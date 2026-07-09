@@ -1125,12 +1125,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         guard timeSinceLastShot >= effectiveInterval else { return }
-        guard let nearestEnemy = findNearestEnemy() else { return }
-        
+        guard let targetPosition = findNearestTargetPosition() else { return }
+
         timeSinceLastShot = 0
-        
+
         let totalProjectiles = 1 + playerStats.extraProjectiles
-        let baseDirection = (nearestEnemy.position - player.position).normalized
+        let baseDirection = (targetPosition - player.position).normalized
         let isSpreadShot = playerStats.recordShot()
         let shotCount = isSpreadShot ? playerStats.spreadShotCount : totalProjectiles
         
@@ -1148,19 +1148,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
-    private func findNearestEnemy() -> EnemyNode? {
+    /// v1.6: Auto-aim considers regular enemies AND the boss.
+    private func findNearestTargetPosition() -> CGPoint? {
         let range = playerStats.effectiveProjectileRange
-        var closest: EnemyNode?
+        var closestPosition: CGPoint?
         var closestDist: CGFloat = .greatestFiniteMagnitude
-        
+
         for enemy in enemies {
             let dist = player.position.distance(to: enemy.position)
             if dist < range && dist < closestDist {
                 closestDist = dist
-                closest = enemy
+                closestPosition = enemy.position
             }
         }
-        return closest
+
+        if let boss = boss, !boss.isDead {
+            let dist = player.position.distance(to: boss.position)
+            if dist < range && dist < closestDist {
+                closestDist = dist
+                closestPosition = boss.position
+            }
+        }
+
+        return closestPosition
     }
     
     private func fireProjectile(direction: CGPoint) {
@@ -1422,6 +1432,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             moveSpeed: GameConfig.Enemy.baseSpeed * 0.65,
             xpValue: bossXP
         )
+        boss.isMiniBoss = true
         boss.position = EnemyNode.spawnPosition()
         boss.setScale(2.2)
         enemies.append(boss)
@@ -1696,7 +1707,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         if (masks == (GameConfig.Physics.player, GameConfig.Physics.enemy)) ||
            (masks == (GameConfig.Physics.enemy, GameConfig.Physics.player)) {
-            handlePlayerEnemyContact()
+            let enemyBody = bodyA.categoryBitMask == GameConfig.Physics.enemy ? bodyA : bodyB
+            handlePlayerEnemyContact(enemyBody: enemyBody)
             return
         }
         
@@ -1745,7 +1757,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - Player ↔ Enemy
     
-    private func handlePlayerEnemyContact() {
+    private func handlePlayerEnemyContact(enemyBody: SKPhysicsBody) {
         guard gameState == .playing else { return }
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
@@ -1767,10 +1779,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         playerStats.resetOvercharge()
         
         // v1.4: Calculate damage based on elapsed time
+        // v1.6: Boss and mini-boss hit with their configured damage, not generic melee
         let elapsed = waveManager.elapsedTime
         let scalingTicks = Int(elapsed / 30)
-        let damage = GameConfig.Enemy.baseMeleeDamage + (scalingTicks * GameConfig.Enemy.meleeDamageScaling)
-        
+        let damage: Int
+        if enemyBody.node is BossNode {
+            damage = boss?.contactDamage ?? GameConfig.Enemy.baseMiniBossDamage
+        } else if let enemy = enemyBody.node as? EnemyNode, enemy.isMiniBoss {
+            damage = GameConfig.Enemy.baseMiniBossDamage + (scalingTicks * GameConfig.Enemy.miniBossDamageScaling)
+        } else {
+            damage = GameConfig.Enemy.baseMeleeDamage + (scalingTicks * GameConfig.Enemy.meleeDamageScaling)
+        }
+
         let died = player.applyDamage(damage)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
@@ -1855,6 +1875,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Projectile ↔ Enemy
     
     private func handleProjectileHit(projectileBody: SKPhysicsBody, enemyBody: SKPhysicsBody) {
+        // v1.6: BossNode shares the enemy physics category but is not an EnemyNode —
+        // route boss hits to the dedicated handler (this was the "invincible Titan" bug)
+        if enemyBody.node is BossNode {
+            handleProjectileHitBoss(projectileBody: projectileBody)
+            return
+        }
+
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let enemyNode = enemyBody.node as? EnemyNode else { return }
         
@@ -1941,6 +1968,44 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    // MARK: - v1.6: Projectile ↔ Boss
+
+    /// Boss damage pipeline. Crits, execution effects, and bloodlust apply;
+    /// status effects (burn/slow/bleed/knockback) do not — the boss resists them.
+    private func handleProjectileHitBoss(projectileBody: SKPhysicsBody) {
+        guard let projectileNode = projectileBody.node as? ProjectileNode,
+              let bossNode = boss, !bossNode.isDead else { return }
+
+        var damage = max(1, Int(projectileNode.damageMultiplier))
+
+        if projectileNode.isCrit {
+            damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
+        }
+
+        if playerStats.executionThreshold > 0 && bossNode.healthPercent < playerStats.executionThreshold {
+            damage *= 2
+        }
+
+        if playerStats.executionProtocolThreshold > 0 && bossNode.healthPercent < playerStats.executionProtocolThreshold {
+            damage = Int(CGFloat(damage) * playerStats.executionProtocolMultiplier)
+        }
+
+        if playerStats.isBloodlustActive(atTime: waveManager.elapsedTime) {
+            damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
+        }
+
+        let consumed = projectileNode.onHitEnemy()
+        if consumed {
+            if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
+                projectiles.remove(at: index)
+            }
+            projectileNode.removeFromParent()
+        }
+
+        // Death flow (XP shower, bossKills, shake) runs via the boss's onDeath callback
+        bossNode.takeDamage(damage)
+    }
+
     // MARK: - Chain Lightning
     
     private func chainLightning(from position: CGPoint, damage: Int, remaining: Int, excludeEnemy: EnemyNode) {

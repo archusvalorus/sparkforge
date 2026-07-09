@@ -15,7 +15,7 @@ final class AdReviveManager: NSObject {
     
     static let reviveAdUnitID = "ca-app-pub-3734133983597932/3682515394"
     static let rerollAdUnitID = "ca-app-pub-3734133983597932/9266014563"
-    static let xpBoostAdUnitID = "ca-app-pub-3734133983597932/5847623891"  // v1.5: Post-run XP boost
+    static let xpBoostAdUnitID = "ca-app-pub-3734133983597932/4094068573"  // v1.6: corrected — must match AdMob console + App Portfolio Registry
     
     // MARK: - State
     

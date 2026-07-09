@@ -269,17 +269,20 @@ final class TitleScene: SKScene {
         
         layoutY -= 15
         
-        // Boss kill progress
-        let bossText = "\(progress.currentBossKills)/\(progress.requiredBossKills) boss kills"
-        bossProgressLabel.text = progress.bossKillProgress >= 1.0 ? "✓ \(bossText)" : "○ \(bossText)"
-        bossProgressLabel.fontSize = 10
-        bossProgressLabel.fontColor = progress.bossKillProgress >= 1.0
-            ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
-        bossProgressLabel.position = CGPoint(x: 0, y: layoutY)
-        bossProgressLabel.zPosition = 10
-        addChild(bossProgressLabel)
-        
-        layoutY -= 15
+        // Boss kill progress — v1.6: only shown when the gate actually requires boss kills
+        // (Arena 1's requirement was dropped; the concept returns for Arena 2+)
+        if progress.requiredBossKills > 0 {
+            let bossText = "\(progress.currentBossKills)/\(progress.requiredBossKills) boss kills"
+            bossProgressLabel.text = progress.bossKillProgress >= 1.0 ? "✓ \(bossText)" : "○ \(bossText)"
+            bossProgressLabel.fontSize = 10
+            bossProgressLabel.fontColor = progress.bossKillProgress >= 1.0
+                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
+            bossProgressLabel.position = CGPoint(x: 0, y: layoutY)
+            bossProgressLabel.zPosition = 10
+            addChild(bossProgressLabel)
+
+            layoutY -= 15
+        }
         
         // Survival check
         survivalCheckLabel.text = progress.survivalMet ? "✓ Survived 2 minutes" : "○ Survive 2 minutes"

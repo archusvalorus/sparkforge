@@ -15,6 +15,8 @@ class EnemyNode: SKNode {
     private(set) var maxHealth: Int
     private(set) var moveSpeed: CGFloat
     private(set) var xpValue: Int
+    /// v1.6: Mini-bosses deal their configured contact damage instead of generic melee
+    var isMiniBoss: Bool = false
     
     // MARK: - Status Effects
     

@@ -153,14 +153,17 @@ final class ProgressionManager {
     }
     
     /// Arena 1 unlock requirements for the boss encounter
+    /// v1.6: bossKillsRequired dropped to 0 — the old value of 3 was a deadlock
+    /// (boss kills could only come from the boss this gate was locking).
+    /// The boss-kill gate concept returns for Arena 2+, fed by Slag Titan kills.
     static let arena1Gate = ArenaGate(
         totalKillsRequired: 500,
-        bossKillsRequired: 3,
+        bossKillsRequired: 0,
         survivalRequired: true,
         arenaName: "The Crucible",
         bossName: "The Slag Titan"
     )
-    
+
     /// Check if the player meets all requirements to face the Arena 1 boss
     var arena1BossUnlocked: Bool {
         let gate = ProgressionManager.arena1Gate
@@ -185,7 +188,9 @@ final class ProgressionManager {
     var arena1Progress: GateProgress {
         let gate = ProgressionManager.arena1Gate
         let kp = min(1.0, CGFloat(totalKills) / CGFloat(gate.totalKillsRequired))
-        let bp = min(1.0, CGFloat(bossKills) / CGFloat(gate.bossKillsRequired))
+        let bp = gate.bossKillsRequired == 0
+            ? 1.0
+            : min(1.0, CGFloat(bossKills) / CGFloat(gate.bossKillsRequired))
         let sm = hasSurvived2Minutes
         return GateProgress(
             killProgress: kp,
