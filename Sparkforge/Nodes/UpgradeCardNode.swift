@@ -3,6 +3,9 @@
 //
 // Visual representation of an upgrade card during level-up selection.
 // Styled as a glowing metal plate with tag color accent.
+//
+// v1.4: Fixed text overflow — card names auto-shrink to fit,
+// wider cards (100pt), better word wrap, description fits cleanly.
 
 import SpriteKit
 
@@ -10,7 +13,8 @@ final class UpgradeCardNode: SKNode {
     
     // MARK: - Config
     
-    static let cardWidth: CGFloat = 90
+    /// v1.4: Bumped from 90 → 100 for text breathing room
+    static let cardWidth: CGFloat = 100
     static let cardHeight: CGFloat = 130
     
     // MARK: - State
@@ -85,6 +89,7 @@ final class UpgradeCardNode: SKNode {
     // MARK: - Labels
     
     private func setupLabels(tagColor: SKColor) {
+        let w = UpgradeCardNode.cardWidth
         let h = UpgradeCardNode.cardHeight
         
         // Tag emoji
@@ -94,18 +99,28 @@ final class UpgradeCardNode: SKNode {
         tagLabel.verticalAlignmentMode = .center
         addChild(tagLabel)
         
-        // Card name
+        // Card name — auto-shrink to fit within card width
         let nameLabel = SKLabelNode(fontNamed: "Menlo-Bold")
         nameLabel.text = card.name
-        nameLabel.fontSize = 12
         nameLabel.fontColor = tagColor
-        nameLabel.position = CGPoint(x: 0, y: 5)
         nameLabel.verticalAlignmentMode = .center
         nameLabel.horizontalAlignmentMode = .center
+        nameLabel.position = CGPoint(x: 0, y: 5)
+        
+        // v1.4: Auto-shrink font size to fit card width with padding
+        let maxNameWidth = w - 12  // 6pt padding each side
+        var nameFontSize: CGFloat = 12
+        nameLabel.fontSize = nameFontSize
+        while nameLabel.frame.width > maxNameWidth && nameFontSize > 7 {
+            nameFontSize -= 0.5
+            nameLabel.fontSize = nameFontSize
+        }
+        
         addChild(nameLabel)
         
         // Description (wrapped manually for small card)
-        let descLines = wrapText(card.description, maxChars: 14)
+        // v1.4: Bumped max chars from 14 → 16 for wider card
+        let descLines = wrapText(card.description, maxChars: 16)
         for (i, line) in descLines.enumerated() {
             let descLabel = SKLabelNode(fontNamed: "Menlo")
             descLabel.text = line
@@ -121,7 +136,7 @@ final class UpgradeCardNode: SKNode {
         let tagNameLabel = SKLabelNode(fontNamed: "Menlo")
         tagNameLabel.text = card.tag.rawValue.uppercased()
         tagNameLabel.fontSize = 7
-        tagNameLabel.fontColor = SKColor(hex: 0x666666)
+        tagNameLabel.fontColor = SKColor(hex: 0x999999)
         tagNameLabel.position = CGPoint(x: 0, y: -h / 2 + 12)
         tagNameLabel.verticalAlignmentMode = .center
         addChild(tagNameLabel)

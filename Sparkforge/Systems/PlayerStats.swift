@@ -4,15 +4,52 @@
 // Runtime stat block for the current run.
 // Cards modify these values. Systems read them.
 // Reset each run.
+//
+// v1.4: HP/ATK/DEF system. Damage is no longer binary.
+// - maxHP / currentHP: player health pool
+// - baseAttack: flat damage per projectile (replaces old damageMultiplier=1.0 baseline)
+// - defense: flat damage reduction per hit
+// - damageMultiplier remains as a % multiplier ON baseAttack
 
 import CoreGraphics
 import Foundation
 
 final class PlayerStats {
     
+    // MARK: - HP / ATK / DEF (v1.4)
+    
+    /// Maximum health — cards and forge bonuses can increase this
+    var maxHP: Int = GameConfig.Player.baseMaxHP
+    /// Current health — depletes on damage, restored by health orbs
+    var currentHP: Int = GameConfig.Player.baseMaxHP
+    /// Base attack damage per projectile
+    var baseAttack: Int = GameConfig.Player.baseAttack
+    /// Flat damage reduction per hit
+    var defense: Int = GameConfig.Player.baseDefense
+    
+    /// HP as 0.0–1.0 fraction for HUD bar
+    var hpPercent: CGFloat {
+        guard maxHP > 0 else { return 0 }
+        return CGFloat(currentHP) / CGFloat(maxHP)
+    }
+    
+    /// Take damage after DEF reduction. Returns true if player died (HP <= 0).
+    @discardableResult
+    func takeDamage(_ rawDamage: Int) -> Bool {
+        let reduced = max(1, rawDamage - defense)
+        currentHP -= reduced
+        if currentHP < 0 { currentHP = 0 }
+        return currentHP <= 0
+    }
+    
+    /// Heal HP, clamped to maxHP
+    func heal(_ amount: Int) {
+        currentHP = min(currentHP + amount, maxHP)
+    }
+    
     // MARK: - Damage
     
-    /// Projectile damage multiplier (base: 1.0)
+    /// Projectile damage multiplier (base: 1.0) — multiplies baseAttack
     var damageMultiplier: CGFloat = 1.0
     /// Crit chance 0.0–1.0 (base: 0)
     var critChance: CGFloat = 0.0
@@ -85,6 +122,7 @@ final class PlayerStats {
     // MARK: - Survival
     
     /// Number of lethal hits that can be survived (base: 0)
+    /// v1.4: Now triggers when HP reaches 0 — prevents death, restores 1 HP
     var lethalSaves: Int = 0
     /// Collision radius shrink multiplier (base: 1.0, lower = smaller)
     var collisionShrink: CGFloat = 1.0
@@ -156,6 +194,49 @@ final class PlayerStats {
     var spreadShotInterval: Int = 0
     var spreadShotCount: Int = 3
     
+    // MARK: - v1.3 Card Properties
+    
+    /// Overcharge: damage bonus that builds while unhit, resets on hit
+    var overchargeDamagePerSecond: CGFloat = 0.0
+    var overchargeMaxBonus: CGFloat = 0.5
+    private(set) var overchargeCurrentBonus: CGFloat = 0.0
+    
+    /// Glass Engine: attack speed boost with max HP penalty (v1.4: was lethal save penalty)
+    var glassEngineActive: Bool = false
+    
+    /// Phase Skin: brief invulnerability on taking damage
+    var phaseSkinCooldown: TimeInterval = 0.0
+    var phaseSkinDuration: TimeInterval = 1.0
+    private(set) var phaseSkinTimer: TimeInterval = 0.0
+    private(set) var phaseSkinCooldownTimer: TimeInterval = 0.0
+    
+    /// Magnetic Core: XP pickup grants speed boost
+    var magneticCoreSpeedBoost: CGFloat = 0.0
+    var magneticCoreBoostDuration: TimeInterval = 1.5
+    private(set) var magneticCoreBoostTimer: TimeInterval = 0.0
+    
+    /// Chain Reaction: enemies explode on death (separate from Ember Burst)
+    var chainReactionExplode: Bool = false
+    var chainReactionRadius: CGFloat = 35.0
+    var chainReactionDamage: Int = 1
+    
+    /// Static Field: proximity slow aura around player
+    var staticFieldRange: CGFloat = 0.0
+    var staticFieldSlow: CGFloat = 0.15
+    
+    /// Execution Protocol: bonus damage to low HP enemies
+    var executionProtocolThreshold: CGFloat = 0.0
+    var executionProtocolMultiplier: CGFloat = 2.0
+    
+    /// Unstable Core: periodic burst damage + self damage
+    /// v1.4: self-damage is now 10 HP instead of losing a lethal save
+    var unstableCoreActive: Bool = false
+    var unstableCoreDamage: Int = 2
+    var unstableCoreRadius: CGFloat = 60.0
+    var unstableCoreInterval: TimeInterval = 4.0
+    var unstableCoreSelfDamage: Int = 10
+    private(set) var unstableCoreTimer: TimeInterval = 0.0
+    
     // MARK: - Computed Properties
     
     /// Effective fire interval after multipliers
@@ -191,6 +272,12 @@ final class PlayerStats {
     /// Calculate effective slow on an enemy (with potency multiplier)
     func effectiveSlow(_ baseAmount: CGFloat) -> CGFloat {
         return min(baseAmount * slowPotencyMultiplier, 0.8)  // Cap at 80% slow
+    }
+    
+    /// v1.4: Effective projectile damage (baseAttack × multipliers + overcharge + bloodlust)
+    var effectiveProjectileDamage: Int {
+        let multiplied = CGFloat(baseAttack) * effectiveDamageMultiplier
+        return max(1, Int(multiplied))
     }
     
     // MARK: - Kill Streak Tracking
@@ -249,9 +336,88 @@ final class PlayerStats {
         return shotsFired % spreadShotInterval == 0
     }
     
+    // MARK: - Overcharge
+    
+    /// Call each frame while not hit — builds damage bonus
+    func updateOvercharge(_ dt: TimeInterval) {
+        guard overchargeDamagePerSecond > 0 else { return }
+        overchargeCurrentBonus = min(overchargeCurrentBonus + overchargeDamagePerSecond * CGFloat(dt), overchargeMaxBonus)
+    }
+    
+    /// Call when player takes damage — resets overcharge
+    func resetOvercharge() {
+        overchargeCurrentBonus = 0
+    }
+    
+    /// Total damage multiplier including overcharge
+    var effectiveDamageMultiplier: CGFloat {
+        return damageMultiplier + overchargeCurrentBonus + bloodlustBonus
+    }
+    
+    // MARK: - Phase Skin
+    
+    /// Call each frame to tick down phase skin timers
+    func updatePhaseSkin(_ dt: TimeInterval) {
+        if phaseSkinTimer > 0 { phaseSkinTimer -= dt }
+        if phaseSkinCooldownTimer > 0 { phaseSkinCooldownTimer -= dt }
+    }
+    
+    /// Try to trigger phase skin. Returns true if activated.
+    func triggerPhaseSkin() -> Bool {
+        guard phaseSkinCooldown > 0 else { return false }
+        guard phaseSkinCooldownTimer <= 0 else { return false }
+        phaseSkinTimer = phaseSkinDuration
+        phaseSkinCooldownTimer = phaseSkinCooldown
+        return true
+    }
+    
+    /// Whether phase skin invulnerability is active
+    var isPhaseSkinActive: Bool { phaseSkinTimer > 0 }
+    
+    // MARK: - Magnetic Core
+    
+    /// Trigger speed boost on XP pickup
+    func triggerMagneticCoreBoost() {
+        guard magneticCoreSpeedBoost > 0 else { return }
+        magneticCoreBoostTimer = magneticCoreBoostDuration
+    }
+    
+    /// Update boost timer
+    func updateMagneticCore(_ dt: TimeInterval) {
+        if magneticCoreBoostTimer > 0 { magneticCoreBoostTimer -= dt }
+    }
+    
+    /// Effective move speed including magnetic core boost
+    var effectiveMoveSpeedWithBoosts: CGFloat {
+        var speed = GameConfig.Player.speed * moveSpeedMultiplier
+        if magneticCoreBoostTimer > 0 {
+            speed *= (1.0 + magneticCoreSpeedBoost)
+        }
+        return speed
+    }
+    
+    // MARK: - Unstable Core
+    
+    /// Update unstable core timer. Returns true when it should burst.
+    func updateUnstableCore(_ dt: TimeInterval) -> Bool {
+        guard unstableCoreActive else { return false }
+        unstableCoreTimer += dt
+        if unstableCoreTimer >= unstableCoreInterval {
+            unstableCoreTimer = 0
+            return true
+        }
+        return false
+    }
+    
     // MARK: - Reset
     
     func reset() {
+        // v1.4: HP system
+        maxHP = GameConfig.Player.baseMaxHP
+        currentHP = GameConfig.Player.baseMaxHP
+        baseAttack = GameConfig.Player.baseAttack
+        defense = GameConfig.Player.baseDefense
+        
         damageMultiplier = 1.0
         critChance = 0.0
         critMultiplier = 2.0
@@ -312,5 +478,31 @@ final class PlayerStats {
         bloodlustStacks = 0
         bloodlustLastKillTime = 0
         shotsFired = 0
+        
+        // v1.3 cards
+        overchargeDamagePerSecond = 0
+        overchargeMaxBonus = 0.5
+        overchargeCurrentBonus = 0
+        glassEngineActive = false
+        phaseSkinCooldown = 0
+        phaseSkinDuration = 1.0
+        phaseSkinTimer = 0
+        phaseSkinCooldownTimer = 0
+        magneticCoreSpeedBoost = 0
+        magneticCoreBoostDuration = 1.5
+        magneticCoreBoostTimer = 0
+        chainReactionExplode = false
+        chainReactionRadius = 35.0
+        chainReactionDamage = 1
+        staticFieldRange = 0
+        staticFieldSlow = 0.15
+        executionProtocolThreshold = 0
+        executionProtocolMultiplier = 2.0
+        unstableCoreActive = false
+        unstableCoreDamage = 2
+        unstableCoreRadius = 60.0
+        unstableCoreInterval = 4.0
+        unstableCoreSelfDamage = 10
+        unstableCoreTimer = 0
     }
 }

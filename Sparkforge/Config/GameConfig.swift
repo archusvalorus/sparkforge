@@ -1,0 +1,218 @@
+// GameConfig.swift
+// Sparkforge
+//
+// Single source of truth for all game tuning values.
+// Tweak here, not scattered across files.
+//
+// v1.4: Arena resize (device-aware), HP/ATK/DEF system,
+// enemy damage values, health orbs, magnet orbs, boss config.
+
+import CoreGraphics
+import Foundation
+
+enum GameConfig {
+    
+    // MARK: - Arena
+    enum Arena {
+        /// Radius of the circular arena in points — device-aware
+        static var radius: CGFloat { DeviceScale.arenaRadius }
+        /// Color of the arena floor
+        static let floorColorHex: UInt32 = 0x1A1A1A
+        /// Color of the arena boundary ring
+        static let boundaryColorHex: UInt32 = 0x3A1A0A
+        /// Boundary ring line width
+        static let boundaryLineWidth: CGFloat = 3.0
+        /// How much beyond the boundary the player is pushed back
+        static let boundaryPushback: CGFloat = 2.0
+    }
+    
+    // MARK: - Player
+    enum Player {
+        /// Player movement speed in points per second
+        static let speed: CGFloat = 250
+        /// Visual radius of the player spark
+        static let visualRadius: CGFloat = 16
+        /// Collision radius — smaller than visual for forgiving hitbox
+        static let collisionRadius: CGFloat = 10
+        /// Base glow intensity (scales with level)
+        static let baseGlowWidth: CGFloat = 8
+        /// Core color
+        static let coreColorHex: UInt32 = 0xFFAA33
+        /// Glow color
+        static let glowColorHex: UInt32 = 0xFF6600
+        
+        // v1.4: HP System
+        /// Starting max HP
+        static let baseMaxHP: Int = 100
+        /// Starting ATK (base projectile damage)
+        static let baseAttack: Int = 10
+        /// Starting DEF (flat damage reduction)
+        static let baseDefense: Int = 0
+        /// Invulnerability frames after taking damage (seconds)
+        static let damageCooldown: TimeInterval = 0.5
+    }
+    
+    // MARK: - Enemy
+    enum Enemy {
+        /// Base enemy speed — must be slower than player
+        static let baseSpeed: CGFloat = 130
+        /// Base enemy visual radius
+        static let visualRadius: CGFloat = 14
+        /// Base enemy collision radius
+        static let collisionRadius: CGFloat = 12
+        /// Base enemy health
+        static let baseHealth: Int = 1
+        /// Body color (darker for menacing look)
+        static let bodyColorHex: UInt32 = 0x1A1A1A
+        /// Rim glow color (subtle red)
+        static let rimGlowColorHex: UInt32 = 0x661111
+        
+        // v1.4: Enemy damage to player
+        /// Base melee contact damage
+        static let baseMeleeDamage: Int = 25
+        /// Additional melee damage per 30s elapsed
+        static let meleeDamageScaling: Int = 5
+        /// Base ranged projectile damage
+        static let baseRangedDamage: Int = 15
+        /// Additional ranged damage per 30s elapsed
+        static let rangedDamageScaling: Int = 3
+        /// Mini-boss contact damage
+        static let baseMiniBossDamage: Int = 40
+        /// Additional mini-boss damage per 30s elapsed
+        static let miniBossDamageScaling: Int = 8
+    }
+    
+    // MARK: - Projectile
+    enum Projectile {
+        /// Auto-attack fire rate (seconds between shots)
+        static let fireInterval: TimeInterval = 0.5
+        /// Projectile speed
+        static let speed: CGFloat = 400
+        /// Projectile radius
+        static let radius: CGFloat = 4
+        /// Projectile color
+        static let colorHex: UInt32 = 0xFFCC44
+        /// Max range before despawn (in points) — bumped for larger arena
+        static let maxRange: CGFloat = 400
+    }
+    
+    // MARK: - Joystick
+    enum Joystick {
+        /// Radius of the joystick base (touch zone)
+        static let baseRadius: CGFloat = 60
+        /// Radius of the joystick knob (thumb indicator)
+        static let knobRadius: CGFloat = 25
+        /// Dead zone — input below this normalized magnitude is ignored
+        static let deadZone: CGFloat = 0.1
+        /// Opacity of the joystick when active
+        static let activeAlpha: CGFloat = 0.5
+        /// Opacity when idle (hidden — appears on touch)
+        static let idleAlpha: CGFloat = 0.0
+        /// Base color
+        static let baseColorHex: UInt32 = 0x444444
+        /// Knob color
+        static let knobColorHex: UInt32 = 0xAAAAAA
+    }
+    
+    // MARK: - Wave / Pacing
+    enum Wave {
+        /// Time between enemy spawns at start (seconds)
+        static let initialSpawnInterval: TimeInterval = 1.2
+        /// Minimum spawn interval before late game kicks in
+        static let minimumSpawnInterval: TimeInterval = 0.4
+        /// How fast spawn interval decreases per second of game time
+        static let spawnAcceleration: TimeInterval = 0.012
+        /// Late game (90s+): faster acceleration
+        static let lateGameAcceleration: TimeInterval = 0.02
+        /// Late game minimum spawn interval
+        static let lateGameMinInterval: TimeInterval = 0.2
+        /// Mini-boss spawn time
+        static let miniBossSpawnTime: TimeInterval = 90.0
+        /// Spawn distance from arena center (just outside boundary)
+        static let spawnDistance: CGFloat = Arena.radius + 40
+    }
+    
+    // MARK: - XP & Leveling
+    enum Leveling {
+        /// XP required for level 2
+        static let baseXPRequired: Int = 5
+        /// XP scaling per level (multiplied by level)
+        static let xpScalingFactor: Double = 1.3
+        /// XP dropped by base enemy
+        static let baseEnemyXP: Int = 1
+        /// Number of upgrade choices presented
+        static let upgradeChoiceCount: Int = 3
+    }
+    
+    // MARK: - Physics Categories (bitmask)
+    enum Physics {
+        static let player:          UInt32 = 0x1 << 0  // 1
+        static let enemy:           UInt32 = 0x1 << 1  // 2
+        static let projectile:      UInt32 = 0x1 << 2  // 4
+        static let boundary:        UInt32 = 0x1 << 3  // 8
+        static let xpOrb:           UInt32 = 0x1 << 4  // 16
+        static let enemyProjectile: UInt32 = 0x1 << 5  // 32
+        static let healthOrb:       UInt32 = 0x1 << 6  // 64   — v1.4
+        static let magnetOrb:       UInt32 = 0x1 << 7  // 128  — v1.4
+    }
+    
+    // MARK: - Ranged Enemy
+    enum RangedEnemy {
+        /// Distance at which ranged enemy stops and fires — bumped for larger arena
+        static var engageRange: CGFloat { 250 * DeviceScale.gameplay }
+        /// Seconds between shots
+        static let fireInterval: TimeInterval = 2.0
+        /// Projectile speed
+        static let projectileSpeed: CGFloat = 180
+        /// Projectile radius
+        static var projectileRadius: CGFloat { 5 * DeviceScale.gameplay }
+        /// Projectile max range
+        static var projectileRange: CGFloat { 450 * DeviceScale.gameplay }
+        /// Body color — distinct from melee enemies
+        static let bodyColorHex: UInt32 = 0x1A0A1A
+        /// Rim glow — purple tint
+        static let rimGlowColorHex: UInt32 = 0x551166
+        /// Eye color — purple
+        static let eyeColorHex: UInt32 = 0xBB44FF
+        /// Projectile color
+        static let projectileColorHex: UInt32 = 0x9933CC
+        /// First spawn time — ranged enemies appear after this many seconds
+        static let firstSpawnTime: TimeInterval = 45
+        /// Chance a spawn is ranged (vs melee) after firstSpawnTime
+        static let spawnChance: CGFloat = 0.25
+    }
+    
+    // MARK: - Health Orb (v1.4)
+    enum HealthOrb {
+        /// Min time between spawns (seconds)
+        static let minSpawnInterval: TimeInterval = 20
+        /// Max time between spawns (seconds)
+        static let maxSpawnInterval: TimeInterval = 30
+        /// HP restored on pickup
+        static let healAmount: Int = 20
+        /// Visual radius
+        static let visualRadius: CGFloat = 10
+        /// Despawn timer (seconds)
+        static let despawnTime: TimeInterval = 10
+        /// Color
+        static let colorHex: UInt32 = 0x44DD66
+        /// Glow color
+        static let glowColorHex: UInt32 = 0x22BB44
+    }
+    
+    // MARK: - Magnet Orb (v1.4)
+    enum MagnetOrb {
+        /// Min time between spawns (seconds)
+        static let minSpawnInterval: TimeInterval = 25
+        /// Max time between spawns (seconds)
+        static let maxSpawnInterval: TimeInterval = 35
+        /// Visual radius
+        static let visualRadius: CGFloat = 10
+        /// Despawn timer (seconds)
+        static let despawnTime: TimeInterval = 8
+        /// Color
+        static let colorHex: UInt32 = 0x44AAFF
+        /// Glow color
+        static let glowColorHex: UInt32 = 0x2288DD
+    }
+}

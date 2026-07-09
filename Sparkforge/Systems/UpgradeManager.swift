@@ -1,8 +1,15 @@
 // UpgradeManager.swift
 // Sparkforge
 //
-// Manages the 30 upgrade cards (24 tagged + 6 neutral).
+// Manages the 38 upgrade cards (24 tagged + 6 neutral + 8 v1.3 Lyra cards).
 // Handles card definitions, random draw, and applying effects to PlayerStats.
+//
+// v1.4: Card rebalancing for HP system:
+//   - Brace: +1 lethal save (unchanged — triggers at 0 HP now)
+//   - Iron Skin synergy: +15 DEF (was +2 lethal saves)
+//   - Glass Engine: -30% max HP (was lose lethal save)
+//   - Unstable Core: 10 HP self-damage (was lose lethal save)
+// + Build identity hint detection
 
 import Foundation
 
@@ -40,6 +47,9 @@ final class UpgradeManager {
     
     /// All available cards
     let allCards: [UpgradeCard]
+    
+    /// v1.4: Track which build hints have been shown this run
+    private var shownBuildHints: Set<String> = []
     
     // MARK: - Init
     
@@ -108,11 +118,67 @@ final class UpgradeManager {
         return triggered
     }
     
+    // MARK: - v1.4: Build Identity Hints
+    
+    /// Check if a build archetype hint should display after a card pick.
+    /// Returns a hint string or nil.
+    func checkBuildHint() -> String? {
+        // Combo-based archetypes (specific cards)
+        if pickedCardIDs.contains("v13_overcharge") && pickedCardIDs.contains("v13_glass_engine") {
+            return showHintOnce("skill_cannon", "⚡ Skill Cannon detected")
+        }
+        if pickedCardIDs.contains("v13_overcharge") && pickedCardIDs.contains("v13_execution") {
+            return showHintOnce("skill_cannon_alt", "⚡ Skill Cannon forming")
+        }
+        if pickedCardIDs.contains("v13_phase_skin") && pickedCardIDs.contains("v13_static_field") {
+            return showHintOnce("survivor_loop", "🛡️ Survivor Loop forming")
+        }
+        if pickedCardIDs.contains("v13_chain_reaction") && pickedCardIDs.contains("v13_magnetic_core") {
+            return showHintOnce("clear_engine", "💥 Clear Engine online")
+        }
+        if pickedCardIDs.contains("v13_unstable_core") {
+            if let voidCount = tagCounts[.voidT], voidCount >= 2 {
+                return showHintOnce("chaos_build", "🕳️ Chaos Build awakening")
+            }
+        }
+        
+        // Tag-count archetypes (2+ of same tag)
+        for (tag, count) in tagCounts {
+            if count == 2 {
+                if let hint = tagHint(for: tag) {
+                    return showHintOnce("tag_\(tag.rawValue)", hint)
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    private func tagHint(for tag: Tag) -> String? {
+        switch tag {
+        case .fire:    return "🔥 Pyromancer rising"
+        case .shock:   return "⚡ Storm building"
+        case .bleed:   return "🩸 Bloodseeker awakening"
+        case .guardT:  return "🛡️ Fortress forming"
+        case .voidT:   return "🕳️ Void touched"
+        case .chill:   return "❄️ Frost spreading"
+        case .neutral: return nil
+        }
+    }
+    
+    private func showHintOnce(_ key: String, _ text: String) -> String? {
+        guard !shownBuildHints.contains(key) else { return nil }
+        shownBuildHints.insert(key)
+        return text
+    }
+    
     // MARK: - Reset
     
     func reset() {
         pickedCardIDs.removeAll()
         tagCounts.removeAll()
+        appliedSynergies.removeAll()
+        shownBuildHints.removeAll()
     }
     
     // MARK: - Synergy Application
@@ -167,13 +233,13 @@ final class UpgradeManager {
             stats.executionThreshold = 0.3
             return "🩸 Exsanguinate — Low HP enemies take double damage"
             
-        // GUARD
+        // GUARD — v1.4: Iron Skin now grants DEF instead of lethal saves
         case (.guardT, 3):
             // Barrier Pulse — handled in level-up logic (push enemies back)
             return "🛡️ Barrier Pulse — Enemies pushed back on level up"
         case (.guardT, 5):
-            stats.lethalSaves = max(stats.lethalSaves, 2)
-            return "🛡️ Iron Skin — Survive 2 lethal hits per run"
+            stats.defense += 15
+            return "🛡️ Iron Skin — +15 DEF, shrug off weak hits"
         case (.guardT, 7):
             stats.globalEnemySlow += 0.15
             stats.collisionShrink *= 0.85
@@ -319,7 +385,7 @@ final class UpgradeManager {
         
         cards.append(UpgradeCard(
             id: "guard_1", name: "Brace", tag: .guardT,
-            description: "Survive one lethal hit per run"
+            description: "Survive one lethal hit (triggers at 0 HP)"
         ) { stats in
             stats.lethalSaves = max(stats.lethalSaves, 1)
         })
@@ -456,6 +522,82 @@ final class UpgradeManager {
         ) { stats in
             stats.extraProjectiles += 1
             stats.spreadAngle += 0.15
+        })
+        
+        // ═══════════════════════════════════
+        // 🔥 v1.3 — LYRA'S CARDS
+        // ═══════════════════════════════════
+        
+        // 1. Overcharge — damage scales while unhit
+        cards.append(UpgradeCard(
+            id: "v13_overcharge", name: "Overcharge", tag: .fire,
+            description: "Damage grows while unhit, resets on hit"
+        ) { stats in
+            stats.overchargeDamagePerSecond = 0.05  // +5% per second, caps at +50%
+        })
+        
+        // 2. Magnetic Core — bigger pickup + speed on collect
+        cards.append(UpgradeCard(
+            id: "v13_magnetic_core", name: "Magnetic Core", tag: .neutral,
+            description: "+50% pickup radius, XP gives speed burst"
+        ) { stats in
+            stats.pickupRadiusMultiplier += 0.50
+            stats.magneticCoreSpeedBoost = 0.30  // +30% speed for 1.5s on pickup
+        })
+        
+        // 3. Chain Reaction — enemies explode on death
+        cards.append(UpgradeCard(
+            id: "v13_chain_reaction", name: "Chain Reaction", tag: .neutral,
+            description: "Enemies explode on death"
+        ) { stats in
+            stats.chainReactionExplode = true
+        })
+        
+        // 4. Glass Engine — massive attack speed, reduced max HP
+        // v1.4: Was "lose a lethal save" — now reduces max HP by 30%
+        cards.append(UpgradeCard(
+            id: "v13_glass_engine", name: "Glass Engine", tag: .fire,
+            description: "+40% attack speed, -30% max HP"
+        ) { stats in
+            stats.fireRateMultiplier *= 0.60  // 40% faster
+            stats.glassEngineActive = true
+            let hpLoss = Int(Double(stats.maxHP) * 0.30)
+            stats.maxHP -= hpLoss
+            stats.currentHP = min(stats.currentHP, stats.maxHP)
+        })
+        
+        // 5. Phase Skin — brief invulnerability on hit
+        cards.append(UpgradeCard(
+            id: "v13_phase_skin", name: "Phase Skin", tag: .guardT,
+            description: "Taking damage grants 1s invulnerability (5s cd)"
+        ) { stats in
+            stats.phaseSkinCooldown = 5.0
+            stats.phaseSkinDuration = 1.0
+        })
+        
+        // 6. Static Field — proximity slow aura
+        cards.append(UpgradeCard(
+            id: "v13_static_field", name: "Static Field", tag: .chill,
+            description: "Nearby enemies are slowed 15%"
+        ) { stats in
+            stats.staticFieldRange = 80.0
+        })
+        
+        // 7. Execution Protocol — bonus damage to low HP
+        cards.append(UpgradeCard(
+            id: "v13_execution", name: "Execution Protocol", tag: .bleed,
+            description: "2x damage to enemies below 30% HP"
+        ) { stats in
+            stats.executionProtocolThreshold = 0.30
+        })
+        
+        // 8. Unstable Core — periodic burst + self damage
+        // v1.4: Self-damage is now 10 HP instead of losing a lethal save
+        cards.append(UpgradeCard(
+            id: "v13_unstable_core", name: "Unstable Core", tag: .voidT,
+            description: "Burst every 4s damages nearby enemies (costs 10 HP)"
+        ) { stats in
+            stats.unstableCoreActive = true
         })
         
         return cards

@@ -2,8 +2,11 @@
 // Sparkforge
 //
 // The player's spark core.
-// Phase 3: Now reads speed/collision from PlayerStats.
+// Reads speed/collision from PlayerStats.
 // Supports lethal save (Brace/Iron Skin).
+//
+// v1.4: HP system — player has health pool, takes damage with DEF reduction,
+// lethal saves trigger at 0 HP instead of on every hit.
 
 import SpriteKit
 
@@ -60,7 +63,11 @@ final class PlayerNode: SKNode {
         body.affectedByGravity = false
         body.allowsRotation = false
         body.categoryBitMask = GameConfig.Physics.player
-        body.contactTestBitMask = GameConfig.Physics.enemy | GameConfig.Physics.xpOrb
+        body.contactTestBitMask = GameConfig.Physics.enemy
+            | GameConfig.Physics.xpOrb
+            | GameConfig.Physics.enemyProjectile
+            | GameConfig.Physics.healthOrb
+            | GameConfig.Physics.magnetOrb
         body.collisionBitMask = 0
         body.linearDamping = 0
         body.friction = 0
@@ -76,7 +83,11 @@ final class PlayerNode: SKNode {
         body.affectedByGravity = false
         body.allowsRotation = false
         body.categoryBitMask = GameConfig.Physics.player
-        body.contactTestBitMask = GameConfig.Physics.enemy | GameConfig.Physics.xpOrb
+        body.contactTestBitMask = GameConfig.Physics.enemy
+            | GameConfig.Physics.xpOrb
+            | GameConfig.Physics.enemyProjectile
+            | GameConfig.Physics.healthOrb
+            | GameConfig.Physics.magnetOrb
         body.collisionBitMask = 0
         body.linearDamping = 0
         body.friction = 0
@@ -88,7 +99,7 @@ final class PlayerNode: SKNode {
     func move(direction: CGPoint, deltaTime: TimeInterval) {
         guard !isDead else { return }
         
-        let speed = stats?.effectiveMoveSpeed ?? GameConfig.Player.speed
+        let speed = stats?.effectiveMoveSpeedWithBoosts ?? GameConfig.Player.speed
         let displacement = direction * speed * CGFloat(deltaTime)
         position += displacement
         
@@ -151,12 +162,38 @@ final class PlayerNode: SKNode {
         coreNode.run(pulse)
     }
     
+    // MARK: - v1.4: HP Damage
+    
+    /// Apply damage to player via stats. Returns true if player should die.
+    /// Phase Skin and lethal saves are handled by GameScene before calling this.
+    func applyDamage(_ rawDamage: Int) -> Bool {
+        guard let stats = stats else { return true }
+        let died = stats.takeDamage(rawDamage)
+        
+        // Visual feedback — red flash proportional to damage
+        let flashIntensity = min(CGFloat(rawDamage) / CGFloat(stats.maxHP) * 2.0, 1.0)
+        let flashColor = SKColor(red: 1.0, green: 1.0 - flashIntensity * 0.7, blue: 1.0 - flashIntensity * 0.7, alpha: 1.0)
+        
+        let flash = SKAction.sequence([
+            SKAction.run { [weak self] in self?.coreNode.fillColor = flashColor },
+            SKAction.wait(forDuration: 0.1),
+            SKAction.run { [weak self] in
+                self?.coreNode.fillColor = SKColor(hex: GameConfig.Player.coreColorHex)
+            }
+        ])
+        run(flash, withKey: "damageFlash")
+        
+        return died
+    }
+    
     // MARK: - Lethal Save
     
-    /// Try to survive a lethal hit. Returns true if saved.
+    /// Try to survive at 0 HP. Returns true if saved.
+    /// v1.4: Only called when currentHP <= 0
     func tryLethalSave() -> Bool {
         guard let stats = stats, stats.lethalSaves > 0 else { return false }
         stats.lethalSaves -= 1
+        stats.currentHP = 1  // Survive with 1 HP
         
         // Brief invulnerability flash
         let flash = SKAction.sequence([
@@ -192,6 +229,7 @@ final class PlayerNode: SKNode {
         position = .zero
         alpha = 1.0
         glowNode.setScale(1.0)
+        coreNode.fillColor = SKColor(hex: GameConfig.Player.coreColorHex)
         physicsBody?.categoryBitMask = GameConfig.Physics.player
         setupPhysics()  // Reset collision radius to base
     }

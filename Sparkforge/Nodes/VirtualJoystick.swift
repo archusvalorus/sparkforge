@@ -4,6 +4,10 @@
 // Custom floating virtual joystick — camera-aware.
 // Uses VIEW coordinates (not scene) for left-half detection.
 // This ensures the joystick works regardless of camera position.
+//
+// v1.4: Dynamic base recentering — when thumb exceeds max radius,
+// base smoothly follows so direction always tracks current intent.
+// Fixes "stuck direction" when sliding along joystick edge.
 
 import SpriteKit
 
@@ -108,19 +112,29 @@ final class VirtualJoystick: SKNode {
         let offset = sceneLocation - baseCenter
         let distance = offset.length
         
-        // Clamp knob
         if distance > baseRadius {
+            // DYNAMIC RECENTERING: Move the base toward the touch so the knob
+            // stays at max radius but the direction always reflects where the
+            // thumb actually is. This prevents the "stuck direction" bug when
+            // the thumb slides along the edge of the joystick circle.
+            let overshoot = offset.normalized * (distance - baseRadius)
+            baseCenter = baseCenter + overshoot
+            
+            // Reposition joystick base in parent (camera) space
+            if let parentNode = parent, let scene = scene as? SKScene {
+                position = parentNode.convert(baseCenter, from: scene)
+            }
+            
+            // Knob sits at max radius in the direction of the touch
             knobNode.position = offset.normalized * baseRadius
-        } else {
+            
+            // Direction is simply where the touch is relative to the (moved) base
+            direction = offset.normalized
+        } else if distance / baseRadius < deadZone {
             knobNode.position = offset
-        }
-        
-        // Direction
-        let normalizedMagnitude = min(distance / baseRadius, 1.0)
-        
-        if normalizedMagnitude < deadZone {
             direction = .zero
         } else {
+            knobNode.position = offset
             direction = offset.normalized
         }
     }

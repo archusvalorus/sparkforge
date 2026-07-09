@@ -20,6 +20,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case dead
         case levelUp
         case reviving  // Brief state during ad revive
+        case paused    // v1.4: Pause menu
     }
     
     private(set) var gameState: GameState = .playing
@@ -30,12 +31,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let upgradeManager = UpgradeManager()
     private let adReviveManager = AdReviveManager()
     
+    // MARK: - Boss Mechanics
+    
+    private var boss: BossNode? = nil
+    private var bossDefeatedThisRun: Bool = false
+    
+    // MARK: - New Additions for health orbs + magnet orbs
+    
+    private let hpBar = HPBarNode(width: 120)
+    private var healthOrbs: [HealthOrbNode] = []
+    private var magnetOrbs: [MagnetOrbNode] = []
+    private var healthOrbTimer: TimeInterval = 0
+    private var magnetOrbTimer: TimeInterval = 0
+    private var nextHealthOrbSpawn: TimeInterval = 20  // randomize later
+    private var nextMagnetOrbSpawn: TimeInterval = 25
+    private var damageCooldownTimer: TimeInterval = 0  // i-frames after hit
+    private var pendingForgeXP: Int = 0  // v1.5: Stored for XP boost ad doubling
+    
     // MARK: - Nodes
     
     private let player = PlayerNode()
     private let joystick = VirtualJoystick()
     private var enemies: [EnemyNode] = []
     private var projectiles: [ProjectileNode] = []
+    private var enemyProjectiles: [EnemyProjectileNode] = []
     private var xpOrbs: [XPOrbNode] = []
     
     // MARK: - Card Selection
@@ -64,6 +83,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let deathOverlay = SKNode()
     private let levelUpOverlay = SKNode()
     private let synergyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let pauseOverlay = SKNode()  // v1.4: Pause menu
+    private let pauseButton = SKLabelNode(fontNamed: "Menlo-Bold")  // v1.4
     
     // MARK: - Stats Tracking
     
@@ -77,7 +98,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Invulnerability (post-revive)
     
     private var invulnerableTimer: TimeInterval = 0
-    private var isInvulnerable: Bool { invulnerableTimer > 0 }
+    private var isInvulnerable: Bool { invulnerableTimer > 0 || playerStats.isPhaseSkinActive }
     
     // MARK: - Reroll
     
@@ -108,10 +129,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         setupHUD()
         setupDeathOverlay()
         setupLevelUpOverlay()
+        setupPauseOverlay()
         setupEmberParticles()
         
         // Preload rewarded ad
         adReviveManager.preloadAd()
+        
+        // Show tutorial hint on first run
+        showTutorialHintIfNeeded()
         
         // Listen for app backgrounding
         NotificationCenter.default.addObserver(
@@ -249,6 +274,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         xpBar.zPosition = 101
         camera.addChild(xpBar)
         
+        // HP Bar - below XP Bar
+        hpBar.position = CGPoint(x: 0, y: safeTop - 50)
+        hpBar.zPosition = 101
+        camera.addChild(hpBar)
+        
         // Buff tracker — top left
         buffTracker.position = CGPoint(x: safeLeft, y: safeTop)
         buffTracker.zPosition = 101
@@ -261,6 +291,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         synergyLabel.zPosition = 150
         synergyLabel.alpha = 0
         camera.addChild(synergyLabel)
+        
+        // v1.4: Pause button — top right
+        let safeRight = view.bounds.width / 2 - 30
+        pauseButton.text = "⏸"
+        pauseButton.fontSize = 20
+        pauseButton.fontColor = SKColor(hex: 0xAAAAAA)
+        pauseButton.position = CGPoint(x: safeRight, y: safeTop)
+        pauseButton.zPosition = 101
+        pauseButton.name = "pauseButton"
+        camera.addChild(pauseButton)
     }
     
     private func setupDeathOverlay() {
@@ -326,10 +366,40 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         deathOverlay.addChild(reviveBtn)
         
+        // v1.5: XP Boost button
+        let xpBoostBtn = SKNode()
+        xpBoostBtn.name = "xpBoostButton"
+        xpBoostBtn.position = CGPoint(x: 0, y: -72)
+        
+        let xpBoostBg = SKShapeNode(rectOf: CGSize(width: 160, height: 32), cornerRadius: 6)
+        xpBoostBg.fillColor = SKColor(hex: 0x332211)
+        xpBoostBg.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.6)
+        xpBoostBg.lineWidth = 1
+        xpBoostBtn.addChild(xpBoostBg)
+        
+        let xpBoostText = SKLabelNode(fontNamed: "Menlo-Bold")
+        xpBoostText.fontSize = 12
+        xpBoostText.fontColor = SKColor(hex: 0xFFAA33)
+        xpBoostText.text = "2x FORGE XP"
+        xpBoostText.verticalAlignmentMode = .center
+        xpBoostText.name = "xpBoostLabel"
+        xpBoostBtn.addChild(xpBoostText)
+        
+        let xpBoostAdIcon = SKLabelNode(fontNamed: "Menlo")
+        xpBoostAdIcon.fontSize = 9
+        xpBoostAdIcon.fontColor = SKColor(hex: 0x999999)
+        xpBoostAdIcon.text = "▶ AD"
+        xpBoostAdIcon.verticalAlignmentMode = .center
+        xpBoostAdIcon.position = CGPoint(x: 62, y: 0)
+        xpBoostAdIcon.name = "xpBoostAdIcon"
+        xpBoostBtn.addChild(xpBoostAdIcon)
+        
+        deathOverlay.addChild(xpBoostBtn)
+        
         // Restart button
         let restartBtn = SKNode()
         restartBtn.name = "restartButton"
-        restartBtn.position = CGPoint(x: 0, y: -75)
+        restartBtn.position = CGPoint(x: 0, y: -115)
         
         let restartBg = SKShapeNode(rectOf: CGSize(width: 140, height: 32), cornerRadius: 6)
         restartBg.fillColor = SKColor(hex: 0x333333)
@@ -352,7 +422,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         menuLabel.fontColor = SKColor(hex: 0x666666)
         menuLabel.text = "MENU"
         menuLabel.name = "menuButton"
-        menuLabel.position = CGPoint(x: 0, y: -110)
+        menuLabel.position = CGPoint(x: 0, y: -155)
         deathOverlay.addChild(menuLabel)
         
         guard let camera = camera else { return }
@@ -373,20 +443,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         label.fontColor = SKColor(hex: 0xFFAA33)
         label.text = "LEVEL UP"
         label.name = "levelUpLabel"
-        label.position = CGPoint(x: 0, y: 110)
+        label.position = CGPoint(x: 0, y: 60)  // v1.4: adjusted for lower cards
         levelUpOverlay.addChild(label)
         
         let hint = SKLabelNode(fontNamed: "Menlo")
         hint.fontSize = 11
         hint.fontColor = SKColor(hex: 0x666666)
         hint.text = "choose an upgrade"
-        hint.position = CGPoint(x: 0, y: 85)
+        hint.position = CGPoint(x: 0, y: 38)  // v1.4: adjusted
         levelUpOverlay.addChild(hint)
         
         // Reroll button
         let rerollBtn = SKNode()
         rerollBtn.name = "rerollButton"
-        rerollBtn.position = CGPoint(x: 0, y: -90)
+        rerollBtn.position = CGPoint(x: 0, y: -130)  // v1.4: below lowered cards
         
         let rerollBg = SKShapeNode(rectOf: CGSize(width: 170, height: 28), cornerRadius: 5)
         rerollBg.fillColor = SKColor(hex: 0x332233)
@@ -416,6 +486,65 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         guard let camera = camera else { return }
         camera.addChild(levelUpOverlay)
+    }
+    
+    // v1.4: Pause Overlay
+    private func setupPauseOverlay() {
+        pauseOverlay.zPosition = 200
+        pauseOverlay.alpha = 0
+        
+        let bg = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
+        bg.fillColor = SKColor(hex: 0x000000, alpha: 0.7)
+        bg.strokeColor = .clear
+        pauseOverlay.addChild(bg)
+        
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "PAUSED"
+        title.fontSize = 28
+        title.fontColor = SKColor(hex: 0xFFAA33)
+        title.position = CGPoint(x: 0, y: 50)
+        pauseOverlay.addChild(title)
+        
+        // Resume button
+        let resumeBtn = SKNode()
+        resumeBtn.name = "resumeButton"
+        resumeBtn.position = CGPoint(x: 0, y: -10)
+        
+        let resumeBg = SKShapeNode(rectOf: CGSize(width: 160, height: 36), cornerRadius: 6)
+        resumeBg.fillColor = SKColor(hex: 0x334433)
+        resumeBg.strokeColor = SKColor(hex: 0x66AA66, alpha: 0.6)
+        resumeBg.lineWidth = 1
+        resumeBtn.addChild(resumeBg)
+        
+        let resumeText = SKLabelNode(fontNamed: "Menlo-Bold")
+        resumeText.text = "RESUME"
+        resumeText.fontSize = 14
+        resumeText.fontColor = SKColor(hex: 0x88DD88)
+        resumeText.verticalAlignmentMode = .center
+        resumeBtn.addChild(resumeText)
+        pauseOverlay.addChild(resumeBtn)
+        
+        // Menu button
+        let menuBtn = SKNode()
+        menuBtn.name = "pauseMenuButton"
+        menuBtn.position = CGPoint(x: 0, y: -60)
+        
+        let menuBg = SKShapeNode(rectOf: CGSize(width: 120, height: 30), cornerRadius: 5)
+        menuBg.fillColor = SKColor(hex: 0x333333)
+        menuBg.strokeColor = SKColor(hex: 0x888888, alpha: 0.4)
+        menuBg.lineWidth = 1
+        menuBtn.addChild(menuBg)
+        
+        let menuText = SKLabelNode(fontNamed: "Menlo")
+        menuText.text = "MENU"
+        menuText.fontSize = 12
+        menuText.fontColor = SKColor(hex: 0xAAAAAA)
+        menuText.verticalAlignmentMode = .center
+        menuBtn.addChild(menuText)
+        pauseOverlay.addChild(menuBtn)
+        
+        guard let camera = camera else { return }
+        camera.addChild(pauseOverlay)
     }
     
     private func setupEmberParticles() {
@@ -502,6 +631,72 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    // MARK: - Tutorial Hint
+    
+    private func showTutorialHintIfNeeded() {
+        guard let camera = camera, let view = view else { return }
+        
+        // Only show on first ever run
+        let hasSeenTutorial = UserDefaults.standard.bool(forKey: "sparkforge_tutorial_seen")
+        guard !hasSeenTutorial else { return }
+        UserDefaults.standard.set(true, forKey: "sparkforge_tutorial_seen")
+        
+        let s = DeviceScale.ui
+        let tutorialNode = SKNode()
+        tutorialNode.zPosition = 180
+        tutorialNode.name = "tutorialHint"
+        
+        // Semi-transparent backdrop
+        let bg = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
+        bg.fillColor = SKColor(hex: 0x000000, alpha: 0.6)
+        bg.strokeColor = .clear
+        tutorialNode.addChild(bg)
+        
+        // Left side hint — joystick area
+        let moveHint = SKLabelNode(fontNamed: "Menlo-Bold")
+        moveHint.text = "◀ TOUCH LEFT SIDE TO MOVE"
+        moveHint.fontSize = 14 * s
+        moveHint.fontColor = SKColor(hex: 0xFFAA33)
+        moveHint.position = CGPoint(x: -view.bounds.width / 6, y: 0)
+        moveHint.zPosition = 1
+        tutorialNode.addChild(moveHint)
+        
+        // Left arrow indicator
+        let leftArrow = SKLabelNode(fontNamed: "Menlo-Bold")
+        leftArrow.text = "👆"
+        leftArrow.fontSize = 30 * s
+        leftArrow.position = CGPoint(x: -view.bounds.width / 6, y: -40 * s)
+        tutorialNode.addChild(leftArrow)
+        
+        // Auto-attack hint
+        let attackHint = SKLabelNode(fontNamed: "Menlo")
+        attackHint.text = "you attack automatically"
+        attackHint.fontSize = 11 * s
+        attackHint.fontColor = SKColor(hex: 0x888888)
+        attackHint.position = CGPoint(x: 0, y: -80 * s)
+        tutorialNode.addChild(attackHint)
+        
+        // Tap to dismiss
+        let dismissHint = SKLabelNode(fontNamed: "Menlo")
+        dismissHint.text = "tap anywhere to start"
+        dismissHint.fontSize = 12 * s
+        dismissHint.fontColor = SKColor(hex: 0x666666)
+        dismissHint.position = CGPoint(x: 0, y: -120 * s)
+        tutorialNode.addChild(dismissHint)
+        
+        // Breathing pulse on dismiss hint
+        let breathe = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.3, duration: 1.0),
+            SKAction.fadeAlpha(to: 1.0, duration: 1.0)
+        ])
+        dismissHint.run(SKAction.repeatForever(breathe))
+        
+        camera.addChild(tutorialNode)
+        
+        // Pause game state until dismissed
+        gameState = .levelUp  // Reuse paused state — touches will dismiss
+    }
+    
     // MARK: - Touch Handling
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -509,13 +704,33 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         switch gameState {
         case .playing:
+            // v1.4: Check pause button tap (right side, top)
+            if let view = view {
+                let viewLoc = touch.location(in: view)
+                if viewLoc.x > view.bounds.width - 60 && viewLoc.y < 60 {
+                    pauseGame()
+                    return
+                }
+            }
             _ = joystick.handleTouchBegan(touch, in: self)
             
         case .dead:
             handleDeathScreenTap(touch)
             
         case .levelUp:
+            // Check if tutorial hint is showing — dismiss it first
+            if let tutorial = camera?.childNode(withName: "tutorialHint") {
+                tutorial.run(SKAction.sequence([
+                    SKAction.fadeOut(withDuration: 0.2),
+                    SKAction.removeFromParent()
+                ]))
+                gameState = .playing
+                return
+            }
             handleCardSelection(touch)
+            
+        case .paused:
+            handlePauseScreenTap(touch)
             
         case .reviving:
             break
@@ -556,6 +771,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
+        // v1.5: XP Boost button
+        if let xpBoostBtn = deathOverlay.childNode(withName: "xpBoostButton"),
+           xpBoostBtn.alpha > 0 {
+            let btnFrame = CGRect(x: xpBoostBtn.position.x - 80, y: xpBoostBtn.position.y - 16,
+                                  width: 160, height: 32)
+            if btnFrame.contains(location) {
+                performXPBoost()
+                return
+            }
+        }
+        
         // Restart button
         if let restartBtn = deathOverlay.childNode(withName: "restartButton") {
             let btnFrame = CGRect(x: restartBtn.position.x - 70, y: restartBtn.position.y - 16,
@@ -588,6 +814,47 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         let transition = SKTransition.fade(with: .black, duration: 0.4)
         view.presentScene(titleScene, transition: transition)
+    }
+    
+    // MARK: - v1.4: Pause
+    
+    private func pauseGame() {
+        guard gameState == .playing else { return }
+        gameState = .paused
+        joystick.forceRelease()
+        pauseOverlay.run(SKAction.fadeIn(withDuration: 0.15))
+    }
+    
+    private func resumeGame() {
+        guard gameState == .paused else { return }
+        gameState = .playing
+        // Brief invulnerability after unpause so player can reorient
+        invulnerableTimer = 1.0
+        pauseOverlay.run(SKAction.fadeOut(withDuration: 0.15))
+    }
+    
+    private func handlePauseScreenTap(_ touch: UITouch) {
+        let location = touch.location(in: pauseOverlay)
+        
+        // Resume button
+        if let resumeBtn = pauseOverlay.childNode(withName: "resumeButton") {
+            let btnFrame = CGRect(x: resumeBtn.position.x - 80, y: resumeBtn.position.y - 18,
+                                  width: 160, height: 36)
+            if btnFrame.contains(location) {
+                resumeGame()
+                return
+            }
+        }
+        
+        // Menu button
+        if let menuBtn = pauseOverlay.childNode(withName: "pauseMenuButton") {
+            let btnFrame = CGRect(x: menuBtn.position.x - 60, y: menuBtn.position.y - 15,
+                                  width: 120, height: 30)
+            if btnFrame.contains(location) {
+                returnToTitle()
+                return
+            }
+        }
     }
     
     // MARK: - Card Selection
@@ -629,6 +896,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Update buff tracker
         buffTracker.update(tagCounts: upgradeManager.tagCounts)
+        
+        // v1.4: Build identity hint
+        if let buildHint = upgradeManager.checkBuildHint() {
+            showBuildHint(buildHint)
+        }
         
         for cardNode in displayedCards {
             if cardNode === selectedNode {
@@ -690,6 +962,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             barrierPulse()
         }
         
+        // v1.4: Post-pick buffer — brief invulnerability so the player can reorient
+        invulnerableTimer = 2.5
+        let blink = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.5, duration: 0.2),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.2)
+        ])
+        player.run(SKAction.repeat(blink, count: 4), withKey: "invulnBlink")
+        
         gameState = .playing
         levelUpOverlay.run(SKAction.fadeOut(withDuration: 0.15))
     }
@@ -727,16 +1007,64 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             invulnerableTimer -= dt
         }
         
+        // v1.4: Damage cooldown (i-frames after taking a hit)
+        if damageCooldownTimer > 0 {
+            damageCooldownTimer -= dt
+        }
+        
         player.move(direction: joystick.direction, deltaTime: dt)
         updateEnemies(dt)
         updateAutoAttack(dt)
         updateProjectiles(dt)
+        updateEnemyProjectiles(dt)
         updateXPOrbs(dt)
         updatePassiveEffects(dt)
         
         let spawnEvent = waveManager.update(deltaTime: dt)
         if spawnEvent.shouldSpawnEnemy { spawnEnemy() }
-        if spawnEvent.shouldSpawnMiniBoss { spawnMiniBoss() }
+        if spawnEvent.shouldSpawnMiniBoss {
+            // v1.4: Spawn real boss if gate is met, otherwise mini-boss
+            if ProgressionManager.shared.arena1BossUnlocked && boss == nil {
+                spawnBoss()
+            } else {
+                spawnMiniBoss()
+            }
+        }
+        
+        // v1.4: Update boss AI
+        boss?.update(deltaTime: dt, playerPosition: player.position)
+        
+        // v1.4: Health orb spawning + updating
+        healthOrbTimer += dt
+        if healthOrbTimer >= nextHealthOrbSpawn {
+            healthOrbTimer = 0
+            nextHealthOrbSpawn = TimeInterval.random(in: GameConfig.HealthOrb.minSpawnInterval...GameConfig.HealthOrb.maxSpawnInterval)
+            let orb = HealthOrbNode()
+            orb.position = HealthOrbNode.randomArenaPosition()
+            orb.zPosition = 4
+            healthOrbs.append(orb)
+            worldNode.addChild(orb)
+        }
+        healthOrbs.removeAll { orb in
+            if orb.update(deltaTime: dt) { orb.removeFromParent(); return true }
+            return false
+        }
+        
+        // v1.4: Magnet orb spawning + updating
+        magnetOrbTimer += dt
+        if magnetOrbTimer >= nextMagnetOrbSpawn {
+            magnetOrbTimer = 0
+            nextMagnetOrbSpawn = TimeInterval.random(in: GameConfig.MagnetOrb.minSpawnInterval...GameConfig.MagnetOrb.maxSpawnInterval)
+            let orb = MagnetOrbNode()
+            orb.position = MagnetOrbNode.randomArenaPosition()
+            orb.zPosition = 4
+            magnetOrbs.append(orb)
+            worldNode.addChild(orb)
+        }
+        magnetOrbs.removeAll { orb in
+            if orb.update(deltaTime: dt) { orb.removeFromParent(); return true }
+            return false
+        }
         
         updateHUD()
         
@@ -750,7 +1078,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var diedFromDOT: [Int] = []
         
         for (index, enemy) in enemies.enumerated() {
-            enemy.chase(target: player.position, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
+            // Use ranged AI for ranged enemies
+            if let ranged = enemy as? RangedEnemyNode {
+                ranged.rangedChase(target: player.position, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
+            } else {
+                enemy.chase(target: player.position, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
+            }
             
             let diedDOT = enemy.updateStatusEffects(deltaTime: dt)
             if diedDOT {
@@ -767,7 +1100,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let pos = enemy.position
             let xp = enemy.xpValue
             enemies.remove(at: index)
-            onEnemyKilled(at: pos, xpValue: xp)
+            onEnemyKilled(at: pos, xpValue: xp, enemy: enemy)
         }
     }
     
@@ -838,7 +1171,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             speed: playerStats.effectiveProjectileSpeed,
             range: playerStats.effectiveProjectileRange,
             pierces: playerStats.pierceCount,
-            damageMultiplier: playerStats.damageMultiplier,
+            damageMultiplier: playerStats.effectiveDamageMultiplier,
             isCrit: isCrit,
             spawnsGravityWell: playerStats.gravityWellOnExpire
         )
@@ -865,6 +1198,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    // MARK: - Enemy Projectile Updates
+    
+    private func updateEnemyProjectiles(_ dt: TimeInterval) {
+        var toRemove: [Int] = []
+        
+        for (index, proj) in enemyProjectiles.enumerated() {
+            if proj.move(deltaTime: dt) {
+                toRemove.append(index)
+            }
+        }
+        
+        for index in toRemove.reversed() {
+            enemyProjectiles[index].removeFromParent()
+            enemyProjectiles.remove(at: index)
+        }
+    }
+    
     // MARK: - XP Orb Updates
     
     private func updateXPOrbs(_ dt: TimeInterval) {
@@ -879,6 +1229,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var passiveDOTAccumulator: CGFloat = 0.0
     
     private func updatePassiveEffects(_ dt: TimeInterval) {
+        // Tesla field
         if playerStats.teslaFieldDPS > 0 {
             for enemy in enemies {
                 if player.position.distance(to: enemy.position) < playerStats.teslaFieldRadius {
@@ -887,6 +1238,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
+        // Arena-wide DOT
         if playerStats.passiveArenaDPS > 0 {
             passiveDOTAccumulator += playerStats.passiveArenaDPS * CGFloat(dt)
             if passiveDOTAccumulator >= 1.0 {
@@ -897,6 +1249,73 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 }
             }
         }
+        
+        // v1.3: Overcharge — builds while unhit
+        playerStats.updateOvercharge(dt)
+        
+        // v1.3: Phase Skin — tick timers
+        playerStats.updatePhaseSkin(dt)
+        
+        // v1.3: Magnetic Core — tick speed boost timer
+        playerStats.updateMagneticCore(dt)
+        
+        // v1.3: Static Field — slow enemies near player
+        if playerStats.staticFieldRange > 0 {
+            for enemy in enemies {
+                if player.position.distance(to: enemy.position) < playerStats.staticFieldRange {
+                    enemy.applySlow(playerStats.staticFieldSlow, duration: 0.5)
+                }
+            }
+        }
+        
+        // v1.3: Unstable Core — periodic burst
+        if playerStats.updateUnstableCore(dt) {
+            performUnstableCoreBurst()
+        }
+    }
+    
+    // MARK: - Unstable Core Burst
+    
+    private func performUnstableCoreBurst() {
+        let radius = playerStats.unstableCoreRadius
+        let damage = playerStats.unstableCoreDamage
+        
+        // Damage nearby enemies
+        for enemy in enemies {
+            if player.position.distance(to: enemy.position) < radius {
+                enemy.takeDamage(damage)
+            }
+        }
+        
+        // v1.4: Self-damage is HP-based instead of losing a lethal save
+        let died = playerStats.takeDamage(playerStats.unstableCoreSelfDamage)
+        hpBar.flashDamage()
+        if died {
+            if player.tryLethalSave() {
+                // Survived — continue
+            } else {
+                playerDied()
+                return
+            }
+        }
+        
+        // Visual: red-purple pulse ring
+        let ring = SKShapeNode(circleOfRadius: radius)
+        ring.strokeColor = SKColor(hex: 0x9933CC, alpha: 0.6)
+        ring.fillColor = SKColor(hex: 0x9933CC, alpha: 0.15)
+        ring.lineWidth = 2
+        ring.position = player.position
+        ring.zPosition = 7
+        worldNode.addChild(ring)
+        
+        let expand = SKAction.group([
+            SKAction.scale(to: 1.3, duration: 0.3),
+            SKAction.fadeOut(withDuration: 0.3)
+        ])
+        ring.run(SKAction.sequence([expand, SKAction.removeFromParent()]))
+        
+        // Small screen shake
+        worldNode.shake(intensity: 4, duration: 0.15)
     }
     
     // MARK: - Spawning
@@ -904,32 +1323,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func spawnEnemy() {
         let elapsed = waveManager.elapsedTime
         
-        // HP scales with time — enemies get beefier
-        // 0-30s: 1HP, 30-60s: 2HP, 60-90s: 3HP, 90-120s: 4-5HP, 120s+: 5-7HP
+        // After 45s, chance to spawn a ranged enemy instead
+        if elapsed >= GameConfig.RangedEnemy.firstSpawnTime &&
+           CGFloat.random(in: 0...1) < GameConfig.RangedEnemy.spawnChance {
+            spawnRangedEnemy()
+            return
+        }
+        
+        // HP scales with time — enemies get beefier (v1.4: softened curve)
         let baseHP: Int
         if elapsed < 30 {
             baseHP = 1
         } else if elapsed < 60 {
-            baseHP = 2
+            baseHP = 1
         } else if elapsed < 90 {
-            baseHP = 3
+            baseHP = 2
         } else if elapsed < 120 {
-            baseHP = Int.random(in: 4...5)
+            baseHP = Int.random(in: 2...3)
         } else {
-            baseHP = Int.random(in: 5...7)
+            baseHP = Int.random(in: 3...5)
         }
         
-        // Speed scales slightly — late game enemies are a bit faster
-        let speedScale: CGFloat = 1.0 + CGFloat(elapsed / 180) * 0.25  // Up to +25% at 3min
+        let speedScale: CGFloat = 1.0 + CGFloat(elapsed / 180) * 0.15  // v1.4: slower speed ramp
         let enemySpeed = GameConfig.Enemy.baseSpeed * speedScale
-        
-        // XP scales with HP so beefier enemies are worth more
-        let xpValue = max(1, baseHP)
+        let xpValue = max(1, baseHP + 1)  // v1.4: +1 XP per kill across the board
         
         let enemy = EnemyNode(health: baseHP, moveSpeed: enemySpeed, xpValue: xpValue)
         enemy.position = EnemyNode.spawnPosition()
         
-        // Subtle size scale with HP — beefier enemies are slightly larger
         if baseHP >= 3 {
             let sizeScale = 1.0 + CGFloat(baseHP - 2) * 0.08
             enemy.setScale(sizeScale)
@@ -937,6 +1358,56 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         enemies.append(enemy)
         worldNode.addChild(enemy)
+    }
+    
+    private func spawnRangedEnemy() {
+        let elapsed = waveManager.elapsedTime
+        
+        // Ranged enemies have slightly more HP than melee at same time
+        let baseHP: Int
+        if elapsed < 60 {
+            baseHP = 2
+        } else if elapsed < 90 {
+            baseHP = 3
+        } else if elapsed < 120 {
+            baseHP = Int.random(in: 3...5)
+        } else {
+            baseHP = Int.random(in: 5...8)
+        }
+        
+        let xpValue = max(2, baseHP + 1)  // Worth more than melee
+        
+        let ranged = RangedEnemyNode(
+            health: baseHP,
+            moveSpeed: GameConfig.Enemy.baseSpeed * 0.75,
+            xpValue: xpValue
+        )
+        ranged.position = EnemyNode.spawnPosition()
+        
+        // Wire up the fire callback
+        ranged.onFireProjectile = { [weak self] position, direction in
+            self?.spawnEnemyProjectile(at: position, direction: direction)
+        }
+        
+        if baseHP >= 4 {
+            let sizeScale = 1.0 + CGFloat(baseHP - 3) * 0.06
+            ranged.setScale(sizeScale)
+        }
+        
+        enemies.append(ranged)
+        worldNode.addChild(ranged)
+    }
+    
+    private func spawnEnemyProjectile(at position: CGPoint, direction: CGPoint) {
+        // v1.4: Projectile carries scaled damage
+        let elapsed = waveManager.elapsedTime
+        let scalingTicks = Int(elapsed / 30)
+        let damage = GameConfig.Enemy.baseRangedDamage + (scalingTicks * GameConfig.Enemy.rangedDamageScaling)
+        let proj = EnemyProjectileNode(direction: direction, damage: damage)
+        proj.position = position
+        proj.zPosition = 7
+        enemyProjectiles.append(proj)
+        worldNode.addChild(proj)
     }
     
     private func spawnMiniBoss() {
@@ -957,6 +1428,86 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(boss)
     }
     
+    // MARK: - v1.4: Boss Spawn
+    
+    private func spawnBoss() {
+        let elapsed = waveManager.elapsedTime
+        let hpScaling = Int(elapsed / 30) * 5
+        
+        let bossNode = BossNode(config: BossNode.slagTitan, hpScaling: hpScaling)
+        bossNode.position = BossNode.spawnPosition()
+        bossNode.zPosition = 6
+        
+        // Wire callbacks
+        bossNode.onSpawnMinions = { [weak self] pos, count in
+            for _ in 0..<count {
+                self?.spawnEnemy()
+            }
+        }
+        bossNode.onSlamHit = { [weak self] pos, radius, damage in
+            guard let self = self else { return }
+            if self.player.position.distance(to: pos) < radius {
+                guard self.damageCooldownTimer <= 0 else { return }
+                let died = self.player.applyDamage(damage)
+                self.damageCooldownTimer = GameConfig.Player.damageCooldown
+                self.hpBar.flashDamage()
+                self.worldNode.shake(intensity: 10, duration: 0.3)
+                if died {
+                    if self.player.tryLethalSave() { return }
+                    self.playerDied()
+                }
+            }
+        }
+        bossNode.onDeath = { [weak self] pos, xp in
+            guard let self = self else { return }
+            self.bossDefeatedThisRun = true
+            ProgressionManager.shared.recordKill(.boss)
+            // Spawn massive XP shower
+            for _ in 0..<10 {
+                let offset = CGPoint(
+                    x: CGFloat.random(in: -40...40),
+                    y: CGFloat.random(in: -40...40)
+                )
+                self.spawnXPOrb(at: pos + offset, value: xp / 10)
+            }
+            self.boss = nil
+            self.worldNode.shake(intensity: 15, duration: 0.5)
+        }
+        
+        boss = bossNode
+        worldNode.addChild(bossNode)
+        
+        // Dramatic entrance
+        showBossEntrance()
+    }
+    
+    private func showBossEntrance() {
+        let dim = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.5)
+        dim.strokeColor = .clear
+        dim.zPosition = 150
+        dim.alpha = 0
+        camera?.addChild(dim)
+        
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "THE SLAG TITAN"
+        title.fontSize = 18
+        title.fontColor = SKColor(hex: 0xFF6611)
+        title.position = CGPoint(x: 0, y: 0)
+        title.zPosition = 151
+        title.alpha = 0
+        camera?.addChild(title)
+        
+        let sequence = SKAction.sequence([
+            SKAction.fadeAlpha(to: 1.0, duration: 0.3),
+            SKAction.wait(forDuration: 1.2),
+            SKAction.fadeOut(withDuration: 0.5),
+            SKAction.removeFromParent()
+        ])
+        dim.run(sequence)
+        title.run(sequence)
+    }
+    
     private func spawnXPOrb(at position: CGPoint, value: Int) {
         let orb = XPOrbNode(xpValue: value)
         orb.position = position
@@ -964,10 +1515,68 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(orb)
     }
     
+    // MARK: - v1.4: Health Orb Collection
+    
+    private func handleHealthOrbCollection(orbBody: SKPhysicsBody) {
+        guard let orb = orbBody.node as? HealthOrbNode else { return }
+        guard let idx = healthOrbs.firstIndex(where: { $0 === orb }) else { return }
+        playerStats.heal(orb.healAmount)
+        hpBar.flashHeal()
+        healthOrbs.remove(at: idx)
+        orb.collect()
+    }
+    
+    // MARK: - v1.4: Magnet Orb Collection
+    
+    private func handleMagnetOrbCollection(orbBody: SKPhysicsBody) {
+        guard let orb = orbBody.node as? MagnetOrbNode else { return }
+        guard let idx = magnetOrbs.firstIndex(where: { $0 === orb }) else { return }
+        magnetOrbs.remove(at: idx)
+        orb.collect()
+        // Vacuum ALL XP orbs to player
+        for xpOrb in xpOrbs {
+            let flyTo = SKAction.move(to: player.position, duration: 0.3)
+            flyTo.timingMode = .easeIn
+            xpOrb.run(flyTo)
+        }
+    }
+    
+    // MARK: - v1.4: Build Identity Hints
+    
+    private func showBuildHint(_ text: String) {
+        let hint = SKLabelNode(fontNamed: "Menlo-Bold")
+        hint.text = text
+        hint.fontSize = 14
+        hint.fontColor = SKColor(hex: 0xFFDD55)
+        hint.position = CGPoint(x: 0, y: -40)
+        hint.alpha = 0
+        hint.zPosition = 160
+        camera?.addChild(hint)
+        
+        let anim = SKAction.sequence([
+            SKAction.fadeIn(withDuration: 0.3),
+            SKAction.wait(forDuration: 1.5),
+            SKAction.fadeOut(withDuration: 0.5),
+            SKAction.removeFromParent()
+        ])
+        hint.run(anim)
+    }
+    
     // MARK: - Enemy Killed
     
-    private func onEnemyKilled(at position: CGPoint, xpValue: Int) {
+    private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil) {
         killCount += 1
+        
+        // v1.4: Track kill type for progression
+        if let enemy = enemy {
+            if enemy is RangedEnemyNode {
+                ProgressionManager.shared.recordKill(.ranged)
+            } else {
+                ProgressionManager.shared.recordKill(.melee)
+            }
+        } else {
+            ProgressionManager.shared.recordKill(.melee)
+        }
         
         run(SKAction.wait(forDuration: 0.05)) { [weak self] in
             self?.spawnXPOrb(at: position, value: xpValue)
@@ -980,8 +1589,40 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             explosionAt(position)
         }
         
-        // Subtle screen shake on kill
+        // v1.3: Chain Reaction — separate from Ember Burst
+        if playerStats.chainReactionExplode {
+            chainReactionAt(position)
+        }
+        
         worldNode.shake(intensity: 2, duration: 0.08)
+    }
+    
+    private func chainReactionAt(_ position: CGPoint) {
+        let radius = playerStats.chainReactionRadius
+        let damage = playerStats.chainReactionDamage
+        
+        for enemy in enemies {
+            if enemy.position.distance(to: position) < radius && enemy.position != position {
+                enemy.takeDamage(damage)
+            }
+        }
+        
+        // Visual: orange-white flash ring
+        let ring = SKShapeNode(circleOfRadius: radius)
+        ring.strokeColor = SKColor(hex: 0xFFCC44, alpha: 0.7)
+        ring.fillColor = SKColor(hex: 0xFF8800, alpha: 0.2)
+        ring.lineWidth = 1.5
+        ring.position = position
+        ring.zPosition = 6
+        worldNode.addChild(ring)
+        
+        ring.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 1.4, duration: 0.2),
+                SKAction.fadeOut(withDuration: 0.2)
+            ]),
+            SKAction.removeFromParent()
+        ]))
     }
     
     private func explosionAt(_ position: CGPoint) {
@@ -1037,6 +1678,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         } else {
             timerLabel.fontColor = SKColor(hex: 0xAAAAAA)  // Default
         }
+        // HP Bar Update
+        
+        hpBar.updateFill(playerStats.hpPercent,
+                         currentHP: playerStats.currentHP,
+                         maxHP: playerStats.maxHP)
         
         levelLabel.text = "LV \(player.currentLevel)"
         xpBar.updateFill(player.xpProgress)
@@ -1071,6 +1717,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             handleXPCollection(orbBody: bodyA)
             return
         }
+        
+        // Player ↔ Enemy Projectile = damage
+        if (masks == (GameConfig.Physics.player, GameConfig.Physics.enemyProjectile)) ||
+           (masks == (GameConfig.Physics.enemyProjectile, GameConfig.Physics.player)) {
+            let projBody = bodyA.categoryBitMask == GameConfig.Physics.enemyProjectile ? bodyA : bodyB
+            handleEnemyProjectileHit(projectileBody: projBody)
+            return
+        }
+        
+        // v1.4: Player ↔ Health Orb
+        if (masks == (GameConfig.Physics.player, GameConfig.Physics.healthOrb)) ||
+           (masks == (GameConfig.Physics.healthOrb, GameConfig.Physics.player)) {
+            let orbBody = bodyA.categoryBitMask == GameConfig.Physics.healthOrb ? bodyA : bodyB
+            handleHealthOrbCollection(orbBody: orbBody)
+            return
+        }
+        
+        // v1.4: Player ↔ Magnet Orb
+        if (masks == (GameConfig.Physics.player, GameConfig.Physics.magnetOrb)) ||
+           (masks == (GameConfig.Physics.magnetOrb, GameConfig.Physics.player)) {
+            let orbBody = bodyA.categoryBitMask == GameConfig.Physics.magnetOrb ? bodyA : bodyB
+            handleMagnetOrbCollection(orbBody: orbBody)
+            return
+        }
     }
     
     // MARK: - Player ↔ Enemy
@@ -1078,19 +1748,108 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func handlePlayerEnemyContact() {
         guard gameState == .playing else { return }
         guard !isInvulnerable else { return }
+        guard damageCooldownTimer <= 0 else { return }
         
-        if player.tryLethalSave() {
-            for enemy in enemies {
-                if player.position.distance(to: enemy.position) < 50 {
-                    let dir = (enemy.position - player.position).normalized
-                    enemy.position += dir * 40
-                }
-            }
-            worldNode.shake(intensity: 8, duration: 0.25)
+        // v1.3: Phase Skin — absorb hit with brief invulnerability
+        if playerStats.triggerPhaseSkin() {
+            playerStats.resetOvercharge()
+            invulnerableTimer = playerStats.phaseSkinDuration
+            let blink = SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.3, duration: 0.1),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.1)
+            ])
+            player.run(SKAction.repeat(blink, count: 5), withKey: "invulnBlink")
+            worldNode.shake(intensity: 4, duration: 0.15)
             return
         }
         
-        playerDied()
+        // v1.3: Overcharge resets on hit
+        playerStats.resetOvercharge()
+        
+        // v1.4: Calculate damage based on elapsed time
+        let elapsed = waveManager.elapsedTime
+        let scalingTicks = Int(elapsed / 30)
+        let damage = GameConfig.Enemy.baseMeleeDamage + (scalingTicks * GameConfig.Enemy.meleeDamageScaling)
+        
+        let died = player.applyDamage(damage)
+        damageCooldownTimer = GameConfig.Player.damageCooldown
+        hpBar.flashDamage()
+        worldNode.shake(intensity: 6, duration: 0.2)
+        
+        if died {
+            if player.tryLethalSave() {
+                for enemy in enemies {
+                    if player.position.distance(to: enemy.position) < 50 {
+                        let dir = (enemy.position - player.position).normalized
+                        enemy.position += dir * 40
+                    }
+                }
+                worldNode.shake(intensity: 8, duration: 0.25)
+                damageCooldownTimer = 1.0  // Generous i-frames after lethal save
+                return
+            }
+            playerDied()
+        }
+    }
+    
+    // MARK: - Enemy Projectile ↔ Player
+    
+    private func handleEnemyProjectileHit(projectileBody: SKPhysicsBody) {
+        guard let projNode = projectileBody.node as? EnemyProjectileNode else { return }
+        guard gameState == .playing else { return }
+        guard !isInvulnerable else {
+            // Still destroy the projectile even if invulnerable
+            if let index = enemyProjectiles.firstIndex(where: { $0 === projNode }) {
+                enemyProjectiles.remove(at: index)
+            }
+            projNode.removeFromParent()
+            return
+        }
+        
+        // Remove the projectile
+        if let index = enemyProjectiles.firstIndex(where: { $0 === projNode }) {
+            enemyProjectiles.remove(at: index)
+        }
+        projNode.removeFromParent()
+        
+        guard damageCooldownTimer <= 0 else { return }
+        
+        // v1.3: Phase Skin — absorb the hit
+        if playerStats.triggerPhaseSkin() {
+            playerStats.resetOvercharge()
+            invulnerableTimer = playerStats.phaseSkinDuration
+            let blink = SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.3, duration: 0.1),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.1)
+            ])
+            player.run(SKAction.repeat(blink, count: 5), withKey: "invulnBlink")
+            worldNode.shake(intensity: 4, duration: 0.15)
+            return
+        }
+        
+        // v1.3: Overcharge resets on hit
+        playerStats.resetOvercharge()
+        
+        // v1.4: Use projectile's damage value instead of instant kill
+        let died = player.applyDamage(projNode.damage)
+        damageCooldownTimer = GameConfig.Player.damageCooldown
+        hpBar.flashDamage()
+        worldNode.shake(intensity: 4, duration: 0.15)
+        
+        if died {
+            if player.tryLethalSave() {
+                for enemy in enemies {
+                    if player.position.distance(to: enemy.position) < 50 {
+                        let dir = (enemy.position - player.position).normalized
+                        enemy.position += dir * 40
+                    }
+                }
+                worldNode.shake(intensity: 8, duration: 0.25)
+                damageCooldownTimer = 1.0
+                return
+            }
+            playerDied()
+        }
     }
     
     // MARK: - Projectile ↔ Enemy
@@ -1107,6 +1866,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         if playerStats.executionThreshold > 0 && enemyNode.healthPercent < playerStats.executionThreshold {
             damage *= 2
+        }
+        
+        // Execution Protocol: bonus damage to low HP enemies
+        if playerStats.executionProtocolThreshold > 0 && enemyNode.healthPercent < playerStats.executionProtocolThreshold {
+            damage = Int(CGFloat(damage) * playerStats.executionProtocolMultiplier)
         }
         
         if playerStats.slowedDamageBonus > 0 && enemyNode.isSlowed {
@@ -1140,7 +1904,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
                         enemies.remove(at: index)
                     }
-                    onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue)
+                    onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode)
                 }
                 if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
                     projectiles.remove(at: index)
@@ -1166,7 +1930,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
                 enemies.remove(at: index)
             }
-            onEnemyKilled(at: deathPos, xpValue: xpValue)
+            onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode)
         }
         
         if playerStats.chainTargets > 0 && !killed {
@@ -1213,7 +1977,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let index = enemies.firstIndex(where: { $0 === target }) {
                 enemies.remove(at: index)
             }
-            onEnemyKilled(at: pos, xpValue: xp)
+            onEnemyKilled(at: pos, xpValue: xp, enemy: target)
         }
     }
     
@@ -1226,6 +1990,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             xpOrbs.remove(at: index)
         }
         orbNode.collect()
+        
+        // v1.3: Magnetic Core — speed boost on XP pickup
+        playerStats.triggerMagneticCoreBoost()
         
         if player.addXP(orbNode.xpValue) {
             triggerLevelUp()
@@ -1266,12 +2033,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for card in displayedCards { card.removeFromParent() }
         displayedCards.removeAll()
         
-        let spacing: CGFloat = 105
+        let spacing: CGFloat = 115  // v1.4: wider for 100pt cards
         let startX = -spacing * CGFloat(cards.count - 1) / 2
+        let cardY: CGFloat = -40  // v1.4: lower on screen, closer to joystick area
         
         for (i, card) in cards.enumerated() {
             let cardNode = UpgradeCardNode(card: card)
-            cardNode.position = CGPoint(x: startX + spacing * CGFloat(i), y: 0)
+            cardNode.position = CGPoint(x: startX + spacing * CGFloat(i), y: cardY)
             cardNode.setScale(0.0)
             levelUpOverlay.addChild(cardNode)
             displayedCards.append(cardNode)
@@ -1300,6 +2068,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             level: player.currentLevel,
             kills: killCount
         )
+        
+        // v1.4: Record to ProgressionManager
+        ProgressionManager.shared.recordSurvival(waveManager.elapsedTime)
+        let forgeXP = ProgressionManager.shared.forgeXPForRun(
+            kills: killCount,
+            level: player.currentLevel,
+            time: waveManager.elapsedTime,
+            bossDefeated: bossDefeatedThisRun
+        )
+        pendingForgeXP = forgeXP
+        ProgressionManager.shared.addForgeXP(forgeXP)
         
         // Analytics
         AnalyticsTracker.shared.recordRun(AnalyticsTracker.RunData(
@@ -1353,6 +2132,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
+        // v1.5: Show/hide XP boost button
+        if let xpBoostBtn = deathOverlay.childNode(withName: "xpBoostButton") {
+            xpBoostBtn.alpha = adReviveManager.canBoostXP && pendingForgeXP > 0 ? 1.0 : 0.0
+            
+            if let label = xpBoostBtn.childNode(withName: "xpBoostLabel") as? SKLabelNode {
+                label.text = "2x FORGE XP (+\(pendingForgeXP))"
+            }
+            if adReviveManager.adsRemoved {
+                if let adIcon = xpBoostBtn.childNode(withName: "xpBoostAdIcon") as? SKLabelNode {
+                    adIcon.text = "FREE"
+                }
+            }
+        }
+        
         deathOverlay.run(SKAction.fadeIn(withDuration: 0.3))
     }
     
@@ -1377,6 +2170,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         player.alpha = 1.0
         player.physicsBody?.categoryBitMask = GameConfig.Physics.player
         
+        // v1.4: Restore HP to full on revive
+        playerStats.currentHP = playerStats.maxHP
+        
         // Clear enemies near player
         var toClear: [Int] = []
         for (index, enemy) in enemies.enumerated() {
@@ -1389,21 +2185,47 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             enemies.remove(at: index)
         }
         
-        // Brief invulnerability
-        invulnerableTimer = 2.0
+        // v1.4: Generous invulnerability — reward for watching the ad
+        invulnerableTimer = 5.0
         
         // Invulnerability visual (blinking)
         let blink = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.3, duration: 0.1),
             SKAction.fadeAlpha(to: 1.0, duration: 0.1)
         ])
-        player.run(SKAction.repeat(blink, count: 10), withKey: "invulnBlink")
+        player.run(SKAction.repeat(blink, count: 25), withKey: "invulnBlink")
         
         // Hide death overlay
         deathOverlay.run(SKAction.fadeOut(withDuration: 0.2))
         
         gameState = .playing
         lastUpdateTime = 0  // Reset delta time to avoid jump
+    }
+    
+    // MARK: - v1.5: XP Boost
+    
+    private func performXPBoost() {
+        let vc = view?.window?.rootViewController
+        adReviveManager.requestXPBoost(from: vc) { [weak self] success in
+            guard let self = self, success else { return }
+            
+            // Double the forge XP — add another copy of what was already awarded
+            let bonusXP = self.pendingForgeXP
+            ProgressionManager.shared.addForgeXP(bonusXP)
+            
+            // Update button to show it's been used
+            if let xpBoostBtn = self.deathOverlay.childNode(withName: "xpBoostButton") {
+                if let label = xpBoostBtn.childNode(withName: "xpBoostLabel") as? SKLabelNode {
+                    label.text = "✓ +\(bonusXP) BONUS XP"
+                    label.fontColor = SKColor(hex: 0x66AA66)
+                }
+                if let adIcon = xpBoostBtn.childNode(withName: "xpBoostAdIcon") as? SKLabelNode {
+                    adIcon.alpha = 0
+                }
+            }
+            
+            self.pendingForgeXP = 0
+        }
     }
     
     // MARK: - Restart
@@ -1415,11 +2237,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for proj in projectiles { proj.removeFromParent() }
         projectiles.removeAll()
         
+        for eProj in enemyProjectiles { eProj.removeFromParent() }
+        enemyProjectiles.removeAll()
+        
         for orb in xpOrbs { orb.removeFromParent() }
         xpOrbs.removeAll()
         
         for card in displayedCards { card.removeFromParent() }
         displayedCards.removeAll()
+        
+        // v1.4: Clean up health orbs, magnet orbs, boss
+        healthOrbs.forEach { $0.removeFromParent() }
+        healthOrbs.removeAll()
+        magnetOrbs.forEach { $0.removeFromParent() }
+        magnetOrbs.removeAll()
+        boss?.removeFromParent()
+        boss = nil
         
         player.reset()
         player.stats = playerStats
@@ -1433,6 +2266,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false
+        bossDefeatedThisRun = false
+        pendingForgeXP = 0
+        
+        // v1.4: Reset orb timers
+        healthOrbTimer = 0
+        magnetOrbTimer = 0
+        damageCooldownTimer = 0
+        nextHealthOrbSpawn = TimeInterval.random(in: 20...30)
+        nextMagnetOrbSpawn = TimeInterval.random(in: 25...35)
+        
+        // v1.4: Apply Forge Level bonuses
+        ProgressionManager.shared.applyForgeBonuses(to: playerStats)
+        
+        // v1.4: Apply Daily Forge Blessing if active
+        DailyForgeManager.shared.applyBlessingIfActive(to: playerStats)
         
         xpBar.updateFill(0)
         

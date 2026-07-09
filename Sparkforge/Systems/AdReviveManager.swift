@@ -1,8 +1,10 @@
 // AdReviveManager.swift
 // Sparkforge
 //
-// Manages rewarded ads for revive and reroll.
+// Manages rewarded ads for revive, reroll, and XP boost.
 // Compatible with Google Mobile Ads SDK 13.x+
+//
+// v1.5: Added XP boost ad placement for post-run forge XP doubling.
 
 import UIKit
 import GoogleMobileAds
@@ -13,18 +15,23 @@ final class AdReviveManager: NSObject {
     
     static let reviveAdUnitID = "ca-app-pub-3734133983597932/3682515394"
     static let rerollAdUnitID = "ca-app-pub-3734133983597932/9266014563"
+    static let xpBoostAdUnitID = "ca-app-pub-3734133983597932/5847623891"  // v1.5: Post-run XP boost
     
     // MARK: - State
     
     private(set) var reviveUsedThisRun: Bool = false
+    private(set) var xpBoostUsedThisRun: Bool = false  // v1.5
     private var reviveAd: RewardedAd?
     private var rerollAd: RewardedAd?
+    private var xpBoostAd: RewardedAd?  // v1.5
     private var reviveCompletion: ((Bool) -> Void)?
     private var rerollCompletion: ((Bool) -> Void)?
+    private var xpBoostCompletion: ((Bool) -> Void)?  // v1.5
     
     private enum ActiveAd {
         case revive
         case reroll
+        case xpBoost  // v1.5
     }
     private var activeAd: ActiveAd?
     
@@ -36,12 +43,17 @@ final class AdReviveManager: NSObject {
         return !reviveUsedThisRun
     }
     
+    var canBoostXP: Bool {
+        return !xpBoostUsedThisRun
+    }
+    
     // MARK: - Preload
     
     func preloadAd() {
         guard !adsRemoved else { return }
         preloadReviveAd()
         preloadRerollAd()
+        preloadXPBoostAd()
     }
     
     private func preloadReviveAd() {
@@ -71,6 +83,21 @@ final class AdReviveManager: NSObject {
             self?.rerollAd = ad
             self?.rerollAd?.fullScreenContentDelegate = self
             print("[AdRevive] Reroll ad loaded")
+        }
+    }
+    
+    private func preloadXPBoostAd() {
+        RewardedAd.load(
+            with: AdReviveManager.xpBoostAdUnitID,
+            request: Request()
+        ) { [weak self] ad, error in
+            if let error = error {
+                print("[AdRevive] Failed to load XP boost ad: \(error.localizedDescription)")
+                return
+            }
+            self?.xpBoostAd = ad
+            self?.xpBoostAd?.fullScreenContentDelegate = self
+            print("[AdRevive] XP boost ad loaded")
         }
     }
     
@@ -131,10 +158,43 @@ final class AdReviveManager: NSObject {
         }
     }
     
+    // MARK: - v1.5: XP Boost Flow
+    
+    func requestXPBoost(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        guard canBoostXP else {
+            completion(false)
+            return
+        }
+        
+        if adsRemoved {
+            xpBoostUsedThisRun = true
+            completion(true)
+            return
+        }
+        
+        guard let ad = xpBoostAd, let vc = viewController else {
+            print("[AdRevive] XP boost ad not ready")
+            completion(false)
+            return
+        }
+        
+        xpBoostCompletion = completion
+        activeAd = .xpBoost
+        
+        ad.present(from: vc) { [weak self] in
+            self?.xpBoostUsedThisRun = true
+            self?.xpBoostCompletion?(true)
+            self?.xpBoostCompletion = nil
+            self?.activeAd = nil
+            self?.preloadXPBoostAd()
+        }
+    }
+    
     // MARK: - Reset
     
     func reset() {
         reviveUsedThisRun = false
+        xpBoostUsedThisRun = false
         preloadAd()
     }
 }
@@ -157,6 +217,10 @@ extension AdReviveManager: FullScreenContentDelegate {
                 self.rerollCompletion?(false)
                 self.rerollCompletion = nil
                 self.preloadRerollAd()
+            case .xpBoost:
+                self.xpBoostCompletion?(false)
+                self.xpBoostCompletion = nil
+                self.preloadXPBoostAd()
             case .none:
                 break
             }
@@ -179,6 +243,12 @@ extension AdReviveManager: FullScreenContentDelegate {
                     self.rerollCompletion = nil
                 }
                 self.preloadRerollAd()
+            case .xpBoost:
+                if let completion = self.xpBoostCompletion {
+                    completion(false)
+                    self.xpBoostCompletion = nil
+                }
+                self.preloadXPBoostAd()
             case .none:
                 break
             }

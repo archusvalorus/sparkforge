@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# SPM
+.swiftpm/
+.build/
+
+# Claude Code local settings
+.claude/settings.local.json
