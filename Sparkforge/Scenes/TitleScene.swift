@@ -38,6 +38,13 @@ final class TitleScene: SKScene {
     private let dailyForgeButton = SKNode()
     private let dailyForgeLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     private let blessingActiveLabel = SKLabelNode(fontNamed: "Menlo")
+
+    // v1.6: Arena selector
+    private let arenaHeader = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let arenaPrevArrow = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let arenaNextArrow = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let arenaFlavorLabel = SKLabelNode(fontNamed: "Menlo")
+    private let arenaReadyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     
     // MARK: - State
     
@@ -242,76 +249,115 @@ final class TitleScene: SKScene {
     
     // MARK: - v1.4: Arena Progress
     
+    // v1.6: Arena section — header doubles as a selector once Arena 2 unlocks.
+    // Fixed four-row layout; refreshArenaSection() fills it per selected arena.
     private func setupArenaProgress() {
-        let pm = ProgressionManager.shared
-        let progress = pm.arena1Progress
-        
-        // Section header
-        let header = SKLabelNode(fontNamed: "Menlo-Bold")
-        header.text = "ARENA 1: THE CRUCIBLE"
-        header.fontSize = 9
-        header.fontColor = SKColor(hex: 0xCCCCCC)
-        header.position = CGPoint(x: 0, y: layoutY)
-        header.zPosition = 10
-        addChild(header)
-        
+        arenaHeader.fontSize = 9
+        arenaHeader.position = CGPoint(x: 0, y: layoutY)
+        arenaHeader.zPosition = 10
+        addChild(arenaHeader)
+
+        arenaPrevArrow.text = "◀"
+        arenaNextArrow.text = "▶"
+        for (arrow, x) in [(arenaPrevArrow, CGFloat(-100)), (arenaNextArrow, CGFloat(100))] {
+            arrow.fontSize = 12
+            arrow.fontColor = SKColor(hex: 0xFFAA33)
+            arrow.position = CGPoint(x: x, y: layoutY - 1)
+            arrow.zPosition = 10
+            addChild(arrow)
+        }
+
         layoutY -= 16
-        
-        // Kill progress
-        let killText = "\(progress.currentKills)/\(progress.requiredKills) kills"
-        killProgressLabel.text = progress.killProgress >= 1.0 ? "✓ \(killText)" : "○ \(killText)"
+
+        // Row 1: kill progress (Crucible) / flavor line (Quench)
         killProgressLabel.fontSize = 10
-        killProgressLabel.fontColor = progress.killProgress >= 1.0
-            ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
         killProgressLabel.position = CGPoint(x: 0, y: layoutY)
         killProgressLabel.zPosition = 10
         addChild(killProgressLabel)
-        
-        layoutY -= 15
-        
-        // Boss kill progress — v1.6: only shown when the gate actually requires boss kills
-        // (Arena 1's requirement was dropped; the concept returns for Arena 2+)
-        if progress.requiredBossKills > 0 {
-            let bossText = "\(progress.currentBossKills)/\(progress.requiredBossKills) boss kills"
-            bossProgressLabel.text = progress.bossKillProgress >= 1.0 ? "✓ \(bossText)" : "○ \(bossText)"
-            bossProgressLabel.fontSize = 10
-            bossProgressLabel.fontColor = progress.bossKillProgress >= 1.0
-                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
-            bossProgressLabel.position = CGPoint(x: 0, y: layoutY)
-            bossProgressLabel.zPosition = 10
-            addChild(bossProgressLabel)
 
-            layoutY -= 15
-        }
-        
-        // Survival check
-        survivalCheckLabel.text = progress.survivalMet ? "✓ Survived 2 minutes" : "○ Survive 2 minutes"
+        arenaFlavorLabel.fontSize = 9
+        arenaFlavorLabel.fontColor = SKColor(hex: 0x8A8478)
+        arenaFlavorLabel.position = CGPoint(x: 0, y: layoutY)
+        arenaFlavorLabel.zPosition = 10
+        addChild(arenaFlavorLabel)
+
+        layoutY -= 15
+
+        // Row 2: survival check (Crucible only)
         survivalCheckLabel.fontSize = 10
-        survivalCheckLabel.fontColor = progress.survivalMet
-            ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
         survivalCheckLabel.position = CGPoint(x: 0, y: layoutY)
         survivalCheckLabel.zPosition = 10
         addChild(survivalCheckLabel)
-        
+
         layoutY -= 18
-        
-        // All met indicator
-        if progress.allMet {
-            let ready = SKLabelNode(fontNamed: "Menlo-Bold")
-            ready.text = "★ BOSS UNLOCKED ★"
-            ready.fontSize = 11
-            ready.fontColor = SKColor(hex: 0xFFAA33)
-            ready.position = CGPoint(x: 0, y: layoutY)
-            ready.zPosition = 10
-            addChild(ready)
-            
-            let pulse = SKAction.sequence([
-                SKAction.fadeAlpha(to: 0.5, duration: 0.8),
-                SKAction.fadeAlpha(to: 1.0, duration: 0.8)
-            ])
-            ready.run(SKAction.repeatForever(pulse))
-            
-            layoutY -= 20
+
+        // Row 3: "boss unlocked" pulse / locked-arena teaser
+        arenaReadyLabel.fontSize = 11
+        arenaReadyLabel.position = CGPoint(x: 0, y: layoutY)
+        arenaReadyLabel.zPosition = 10
+        addChild(arenaReadyLabel)
+        let pulse = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.5, duration: 0.8),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.8)
+        ])
+        arenaReadyLabel.run(SKAction.repeatForever(pulse))
+
+        layoutY -= 20
+
+        refreshArenaSection()
+    }
+
+    private func refreshArenaSection() {
+        let pm = ProgressionManager.shared
+        let arena = ArenaConfig.current
+        let selectorVisible = pm.arenasUnlocked >= 2
+
+        arenaHeader.text = arena.displayName
+        arenaHeader.fontColor = arena.id == 1 ? SKColor(hex: 0xB8B0A4) : SKColor(hex: 0xCCCCCC)
+        arenaPrevArrow.isHidden = !selectorVisible
+        arenaNextArrow.isHidden = !selectorVisible
+
+        if arena.id == 0 {
+            let progress = pm.arena1Progress
+
+            let killText = "\(progress.currentKills)/\(progress.requiredKills) kills"
+            killProgressLabel.text = progress.killProgress >= 1.0 ? "✓ \(killText)" : "○ \(killText)"
+            killProgressLabel.fontColor = progress.killProgress >= 1.0
+                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
+            killProgressLabel.isHidden = false
+
+            // v1.6: survival row only appears when the gate requires it
+            if ProgressionManager.arena1Gate.survivalRequired {
+                survivalCheckLabel.text = progress.survivalMet ? "✓ Survived 2 minutes" : "○ Survive 2 minutes"
+                survivalCheckLabel.fontColor = progress.survivalMet
+                    ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
+                survivalCheckLabel.isHidden = false
+            } else {
+                survivalCheckLabel.isHidden = true
+            }
+
+            arenaFlavorLabel.isHidden = true
+
+            if pm.arenasUnlocked >= 2 {
+                arenaReadyLabel.isHidden = true
+            } else if progress.allMet {
+                arenaReadyLabel.text = "★ BOSS UNLOCKED ★"
+                arenaReadyLabel.fontColor = SKColor(hex: 0xFFAA33)
+                arenaReadyLabel.isHidden = false
+            } else {
+                arenaReadyLabel.text = "🔒 THE QUENCH lies beyond the Titan"
+                arenaReadyLabel.fontSize = 9
+                arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
+                arenaReadyLabel.isHidden = false
+            }
+        } else {
+            killProgressLabel.isHidden = true
+            survivalCheckLabel.isHidden = true
+
+            arenaFlavorLabel.text = arena.flavorLine
+            arenaFlavorLabel.isHidden = false
+
+            arenaReadyLabel.isHidden = true
         }
     }
     
@@ -421,7 +467,21 @@ final class TitleScene: SKScene {
         guard !isTransitioning else { return }
         
         let location = touch.location(in: self)
-        
+
+        // v1.6: Arena selector arrows (visible once Arena 2 is unlocked)
+        if ProgressionManager.shared.arenasUnlocked >= 2 {
+            for arrow in [arenaPrevArrow, arenaNextArrow] where !arrow.isHidden {
+                let frame = CGRect(x: arrow.position.x - 28, y: arrow.position.y - 22,
+                                   width: 56, height: 44)
+                if frame.contains(location) {
+                    let pm = ProgressionManager.shared
+                    pm.currentArena = pm.currentArena == 0 ? 1 : 0
+                    refreshArenaSection()
+                    return
+                }
+            }
+        }
+
         // Check Daily Forge tap — use the BG node's position for hit testing
         if dailyForgeButton.parent != nil,
            let bg = dailyForgeButton.childNode(withName: "dailyForgeBG") {

@@ -33,12 +33,22 @@ final class XPBarNode: SKNode {
         fillBar = SKShapeNode(rectOf: CGSize(width: 1, height: barHeight), cornerRadius: 2)
         fillBar.fillColor = SKColor(hex: 0xFFAA33)
         fillBar.strokeColor = .clear
-        
+
         super.init()
-        
+
         addChild(backgroundBar)
         addChild(fillBar)
-        
+
+        // v1.6: "XP" tag left of the bar (pairs with the HP tag below it)
+        let tagLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        tagLabel.text = "XP"
+        tagLabel.fontSize = 7
+        tagLabel.fontColor = SKColor(hex: 0xFFAA33, alpha: 0.8)
+        tagLabel.verticalAlignmentMode = .center
+        tagLabel.horizontalAlignmentMode = .right
+        tagLabel.position = CGPoint(x: -width / 2 - 6, y: 0)
+        addChild(tagLabel)
+
         updateFill(0)
     }
     

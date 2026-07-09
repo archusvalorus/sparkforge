@@ -26,10 +26,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private(set) var gameState: GameState = .playing
     
     // MARK: - Core Systems
-    
+
     private let playerStats = PlayerStats()
     private let upgradeManager = UpgradeManager()
     private let adReviveManager = AdReviveManager()
+
+    // v1.6: Selected arena's visual identity (resolved at scene creation)
+    private let arenaConfig = ArenaConfig.current
     
     // MARK: - Boss Mechanics
     
@@ -114,8 +117,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var isInvulnerable: Bool { invulnerableTimer > 0 || playerStats.isPhaseSkinActive }
     
     // MARK: - Reroll
-    
+
     private var rerollUsedThisRun: Bool = false
+
+    // MARK: - v1.6: Extra Card (ad reward)
+
+    private var extraCardUsedThisRun: Bool = false
     
     // MARK: - Scene Lifecycle
     
@@ -181,72 +188,139 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Setup (gameplay objects go into worldNode)
     
     private func setupArena() {
-        let config = GameConfig.Arena.self
-        
+        // v1.6: colors + motif come from the selected arena's config
+        let radius = GameConfig.Arena.radius
+
         let floorPath = CGPath(ellipseIn: CGRect(
-            x: -config.radius, y: -config.radius,
-            width: config.radius * 2, height: config.radius * 2
+            x: -radius, y: -radius,
+            width: radius * 2, height: radius * 2
         ), transform: nil)
         arenaFloor.path = floorPath
-        arenaFloor.fillColor = SKColor(hex: config.floorColorHex)
+        arenaFloor.fillColor = SKColor(hex: arenaConfig.floorColorHex)
         arenaFloor.strokeColor = .clear
         arenaFloor.zPosition = -10
         worldNode.addChild(arenaFloor)
-        
-        // Inner ring details — concentric forge markings
-        let ringRadii: [CGFloat] = [config.radius * 0.3, config.radius * 0.6, config.radius * 0.85]
+
+        // Per-arena floor motif
+        switch arenaConfig.id {
+        case 1:
+            buildQuenchMotif(radius: radius)
+        default:
+            buildCrucibleMotif(radius: radius)
+        }
+
+        // Outer boundary ring — main edge
+        arenaBoundary.path = floorPath
+        arenaBoundary.fillColor = .clear
+        arenaBoundary.strokeColor = SKColor(hex: arenaConfig.boundaryColorHex, alpha: 0.6)
+        arenaBoundary.lineWidth = GameConfig.Arena.boundaryLineWidth
+        arenaBoundary.glowWidth = 6
+        arenaBoundary.zPosition = -9
+        worldNode.addChild(arenaBoundary)
+
+        // Outer danger glow — pulsing warning ring just outside boundary
+        let dangerRing = SKShapeNode(circleOfRadius: radius + 4)
+        dangerRing.fillColor = .clear
+        dangerRing.strokeColor = SKColor(hex: arenaConfig.dangerGlowHex, alpha: 0.3)
+        dangerRing.lineWidth = 8
+        dangerRing.glowWidth = 10
+        dangerRing.zPosition = -8
+        worldNode.addChild(dangerRing)
+
+        let dangerPulse = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.15, duration: 1.5),
+            SKAction.fadeAlpha(to: 0.4, duration: 1.5)
+        ])
+        dangerRing.run(SKAction.repeatForever(dangerPulse))
+    }
+
+    /// Arena 1 motif: concentric forge rings + cross-hair grid (original v1.0 look)
+    private func buildCrucibleMotif(radius: CGFloat) {
+        let ringRadii: [CGFloat] = [radius * 0.3, radius * 0.6, radius * 0.85]
         for (i, ringR) in ringRadii.enumerated() {
-            let ringPath = CGPath(ellipseIn: CGRect(
-                x: -ringR, y: -ringR,
-                width: ringR * 2, height: ringR * 2
-            ), transform: nil)
-            let ring = SKShapeNode()
-            ring.path = ringPath
+            let ring = SKShapeNode(circleOfRadius: ringR)
             ring.fillColor = .clear
-            ring.strokeColor = SKColor(hex: 0x252525, alpha: 0.4 - CGFloat(i) * 0.1)
+            ring.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.4 - CGFloat(i) * 0.1)
             ring.lineWidth = 1
             ring.zPosition = -9.5
             worldNode.addChild(ring)
         }
-        
-        // Cross-hair lines through center (subtle forge grid)
+
         for angle in stride(from: 0.0, to: CGFloat.pi, by: CGFloat.pi / 4) {
             let line = SKShapeNode()
             let linePath = CGMutablePath()
-            linePath.move(to: CGPoint(x: cos(angle) * config.radius * 0.9,
-                                       y: sin(angle) * config.radius * 0.9))
-            linePath.addLine(to: CGPoint(x: -cos(angle) * config.radius * 0.9,
-                                          y: -sin(angle) * config.radius * 0.9))
+            linePath.move(to: CGPoint(x: cos(angle) * radius * 0.9,
+                                       y: sin(angle) * radius * 0.9))
+            linePath.addLine(to: CGPoint(x: -cos(angle) * radius * 0.9,
+                                          y: -sin(angle) * radius * 0.9))
             line.path = linePath
             line.strokeColor = SKColor(hex: 0x222222, alpha: 0.2)
             line.lineWidth = 0.5
             line.zPosition = -9.5
             worldNode.addChild(line)
         }
-        
-        // Outer boundary ring — main edge
-        arenaBoundary.path = floorPath
-        arenaBoundary.fillColor = .clear
-        arenaBoundary.strokeColor = SKColor(hex: config.boundaryColorHex, alpha: 0.6)
-        arenaBoundary.lineWidth = config.boundaryLineWidth
-        arenaBoundary.glowWidth = 6
-        arenaBoundary.zPosition = -9
-        worldNode.addChild(arenaBoundary)
-        
-        // Outer danger glow — pulsing warning ring just outside boundary
-        let dangerRing = SKShapeNode(circleOfRadius: config.radius + 4)
-        dangerRing.fillColor = .clear
-        dangerRing.strokeColor = SKColor(hex: 0x441100, alpha: 0.3)
-        dangerRing.lineWidth = 8
-        dangerRing.glowWidth = 10
-        dangerRing.zPosition = -8
-        worldNode.addChild(dangerRing)
-        
-        let dangerPulse = SKAction.sequence([
-            SKAction.fadeAlpha(to: 0.15, duration: 1.5),
-            SKAction.fadeAlpha(to: 0.4, duration: 1.5)
-        ])
-        dangerRing.run(SKAction.repeatForever(dangerPulse))
+    }
+
+    /// v1.6 Arena 2 motif (Lyra canon): quench rings and stress fractures —
+    /// uneven offset rings, radial fracture lines, four diagonal cooling channels.
+    /// "This place has cooled too quickly, and something beneath it remembers the heat."
+    private func buildQuenchMotif(radius: CGFloat) {
+        // Three faint uneven concentric rings, slightly offset from center
+        let ringSpecs: [(r: CGFloat, offset: CGPoint)] = [
+            (radius * 0.32, CGPoint(x: 6, y: -4)),
+            (radius * 0.57, CGPoint(x: -8, y: 5)),
+            (radius * 0.84, CGPoint(x: 4, y: 7))
+        ]
+        for (i, spec) in ringSpecs.enumerated() {
+            let ring = SKShapeNode(circleOfRadius: spec.r)
+            ring.fillColor = .clear
+            ring.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.38 - CGFloat(i) * 0.08)
+            ring.lineWidth = 1
+            ring.position = spec.offset
+            ring.zPosition = -9.5
+            worldNode.addChild(ring)
+        }
+
+        // Radial stress fractures — jagged two-segment lines at irregular angles
+        let fractureAngles: [CGFloat] = [0.4, 1.1, 1.9, 2.7, 3.6, 4.5, 5.4]
+        for (i, angle) in fractureAngles.enumerated() {
+            let innerR = radius * 0.12
+            let breakR = radius * (0.45 + CGFloat(i % 3) * 0.12)
+            let outerR = radius * 0.92
+            let bentAngle = angle + 0.09
+
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: cos(angle) * innerR, y: sin(angle) * innerR))
+            path.addLine(to: CGPoint(x: cos(angle) * breakR, y: sin(angle) * breakR))
+            path.addLine(to: CGPoint(x: cos(bentAngle) * outerR, y: sin(bentAngle) * outerR))
+
+            let fracture = SKShapeNode()
+            fracture.path = path
+            fracture.strokeColor = SKColor(hex: arenaConfig.boundaryColorHex, alpha: 0.14)
+            fracture.lineWidth = 0.8
+            fracture.zPosition = -9.5
+            worldNode.addChild(fracture)
+        }
+
+        // Four shallow diagonal cooling channels crossing the floor
+        let channelAngles: [CGFloat] = [0.6, 0.6 + .pi / 2, 2.3, 2.3 + .pi / 2]
+        for (i, angle) in channelAngles.enumerated() {
+            let perpOffset: CGFloat = (i % 2 == 0 ? 1 : -1) * radius * 0.28
+            let dx = cos(angle), dy = sin(angle)
+            let px = -dy * perpOffset, py = dx * perpOffset
+            let span = radius * 0.75
+
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: px - dx * span, y: py - dy * span))
+            path.addLine(to: CGPoint(x: px + dx * span, y: py + dy * span))
+
+            let channel = SKShapeNode()
+            channel.path = path
+            channel.strokeColor = SKColor(hex: 0x0B0E12, alpha: 0.55)
+            channel.lineWidth = 3
+            channel.zPosition = -9.6
+            worldNode.addChild(channel)
+        }
     }
     
     private func setupPlayer() {
@@ -466,36 +540,71 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hint.position = CGPoint(x: 0, y: 38)  // v1.4: adjusted
         levelUpOverlay.addChild(hint)
         
-        // Reroll button
+        // v1.6: Reroll + Extra Card sit side by side below the cards.
+        // Both are once per run; both free with Remove Ads.
+        let adText = IAPManager.shared.hasRemovedAds ? "FREE" : "▶ AD"
+
+        // Reroll button (left)
         let rerollBtn = SKNode()
         rerollBtn.name = "rerollButton"
-        rerollBtn.position = CGPoint(x: 0, y: -130)  // v1.4: below lowered cards
-        
-        let rerollBg = SKShapeNode(rectOf: CGSize(width: 170, height: 28), cornerRadius: 5)
+        rerollBtn.position = CGPoint(x: -80, y: -130)
+
+        let rerollBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
         rerollBg.fillColor = SKColor(hex: 0x332233)
         rerollBg.strokeColor = SKColor(hex: 0x9966AA, alpha: 0.5)
         rerollBg.lineWidth = 1
         rerollBtn.addChild(rerollBg)
-        
+
         let rerollText = SKLabelNode(fontNamed: "Menlo")
         rerollText.fontSize = 10
         rerollText.fontColor = SKColor(hex: 0xBB88CC)
-        rerollText.text = "⟳ REFORGE CARDS"
+        rerollText.text = "⟳ REFORGE"
         rerollText.verticalAlignmentMode = .center
+        rerollText.position = CGPoint(x: -14, y: 0)
         rerollText.name = "rerollLabel"
         rerollBtn.addChild(rerollText)
-        
-        // Small ad indicator (hidden if ads removed)
+
         let adIcon = SKLabelNode(fontNamed: "Menlo")
         adIcon.fontSize = 8
         adIcon.fontColor = SKColor(hex: 0x777777)
-        adIcon.text = IAPManager.shared.hasRemovedAds ? "FREE" : "▶ AD"
+        adIcon.text = adText
         adIcon.verticalAlignmentMode = .center
-        adIcon.position = CGPoint(x: 72, y: 0)
+        adIcon.position = CGPoint(x: 50, y: 0)
         adIcon.name = "rerollAdIcon"
         rerollBtn.addChild(adIcon)
-        
+
         levelUpOverlay.addChild(rerollBtn)
+
+        // Extra Card button (right)
+        let extraBtn = SKNode()
+        extraBtn.name = "extraCardButton"
+        extraBtn.position = CGPoint(x: 80, y: -130)
+
+        let extraBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
+        extraBg.fillColor = SKColor(hex: 0x223333)
+        extraBg.strokeColor = SKColor(hex: 0x66AAAA, alpha: 0.5)
+        extraBg.lineWidth = 1
+        extraBtn.addChild(extraBg)
+
+        let extraText = SKLabelNode(fontNamed: "Menlo")
+        extraText.fontSize = 10
+        extraText.fontColor = SKColor(hex: 0x88CCCC)
+        extraText.text = "✦ +1 CARD"
+        extraText.verticalAlignmentMode = .center
+        extraText.position = CGPoint(x: -14, y: 0)
+        extraText.name = "extraCardLabel"
+        extraBtn.addChild(extraText)
+
+        let extraAdIcon = SKLabelNode(fontNamed: "Menlo")
+        extraAdIcon.fontSize = 8
+        extraAdIcon.fontColor = SKColor(hex: 0x777777)
+        extraAdIcon.text = adText
+        extraAdIcon.verticalAlignmentMode = .center
+        extraAdIcon.position = CGPoint(x: 50, y: 0)
+        extraAdIcon.name = "extraCardAdIcon"
+        extraBtn.addChild(extraAdIcon)
+
+        levelUpOverlay.addChild(extraBtn)
         
         guard let camera = camera else { return }
         camera.addChild(levelUpOverlay)
@@ -569,7 +678,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: dotSize))
         }
         let dotTexture = SKTexture(image: dotImage)
-        
+
+        // v1.6: per-arena ambience — Crucible rises, The Quench falls
+        if arenaConfig.id == 1 {
+            setupQuenchAsh(texture: dotTexture)
+            if let view = view {
+                let vignette = VignetteNode(size: view.bounds.size)
+                camera?.addChild(vignette)
+            }
+            return
+        }
+
         // Primary embers — small, frequent, drifting up
         let emitter = SKEmitterNode()
         emitter.particleBirthRate = 12
@@ -643,7 +762,80 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             camera?.addChild(vignette)
         }
     }
-    
+
+    /// v1.6 Arena 2 ambience (Lyra canon): soft ash falling like verdicts —
+    /// slow downward drift with lateral sway; rare pale-amber sparks stay
+    /// reserved for player progression moments.
+    private func setupQuenchAsh(texture: SKTexture) {
+        // Main ash fall — slow, dim, drifting down
+        let ash = SKEmitterNode()
+        ash.particleBirthRate = 10
+        ash.particleLifetime = 6
+        ash.particleLifetimeRange = 2.5
+        ash.particlePositionRange = CGVector(dx: GameConfig.Arena.radius * 2.2, dy: GameConfig.Arena.radius * 2.2)
+        ash.particleSpeed = 16
+        ash.particleSpeedRange = 8
+        ash.emissionAngle = -.pi / 2
+        ash.emissionAngleRange = 0.25
+        ash.xAcceleration = 3          // gentle lateral sway
+        ash.particleAlpha = 0.3
+        ash.particleAlphaRange = 0.15
+        ash.particleAlphaSpeed = -0.04
+        ash.particleScale = 0.05
+        ash.particleScaleRange = 0.03
+        ash.particleColor = SKColor(hex: 0xD8D0C4)
+        ash.particleColorBlendFactor = 1.0
+        ash.particleBlendMode = .alpha
+        ash.zPosition = -5
+        ash.particleTexture = texture
+        worldNode.addChild(ash)
+
+        // Sparse heavier flakes swaying the other way
+        let flakes = SKEmitterNode()
+        flakes.particleBirthRate = 3
+        flakes.particleLifetime = 5
+        flakes.particleLifetimeRange = 2
+        flakes.particlePositionRange = CGVector(dx: GameConfig.Arena.radius * 1.8, dy: GameConfig.Arena.radius * 1.8)
+        flakes.particleSpeed = 22
+        flakes.particleSpeedRange = 10
+        flakes.emissionAngle = -.pi / 2
+        flakes.emissionAngleRange = 0.35
+        flakes.xAcceleration = -4
+        flakes.particleAlpha = 0.45
+        flakes.particleAlphaRange = 0.15
+        flakes.particleAlphaSpeed = -0.08
+        flakes.particleScale = 0.09
+        flakes.particleScaleRange = 0.04
+        flakes.particleColor = SKColor(hex: 0xB8B0A4)
+        flakes.particleColorBlendFactor = 1.0
+        flakes.particleBlendMode = .alpha
+        flakes.zPosition = -4
+        flakes.particleTexture = texture
+        worldNode.addChild(flakes)
+
+        // Near-floor haze — very dim, almost still
+        let haze = SKEmitterNode()
+        haze.particleBirthRate = 4
+        haze.particleLifetime = 8
+        haze.particleLifetimeRange = 3
+        haze.particlePositionRange = CGVector(dx: GameConfig.Arena.radius * 2.4, dy: GameConfig.Arena.radius * 2.4)
+        haze.particleSpeed = 4
+        haze.particleSpeedRange = 3
+        haze.emissionAngle = -.pi / 2
+        haze.emissionAngleRange = 0.8
+        haze.particleAlpha = 0.1
+        haze.particleAlphaRange = 0.05
+        haze.particleAlphaSpeed = -0.012
+        haze.particleScale = 0.04
+        haze.particleScaleRange = 0.02
+        haze.particleColor = SKColor(hex: 0x6A6256)
+        haze.particleColorBlendFactor = 1.0
+        haze.particleBlendMode = .alpha
+        haze.zPosition = -6
+        haze.particleTexture = texture
+        worldNode.addChild(haze)
+    }
+
     // MARK: - Tutorial Hint
     
     private func showTutorialHintIfNeeded() {
@@ -878,23 +1070,36 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Check reroll button first
         if let rerollBtn = levelUpOverlay.childNode(withName: "rerollButton"),
            rerollBtn.alpha > 0 {
-            let btnFrame = CGRect(x: rerollBtn.position.x - 85, y: rerollBtn.position.y - 14,
-                                  width: 170, height: 28)
+            let btnFrame = CGRect(x: rerollBtn.position.x - 75, y: rerollBtn.position.y - 14,
+                                  width: 150, height: 28)
             if btnFrame.contains(location) {
                 performReroll()
                 return
             }
         }
-        
-        // Check card taps
+
+        // v1.6: Extra card button
+        if let extraBtn = levelUpOverlay.childNode(withName: "extraCardButton"),
+           extraBtn.alpha > 0 {
+            let btnFrame = CGRect(x: extraBtn.position.x - 75, y: extraBtn.position.y - 14,
+                                  width: 150, height: 28)
+            if btnFrame.contains(location) {
+                performExtraCard()
+                return
+            }
+        }
+
+        // Check card taps (frames scale down when 4 cards are shown)
         for cardNode in displayedCards {
+            let w = UpgradeCardNode.cardWidth * cardNode.xScale
+            let h = UpgradeCardNode.cardHeight * cardNode.yScale
             let cardFrame = CGRect(
-                x: cardNode.position.x - UpgradeCardNode.cardWidth / 2,
-                y: cardNode.position.y - UpgradeCardNode.cardHeight / 2,
-                width: UpgradeCardNode.cardWidth,
-                height: UpgradeCardNode.cardHeight
+                x: cardNode.position.x - w / 2,
+                y: cardNode.position.y - h / 2,
+                width: w,
+                height: h
             )
-            
+
             if cardFrame.contains(location) {
                 selectCard(cardNode)
                 return
@@ -966,6 +1171,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    // MARK: - v1.6: Extra Card
+
+    private func performExtraCard() {
+        guard !extraCardUsedThisRun else { return }
+        guard displayedCards.count < 4 else { return }
+
+        if IAPManager.shared.hasRemovedAds {
+            executeExtraCard()
+            return
+        }
+
+        let vc = view?.window?.rootViewController
+        adReviveManager.requestExtraCardAd(from: vc) { [weak self] success in
+            guard success else { return }
+            self?.executeExtraCard()
+        }
+    }
+
+    private func executeExtraCard() {
+        extraCardUsedThisRun = true
+
+        guard let bonus = upgradeManager.drawBonusCard(excluding: displayedCards.map { $0.card }) else { return }
+
+        // Rebuild the spread with the bonus card — four cards render smaller
+        let cards = displayedCards.map { $0.card } + [bonus]
+        showCardSelection(cards)
+
+        if let extraBtn = levelUpOverlay.childNode(withName: "extraCardButton") {
+            extraBtn.run(SKAction.fadeOut(withDuration: 0.15))
+        }
+    }
+
     private func finishLevelUp(synergies: [String]) {
         if let firstSynergy = synergies.first {
             showSynergyNotification(firstSynergy)
@@ -1051,7 +1288,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if spawnEvent.shouldSpawnEnemy { spawnEnemy() }
         if spawnEvent.shouldSpawnMiniBoss {
             // v1.4: Spawn real boss if gate is met, otherwise mini-boss
-            if ProgressionManager.shared.arena1BossUnlocked && boss == nil {
+            // v1.6: the Slag Titan belongs to The Crucible only — Arena 2
+            // gets a mini-boss until the Quench Warden arrives (Unit 6)
+            if arenaConfig.id == 0 && ProgressionManager.shared.arena1BossUnlocked && boss == nil {
                 spawnBoss()
             } else {
                 spawnMiniBoss()
@@ -1615,15 +1854,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Spawning
     
     private func spawnEnemy() {
+        // v1.6: The Quench runs its own spawn table
+        if arenaConfig.id == 1 {
+            spawnQuenchEnemy()
+            return
+        }
+
         let elapsed = waveManager.elapsedTime
-        
+
         // After 45s, chance to spawn a ranged enemy instead
         if elapsed >= GameConfig.RangedEnemy.firstSpawnTime &&
            CGFloat.random(in: 0...1) < GameConfig.RangedEnemy.spawnChance {
             spawnRangedEnemy()
             return
         }
-        
+
+        spawnBasicMelee(elapsed: elapsed)
+    }
+
+    private func spawnBasicMelee(elapsed: TimeInterval) {
         // HP scales with time — enemies get beefier (v1.4: softened curve)
         let baseHP: Int
         if elapsed < 30 {
@@ -1637,21 +1886,79 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         } else {
             baseHP = Int.random(in: 3...5)
         }
-        
+
         let speedScale: CGFloat = 1.0 + CGFloat(elapsed / 180) * 0.15  // v1.4: slower speed ramp
         let enemySpeed = GameConfig.Enemy.baseSpeed * speedScale
         let xpValue = max(1, baseHP + 1)  // v1.4: +1 XP per kill across the board
-        
+
         let enemy = EnemyNode(health: baseHP, moveSpeed: enemySpeed, xpValue: xpValue)
         enemy.position = EnemyNode.spawnPosition()
-        
+
         if baseHP >= 3 {
             let sizeScale = 1.0 + CGFloat(baseHP - 2) * 0.08
             enemy.setScale(sizeScale)
         }
-        
+
         enemies.append(enemy)
         worldNode.addChild(enemy)
+    }
+
+    // MARK: - v1.6: Quench Spawning (Unit 5)
+
+    /// Arena 2 spawn table. Ashlings are the bread and butter; Cinder Halos
+    /// arrive at 25s, ranged at 45s, Braceguards at 50s.
+    private func spawnQuenchEnemy() {
+        let elapsed = waveManager.elapsedTime
+        let roll = CGFloat.random(in: 0...1)
+
+        if elapsed >= 50 && roll < 0.10 {
+            spawnBraceguard(elapsed: elapsed)
+        } else if elapsed >= 25 && roll < 0.30 {
+            spawnCinderHalo(elapsed: elapsed)
+        } else if elapsed >= 45 && roll < 0.42 {
+            spawnRangedEnemy()
+        } else if roll < 0.78 {
+            spawnAshling(elapsed: elapsed)
+        } else {
+            spawnBasicMelee(elapsed: elapsed)
+        }
+    }
+
+    private func spawnAshling(elapsed: TimeInterval) {
+        let ashling = AshlingNode(elapsed: elapsed, isShard: false)
+        ashling.position = EnemyNode.spawnPosition()
+        ashling.setMoteTarget(worldNode)
+        enemies.append(ashling)
+        worldNode.addChild(ashling)
+    }
+
+    /// Two shards erupt where an Ashling died.
+    private func spawnAshlingShards(at position: CGPoint) {
+        for i in 0..<2 {
+            let shard = AshlingNode(elapsed: waveManager.elapsedTime, isShard: true)
+            let angle = CGFloat.random(in: 0...(2 * .pi))
+            let side: CGFloat = i == 0 ? 1 : -1
+            shard.position = position + CGPoint(x: cos(angle) * 14 * side,
+                                                y: sin(angle) * 14 * side)
+            enemies.append(shard)
+            worldNode.addChild(shard)
+        }
+    }
+
+    private func spawnCinderHalo(elapsed: TimeInterval) {
+        let halo = CinderHaloNode(elapsed: elapsed)
+        halo.position = EnemyNode.spawnPosition()
+        enemies.append(halo)
+        worldNode.addChild(halo)
+    }
+
+    private func spawnBraceguard(elapsed: TimeInterval) {
+        let braceguard = BraceguardNode(elapsed: elapsed)
+        braceguard.position = EnemyNode.spawnPosition()
+        // Face inward on arrival so the shield reads immediately
+        braceguard.zRotation = atan2(-braceguard.position.y, -braceguard.position.x)
+        enemies.append(braceguard)
+        worldNode.addChild(braceguard)
     }
     
     private func spawnRangedEnemy() {
@@ -1879,6 +2186,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         _ = playerStats.recordKill(atTime: waveManager.elapsedTime)
         playerStats.recordBloodlustKill(atTime: waveManager.elapsedTime)
+
+        // v1.6: Ashlings split into two shards on death
+        if let ashling = enemy as? AshlingNode, !ashling.isShard {
+            spawnAshlingShards(at: position)
+        }
 
         // v1.6: Siphon — kills restore HP
         if playerStats.killHealAmount > 0 {
@@ -2210,7 +2522,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let enemyNode = enemyBody.node as? EnemyNode else { return }
-        
+
+        // v1.6: Braceguard — the front shield stops projectiles cold
+        if let braceguard = enemyNode as? BraceguardNode,
+           braceguard.blocksHit(from: player.position) {
+            braceguard.flashShield()
+            if projectileNode.onHitEnemy() {
+                if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
+                    projectiles.remove(at: index)
+                }
+                projectileNode.removeFromParent()
+            }
+            return
+        }
+
         var damage = max(1, Int(projectileNode.damageMultiplier))
         
         if projectileNode.isCrit {
@@ -2407,9 +2732,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         showCardSelection(upgradeManager.drawCards(count: 3))
         
-        // Show/hide reroll button
+        // Show/hide reroll + extra card buttons
         if let rerollBtn = levelUpOverlay.childNode(withName: "rerollButton") {
             rerollBtn.alpha = rerollUsedThisRun ? 0.0 : 1.0
+        }
+        if let extraBtn = levelUpOverlay.childNode(withName: "extraCardButton") {
+            extraBtn.alpha = extraCardUsedThisRun ? 0.0 : 1.0
         }
         
         levelUpOverlay.alpha = 0
@@ -2427,20 +2755,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func showCardSelection(_ cards: [UpgradeManager.UpgradeCard]) {
         for card in displayedCards { card.removeFromParent() }
         displayedCards.removeAll()
-        
-        let spacing: CGFloat = 115  // v1.4: wider for 100pt cards
+
+        // v1.6: four cards (Extra Card reward) render tighter and smaller
+        let spacing: CGFloat = cards.count >= 4 ? 88 : 115
+        let cardScale: CGFloat = cards.count >= 4 ? 0.82 : 1.0
         let startX = -spacing * CGFloat(cards.count - 1) / 2
         let cardY: CGFloat = -40  // v1.4: lower on screen, closer to joystick area
-        
+
         for (i, card) in cards.enumerated() {
             let cardNode = UpgradeCardNode(card: card)
             cardNode.position = CGPoint(x: startX + spacing * CGFloat(i), y: cardY)
             cardNode.setScale(0.0)
             levelUpOverlay.addChild(cardNode)
             displayedCards.append(cardNode)
-            
+
             let delay = SKAction.wait(forDuration: 0.05 * Double(i))
-            let popIn = SKAction.scale(to: 1.0, duration: 0.2)
+            let popIn = SKAction.scale(to: cardScale, duration: 0.2)
             popIn.timingMode = .easeOut
             cardNode.run(SKAction.sequence([delay, popIn]))
         }
@@ -2671,6 +3001,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false
+        extraCardUsedThisRun = false
         bossDefeatedThisRun = false
         pendingForgeXP = 0
         

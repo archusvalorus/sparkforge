@@ -155,11 +155,13 @@ final class ProgressionManager {
     /// Arena 1 unlock requirements for the boss encounter
     /// v1.6: bossKillsRequired dropped to 0 — the old value of 3 was a deadlock
     /// (boss kills could only come from the boss this gate was locking).
-    /// The boss-kill gate concept returns for Arena 2+, fed by Slag Titan kills.
+    /// Kills tuned 500 → 100 (500 was a placeholder from before Arena 2
+    /// existed; the Titan is now a door, not an endpoint). Survival
+    /// requirement dropped — reaching the 90s boss spawn is its own test.
     static let arena1Gate = ArenaGate(
-        totalKillsRequired: 500,
+        totalKillsRequired: 100,
         bossKillsRequired: 0,
-        survivalRequired: true,
+        survivalRequired: false,
         arenaName: "The Crucible",
         bossName: "The Slag Titan"
     )
@@ -169,7 +171,7 @@ final class ProgressionManager {
         let gate = ProgressionManager.arena1Gate
         return totalKills >= gate.totalKillsRequired
             && bossKills >= gate.bossKillsRequired
-            && hasSurvived2Minutes
+            && (!gate.survivalRequired || hasSurvived2Minutes)
     }
     
     /// Progress toward Arena 1 gate as individual fractions
@@ -191,7 +193,7 @@ final class ProgressionManager {
         let bp = gate.bossKillsRequired == 0
             ? 1.0
             : min(1.0, CGFloat(bossKills) / CGFloat(gate.bossKillsRequired))
-        let sm = hasSurvived2Minutes
+        let sm = gate.survivalRequired ? hasSurvived2Minutes : true
         return GateProgress(
             killProgress: kp,
             bossKillProgress: bp,
@@ -217,7 +219,14 @@ final class ProgressionManager {
         switch type {
         case .melee:  meleeKills += 1
         case .ranged: rangedKills += 1
-        case .boss:   bossKills += 1
+        case .boss:
+            bossKills += 1
+            // v1.6: Arena 2 gate — Slag Titan kill + 100 total kills
+            // (the kills condition is met by the time anyone faces him,
+            // but it's encoded so the gate survives future retuning)
+            if arenasUnlocked < 2 && totalKills >= ProgressionManager.arena1Gate.totalKillsRequired {
+                arenasUnlocked = 2
+            }
         }
     }
     

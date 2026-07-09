@@ -13,9 +13,21 @@ final class AdReviveManager: NSObject {
     
     // MARK: - Ad Unit IDs
     
-    static let reviveAdUnitID = "ca-app-pub-3734133983597932/3682515394"
-    static let rerollAdUnitID = "ca-app-pub-3734133983597932/9266014563"
-    static let xpBoostAdUnitID = "ca-app-pub-3734133983597932/4094068573"  // v1.6: corrected — must match AdMob console + App Portfolio Registry
+    // v1.6: DEBUG builds use Google's official rewarded TEST unit so
+    // playtests never touch live units — keeps revenue data clean AND
+    // protects the AdMob account (watching/clicking your own live ads
+    // reads as invalid traffic). Release builds use the real units.
+    #if DEBUG
+    static let reviveAdUnitID    = "ca-app-pub-3940256099942544/1712485313"
+    static let rerollAdUnitID    = "ca-app-pub-3940256099942544/1712485313"
+    static let xpBoostAdUnitID   = "ca-app-pub-3940256099942544/1712485313"
+    static let extraCardAdUnitID = "ca-app-pub-3940256099942544/1712485313"
+    #else
+    static let reviveAdUnitID    = "ca-app-pub-3734133983597932/3682515394"
+    static let rerollAdUnitID    = "ca-app-pub-3734133983597932/9266014563"
+    static let xpBoostAdUnitID   = "ca-app-pub-3734133983597932/4094068573"  // v1.6: corrected — matches AdMob console + registry
+    static let extraCardAdUnitID = "ca-app-pub-3734133983597932/8893772917"  // v1.6: level-up +1 card choice
+    #endif
     
     // MARK: - State
     
@@ -24,14 +36,17 @@ final class AdReviveManager: NSObject {
     private var reviveAd: RewardedAd?
     private var rerollAd: RewardedAd?
     private var xpBoostAd: RewardedAd?  // v1.5
+    private var extraCardAd: RewardedAd?  // v1.6
     private var reviveCompletion: ((Bool) -> Void)?
     private var rerollCompletion: ((Bool) -> Void)?
     private var xpBoostCompletion: ((Bool) -> Void)?  // v1.5
-    
+    private var extraCardCompletion: ((Bool) -> Void)?  // v1.6
+
     private enum ActiveAd {
         case revive
         case reroll
-        case xpBoost  // v1.5
+        case xpBoost   // v1.5
+        case extraCard // v1.6
     }
     private var activeAd: ActiveAd?
     
@@ -54,6 +69,7 @@ final class AdReviveManager: NSObject {
         preloadReviveAd()
         preloadRerollAd()
         preloadXPBoostAd()
+        preloadExtraCardAd()
     }
     
     private func preloadReviveAd() {
@@ -101,6 +117,21 @@ final class AdReviveManager: NSObject {
         }
     }
     
+    private func preloadExtraCardAd() {
+        RewardedAd.load(
+            with: AdReviveManager.extraCardAdUnitID,
+            request: Request()
+        ) { [weak self] ad, error in
+            if let error = error {
+                print("[AdRevive] Failed to load extra card ad: \(error.localizedDescription)")
+                return
+            }
+            self?.extraCardAd = ad
+            self?.extraCardAd?.fullScreenContentDelegate = self
+            print("[AdRevive] Extra card ad loaded")
+        }
+    }
+
     // MARK: - Revive Flow
     
     func requestRevive(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
@@ -158,6 +189,31 @@ final class AdReviveManager: NSObject {
         }
     }
     
+    // MARK: - v1.6: Extra Card Flow
+
+    func requestExtraCardAd(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        if adsRemoved {
+            completion(true)
+            return
+        }
+
+        guard let ad = extraCardAd, let vc = viewController else {
+            print("[AdRevive] Extra card ad not ready")
+            completion(false)
+            return
+        }
+
+        extraCardCompletion = completion
+        activeAd = .extraCard
+
+        ad.present(from: vc) { [weak self] in
+            self?.extraCardCompletion?(true)
+            self?.extraCardCompletion = nil
+            self?.activeAd = nil
+            self?.preloadExtraCardAd()
+        }
+    }
+
     // MARK: - v1.5: XP Boost Flow
     
     func requestXPBoost(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
@@ -221,13 +277,17 @@ extension AdReviveManager: FullScreenContentDelegate {
                 self.xpBoostCompletion?(false)
                 self.xpBoostCompletion = nil
                 self.preloadXPBoostAd()
+            case .extraCard:
+                self.extraCardCompletion?(false)
+                self.extraCardCompletion = nil
+                self.preloadExtraCardAd()
             case .none:
                 break
             }
             self.activeAd = nil
         }
     }
-    
+
     nonisolated func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         Task { @MainActor in
             switch self.activeAd {
@@ -249,6 +309,12 @@ extension AdReviveManager: FullScreenContentDelegate {
                     self.xpBoostCompletion = nil
                 }
                 self.preloadXPBoostAd()
+            case .extraCard:
+                if let completion = self.extraCardCompletion {
+                    completion(false)
+                    self.extraCardCompletion = nil
+                }
+                self.preloadExtraCardAd()
             case .none:
                 break
             }

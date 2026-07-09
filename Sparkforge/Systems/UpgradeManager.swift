@@ -61,23 +61,55 @@ final class UpgradeManager {
     
     // MARK: - Draw
     
-    /// Draw N random cards the player hasn't picked yet
+    /// Draw N random cards the player hasn't picked yet.
+    /// v1.6: draws are tag-diverse — each card comes from a different tree.
+    /// Duplicate trees appear only when the remaining pool can't offer
+    /// enough distinct ones (deep tag-devoted runs), never by bad luck.
     func drawCards(count: Int = 3) -> [UpgradeCard] {
         let available = allCards.filter { card in
             !pickedCardIDs.contains(card.id)
         }
-        
+
         guard !available.isEmpty else { return [] }
-        
+
+        let pool = available.shuffled()
         var drawn: [UpgradeCard] = []
-        var pool = available.shuffled()
-        
-        let drawCount = min(count, pool.count)
-        for _ in 0..<drawCount {
-            drawn.append(pool.removeFirst())
+        var usedTags: Set<Tag> = []
+
+        // First pass: unique tags only (shuffled pool = tags weighted by
+        // how many of their cards remain)
+        for card in pool where drawn.count < count {
+            if !usedTags.contains(card.tag) {
+                usedTags.insert(card.tag)
+                drawn.append(card)
+            }
         }
-        
+
+        // Second pass: not enough distinct trees left — fill the gaps
+        if drawn.count < count {
+            for card in pool where drawn.count < count {
+                if !drawn.contains(where: { $0.id == card.id }) {
+                    drawn.append(card)
+                }
+            }
+        }
+
         return drawn
+    }
+
+    /// v1.6: Draw one bonus card (Extra Card ad reward). Avoids the cards
+    /// already on the table and prefers a tree that isn't represented yet.
+    func drawBonusCard(excluding displayed: [UpgradeCard]) -> UpgradeCard? {
+        let displayedIDs = displayed.map { $0.id }
+        let displayedTags = Set(displayed.map { $0.tag })
+        let available = allCards.filter {
+            !pickedCardIDs.contains($0.id) && !displayedIDs.contains($0.id)
+        }
+
+        if let freshTree = available.filter({ !displayedTags.contains($0.tag) }).randomElement() {
+            return freshTree
+        }
+        return available.randomElement()
     }
     
     /// Player picks a card — apply its effects and track it
