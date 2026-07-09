@@ -1,7 +1,9 @@
 // UpgradeManager.swift
 // Sparkforge
 //
-// Manages the 38 upgrade cards (24 tagged + 6 neutral + 8 v1.3 Lyra cards).
+// Manages the 50-card pool (24 tagged + 6 neutral + 8 v1.3 Lyra cards
+// + 12 v1.6 Quench cards). Every tag has exactly 7 cards, so every
+// tier-7 synergy is reachable through full tag devotion.
 // Handles card definitions, random draw, and applying effects to PlayerStats.
 //
 // v1.4: Card rebalancing for HP system:
@@ -600,7 +602,100 @@ final class UpgradeManager {
         ) { stats in
             stats.unstableCoreActive = true
         })
-        
+
+        // ═══════════════════════════════════
+        // ⚒️ v1.6 — LYRA'S QUENCH CARDS
+        // Brings every tag to 7 cards; tier-7 synergies become reachable.
+        // ═══════════════════════════════════
+
+        cards.append(UpgradeCard(
+            id: "v16_arc_wake", name: "Arc Wake", tag: .shock,
+            description: "Movement leaves brief damaging sparks"
+        ) { stats in
+            stats.arcWakeDamage = 1
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_static_crown", name: "Static Crown", tag: .shock,
+            description: "Level-ups release a shock burst"
+        ) { stats in
+            stats.staticCrownDamage = 2
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_live_wire", name: "Live Wire", tag: .shock,
+            description: "Attacks chain to 1 more nearby foe"
+        ) { stats in
+            // Stacks with Arc and the Charged synergy
+            stats.chainTargets += 1
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_blood_price", name: "Blood Price", tag: .bleed,
+            description: "+30% damage while below half HP"
+        ) { stats in
+            stats.bloodPriceBonus = 0.30
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_open_vein", name: "Open Vein", tag: .bleed,
+            description: "Bleeding enemies burst on death"
+        ) { stats in
+            stats.openVeinDamage = 2
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_iron_bloom", name: "Iron Bloom", tag: .guardT,
+            description: "Attackers take damage scaling with DEF"
+        ) { stats in
+            stats.ironBloomActive = true
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_aegis_pulse", name: "Aegis Pulse", tag: .guardT,
+            description: "Pulse every 4s, damage scales with DEF"
+        ) { stats in
+            stats.aegisPulseActive = true
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_null_bloom", name: "Null Bloom", tag: .voidT,
+            description: "Kills may leave brief slowing zones"
+        ) { stats in
+            stats.nullBloomChance = 0.30
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_mass_tax", name: "Mass Tax", tag: .voidT,
+            description: "-20% max HP, +30% damage"
+        ) { stats in
+            let hpLoss = Int(Double(stats.maxHP) * 0.20)
+            stats.maxHP -= hpLoss
+            stats.currentHP = min(stats.currentHP, stats.maxHP)
+            stats.damageMultiplier += 0.30
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_hoarfrost", name: "Hoarfrost", tag: .chill,
+            description: "Regenerate 1 HP every 12s"
+        ) { stats in
+            stats.hoarfrostInterval = 12.0
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_whiteout", name: "Whiteout", tag: .chill,
+            description: "Slowed enemies chill others on death"
+        ) { stats in
+            stats.whiteoutActive = true
+        })
+
+        cards.append(UpgradeCard(
+            id: "v16_cauterize", name: "Cauterize", tag: .fire,
+            description: "Slowly regenerate while at low HP"
+        ) { stats in
+            stats.cauterizeActive = true
+        })
+
         return cards
     }
 }

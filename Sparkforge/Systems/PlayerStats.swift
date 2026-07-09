@@ -205,6 +205,57 @@ final class PlayerStats {
     var singularityRadius: CGFloat = 90.0
     var singularityDuration: TimeInterval = 3.0
     var singularityDPS: CGFloat = 1.0
+
+    // MARK: - v1.6: Quench Cards (Lyra)
+
+    /// Arc Wake: damage per spark node dropped while moving (0 = off)
+    var arcWakeDamage: Int = 0
+    var arcWakeDropInterval: TimeInterval = 0.25
+    var arcWakeLifetime: TimeInterval = 1.0
+
+    /// Static Crown: shock burst on level-up (0 = off)
+    var staticCrownDamage: Int = 0
+    var staticCrownRadius: CGFloat = 90.0
+
+    /// Blood Price: bonus damage while HP ≤ 50%
+    var bloodPriceBonus: CGFloat = 0.0
+
+    /// Open Vein: bleeding enemies burst on death (0 = off)
+    var openVeinDamage: Int = 0
+    var openVeinRadius: CGFloat = 40.0
+
+    /// Iron Bloom: contact attackers take DEF-scaled thorns damage
+    var ironBloomActive: Bool = false
+    var ironBloomDamage: Int { max(1, defense / 3) }
+
+    /// Aegis Pulse: periodic pulse around player, damage scales with DEF
+    var aegisPulseActive: Bool = false
+    var aegisPulseInterval: TimeInterval = 4.0
+    var aegisPulseRadius: CGFloat = 70.0
+    var aegisPulseDamage: Int { max(1, defense / 5) }
+    private var aegisPulseTimer: TimeInterval = 0.0
+
+    /// Null Bloom: chance on kill to leave a slowing zone
+    var nullBloomChance: CGFloat = 0.0
+    var nullBloomRadius: CGFloat = 35.0
+    var nullBloomSlow: CGFloat = 0.4
+    var nullBloomDuration: TimeInterval = 1.5
+
+    /// Hoarfrost: flat regen — 1 HP per interval (0 = off)
+    var hoarfrostInterval: TimeInterval = 0.0
+    private var hoarfrostTimer: TimeInterval = 0.0
+
+    /// Cauterize: regen 1 HP per interval while below HP threshold
+    var cauterizeActive: Bool = false
+    var cauterizeThreshold: CGFloat = 0.3
+    var cauterizeInterval: TimeInterval = 3.0
+    private var cauterizeTimer: TimeInterval = 0.0
+
+    /// Whiteout: slowed enemies release a slow burst on death
+    var whiteoutActive: Bool = false
+    var whiteoutRadius: CGFloat = 50.0
+    var whiteoutSlow: CGFloat = 0.3
+    var whiteoutDuration: TimeInterval = 2.0
     
     // MARK: - v1.3 Card Properties
     
@@ -363,7 +414,51 @@ final class PlayerStats {
     
     /// Total damage multiplier including overcharge
     var effectiveDamageMultiplier: CGFloat {
-        return damageMultiplier + overchargeCurrentBonus + bloodlustBonus
+        var total = damageMultiplier + overchargeCurrentBonus + bloodlustBonus
+        // v1.6: Blood Price — bonus while at or below half HP
+        if bloodPriceBonus > 0 && currentHP * 2 <= maxHP {
+            total += bloodPriceBonus
+        }
+        return total
+    }
+
+    // MARK: - v1.6: Aegis Pulse
+
+    /// Tick the pulse timer. Returns true when a pulse should fire.
+    func updateAegisPulse(_ dt: TimeInterval) -> Bool {
+        guard aegisPulseActive else { return false }
+        aegisPulseTimer += dt
+        if aegisPulseTimer >= aegisPulseInterval {
+            aegisPulseTimer = 0
+            return true
+        }
+        return false
+    }
+
+    // MARK: - v1.6: Regen (Hoarfrost + Cauterize)
+
+    /// Tick regen timers. Returns HP to restore this frame (usually 0).
+    func updateRegen(_ dt: TimeInterval) -> Int {
+        var heal = 0
+        if hoarfrostInterval > 0 {
+            hoarfrostTimer += dt
+            if hoarfrostTimer >= hoarfrostInterval {
+                hoarfrostTimer = 0
+                heal += 1
+            }
+        }
+        if cauterizeActive {
+            if hpPercent < cauterizeThreshold {
+                cauterizeTimer += dt
+                if cauterizeTimer >= cauterizeInterval {
+                    cauterizeTimer = 0
+                    heal += 1
+                }
+            } else {
+                cauterizeTimer = 0
+            }
+        }
+        return heal
     }
     
     // MARK: - Phase Skin
@@ -492,6 +587,36 @@ final class PlayerStats {
         singularityRadius = 90.0
         singularityDuration = 3.0
         singularityDPS = 1.0
+
+        // v1.6 Quench cards
+        arcWakeDamage = 0
+        arcWakeDropInterval = 0.25
+        arcWakeLifetime = 1.0
+        staticCrownDamage = 0
+        staticCrownRadius = 90.0
+        bloodPriceBonus = 0.0
+        openVeinDamage = 0
+        openVeinRadius = 40.0
+        ironBloomActive = false
+        aegisPulseActive = false
+        aegisPulseInterval = 4.0
+        aegisPulseRadius = 70.0
+        aegisPulseTimer = 0.0
+        nullBloomChance = 0.0
+        nullBloomRadius = 35.0
+        nullBloomSlow = 0.4
+        nullBloomDuration = 1.5
+        hoarfrostInterval = 0.0
+        hoarfrostTimer = 0.0
+        cauterizeActive = false
+        cauterizeThreshold = 0.3
+        cauterizeInterval = 3.0
+        cauterizeTimer = 0.0
+        whiteoutActive = false
+        whiteoutRadius = 50.0
+        whiteoutSlow = 0.3
+        whiteoutDuration = 2.0
+
         currentKillStreak = 0
         lastKillTime = 0
         bloodlustStacks = 0

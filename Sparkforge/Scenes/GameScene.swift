@@ -54,6 +54,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var singularityTimer: TimeInterval = 0
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
+
+    // MARK: - v1.6: Quench Card State (Unit 3)
+
+    private var arcWakeSparks: [(position: CGPoint, expiry: TimeInterval)] = []
+    private var arcWakeDropTimer: TimeInterval = 0
+    private var nullBloomZones: [(position: CGPoint, expiry: TimeInterval)] = []
     
     // MARK: - Nodes
     
@@ -968,6 +974,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if synergies.contains(where: { $0.contains("Barrier Pulse") }) {
             barrierPulse()
         }
+
+        // v1.6: Static Crown — level-ups release a shock burst
+        if playerStats.staticCrownDamage > 0 {
+            damageEnemiesInRadius(playerStats.staticCrownRadius,
+                                  around: player.position,
+                                  damage: playerStats.staticCrownDamage)
+            showRingPulse(at: player.position,
+                          radius: playerStats.staticCrownRadius,
+                          colorHex: 0xFFE066)
+        }
         
         // v1.4: Post-pick buffer — brief invulnerability so the player can reorient
         invulnerableTimer = 2.5
@@ -1028,6 +1044,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updatePassiveEffects(dt)
         updateGravityWells(dt)
         updateChillTrail(dt)
+        updateArcWake(dt)
+        updateNullBlooms(dt)
         
         let spawnEvent = waveManager.update(deltaTime: dt)
         if spawnEvent.shouldSpawnEnemy { spawnEnemy() }
@@ -1314,6 +1332,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                  dps: playerStats.singularityDPS)
             }
         }
+
+        // v1.6: Aegis Pulse — periodic DEF-scaled pulse around the player
+        if playerStats.updateAegisPulse(dt) {
+            damageEnemiesInRadius(playerStats.aegisPulseRadius,
+                                  around: player.position,
+                                  damage: playerStats.aegisPulseDamage)
+            showRingPulse(at: player.position,
+                          radius: playerStats.aegisPulseRadius,
+                          colorHex: 0xCCC8AA)
+        }
+
+        // v1.6: Hoarfrost + Cauterize regen
+        let regen = playerStats.updateRegen(dt)
+        if regen > 0 {
+            playerStats.heal(regen)
+            hpBar.flashHeal()
+        }
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -1334,20 +1369,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let result = well.update(deltaTime: dt, enemies: enemies)
 
             // Event Horizon / Singularity: DOT on enemies inside the well
+            // (reference-based removal — onEnemyKilled side effects can mutate the array)
             if result.dotDamage > 0 {
-                var killed: [Int] = []
-                for (i, enemy) in enemies.enumerated()
+                var killed: [EnemyNode] = []
+                for enemy in enemies
                 where enemy.position.distance(to: well.position) < well.radius {
                     if enemy.takeDamage(result.dotDamage) {
-                        killed.append(i)
+                        killed.append(enemy)
                     }
                 }
-                for i in killed.reversed() {
-                    let enemy = enemies[i]
-                    let pos = enemy.position
-                    let xp = enemy.xpValue
-                    enemies.remove(at: i)
-                    onEnemyKilled(at: pos, xpValue: xp, enemy: enemy)
+                for enemy in killed {
+                    if let i = enemies.firstIndex(where: { $0 === enemy }) {
+                        enemies.remove(at: i)
+                        onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                    }
                 }
             }
 
@@ -1403,6 +1438,136 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
     
+    // MARK: - v1.6: Shared Burst Helpers (Unit 3)
+
+    /// Damage all enemies within radius of a point. Kills spawn XP orbs
+    /// directly (Ember Burst precedent — burst kills don't re-trigger bursts).
+    private func damageEnemiesInRadius(_ radius: CGFloat, around position: CGPoint, damage: Int) {
+        var killed: [EnemyNode] = []
+        for enemy in enemies where enemy.position.distance(to: position) < radius {
+            if enemy.takeDamage(damage) {
+                killed.append(enemy)
+            }
+        }
+        for enemy in killed {
+            if let index = enemies.firstIndex(where: { $0 === enemy }) {
+                spawnXPOrb(at: enemy.position, value: enemy.xpValue)
+                enemies.remove(at: index)
+            }
+        }
+    }
+
+    /// Expanding ring visual for pulses and bursts.
+    private func showRingPulse(at position: CGPoint, radius: CGFloat, colorHex: UInt32) {
+        let ring = SKShapeNode(circleOfRadius: 1)
+        ring.strokeColor = SKColor(hex: colorHex, alpha: 0.6)
+        ring.fillColor = SKColor(hex: colorHex, alpha: 0.1)
+        ring.lineWidth = 2
+        ring.position = position
+        ring.zPosition = 6
+        worldNode.addChild(ring)
+        ring.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: radius, duration: 0.25),
+                SKAction.fadeOut(withDuration: 0.3)
+            ]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    // MARK: - v1.6: Arc Wake (Unit 3)
+
+    private func updateArcWake(_ dt: TimeInterval) {
+        guard playerStats.arcWakeDamage > 0 else { return }
+        let now = waveManager.elapsedTime
+
+        // Drop sparks while moving
+        if joystick.direction != .zero {
+            arcWakeDropTimer += dt
+            if arcWakeDropTimer >= playerStats.arcWakeDropInterval {
+                arcWakeDropTimer = 0
+                arcWakeSparks.append((position: player.position,
+                                      expiry: now + playerStats.arcWakeLifetime))
+                spawnArcWakeVisual(at: player.position)
+            }
+        }
+
+        arcWakeSparks.removeAll { $0.expiry <= now }
+        guard !arcWakeSparks.isEmpty else { return }
+
+        // Each spark zaps the first enemy that touches it, then is consumed
+        var consumedSparks: [Int] = []
+        var killed: [EnemyNode] = []
+        for (sIndex, spark) in arcWakeSparks.enumerated() {
+            for enemy in enemies where !killed.contains(where: { $0 === enemy }) {
+                if enemy.position.distance(to: spark.position) < 16 {
+                    if enemy.takeDamage(playerStats.arcWakeDamage) {
+                        killed.append(enemy)
+                    }
+                    consumedSparks.append(sIndex)
+                    break
+                }
+            }
+        }
+        for index in consumedSparks.reversed() {
+            arcWakeSparks.remove(at: index)
+        }
+        for enemy in killed {
+            if let index = enemies.firstIndex(where: { $0 === enemy }) {
+                enemies.remove(at: index)
+                onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+            }
+        }
+    }
+
+    private func spawnArcWakeVisual(at position: CGPoint) {
+        let spark = SKShapeNode(circleOfRadius: 4)
+        spark.fillColor = SKColor(hex: 0xFFE066, alpha: 0.5)
+        spark.strokeColor = SKColor(hex: 0xFFF2AA, alpha: 0.7)
+        spark.lineWidth = 1
+        spark.glowWidth = 3
+        spark.position = position
+        spark.zPosition = 2
+        worldNode.addChild(spark)
+        spark.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: playerStats.arcWakeLifetime),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    // MARK: - v1.6: Null Bloom (Unit 3)
+
+    private func updateNullBlooms(_ dt: TimeInterval) {
+        guard !nullBloomZones.isEmpty else { return }
+        let now = waveManager.elapsedTime
+
+        nullBloomZones.removeAll { $0.expiry <= now }
+
+        for zone in nullBloomZones {
+            for enemy in enemies
+            where enemy.position.distance(to: zone.position) < playerStats.nullBloomRadius {
+                enemy.applySlow(playerStats.effectiveSlow(playerStats.nullBloomSlow), duration: 0.3)
+            }
+        }
+    }
+
+    private func spawnNullBloom(at position: CGPoint) {
+        nullBloomZones.append((position: position,
+                               expiry: waveManager.elapsedTime + playerStats.nullBloomDuration))
+
+        let zone = SKShapeNode(circleOfRadius: playerStats.nullBloomRadius)
+        zone.fillColor = SKColor(hex: 0x223366, alpha: 0.18)
+        zone.strokeColor = SKColor(hex: 0x4466DD, alpha: 0.35)
+        zone.lineWidth = 1
+        zone.position = position
+        zone.zPosition = 2
+        worldNode.addChild(zone)
+        zone.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: playerStats.nullBloomDuration),
+            SKAction.removeFromParent()
+        ]))
+    }
+
     // MARK: - Unstable Core Burst
     
     private func performUnstableCoreBurst() {
@@ -1719,7 +1884,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.killHealAmount > 0 {
             playerStats.heal(playerStats.killHealAmount)
         }
-        
+
+        // v1.6: Open Vein — bleeding enemies burst on death
+        if playerStats.openVeinDamage > 0, let enemy = enemy, enemy.isBleeding {
+            damageEnemiesInRadius(playerStats.openVeinRadius, around: position,
+                                  damage: playerStats.openVeinDamage)
+            showRingPulse(at: position, radius: playerStats.openVeinRadius, colorHex: 0xCC2233)
+        }
+
+        // v1.6: Whiteout — slowed enemies chill others on death
+        if playerStats.whiteoutActive, let enemy = enemy, enemy.isSlowed {
+            for other in enemies
+            where other.position.distance(to: position) < playerStats.whiteoutRadius {
+                other.applySlow(playerStats.effectiveSlow(playerStats.whiteoutSlow),
+                                duration: playerStats.whiteoutDuration)
+            }
+            showRingPulse(at: position, radius: playerStats.whiteoutRadius, colorHex: 0xAADDFF)
+        }
+
+        // v1.6: Null Bloom — chance to leave a slowing zone
+        if playerStats.nullBloomChance > 0 && CGFloat.random(in: 0...1) < playerStats.nullBloomChance {
+            spawnNullBloom(at: position)
+        }
+
         if playerStats.killsExplode {
             explosionAt(position)
         }
@@ -1885,6 +2072,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard gameState == .playing else { return }
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
+
+        // v1.6: Iron Bloom — attackers take DEF-scaled thorns damage.
+        // Fires before Phase Skin so absorbed hits still bite back.
+        if playerStats.ironBloomActive {
+            if let bossNode = enemyBody.node as? BossNode {
+                bossNode.takeDamage(playerStats.ironBloomDamage)
+            } else if let enemy = enemyBody.node as? EnemyNode {
+                if enemy.takeDamage(playerStats.ironBloomDamage) {
+                    if let index = enemies.firstIndex(where: { $0 === enemy }) {
+                        enemies.remove(at: index)
+                    }
+                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                }
+            }
+        }
         
         // v1.3: Phase Skin — absorb hit with brief invulnerability
         if playerStats.triggerPhaseSkin() {
@@ -2447,12 +2649,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         boss?.removeFromParent()
         boss = nil
 
-        // v1.6: Clean up gravity wells + chill trail
+        // v1.6: Clean up gravity wells + chill trail + Quench card state
         gravityWells.forEach { $0.removeFromParent() }
         gravityWells.removeAll()
         chillTrailPoints.removeAll()
         singularityTimer = 0
         chillTrailDropTimer = 0
+        arcWakeSparks.removeAll()
+        arcWakeDropTimer = 0
+        nullBloomZones.removeAll()
 
         player.reset()
         player.stats = playerStats
