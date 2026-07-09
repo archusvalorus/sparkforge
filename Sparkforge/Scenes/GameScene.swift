@@ -47,6 +47,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var nextMagnetOrbSpawn: TimeInterval = 25
     private var damageCooldownTimer: TimeInterval = 0  // i-frames after hit
     private var pendingForgeXP: Int = 0  // v1.5: Stored for XP boost ad doubling
+
+    // MARK: - v1.6: Gravity Wells + Chill Trail (True Cards)
+
+    private var gravityWells: [GravityWellNode] = []
+    private var singularityTimer: TimeInterval = 0
+    private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
+    private var chillTrailDropTimer: TimeInterval = 0
     
     // MARK: - Nodes
     
@@ -1019,6 +1026,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateEnemyProjectiles(dt)
         updateXPOrbs(dt)
         updatePassiveEffects(dt)
+        updateGravityWells(dt)
+        updateChillTrail(dt)
         
         let spawnEvent = waveManager.update(deltaTime: dt)
         if spawnEvent.shouldSpawnEnemy { spawnEnemy() }
@@ -1203,7 +1212,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         for index in toRemove.reversed() {
-            projectiles[index].removeFromParent()
+            let projectile = projectiles[index]
+            // v1.6: Gravity Well — projectiles that expire at max range leave a pull zone
+            if projectile.spawnsGravityWell {
+                spawnGravityWell(at: projectile.position,
+                                 radius: playerStats.gravityWellRadius,
+                                 duration: playerStats.gravityWellDuration,
+                                 dps: playerStats.gravityWellDPS)
+            }
+            projectile.removeFromParent()
             projectiles.remove(at: index)
         }
     }
@@ -1282,6 +1299,108 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.updateUnstableCore(dt) {
             performUnstableCoreBurst()
         }
+
+        // v1.6: Singularity (Void tier-7) — periodic massive gravity wells
+        if playerStats.singularityActive {
+            singularityTimer += dt
+            if singularityTimer >= playerStats.singularityInterval {
+                singularityTimer = 0
+                let angle = CGFloat.random(in: 0...(2 * .pi))
+                let dist = CGFloat.random(in: 0...(GameConfig.Arena.radius * 0.6))
+                let pos = CGPoint(x: cos(angle) * dist, y: sin(angle) * dist)
+                spawnGravityWell(at: pos,
+                                 radius: playerStats.singularityRadius,
+                                 duration: playerStats.singularityDuration,
+                                 dps: playerStats.singularityDPS)
+            }
+        }
+    }
+
+    // MARK: - v1.6: Gravity Wells
+
+    private func spawnGravityWell(at position: CGPoint, radius: CGFloat, duration: TimeInterval, dps: CGFloat) {
+        let well = GravityWellNode(radius: radius, duration: duration, dps: dps)
+        well.position = position
+        well.zPosition = 3
+        gravityWells.append(well)
+        worldNode.addChild(well)
+    }
+
+    private func updateGravityWells(_ dt: TimeInterval) {
+        guard !gravityWells.isEmpty else { return }
+
+        var expired: [Int] = []
+        for (index, well) in gravityWells.enumerated() {
+            let result = well.update(deltaTime: dt, enemies: enemies)
+
+            // Event Horizon / Singularity: DOT on enemies inside the well
+            if result.dotDamage > 0 {
+                var killed: [Int] = []
+                for (i, enemy) in enemies.enumerated()
+                where enemy.position.distance(to: well.position) < well.radius {
+                    if enemy.takeDamage(result.dotDamage) {
+                        killed.append(i)
+                    }
+                }
+                for i in killed.reversed() {
+                    let enemy = enemies[i]
+                    let pos = enemy.position
+                    let xp = enemy.xpValue
+                    enemies.remove(at: i)
+                    onEnemyKilled(at: pos, xpValue: xp, enemy: enemy)
+                }
+            }
+
+            if result.expired { expired.append(index) }
+        }
+
+        for index in expired.reversed() {
+            gravityWells[index].collapseAndRemove()
+            gravityWells.remove(at: index)
+        }
+    }
+
+    // MARK: - v1.6: Chill Trail (Glacial Drift)
+
+    private func updateChillTrail(_ dt: TimeInterval) {
+        let now = waveManager.elapsedTime
+
+        // Drop trail points while moving
+        if playerStats.chillTrail && joystick.direction != .zero {
+            chillTrailDropTimer += dt
+            if chillTrailDropTimer >= 0.15 {
+                chillTrailDropTimer = 0
+                chillTrailPoints.append((position: player.position,
+                                         expiry: now + playerStats.chillTrailDuration))
+                spawnChillTrailVisual(at: player.position)
+            }
+        }
+
+        chillTrailPoints.removeAll { $0.expiry <= now }
+        guard !chillTrailPoints.isEmpty else { return }
+
+        // Slow enemies standing on the trail
+        for enemy in enemies {
+            for point in chillTrailPoints
+            where enemy.position.distance(to: point.position) < 22 {
+                enemy.applySlow(playerStats.effectiveSlow(playerStats.chillTrailSlow), duration: 0.5)
+                break
+            }
+        }
+    }
+
+    private func spawnChillTrailVisual(at position: CGPoint) {
+        let frost = SKShapeNode(circleOfRadius: 9)
+        frost.fillColor = SKColor(hex: 0x88CCFF, alpha: 0.12)
+        frost.strokeColor = SKColor(hex: 0xAADDFF, alpha: 0.25)
+        frost.lineWidth = 1
+        frost.position = position
+        frost.zPosition = 2
+        worldNode.addChild(frost)
+        frost.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: playerStats.chillTrailDuration),
+            SKAction.removeFromParent()
+        ]))
     }
     
     // MARK: - Unstable Core Burst
@@ -1595,6 +1714,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         _ = playerStats.recordKill(atTime: waveManager.elapsedTime)
         playerStats.recordBloodlustKill(atTime: waveManager.elapsedTime)
+
+        // v1.6: Siphon — kills restore HP
+        if playerStats.killHealAmount > 0 {
+            playerStats.heal(playerStats.killHealAmount)
+        }
         
         if playerStats.killsExplode {
             explosionAt(position)
@@ -1920,7 +2044,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.knockbackForce > 0 {
             enemyNode.applyKnockback(from: player.position, force: playerStats.knockbackForce)
         }
-        
+        // v1.6: Overload — real stun (was a mislabeled slow)
+        if playerStats.stunChance > 0 && CGFloat.random(in: 0...1) < playerStats.stunChance {
+            enemyNode.applyStun(playerStats.stunDuration)
+        }
+
         // Shatter check
         if playerStats.shatterChance > 0 && enemyNode.isSlowed {
             let totalSlow = enemyNode.currentSlow + playerStats.globalEnemySlow
@@ -2318,7 +2446,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         magnetOrbs.removeAll()
         boss?.removeFromParent()
         boss = nil
-        
+
+        // v1.6: Clean up gravity wells + chill trail
+        gravityWells.forEach { $0.removeFromParent() }
+        gravityWells.removeAll()
+        chillTrailPoints.removeAll()
+        singularityTimer = 0
+        chillTrailDropTimer = 0
+
         player.reset()
         player.stats = playerStats
         playerStats.reset()

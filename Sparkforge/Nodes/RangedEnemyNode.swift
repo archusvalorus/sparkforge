@@ -72,6 +72,9 @@ final class RangedEnemyNode: EnemyNode {
     
     /// Ranged AI: approach until in range, then stop and shoot
     func rangedChase(target: CGPoint, deltaTime: TimeInterval, globalSlow: CGFloat = 0) {
+        // v1.6: stunned ranged enemies can't move OR fire
+        guard !isStunned else { return }
+
         let distToTarget = position.distance(to: target)
         let engageRange = GameConfig.RangedEnemy.engageRange
         

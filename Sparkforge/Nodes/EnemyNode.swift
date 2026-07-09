@@ -246,10 +246,8 @@ class EnemyNode: SKNode {
     // MARK: - AI
     
     func chase(target: CGPoint, deltaTime: TimeInterval, globalSlow: CGFloat = 0) {
-        guard !isStunned else {
-            stunTimer -= deltaTime
-            return
-        }
+        // v1.6: stun ticks in updateStatusEffects (so ranged enemies respect it too)
+        guard !isStunned else { return }
         
         let effectiveSlow = min(currentSlow + globalSlow, 0.8)
         let effectiveSpeed = moveSpeed * (1.0 - effectiveSlow)
@@ -289,7 +287,12 @@ class EnemyNode: SKNode {
     
     func updateStatusEffects(deltaTime: TimeInterval) -> Bool {
         var totalDOT: CGFloat = 0
-        
+
+        // v1.6: stun timer ticks here so ALL enemy types respect it
+        if stunTimer > 0 {
+            stunTimer -= deltaTime
+        }
+
         if burnTimer > 0 {
             burnTimer -= deltaTime
             totalDOT += burnDPS

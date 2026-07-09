@@ -152,9 +152,9 @@ final class PlayerStats {
     /// Kill streak duration window
     var killStreakWindow: TimeInterval = 3.0
     
-    /// Time added per kill (Siphon)
-    var killTimeBonus: TimeInterval = 0.0
-    
+    /// HP restored per kill (Siphon — v1.6 redesign from the dead "time bonus" concept)
+    var killHealAmount: Int = 0
+
     /// XP orb pull range multiplier on kill (Devour)
     var killOrbPullMultiplier: CGFloat = 1.0
     
@@ -193,6 +193,18 @@ final class PlayerStats {
     /// Every Nth shot fires spread (Lightning Storm)
     var spreadShotInterval: Int = 0
     var spreadShotCount: Int = 3
+
+    /// v1.6: Stun chance on projectile hit (Overload — was a mislabeled slow)
+    var stunChance: CGFloat = 0.0
+    /// Stun duration in seconds
+    var stunDuration: TimeInterval = 0.5
+
+    /// v1.6: Singularity (Void tier-7) — periodic massive gravity wells
+    var singularityActive: Bool = false
+    var singularityInterval: TimeInterval = 8.0
+    var singularityRadius: CGFloat = 90.0
+    var singularityDuration: TimeInterval = 3.0
+    var singularityDPS: CGFloat = 1.0
     
     // MARK: - v1.3 Card Properties
     
@@ -455,7 +467,7 @@ final class PlayerStats {
         killStreakFireRateBonus = 0.0
         killStreakThreshold = 3
         killStreakWindow = 3.0
-        killTimeBonus = 0.0
+        killHealAmount = 0
         killOrbPullMultiplier = 1.0
         chillTrail = false
         chillTrailSlow = 0.08
@@ -473,6 +485,13 @@ final class PlayerStats {
         executionThreshold = 0.0
         spreadShotInterval = 0
         spreadShotCount = 3
+        stunChance = 0.0
+        stunDuration = 0.5
+        singularityActive = false
+        singularityInterval = 8.0
+        singularityRadius = 90.0
+        singularityDuration = 3.0
+        singularityDPS = 1.0
         currentKillStreak = 0
         lastKillTime = 0
         bloodlustStacks = 0

@@ -254,7 +254,7 @@ final class UpgradeManager {
             stats.gravityWellDPS = 0.5
             return "🕳️ Event Horizon — Gravity wells last longer and deal damage"
         case (.voidT, 7):
-            // Singularity — handled in GameScene timer logic
+            stats.singularityActive = true
             return "🕳️ Singularity — Massive gravity wells spawn periodically"
             
         // CHILL
@@ -342,9 +342,8 @@ final class UpgradeManager {
             id: "shock_4", name: "Overload", tag: .shock,
             description: "15% chance to stun enemies for 0.5s on hit"
         ) { stats in
-            // Stun is implemented as a strong slow (100%) for 0.5s
-            // Handled in hit logic — flag-based
-            stats.slowAmount += 0.15  // Repurposed as stun chance in hit logic
+            // v1.6: real stun — previous version added a slow by mistake
+            stats.stunChance += 0.15
         })
         
         // ═══════════════════════════════════
@@ -374,9 +373,11 @@ final class UpgradeManager {
         
         cards.append(UpgradeCard(
             id: "bleed_4", name: "Siphon", tag: .bleed,
-            description: "Each kill extends your run by 0.3s"
+            description: "Kills restore 1 HP"
         ) { stats in
-            stats.killTimeBonus = 0.3
+            // v1.6: redesigned — old "extends your run" effect predated the
+            // HP system and was never implemented
+            stats.killHealAmount += 1
         })
         
         // ═══════════════════════════════════
