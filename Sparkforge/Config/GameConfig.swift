@@ -119,13 +119,21 @@ enum GameConfig {
         /// Time between enemy spawns at start (seconds)
         static let initialSpawnInterval: TimeInterval = 1.2
         /// Minimum spawn interval before late game kicks in
-        static let minimumSpawnInterval: TimeInterval = 0.4
+        /// v1.6 tuning: 0.4 → 0.55 — old floor arrived at ~66s, turning the
+        /// 70–75s window into a wall of bodies (Brandon playtest 7/9/26)
+        static let minimumSpawnInterval: TimeInterval = 0.55
         /// How fast spawn interval decreases per second of game time
-        static let spawnAcceleration: TimeInterval = 0.012
+        /// v1.6 tuning: 0.012 → 0.010 — gentler ramp into the floor
+        static let spawnAcceleration: TimeInterval = 0.010
         /// Late game (90s+): faster acceleration
         static let lateGameAcceleration: TimeInterval = 0.02
-        /// Late game minimum spawn interval
-        static let lateGameMinInterval: TimeInterval = 0.2
+        /// Late game minimum spawn interval (v1.6 tuning: 0.2 → 0.25)
+        static let lateGameMinInterval: TimeInterval = 0.25
+        /// v1.6 tuning: from this mark, some Crucible melee spawns are
+        /// skipped to thin the crowd
+        static let meleeThinningStart: TimeInterval = 30
+        /// Chance a melee spawn is skipped after the thinning mark
+        static let meleeThinningChance: CGFloat = 0.30
         /// Mini-boss spawn time
         static let miniBossSpawnTime: TimeInterval = 90.0
         /// Spawn distance from arena center (just outside boundary)

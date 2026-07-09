@@ -35,9 +35,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let arenaConfig = ArenaConfig.current
     
     // MARK: - Boss Mechanics
-    
-    private var boss: BossNode? = nil
+
+    // v1.6: any arena's boss lives here (Slag Titan or Quench Warden)
+    private var boss: (any ArenaBossNode)? = nil
     private var bossDefeatedThisRun: Bool = false
+
+    // v1.6: Quench Field momentum pulses (points/sec toward boss when positive)
+    private var fieldImpulseStrength: CGFloat = 0
+    private var fieldImpulseRemaining: TimeInterval = 0
     
     // MARK: - New Additions for health orbs + magnet orbs
     
@@ -526,18 +531,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         levelUpOverlay.addChild(bg)
         
         let label = SKLabelNode(fontNamed: "Menlo-Bold")
-        label.fontSize = 22
+        label.fontSize = 24
         label.fontColor = SKColor(hex: 0xFFAA33)
         label.text = "LEVEL UP"
         label.name = "levelUpLabel"
-        label.position = CGPoint(x: 0, y: 60)  // v1.4: adjusted for lower cards
+        label.position = CGPoint(x: 0, y: 90)  // v1.6: cleared for taller cards
         levelUpOverlay.addChild(label)
-        
+
         let hint = SKLabelNode(fontNamed: "Menlo")
-        hint.fontSize = 11
-        hint.fontColor = SKColor(hex: 0x666666)
+        hint.fontSize = 12
+        hint.fontColor = SKColor(hex: 0x777777)
         hint.text = "choose an upgrade"
-        hint.position = CGPoint(x: 0, y: 38)  // v1.4: adjusted
+        hint.position = CGPoint(x: 0, y: 66)  // v1.6: cleared for taller cards
         levelUpOverlay.addChild(hint)
         
         // v1.6: Reroll + Extra Card sit side by side below the cards.
@@ -547,7 +552,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Reroll button (left)
         let rerollBtn = SKNode()
         rerollBtn.name = "rerollButton"
-        rerollBtn.position = CGPoint(x: -80, y: -130)
+        rerollBtn.position = CGPoint(x: -80, y: -144)  // v1.6: below taller cards
 
         let rerollBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
         rerollBg.fillColor = SKColor(hex: 0x332233)
@@ -578,7 +583,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Extra Card button (right)
         let extraBtn = SKNode()
         extraBtn.name = "extraCardButton"
-        extraBtn.position = CGPoint(x: 80, y: -130)
+        extraBtn.position = CGPoint(x: 80, y: -144)  // v1.6: below taller cards
 
         let extraBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
         extraBg.fillColor = SKColor(hex: 0x223333)
@@ -1285,20 +1290,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateNullBlooms(dt)
         
         let spawnEvent = waveManager.update(deltaTime: dt)
-        if spawnEvent.shouldSpawnEnemy { spawnEnemy() }
+        // v1.6 tuning: wave spawns pause while a boss holds the arena —
+        // the stage belongs to him. Boss-summoned minions (Titan's spawn
+        // pattern) still arrive; waves resume the moment he falls.
+        if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
         if spawnEvent.shouldSpawnMiniBoss {
             // v1.4: Spawn real boss if gate is met, otherwise mini-boss
-            // v1.6: the Slag Titan belongs to The Crucible only — Arena 2
-            // gets a mini-boss until the Quench Warden arrives (Unit 6)
+            // v1.6: each arena summons its own warden at the 90s bell
             if arenaConfig.id == 0 && ProgressionManager.shared.arena1BossUnlocked && boss == nil {
                 spawnBoss()
+            } else if arenaConfig.id == 1 && ProgressionManager.shared.quenchWardenUnlocked && boss == nil {
+                spawnQuenchWarden()
             } else {
                 spawnMiniBoss()
             }
         }
-        
+
         // v1.4: Update boss AI
         boss?.update(deltaTime: dt, playerPosition: player.position)
+
+        // v1.6: Quench Field — momentum pressure on the player
+        if fieldImpulseRemaining > 0 {
+            fieldImpulseRemaining -= dt
+            if let boss = boss, !boss.isDead {
+                let dir = (boss.position - player.position).normalized
+                player.position += dir * fieldImpulseStrength * CGFloat(dt)
+                // Keep the shove inside the arena
+                let maxDist = GameConfig.Arena.radius - GameConfig.Player.collisionRadius
+                if player.position.length > maxDist {
+                    player.position = player.position.normalized * maxDist
+                }
+            }
+        }
         
         // v1.4: Health orb spawning + updating
         healthOrbTimer += dt
@@ -1869,6 +1892,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
+        // v1.6 tuning: from 30s, skip ~30% of melee spawns — the crowd was
+        // outpacing the fun (Brandon playtest 7/9/26)
+        if elapsed >= GameConfig.Wave.meleeThinningStart &&
+           CGFloat.random(in: 0...1) < GameConfig.Wave.meleeThinningChance {
+            return
+        }
+
         spawnBasicMelee(elapsed: elapsed)
     }
 
@@ -1905,19 +1935,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - v1.6: Quench Spawning (Unit 5)
 
-    /// Arena 2 spawn table. Ashlings are the bread and butter; Cinder Halos
-    /// arrive at 25s, ranged at 45s, Braceguards at 50s.
+    /// Arena 2 spawn table — v1.6 tuning: staggered vocabulary. The first
+    /// 20s are familiar bodies + self-teaching Ashlings; ranged joins at
+    /// 55s, Braceguards at 65s. Cinder Halos are BANKED for a later arena
+    /// (Brandon playtest 7/9/26: the rotating halo reads as a spinning
+    /// shield mid-swarm — perception is reality).
     private func spawnQuenchEnemy() {
         let elapsed = waveManager.elapsedTime
         let roll = CGFloat.random(in: 0...1)
 
-        if elapsed >= 50 && roll < 0.10 {
+        // Opening: ease in with known shapes while Ashlings teach splitting
+        if elapsed < 20 {
+            if roll < 0.5 {
+                spawnBasicMelee(elapsed: elapsed)
+            } else {
+                spawnAshling(elapsed: elapsed)
+            }
+            return
+        }
+
+        if elapsed >= 65 && roll < 0.10 {
             spawnBraceguard(elapsed: elapsed)
-        } else if elapsed >= 25 && roll < 0.30 {
-            spawnCinderHalo(elapsed: elapsed)
-        } else if elapsed >= 45 && roll < 0.42 {
+        } else if elapsed >= 55 && roll < 0.28 {
             spawnRangedEnemy()
-        } else if roll < 0.78 {
+        } else if roll < 0.72 {
             spawnAshling(elapsed: elapsed)
         } else {
             spawnBasicMelee(elapsed: elapsed)
@@ -1955,46 +1996,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func spawnBraceguard(elapsed: TimeInterval) {
         let braceguard = BraceguardNode(elapsed: elapsed)
         braceguard.position = EnemyNode.spawnPosition()
-        // Face inward on arrival so the shield reads immediately
-        braceguard.zRotation = atan2(-braceguard.position.y, -braceguard.position.x)
+        // v1.6 tuning: shield direction is set (randomly, cardinal) in init
         enemies.append(braceguard)
         worldNode.addChild(braceguard)
     }
     
     private func spawnRangedEnemy() {
-        let elapsed = waveManager.elapsedTime
-        
-        // Ranged enemies have slightly more HP than melee at same time
-        let baseHP: Int
-        if elapsed < 60 {
-            baseHP = 2
-        } else if elapsed < 90 {
-            baseHP = 3
-        } else if elapsed < 120 {
-            baseHP = Int.random(in: 3...5)
-        } else {
-            baseHP = Int.random(in: 5...8)
-        }
-        
-        let xpValue = max(2, baseHP + 1)  // Worth more than melee
-        
+        // v1.6 tuning: shooters are glass cannons — dangerous at range,
+        // dead in one hit (Brandon playtest 7/9/26). Was 2–8 HP scaling.
         let ranged = RangedEnemyNode(
-            health: baseHP,
+            health: 1,
             moveSpeed: GameConfig.Enemy.baseSpeed * 0.75,
-            xpValue: xpValue
+            xpValue: 2
         )
         ranged.position = EnemyNode.spawnPosition()
-        
+
         // Wire up the fire callback
         ranged.onFireProjectile = { [weak self] position, direction in
             self?.spawnEnemyProjectile(at: position, direction: direction)
         }
-        
-        if baseHP >= 4 {
-            let sizeScale = 1.0 + CGFloat(baseHP - 3) * 0.06
-            ranged.setScale(sizeScale)
-        }
-        
+
         enemies.append(ranged)
         worldNode.addChild(ranged)
     }
@@ -2078,28 +2099,110 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         boss = bossNode
         worldNode.addChild(bossNode)
-        
+
         // Dramatic entrance
-        showBossEntrance()
+        showBossEntrance(name: "THE SLAG TITAN", colorHex: 0xFF6611)
     }
-    
-    private func showBossEntrance() {
+
+    // MARK: - v1.6: Quench Warden Spawn
+
+    private func spawnQuenchWarden() {
+        let elapsed = waveManager.elapsedTime
+        let hpScaling = Int(elapsed / 30) * 5
+
+        let warden = QuenchWardenNode(hpScaling: hpScaling)
+        warden.position = QuenchWardenNode.spawnPosition()
+        warden.zPosition = 6
+
+        // Cinder Aperture volleys ride the existing enemy projectile pipeline
+        warden.onFireProjectile = { [weak self] position, direction in
+            self?.spawnEnemyProjectile(at: position, direction: direction)
+        }
+
+        // Pressure Lanes — standing in an armed lane hurts
+        warden.onLaneDamage = { [weak self] damage in
+            self?.applyBossHazardDamage(damage, shakeIntensity: 6)
+        }
+
+        // Quench Field — momentum pulses
+        warden.onFieldPulse = { [weak self] strength, duration in
+            self?.fieldImpulseStrength = strength
+            self?.fieldImpulseRemaining = duration
+        }
+
+        warden.onDeath = { [weak self] pos, xp in
+            guard let self = self else { return }
+            self.bossDefeatedThisRun = true
+            ProgressionManager.shared.recordKill(.boss)
+            ProgressionManager.shared.wardenKills += 1
+            for _ in 0..<10 {
+                let offset = CGPoint(
+                    x: CGFloat.random(in: -40...40),
+                    y: CGFloat.random(in: -40...40)
+                )
+                self.spawnXPOrb(at: pos + offset, value: xp / 10)
+            }
+            self.boss = nil
+            self.worldNode.shake(intensity: 15, duration: 0.5)
+        }
+
+        boss = warden
+        worldNode.addChild(warden)
+
+        showBossEntrance(name: "THE QUENCH WARDEN", colorHex: 0xB8B0A4)
+    }
+
+    /// Shared damage path for boss arena hazards (lanes, future patterns).
+    /// Respects i-frames, Phase Skin, and lethal saves like any other hit.
+    private func applyBossHazardDamage(_ damage: Int, shakeIntensity: CGFloat) {
+        guard gameState == .playing else { return }
+        guard !isInvulnerable else { return }
+        guard damageCooldownTimer <= 0 else { return }
+
+        if playerStats.triggerPhaseSkin() {
+            playerStats.resetOvercharge()
+            invulnerableTimer = playerStats.phaseSkinDuration
+            let blink = SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.3, duration: 0.1),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.1)
+            ])
+            player.run(SKAction.repeat(blink, count: 5), withKey: "invulnBlink")
+            worldNode.shake(intensity: 4, duration: 0.15)
+            return
+        }
+
+        playerStats.resetOvercharge()
+        let died = player.applyDamage(damage)
+        damageCooldownTimer = GameConfig.Player.damageCooldown
+        hpBar.flashDamage()
+        worldNode.shake(intensity: shakeIntensity, duration: 0.2)
+
+        if died {
+            if player.tryLethalSave() {
+                damageCooldownTimer = 1.0
+                return
+            }
+            playerDied()
+        }
+    }
+
+    private func showBossEntrance(name: String, colorHex: UInt32) {
         let dim = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.5)
         dim.strokeColor = .clear
         dim.zPosition = 150
         dim.alpha = 0
         camera?.addChild(dim)
-        
+
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
-        title.text = "THE SLAG TITAN"
+        title.text = name
         title.fontSize = 18
-        title.fontColor = SKColor(hex: 0xFF6611)
+        title.fontColor = SKColor(hex: colorHex)
         title.position = CGPoint(x: 0, y: 0)
         title.zPosition = 151
         title.alpha = 0
         camera?.addChild(title)
-        
+
         let sequence = SKAction.sequence([
             SKAction.fadeAlpha(to: 1.0, duration: 0.3),
             SKAction.wait(forDuration: 1.2),
@@ -2168,6 +2271,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil) {
         killCount += 1
+
+        // v1.6: kills made in The Quench feed the Warden's gate
+        if arenaConfig.id == 1 {
+            ProgressionManager.shared.quenchKills += 1
+        }
         
         // v1.4: Track kill type for progression
         if let enemy = enemy {
@@ -2388,7 +2496,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.6: Iron Bloom — attackers take DEF-scaled thorns damage.
         // Fires before Phase Skin so absorbed hits still bite back.
         if playerStats.ironBloomActive {
-            if let bossNode = enemyBody.node as? BossNode {
+            if let bossNode = enemyBody.node as? (any ArenaBossNode) {
                 bossNode.takeDamage(playerStats.ironBloomDamage)
             } else if let enemy = enemyBody.node as? EnemyNode {
                 if enemy.takeDamage(playerStats.ironBloomDamage) {
@@ -2421,8 +2529,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let elapsed = waveManager.elapsedTime
         let scalingTicks = Int(elapsed / 30)
         let damage: Int
-        if enemyBody.node is BossNode {
-            damage = boss?.contactDamage ?? GameConfig.Enemy.baseMiniBossDamage
+        if let bossNode = enemyBody.node as? (any ArenaBossNode) {
+            damage = bossNode.contactDamage
         } else if let enemy = enemyBody.node as? EnemyNode, enemy.isMiniBoss {
             damage = GameConfig.Enemy.baseMiniBossDamage + (scalingTicks * GameConfig.Enemy.miniBossDamageScaling)
         } else {
@@ -2513,9 +2621,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Projectile ↔ Enemy
     
     private func handleProjectileHit(projectileBody: SKPhysicsBody, enemyBody: SKPhysicsBody) {
-        // v1.6: BossNode shares the enemy physics category but is not an EnemyNode —
+        // v1.6: Bosses share the enemy physics category but are not EnemyNodes —
         // route boss hits to the dedicated handler (this was the "invincible Titan" bug)
-        if enemyBody.node is BossNode {
+        if enemyBody.node is (any ArenaBossNode) {
             handleProjectileHitBoss(projectileBody: projectileBody)
             return
         }
@@ -2523,17 +2631,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let enemyNode = enemyBody.node as? EnemyNode else { return }
 
-        // v1.6: Braceguard — the front shield stops projectiles cold
+        // v1.6 tuning: Braceguard's fixed shield halves damage from its arc
+        // (was a full block — too punishing with auto-aim mid-chaos)
+        var braceguardShielded = false
         if let braceguard = enemyNode as? BraceguardNode,
            braceguard.blocksHit(from: player.position) {
+            braceguardShielded = true
             braceguard.flashShield()
-            if projectileNode.onHitEnemy() {
-                if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
-                    projectiles.remove(at: index)
-                }
-                projectileNode.removeFromParent()
-            }
-            return
         }
 
         var damage = max(1, Int(projectileNode.damageMultiplier))
@@ -2558,7 +2662,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.isBloodlustActive(atTime: waveManager.elapsedTime) {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
         }
-        
+
+        // v1.6: shield reduction applies after all bonuses — flanking doubles output
+        if braceguardShielded {
+            damage = max(1, Int(CGFloat(damage) * BraceguardNode.shieldDamageMultiplier))
+        }
+
         if playerStats.burnDPS > 0 {
             enemyNode.applyBurn(playerStats.burnDPS, duration: playerStats.burnDuration)
         }
@@ -2757,8 +2866,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         displayedCards.removeAll()
 
         // v1.6: four cards (Extra Card reward) render tighter and smaller
-        let spacing: CGFloat = cards.count >= 4 ? 88 : 115
-        let cardScale: CGFloat = cards.count >= 4 ? 0.82 : 1.0
+        // (spacings sized for the 118pt legibility-pass cards; fits iPhone SE)
+        let spacing: CGFloat = cards.count >= 4 ? 92 : 124
+        let cardScale: CGFloat = cards.count >= 4 ? 0.75 : 1.0
         let startX = -spacing * CGFloat(cards.count - 1) / 2
         let cardY: CGFloat = -40  // v1.4: lower on screen, closer to joystick area
 
@@ -2976,8 +3086,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         healthOrbs.removeAll()
         magnetOrbs.forEach { $0.removeFromParent() }
         magnetOrbs.removeAll()
+        (boss as? QuenchWardenNode)?.cleanupWorldEffects()
         boss?.removeFromParent()
         boss = nil
+        fieldImpulseStrength = 0
+        fieldImpulseRemaining = 0
 
         // v1.6: Clean up gravity wells + chill trail + Quench card state
         gravityWells.forEach { $0.removeFromParent() }

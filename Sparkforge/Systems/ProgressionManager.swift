@@ -23,6 +23,8 @@ final class ProgressionManager {
         static let meleeKills = "sf_melee_kills"
         static let rangedKills = "sf_ranged_kills"
         static let bossKills = "sf_boss_kills"
+        static let quenchKills = "sf_quench_kills"    // v1.6: kills made in Arena 2
+        static let wardenKills = "sf_warden_kills"    // v1.6: Quench Warden kills
         static let longestSurvival = "sf_longest_survival"
         static let survived2Min = "sf_survived_2min"
         static let forgeXP = "sf_forge_xp"
@@ -49,6 +51,18 @@ final class ProgressionManager {
     }
     
     var totalKills: Int { meleeKills + rangedKills + bossKills }
+
+    /// v1.6: kills made while fighting in The Quench (feeds the Warden gate)
+    var quenchKills: Int {
+        get { defaults.integer(forKey: Keys.quenchKills) }
+        set { defaults.set(newValue, forKey: Keys.quenchKills) }
+    }
+
+    /// v1.6: Quench Warden kills (Arena 3's gate will feed on these)
+    var wardenKills: Int {
+        get { defaults.integer(forKey: Keys.wardenKills) }
+        set { defaults.set(newValue, forKey: Keys.wardenKills) }
+    }
     
     // MARK: - Survival
     
@@ -172,6 +186,24 @@ final class ProgressionManager {
         return totalKills >= gate.totalKillsRequired
             && bossKills >= gate.bossKillsRequired
             && (!gate.survivalRequired || hasSurvived2Minutes)
+    }
+
+    // MARK: - v1.6: Arena 2 Gate (The Quench Warden)
+
+    /// The Warden's gate is fed by kills made INSIDE The Quench —
+    /// the boss-kill concept lives in arena access itself (you can't
+    /// stand here without having felled the Slag Titan).
+    static let arena2Gate = ArenaGate(
+        totalKillsRequired: 100,
+        bossKillsRequired: 0,
+        survivalRequired: false,
+        arenaName: "The Quench",
+        bossName: "The Quench Warden"
+    )
+
+    /// Check if the Quench Warden will answer the 90s bell
+    var quenchWardenUnlocked: Bool {
+        return quenchKills >= ProgressionManager.arena2Gate.totalKillsRequired
     }
     
     /// Progress toward Arena 1 gate as individual fractions

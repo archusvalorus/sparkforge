@@ -12,16 +12,19 @@ import SpriteKit
 final class UpgradeCardNode: SKNode {
     
     // MARK: - Config
-    
-    /// v1.4: Bumped from 90 → 100 for text breathing room
-    static let cardWidth: CGFloat = 100
-    static let cardHeight: CGFloat = 130
+
+    /// v1.4: 90 → 100. v1.6: 100 → 118 — legibility pass (Brandon 7/9/26);
+    /// still fits 3-across on iPhone SE at 124pt spacing
+    static let cardWidth: CGFloat = 118
+    static let cardHeight: CGFloat = 156
     
     // MARK: - State
     
     let card: UpgradeManager.UpgradeCard
-    private let backgroundNode: SKShapeNode
+    private let basePlate: SKShapeNode      // v1.6: dark plate keeps text readable
+    private let backgroundNode: SKShapeNode // v1.6: translucent tag-color wash
     private let accentBar: SKShapeNode
+    private let tagColorHex: UInt32
     
     // MARK: - Tag Colors
     
@@ -53,28 +56,35 @@ final class UpgradeCardNode: SKNode {
     
     init(card: UpgradeManager.UpgradeCard) {
         self.card = card
-        
+        self.tagColorHex = UpgradeCardNode.color(for: card.tag)
+
         let w = UpgradeCardNode.cardWidth
         let h = UpgradeCardNode.cardHeight
-        let tagColor = SKColor(hex: UpgradeCardNode.color(for: card.tag))
-        
-        // Card background — dark metal plate
+        let tagColor = SKColor(hex: tagColorHex)
+
+        // v1.6: the whole card wears its tree's color — a dark plate for
+        // text contrast, washed with a translucent tag tint
+        basePlate = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 8)
+        basePlate.fillColor = SKColor(hex: 0x161616)
+        basePlate.strokeColor = .clear
+
         backgroundNode = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 8)
-        backgroundNode.fillColor = SKColor(hex: 0x222222)
+        backgroundNode.fillColor = SKColor(hex: tagColorHex, alpha: 0.20)
         backgroundNode.strokeColor = tagColor
         backgroundNode.lineWidth = 1.5
         backgroundNode.glowWidth = 2
-        
+
         // Tag color accent bar at top
-        accentBar = SKShapeNode(rectOf: CGSize(width: w - 8, height: 4), cornerRadius: 2)
+        accentBar = SKShapeNode(rectOf: CGSize(width: w - 10, height: 5), cornerRadius: 2.5)
         accentBar.fillColor = tagColor
         accentBar.strokeColor = .clear
-        accentBar.position = CGPoint(x: 0, y: h / 2 - 12)
-        
+        accentBar.position = CGPoint(x: 0, y: h / 2 - 14)
+
         super.init()
-        
+
         isUserInteractionEnabled = false  // Scene handles taps
-        
+
+        addChild(basePlate)
         addChild(backgroundNode)
         addChild(accentBar)
         
@@ -94,50 +104,51 @@ final class UpgradeCardNode: SKNode {
         
         // Tag emoji
         let tagLabel = SKLabelNode(text: UpgradeCardNode.emoji(for: card.tag))
-        tagLabel.fontSize = 20
-        tagLabel.position = CGPoint(x: 0, y: h / 2 - 35)
+        tagLabel.fontSize = 24
+        tagLabel.position = CGPoint(x: 0, y: h / 2 - 44)
         tagLabel.verticalAlignmentMode = .center
         addChild(tagLabel)
-        
+
         // Card name — auto-shrink to fit within card width
         let nameLabel = SKLabelNode(fontNamed: "Menlo-Bold")
         nameLabel.text = card.name
         nameLabel.fontColor = tagColor
         nameLabel.verticalAlignmentMode = .center
         nameLabel.horizontalAlignmentMode = .center
-        nameLabel.position = CGPoint(x: 0, y: 5)
-        
+        nameLabel.position = CGPoint(x: 0, y: 10)
+
         // v1.4: Auto-shrink font size to fit card width with padding
+        // v1.6 legibility: base size 12 → 14
         let maxNameWidth = w - 12  // 6pt padding each side
-        var nameFontSize: CGFloat = 12
+        var nameFontSize: CGFloat = 14
         nameLabel.fontSize = nameFontSize
-        while nameLabel.frame.width > maxNameWidth && nameFontSize > 7 {
+        while nameLabel.frame.width > maxNameWidth && nameFontSize > 8 {
             nameFontSize -= 0.5
             nameLabel.fontSize = nameFontSize
         }
-        
+
         addChild(nameLabel)
-        
+
         // Description (wrapped manually for small card)
-        // v1.4: Bumped max chars from 14 → 16 for wider card
-        let descLines = wrapText(card.description, maxChars: 16)
+        // v1.6 legibility: 8pt → 10pt, wider card fits 17 chars/line
+        let descLines = wrapText(card.description, maxChars: 17)
         for (i, line) in descLines.enumerated() {
             let descLabel = SKLabelNode(fontNamed: "Menlo")
             descLabel.text = line
-            descLabel.fontSize = 8
-            descLabel.fontColor = SKColor(hex: 0xAAAAAA)
-            descLabel.position = CGPoint(x: 0, y: -12 - CGFloat(i) * 11)
+            descLabel.fontSize = 10
+            descLabel.fontColor = SKColor(hex: 0xBBBBBB)
+            descLabel.position = CGPoint(x: 0, y: -12 - CGFloat(i) * 13)
             descLabel.verticalAlignmentMode = .center
             descLabel.horizontalAlignmentMode = .center
             addChild(descLabel)
         }
-        
+
         // Tag name at bottom
         let tagNameLabel = SKLabelNode(fontNamed: "Menlo")
         tagNameLabel.text = card.tag.rawValue.uppercased()
-        tagNameLabel.fontSize = 7
+        tagNameLabel.fontSize = 9
         tagNameLabel.fontColor = SKColor(hex: 0x999999)
-        tagNameLabel.position = CGPoint(x: 0, y: -h / 2 + 12)
+        tagNameLabel.position = CGPoint(x: 0, y: -h / 2 + 14)
         tagNameLabel.verticalAlignmentMode = .center
         addChild(tagNameLabel)
     }
@@ -182,7 +193,9 @@ final class UpgradeCardNode: SKNode {
         let flash = SKAction.sequence([
             SKAction.scale(to: 1.15, duration: 0.1),
             SKAction.run { [weak self] in
-                self?.backgroundNode.fillColor = SKColor(hex: 0x444444)
+                guard let self = self else { return }
+                // v1.6: selection flash brightens the tree's own color
+                self.backgroundNode.fillColor = SKColor(hex: self.tagColorHex, alpha: 0.55)
             },
             SKAction.wait(forDuration: 0.15),
             SKAction.group([

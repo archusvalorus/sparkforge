@@ -40,6 +40,7 @@ final class TitleScene: SKScene {
     private let blessingActiveLabel = SKLabelNode(fontNamed: "Menlo")
 
     // v1.6: Arena selector
+    private let arenaBox = SKShapeNode(rectOf: CGSize(width: 312, height: 118), cornerRadius: 12)
     private let arenaHeader = SKLabelNode(fontNamed: "Menlo-Bold")
     private let arenaPrevArrow = SKLabelNode(fontNamed: "Menlo-Bold")
     private let arenaNextArrow = SKLabelNode(fontNamed: "Menlo-Bold")
@@ -47,19 +48,28 @@ final class TitleScene: SKScene {
     private let arenaReadyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     
     // MARK: - State
-    
+
     private var isTransitioning = false
-    
+
     /// Tracks the current Y cursor for sequential layout
     private var layoutY: CGFloat = 0
+
+    // v1.6: blessing claim is a modal now (the old inline text stamped
+    // itself over whatever the layout had moved into its spot)
+    private var blessingModal: SKNode?
+    private var dailyForgeRowY: CGFloat = 0
     
     // MARK: - Scene Lifecycle
     
     override func didMove(to view: SKView) {
         backgroundColor = .black
-        
-        // Start layout from center
-        layoutY = 120
+
+        // v1.6: stretch the stack to fill the screen — the old fixed 120
+        // start crammed everything into the middle third.
+        // Belt & suspenders: if the scene somehow arrives unsized (the
+        // zero-bounds-at-launch trap), fall back to a sane phone height.
+        let screenHeight = size.height > 100 ? size.height : 667
+        layoutY = min(screenHeight * 0.30, 280)
         
         setupEmberParticles()
         setupForgeGlow()
@@ -165,17 +175,17 @@ final class TitleScene: SKScene {
         titleGlow.zPosition = 9
         addChild(titleGlow)
         
-        layoutY -= 28
-        
+        layoutY -= 34
+
         // Subtitle
         subtitleLabel.text = "arena survival roguelite"
-        subtitleLabel.fontSize = 11
+        subtitleLabel.fontSize = 12
         subtitleLabel.fontColor = SKColor(hex: 0xCCCCCC)
         subtitleLabel.position = CGPoint(x: 0, y: layoutY)
         subtitleLabel.zPosition = 10
         addChild(subtitleLabel)
-        
-        layoutY -= 30
+
+        layoutY -= 44
     }
     
     // MARK: - v1.4: Forge Level
@@ -186,17 +196,17 @@ final class TitleScene: SKScene {
         // Forge Level badge
         let level = pm.forgeLevel
         forgeLevelLabel.text = level > 0 ? "FORGE LV \(level)" : "FORGE LV 0"
-        forgeLevelLabel.fontSize = 12
+        forgeLevelLabel.fontSize = 14
         forgeLevelLabel.fontColor = SKColor(hex: 0xFFAA33)
         forgeLevelLabel.position = CGPoint(x: 0, y: layoutY)
         forgeLevelLabel.zPosition = 10
         addChild(forgeLevelLabel)
-        
-        layoutY -= 14
-        
+
+        layoutY -= 18
+
         // XP progress bar
-        let barW: CGFloat = 100
-        let barH: CGFloat = 3
+        let barW: CGFloat = 130
+        let barH: CGFloat = 4
         
         let bg = SKShapeNode(rectOf: CGSize(width: barW, height: barH), cornerRadius: 1.5)
         bg.fillColor = SKColor(hex: 0x332211)
@@ -216,8 +226,8 @@ final class TitleScene: SKScene {
         fill.position = CGPoint(x: 0, y: layoutY)
         fill.zPosition = 11
         addChild(fill)
-        
-        layoutY -= 25
+
+        layoutY -= 34
     }
     
     private func setupStats() {
@@ -226,24 +236,24 @@ final class TitleScene: SKScene {
         if hs.totalRuns > 0 {
             // Best time + level
             bestLabel.text = "Best: \(hs.bestTimeFormatted)  •  Level \(hs.bestLevel)"
-            bestLabel.fontSize = 13
+            bestLabel.fontSize = 15
             bestLabel.fontColor = SKColor(hex: 0xFFAA33)
             bestLabel.position = CGPoint(x: 0, y: layoutY)
             bestLabel.zPosition = 10
             addChild(bestLabel)
-            
-            layoutY -= 18
-            
+
+            layoutY -= 24
+
             // Total stats — now shows typed kills
             let pm = ProgressionManager.shared
             statsLabel.text = "\(hs.totalRuns) runs  •  \(pm.totalKills) kills"
-            statsLabel.fontSize = 10
+            statsLabel.fontSize = 12
             statsLabel.fontColor = SKColor(hex: 0xBBBBBB)
             statsLabel.position = CGPoint(x: 0, y: layoutY)
             statsLabel.zPosition = 10
             addChild(statsLabel)
-            
-            layoutY -= 25
+
+            layoutY -= 36
         }
     }
     
@@ -252,47 +262,56 @@ final class TitleScene: SKScene {
     // v1.6: Arena section — header doubles as a selector once Arena 2 unlocks.
     // Fixed four-row layout; refreshArenaSection() fills it per selected arena.
     private func setupArenaProgress() {
-        arenaHeader.fontSize = 9
+        // v1.6 polish: the arena selector is the most important choice on
+        // this screen — it now reads like one, boxed like a skill card
+        // (dark plate + arena-tinted wash; tint set in refreshArenaSection)
+        arenaBox.position = CGPoint(x: 0, y: layoutY - 42)
+        arenaBox.lineWidth = 1.5
+        arenaBox.glowWidth = 2
+        arenaBox.zPosition = 9
+        addChild(arenaBox)
+
+        arenaHeader.fontSize = 15
         arenaHeader.position = CGPoint(x: 0, y: layoutY)
         arenaHeader.zPosition = 10
         addChild(arenaHeader)
 
         arenaPrevArrow.text = "◀"
         arenaNextArrow.text = "▶"
-        for (arrow, x) in [(arenaPrevArrow, CGFloat(-100)), (arenaNextArrow, CGFloat(100))] {
-            arrow.fontSize = 12
+        for (arrow, x) in [(arenaPrevArrow, CGFloat(-125)), (arenaNextArrow, CGFloat(125))] {
+            arrow.fontSize = 20
             arrow.fontColor = SKColor(hex: 0xFFAA33)
-            arrow.position = CGPoint(x: x, y: layoutY - 1)
+            arrow.position = CGPoint(x: x, y: layoutY - 2)
             arrow.zPosition = 10
             addChild(arrow)
         }
 
-        layoutY -= 16
+        layoutY -= 26
 
-        // Row 1: kill progress (Crucible) / flavor line (Quench)
-        killProgressLabel.fontSize = 10
+        // Row 1: kill progress (both arenas track their own gate kills)
+        killProgressLabel.fontSize = 12
         killProgressLabel.position = CGPoint(x: 0, y: layoutY)
         killProgressLabel.zPosition = 10
         addChild(killProgressLabel)
 
-        arenaFlavorLabel.fontSize = 9
+        layoutY -= 22
+
+        // Row 2: survival check (Crucible, when required) / flavor line (Quench)
+        survivalCheckLabel.fontSize = 12
+        survivalCheckLabel.position = CGPoint(x: 0, y: layoutY)
+        survivalCheckLabel.zPosition = 10
+        addChild(survivalCheckLabel)
+
+        arenaFlavorLabel.fontSize = 11
         arenaFlavorLabel.fontColor = SKColor(hex: 0x8A8478)
         arenaFlavorLabel.position = CGPoint(x: 0, y: layoutY)
         arenaFlavorLabel.zPosition = 10
         addChild(arenaFlavorLabel)
 
-        layoutY -= 15
-
-        // Row 2: survival check (Crucible only)
-        survivalCheckLabel.fontSize = 10
-        survivalCheckLabel.position = CGPoint(x: 0, y: layoutY)
-        survivalCheckLabel.zPosition = 10
-        addChild(survivalCheckLabel)
-
-        layoutY -= 18
+        layoutY -= 26
 
         // Row 3: "boss unlocked" pulse / locked-arena teaser
-        arenaReadyLabel.fontSize = 11
+        arenaReadyLabel.fontSize = 13
         arenaReadyLabel.position = CGPoint(x: 0, y: layoutY)
         arenaReadyLabel.zPosition = 10
         addChild(arenaReadyLabel)
@@ -302,7 +321,7 @@ final class TitleScene: SKScene {
         ])
         arenaReadyLabel.run(SKAction.repeatForever(pulse))
 
-        layoutY -= 20
+        layoutY -= 32
 
         refreshArenaSection()
     }
@@ -316,6 +335,10 @@ final class TitleScene: SKScene {
         arenaHeader.fontColor = arena.id == 1 ? SKColor(hex: 0xB8B0A4) : SKColor(hex: 0xCCCCCC)
         arenaPrevArrow.isHidden = !selectorVisible
         arenaNextArrow.isHidden = !selectorVisible
+
+        // v1.6: the box wears the arena's vibe — same treatment as skill cards
+        arenaBox.fillColor = SKColor(hex: arena.accentColorHex, alpha: 0.12)
+        arenaBox.strokeColor = SKColor(hex: arena.accentColorHex, alpha: 0.5)
 
         if arena.id == 0 {
             let progress = pm.arena1Progress
@@ -342,22 +365,39 @@ final class TitleScene: SKScene {
                 arenaReadyLabel.isHidden = true
             } else if progress.allMet {
                 arenaReadyLabel.text = "★ BOSS UNLOCKED ★"
+                arenaReadyLabel.fontSize = 13
                 arenaReadyLabel.fontColor = SKColor(hex: 0xFFAA33)
                 arenaReadyLabel.isHidden = false
             } else {
                 arenaReadyLabel.text = "🔒 THE QUENCH lies beyond the Titan"
-                arenaReadyLabel.fontSize = 9
+                arenaReadyLabel.fontSize = 11
                 arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
                 arenaReadyLabel.isHidden = false
             }
         } else {
-            killProgressLabel.isHidden = true
-            survivalCheckLabel.isHidden = true
+            // v1.6 Unit 6: The Quench shows the Warden's gate
+            let gate = ProgressionManager.arena2Gate
+            let kills = pm.quenchKills
+            let met = pm.quenchWardenUnlocked
 
+            let killText = "\(min(kills, gate.totalKillsRequired))/\(gate.totalKillsRequired) kills in the Quench"
+            killProgressLabel.text = met ? "✓ \(killText)" : "○ \(killText)"
+            killProgressLabel.fontColor = met
+                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
+            killProgressLabel.isHidden = false
+
+            survivalCheckLabel.isHidden = true
             arenaFlavorLabel.text = arena.flavorLine
             arenaFlavorLabel.isHidden = false
 
-            arenaReadyLabel.isHidden = true
+            if met {
+                arenaReadyLabel.text = "★ THE WARDEN STIRS ★"
+                arenaReadyLabel.fontSize = 13
+                arenaReadyLabel.fontColor = SKColor(hex: 0xD8A94A)
+                arenaReadyLabel.isHidden = false
+            } else {
+                arenaReadyLabel.isHidden = true
+            }
         }
     }
     
@@ -365,12 +405,13 @@ final class TitleScene: SKScene {
     
     private func setupDailyForge() {
         let dfm = DailyForgeManager.shared
-        
-        layoutY -= 8  // Extra breathing room
-        
+
+        layoutY -= 22  // Extra breathing room (clears the arena box's bottom edge)
+        dailyForgeRowY = layoutY  // v1.6: remembered so the post-claim indicator lands here
+
         if !dfm.hasClaimedToday {
             // Show claimable button
-            let bg = SKShapeNode(rectOf: CGSize(width: 160, height: 32), cornerRadius: 8)
+            let bg = SKShapeNode(rectOf: CGSize(width: 200, height: 42), cornerRadius: 10)
             bg.fillColor = SKColor(hex: 0x332200)
             bg.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.6)
             bg.lineWidth = 1.5
@@ -378,46 +419,46 @@ final class TitleScene: SKScene {
             bg.zPosition = 10
             bg.name = "dailyForgeBG"
             dailyForgeButton.addChild(bg)
-            
+
             dailyForgeLabel.text = "🔥 DAILY FORGE"
-            dailyForgeLabel.fontSize = 12
+            dailyForgeLabel.fontSize = 14
             dailyForgeLabel.fontColor = SKColor(hex: 0xFFAA33)
             dailyForgeLabel.verticalAlignmentMode = .center
             dailyForgeLabel.position = CGPoint(x: 0, y: layoutY)
             dailyForgeLabel.zPosition = 11
             dailyForgeLabel.name = "dailyForgeLabel"
             dailyForgeButton.addChild(dailyForgeLabel)
-            
+
             dailyForgeButton.name = "dailyForgeButton"
             addChild(dailyForgeButton)
-            
+
             // Gentle pulse on the button
             let pulse = SKAction.sequence([
                 SKAction.fadeAlpha(to: 0.7, duration: 1.0),
                 SKAction.fadeAlpha(to: 1.0, duration: 1.0)
             ])
             bg.run(SKAction.repeatForever(pulse))
-            
-            layoutY -= 30
-            
+
+            layoutY -= 50
+
         } else if let blessing = dfm.activeBlessing {
             // Show active blessing indicator
             blessingActiveLabel.text = "\(blessing.icon) \(blessing.name) ready"
-            blessingActiveLabel.fontSize = 10
+            blessingActiveLabel.fontSize = 12
             blessingActiveLabel.fontColor = SKColor(hex: 0x66AA66)
             blessingActiveLabel.position = CGPoint(x: 0, y: layoutY)
             blessingActiveLabel.zPosition = 10
             addChild(blessingActiveLabel)
-            
-            layoutY -= 22
+
+            layoutY -= 32
         }
     }
     
     private func setupTapPrompt() {
-        layoutY -= 10  // Breathing room
-        
+        layoutY -= 14  // Breathing room
+
         tapPrompt.text = "tap to ignite"
-        tapPrompt.fontSize = 14
+        tapPrompt.fontSize = 17
         tapPrompt.fontColor = SKColor(hex: 0xCCCCCC)
         tapPrompt.position = CGPoint(x: 0, y: layoutY)
         tapPrompt.zPosition = 10
@@ -433,26 +474,26 @@ final class TitleScene: SKScene {
     
     private func setupSettings() {
         let s = DeviceScale.ui
-        
-        layoutY -= 15  // Breathing room before settings
-        
+
+        layoutY -= 34  // Breathing room before settings
+
         // Remove Ads button (hidden if already purchased)
         if !IAPManager.shared.hasRemovedAds {
             let removeAdsLabel = SKLabelNode(fontNamed: "Menlo-Bold")
             removeAdsLabel.text = "Remove Ads - $2.99"
-            removeAdsLabel.fontSize = 11 * s
+            removeAdsLabel.fontSize = 13 * s
             removeAdsLabel.fontColor = SKColor(hex: 0xFFAA33)
             removeAdsLabel.position = CGPoint(x: 0, y: layoutY)
             removeAdsLabel.zPosition = 10
             removeAdsLabel.name = "removeAdsButton"
             addChild(removeAdsLabel)
-            
-            layoutY -= 20
+
+            layoutY -= 26
         }
-        
+
         // Restore purchases link
         restoreLabel.text = "Restore Purchases"
-        restoreLabel.fontSize = 10 * s
+        restoreLabel.fontSize = 11 * s
         restoreLabel.fontColor = SKColor(hex: 0x999999)
         restoreLabel.position = CGPoint(x: 0, y: layoutY)
         restoreLabel.zPosition = 10
@@ -468,11 +509,17 @@ final class TitleScene: SKScene {
         
         let location = touch.location(in: self)
 
+        // v1.6: blessing modal eats every tap until dismissed
+        if blessingModal != nil {
+            dismissBlessingModal()
+            return
+        }
+
         // v1.6: Arena selector arrows (visible once Arena 2 is unlocked)
         if ProgressionManager.shared.arenasUnlocked >= 2 {
             for arrow in [arenaPrevArrow, arenaNextArrow] where !arrow.isHidden {
-                let frame = CGRect(x: arrow.position.x - 28, y: arrow.position.y - 22,
-                                   width: 56, height: 44)
+                let frame = CGRect(x: arrow.position.x - 32, y: arrow.position.y - 26,
+                                   width: 64, height: 52)
                 if frame.contains(location) {
                     let pm = ProgressionManager.shared
                     pm.currentArena = pm.currentArena == 0 ? 1 : 0
@@ -486,9 +533,9 @@ final class TitleScene: SKScene {
         if dailyForgeButton.parent != nil,
            let bg = dailyForgeButton.childNode(withName: "dailyForgeBG") {
             let forgeFrame = CGRect(
-                x: bg.position.x - 90,
-                y: bg.position.y - 20,
-                width: 180, height: 40
+                x: bg.position.x - 105,
+                y: bg.position.y - 25,
+                width: 210, height: 50
             )
             if forgeFrame.contains(location) {
                 handleDailyForge()
@@ -530,54 +577,107 @@ final class TitleScene: SKScene {
     
     private func handleDailyForge() {
         let dfm = DailyForgeManager.shared
-        
+
         // If ads are removed, claim directly
         if IAPManager.shared.hasRemovedAds {
             let blessing = dfm.claimBlessing()
-            showBlessingGranted(blessing)
+            showBlessingModal(blessing)
             return
         }
-        
+
         // Otherwise, show rewarded ad then claim
         // TODO: Wire AdReviveManager for Daily Forge ad placement
         let blessing = dfm.claimBlessing()
-        showBlessingGranted(blessing)
+        showBlessingModal(blessing)
     }
-    
-    private func showBlessingGranted(_ blessing: DailyForgeManager.Blessing) {
-        // Replace button with blessing display
+
+    // v1.6: blessing claim is a modal — the old inline text was positioned
+    // off a stale layout cursor and stamped itself over "tap to ignite"
+    private func showBlessingModal(_ blessing: DailyForgeManager.Blessing) {
         dailyForgeButton.removeAllChildren()
         dailyForgeButton.removeFromParent()
-        
-        let grantedY = layoutY + 50  // Roughly where the button was
-        
-        let granted = SKLabelNode(fontNamed: "Menlo-Bold")
-        granted.text = "\(blessing.icon) \(blessing.name)"
-        granted.fontSize = 14
-        granted.fontColor = SKColor(hex: 0xFFAA33)
-        granted.position = CGPoint(x: 0, y: grantedY + 5)
-        granted.zPosition = 11
-        granted.alpha = 0
-        addChild(granted)
-        
+
+        let modal = SKNode()
+        modal.zPosition = 300
+
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
+        dim.strokeColor = .clear
+        modal.addChild(dim)
+
+        let panel = SKShapeNode(rectOf: CGSize(width: 280, height: 190), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x1A1208)
+        panel.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.7)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        modal.addChild(panel)
+
+        let icon = SKLabelNode(text: blessing.icon)
+        icon.fontSize = 38
+        icon.verticalAlignmentMode = .center
+        icon.position = CGPoint(x: 0, y: 48)
+        modal.addChild(icon)
+
+        let name = SKLabelNode(fontNamed: "Menlo-Bold")
+        name.text = blessing.name
+        name.fontSize = 18
+        name.fontColor = SKColor(hex: 0xFFAA33)
+        name.verticalAlignmentMode = .center
+        name.position = CGPoint(x: 0, y: 8)
+        modal.addChild(name)
+
         let desc = SKLabelNode(fontNamed: "Menlo")
         desc.text = blessing.description
-        desc.fontSize = 10
+        desc.fontSize = 12
         desc.fontColor = SKColor(hex: 0x66AA66)
-        desc.position = CGPoint(x: 0, y: grantedY - 12)
-        desc.zPosition = 11
-        desc.alpha = 0
-        addChild(desc)
-        
-        // Pop-in animation
-        granted.run(SKAction.sequence([
-            SKAction.group([
-                SKAction.fadeIn(withDuration: 0.3),
-                SKAction.scale(to: 1.2, duration: 0.2)
-            ]),
-            SKAction.scale(to: 1.0, duration: 0.1)
+        desc.verticalAlignmentMode = .center
+        desc.position = CGPoint(x: 0, y: -20)
+        modal.addChild(desc)
+
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "tap to continue"
+        hint.fontSize = 10
+        hint.fontColor = SKColor(hex: 0x888888)
+        hint.verticalAlignmentMode = .center
+        hint.position = CGPoint(x: 0, y: -62)
+        modal.addChild(hint)
+        hint.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.3, duration: 1.0),
+            SKAction.fadeAlpha(to: 1.0, duration: 1.0)
+        ])))
+
+        addChild(modal)
+        blessingModal = modal
+
+        modal.alpha = 0
+        panel.setScale(0.85)
+        modal.run(SKAction.fadeIn(withDuration: 0.2))
+        let pop = SKAction.scale(to: 1.0, duration: 0.2)
+        pop.timingMode = .easeOut
+        panel.run(pop)
+    }
+
+    private func dismissBlessingModal() {
+        guard let modal = blessingModal else { return }
+        blessingModal = nil
+
+        modal.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: 0.15),
+            SKAction.removeFromParent()
         ]))
-        desc.run(SKAction.fadeIn(withDuration: 0.4))
+
+        // Leave the "ready" indicator where the Daily Forge button lived
+        if let blessing = DailyForgeManager.shared.activeBlessing,
+           blessingActiveLabel.parent == nil {
+            blessingActiveLabel.text = "\(blessing.icon) \(blessing.name) ready"
+            blessingActiveLabel.fontSize = 12
+            blessingActiveLabel.fontColor = SKColor(hex: 0x66AA66)
+            blessingActiveLabel.position = CGPoint(x: 0, y: dailyForgeRowY)
+            blessingActiveLabel.zPosition = 10
+            blessingActiveLabel.alpha = 0
+            addChild(blessingActiveLabel)
+            blessingActiveLabel.run(SKAction.fadeIn(withDuration: 0.3))
+        }
     }
     
     // MARK: - Transitions

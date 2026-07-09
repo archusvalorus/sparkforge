@@ -72,6 +72,10 @@ v2.0 = facelift / cohesion pass / progression framing — "package the first fiv
 - *Last Ember* (Arena 5, "survive lethal damage once") overlaps *Brace* (guard_1) — same `lethalSaves` mechanic, different tag. Fine if intentional (stacking saves), needs a rules call.
 - *Live Wire*-style near-duplicates: watch for these in every future card drop.
 
+**Banked concepts (Brandon, 7/9/26):**
+- The original Braceguard — a shield-bearer whose full-block shield *rotates to track the player* (capped turn rate, flank to kill) — built, playtested, pulled from Arena 2 as too demanding amid the chaos. Reintroduce as a **later-arena elite** (natural fits: Coilworks' rhythm lessons or Mirrorwound's attention economy). Arena 2 ships the readable version: fixed cardinal shield, 50% damage reduction.
+- The **Cinder Halo** (orbiter with rotating broken-halo ring) — built and pulled from Arena 2's table: mid-swarm, the spinning ring *reads* as a shield even though it never blocks. The class is fully implemented (`CinderHaloNode`, tightening-orbit AI) and one spawn-table line from returning. Before reuse, restyle the ring so it reads as ornament, not armor — or hand it to the Coilworks, where its snapping angular cousin (Circuit Wasp) already lives in spec.
+
 **Two structural hints in Lyra's spec worth a deliberate decision later:**
 1. **"Node names" per biome** imply a possible run-map / route-selection structure (nodes as chambers within an arena). That's a v2.0-scale identity question: do arenas stay parallel selectable modes, or does a deep run *travel* them?
 2. ***Star Temper* ("each boss kill grants max HP") implies multiple boss kills in one run** — same question. Current architecture: one boss per run at 90s. A multi-arena "gauntlet run" would be the natural v2.0 Endless Forge shape.

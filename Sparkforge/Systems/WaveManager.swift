@@ -27,9 +27,13 @@ final class WaveManager {
             return max(reduced, config.minimumSpawnInterval)
         } else {
             // Phase 2: Aggressive density (90s+)
-            // Faster acceleration, lower floor
+            // v1.6: ramps from the CLAMPED phase-1 floor — the old math used
+            // the unclamped value, causing an instant density cliff at 90s
             let phase2Time = elapsedTime - 90
-            let phase1Floor = config.initialSpawnInterval - (90 * config.spawnAcceleration)
+            let phase1Floor = max(
+                config.initialSpawnInterval - (90 * config.spawnAcceleration),
+                config.minimumSpawnInterval
+            )
             let reduced = phase1Floor - (phase2Time * config.lateGameAcceleration)
             return max(reduced, config.lateGameMinInterval)
         }

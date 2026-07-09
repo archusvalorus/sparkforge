@@ -19,6 +19,7 @@ struct ArenaConfig {
     let boundaryColorHex: UInt32
     let dangerGlowHex: UInt32   // Pulsing ring outside the boundary
     let detailLineHex: UInt32   // Floor motif line work
+    let accentColorHex: UInt32  // v1.6: title-screen selector box tint/stroke
 
     static let crucible = ArenaConfig(
         id: 0,
@@ -28,7 +29,8 @@ struct ArenaConfig {
         floorColorHex: 0x1A1A1A,
         boundaryColorHex: 0x3A1A0A,
         dangerGlowHex: 0x441100,
-        detailLineHex: 0x252525
+        detailLineHex: 0x252525,
+        accentColorHex: 0xFF7722
     )
 
     static let quench = ArenaConfig(
@@ -39,7 +41,8 @@ struct ArenaConfig {
         floorColorHex: 0x11151A,
         boundaryColorHex: 0x6A6256,
         dangerGlowHex: 0x3A3A34,
-        detailLineHex: 0x272C33
+        detailLineHex: 0x272C33,
+        accentColorHex: 0xB8B0A4
     )
 
     static let all: [ArenaConfig] = [crucible, quench]

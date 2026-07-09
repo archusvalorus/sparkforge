@@ -50,19 +50,27 @@ final class AshlingNode: EnemyNode {
     // MARK: - Visuals
 
     private func applyAshVisuals() {
-        // Ash-gray outline, near-black body, ember-pin eyes
+        // v1.6 color coding: shardlings read NEON YELLOW — distinct from
+        // melee red, shooter purple, and (critically) the player's ember
+        // orange, which the old eye color collided with.
         for child in children {
             if let shape = child as? SKShapeNode {
                 if shape.glowWidth > 0 && shape.fillColor == .clear {
-                    shape.strokeColor = SKColor(hex: 0x8A8478, alpha: 0.55)
+                    // Rim — ash with a yellow undertone
+                    shape.strokeColor = SKColor(hex: 0xA8AE5C, alpha: 0.55)
                 }
-                if shape.fillColor != .clear && shape.glowWidth == 0 {
+                if shape.fillColor != .clear && shape.glowWidth == 0 && shape.zPosition != 6 {
                     shape.fillColor = SKColor(hex: 0x14161A)
                 }
-                // Eyes → tiny ember pins
-                if shape.zPosition == 6, shape.fillColor == SKColor(hex: 0xFF2222) {
-                    shape.fillColor = SKColor(hex: 0xFF7733)
-                    shape.setScale(0.8)
+                // Face (eyes, mouth, brows — any style variant) → neon yellow
+                if shape.zPosition == 6 {
+                    if shape.fillColor != .clear {
+                        shape.fillColor = SKColor(hex: 0xE6FF33)
+                        shape.setScale(0.8)
+                    }
+                    if shape.strokeColor != .clear {
+                        shape.strokeColor = SKColor(hex: 0xD4EE22, alpha: 0.85)
+                    }
                 }
             }
         }
