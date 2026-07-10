@@ -113,33 +113,13 @@ final class ProgressionManager {
         return false
     }
     
-    /// Apply forge level bonuses to PlayerStats at run start
+    /// Apply forge bonuses to PlayerStats at run start.
+    /// v1.7 Forge Paths: flat per-level bonuses are gone — power now
+    /// comes from the player's chosen path nodes (same budget, spent
+    /// deliberately). Picks are a pure function of forge level, so
+    /// existing players' history arrived banked and spendable.
     func applyForgeBonuses(to stats: PlayerStats) {
-        let level = forgeLevel
-        
-        // Levels 1–5: +2 max HP each
-        let hpBonus = min(level, 5) * 2
-        stats.maxHP += hpBonus
-        stats.currentHP += hpBonus
-        
-        // Levels 6–10: +1 ATK each
-        let atkLevels = max(0, min(level - 5, 5))
-        stats.baseAttack += atkLevels
-        
-        // Levels 11–15: +1 DEF each
-        let defLevels = max(0, min(level - 10, 5))
-        stats.defense += defLevels
-        
-        // Levels 16–20: +3% crit chance each
-        let critLevels = max(0, min(level - 15, 5))
-        stats.critChance += CGFloat(critLevels) * 0.03
-        
-        // Levels 21+: rotating small bonuses
-        if level > 20 {
-            let extraLevels = level - 20
-            stats.maxHP += extraLevels  // +1 HP per level
-            stats.currentHP += extraLevels
-        }
+        ForgePathManager.shared.applyPathBonuses(to: stats)
     }
     
     // MARK: - Arena Unlocks
@@ -295,6 +275,7 @@ final class ProgressionManager {
         defaults.removeObject(forKey: Keys.forgeLevel)
         defaults.removeObject(forKey: Keys.currentArena)
         defaults.removeObject(forKey: Keys.arenasUnlocked)
+        ForgePathManager.shared.resetAll()
     }
     
     private init() {}

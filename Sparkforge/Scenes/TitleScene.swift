@@ -63,6 +63,10 @@ final class TitleScene: SKScene {
     private var blessingChoiceModal: SKNode?
     private var blessingPickerModal: SKNode?
     private let adManager = AdReviveManager()
+
+    // v1.7: Forge Paths
+    private var forgePathModal: SKNode?
+    private var forgePathRowY: CGFloat = 0
     
     // MARK: - Scene Lifecycle
     
@@ -237,7 +241,70 @@ final class TitleScene: SKScene {
         fill.zPosition = 11
         addChild(fill)
 
+        setupForgePathRow()
+
         layoutY -= 34
+    }
+
+    // MARK: - v1.7: Forge Paths
+
+    /// Under the forge XP bar: a picks-ready button when there's a choice
+    /// to make, otherwise a quiet one-line path summary.
+    private func setupForgePathRow() {
+        let fpm = ForgePathManager.shared
+        guard fpm.picksAvailable > 0 || !fpm.summary.isEmpty else { return }
+
+        layoutY -= 24
+        forgePathRowY = layoutY
+        drawForgePathRow()
+        layoutY -= 10
+    }
+
+    /// Draws (or redraws after spending picks) the path row at its slot
+    private func drawForgePathRow() {
+        while let stale = childNode(withName: "forgePathButton") { stale.removeFromParent() }
+        while let stale = childNode(withName: "forgePathRowLabel") { stale.removeFromParent() }
+
+        let fpm = ForgePathManager.shared
+
+        if fpm.picksAvailable > 0 {
+            let bg = SKShapeNode(rectOf: CGSize(width: 220, height: 32), cornerRadius: 8)
+            bg.fillColor = SKColor(hex: 0x2A1A00)
+            bg.strokeColor = SKColor(hex: 0xFFCC66, alpha: 0.7)
+            bg.lineWidth = 1.5
+            bg.position = CGPoint(x: 0, y: forgePathRowY)
+            bg.zPosition = 10
+            bg.name = "forgePathButton"
+            addChild(bg)
+
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            let n = fpm.picksAvailable
+            label.text = "⚒ FORGE PATH — \(n) PICK\(n == 1 ? "" : "S") READY"
+            label.fontSize = 11
+            label.fontColor = SKColor(hex: 0xFFCC66)
+            label.verticalAlignmentMode = .center
+            label.position = CGPoint(x: 0, y: forgePathRowY)
+            label.zPosition = 11
+            label.name = "forgePathRowLabel"
+            addChild(label)
+
+            let pulse = SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.65, duration: 1.0),
+                SKAction.fadeAlpha(to: 1.0, duration: 1.0)
+            ])
+            bg.run(SKAction.repeatForever(pulse))
+        } else if !fpm.summary.isEmpty {
+            let parts = fpm.summary.map { "\($0.branch.icon)\($0.count)" }
+            let summaryLabel = SKLabelNode(fontNamed: "Menlo")
+            summaryLabel.text = parts.joined(separator: "  ")
+            summaryLabel.fontSize = 11
+            summaryLabel.fontColor = SKColor(hex: 0x999999)
+            summaryLabel.verticalAlignmentMode = .center
+            summaryLabel.position = CGPoint(x: 0, y: forgePathRowY)
+            summaryLabel.zPosition = 10
+            summaryLabel.name = "forgePathRowLabel"
+            addChild(summaryLabel)
+        }
     }
     
     private func setupStats() {
@@ -528,6 +595,10 @@ final class TitleScene: SKScene {
             handleBlessingPickerTap(location)
             return
         }
+        if forgePathModal != nil {
+            handleForgePathModalTap(location)
+            return
+        }
 
         // v1.6: blessing modal eats every tap until dismissed
         if blessingModal != nil {
@@ -563,6 +634,16 @@ final class TitleScene: SKScene {
             }
         }
         
+        // v1.7: Forge Path picks button
+        if let pathBtn = childNode(withName: "forgePathButton") {
+            let frame = CGRect(x: pathBtn.position.x - 110, y: pathBtn.position.y - 16,
+                               width: 220, height: 32)
+            if frame.contains(location) {
+                showForgePathModal()
+                return
+            }
+        }
+
         // Check Remove Ads tap
         if let removeBtn = childNode(withName: "removeAdsButton") {
             let btnFrame = CGRect(
@@ -813,6 +894,144 @@ final class TitleScene: SKScene {
         let pop = SKAction.scale(to: 1.0, duration: 0.2)
         pop.timingMode = .easeOut
         panel.run(pop)
+    }
+
+    // MARK: - v1.7: Forge Path Modal
+
+    private func showForgePathModal() {
+        let fpm = ForgePathManager.shared
+        guard fpm.picksAvailable > 0 else { return }
+
+        let modal = SKNode()
+        modal.zPosition = 300
+
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
+        dim.strokeColor = .clear
+        modal.addChild(dim)
+
+        let panel = SKShapeNode(rectOf: CGSize(width: 292, height: 276), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x1A1208)
+        panel.strokeColor = SKColor(hex: 0xFFCC66, alpha: 0.7)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        modal.addChild(panel)
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "⚒ FORGE PATH"
+        title.fontSize = 16
+        title.fontColor = SKColor(hex: 0xFFCC66)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: 108)
+        modal.addChild(title)
+
+        let n = fpm.picksAvailable
+        let subtitle = SKLabelNode(fontNamed: "Menlo")
+        subtitle.text = "choose a permanent node — \(n) pick\(n == 1 ? "" : "s") left"
+        subtitle.fontSize = 10
+        subtitle.fontColor = SKColor(hex: 0x999999)
+        subtitle.verticalAlignmentMode = .center
+        subtitle.position = CGPoint(x: 0, y: 86)
+        modal.addChild(subtitle)
+
+        let rowYs: [CGFloat] = [44, -14, -72]
+        for (i, branch) in ForgePathManager.Branch.allCases.enumerated() {
+            guard let node = fpm.nextNode(for: branch) else { continue }
+            let y = rowYs[i]
+            let color = SKColor(hex: branch.colorHex)
+
+            let row = SKShapeNode(rectOf: CGSize(width: 256, height: 50), cornerRadius: 8)
+            row.fillColor = SKColor(hex: 0x161616)
+            row.strokeColor = SKColor(hex: branch.colorHex, alpha: 0.7)
+            row.lineWidth = 1.5
+            row.position = CGPoint(x: 0, y: y)
+            modal.addChild(row)
+
+            let wash = SKShapeNode(rectOf: CGSize(width: 256, height: 50), cornerRadius: 8)
+            wash.fillColor = SKColor(hex: branch.colorHex, alpha: 0.12)
+            wash.strokeColor = .clear
+            wash.position = CGPoint(x: 0, y: y)
+            modal.addChild(wash)
+
+            let icon = SKLabelNode(text: branch.icon)
+            icon.fontSize = 20
+            icon.verticalAlignmentMode = .center
+            icon.position = CGPoint(x: -106, y: y)
+            modal.addChild(icon)
+
+            let branchName = SKLabelNode(fontNamed: "Menlo-Bold")
+            branchName.text = branch.rawValue.uppercased()
+            branchName.fontSize = 12
+            branchName.fontColor = color
+            branchName.verticalAlignmentMode = .center
+            branchName.horizontalAlignmentMode = .left
+            branchName.position = CGPoint(x: -84, y: y + 11)
+            modal.addChild(branchName)
+
+            let nodeLabel = SKLabelNode(fontNamed: "Menlo")
+            nodeLabel.text = "\(node.name) — \(node.effectText)"
+            nodeLabel.fontSize = 10
+            nodeLabel.fontColor = SKColor(hex: 0xBBBBBB)
+            nodeLabel.verticalAlignmentMode = .center
+            nodeLabel.horizontalAlignmentMode = .left
+            nodeLabel.position = CGPoint(x: -84, y: y - 10)
+            modal.addChild(nodeLabel)
+        }
+
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "tap outside to bank picks for later"
+        hint.fontSize = 9
+        hint.fontColor = SKColor(hex: 0x666666)
+        hint.verticalAlignmentMode = .center
+        hint.position = CGPoint(x: 0, y: -122)
+        modal.addChild(hint)
+
+        addChild(modal)
+        forgePathModal = modal
+
+        modal.alpha = 0
+        panel.setScale(0.85)
+        modal.run(SKAction.fadeIn(withDuration: 0.2))
+        let pop = SKAction.scale(to: 1.0, duration: 0.2)
+        pop.timingMode = .easeOut
+        panel.run(pop)
+    }
+
+    private func handleForgePathModalTap(_ location: CGPoint) {
+        let fpm = ForgePathManager.shared
+        let rowYs: [CGFloat] = [44, -14, -72]
+
+        for (i, branch) in ForgePathManager.Branch.allCases.enumerated() {
+            let rowFrame = CGRect(x: -128, y: rowYs[i] - 25, width: 256, height: 50)
+            if rowFrame.contains(location) {
+                fpm.choose(branch)
+                AudioManager.shared.play(.cardSelect)
+                dismissForgePathModal(animated: false)
+                if fpm.picksAvailable > 0 {
+                    showForgePathModal()  // fresh counts + next nodes in each cycle
+                } else {
+                    drawForgePathRow()
+                }
+                return
+            }
+        }
+
+        // Outside: picks are banked, nothing lost
+        dismissForgePathModal(animated: true)
+        drawForgePathRow()
+    }
+
+    private func dismissForgePathModal(animated: Bool) {
+        guard let modal = forgePathModal else { return }
+        forgePathModal = nil
+        if animated {
+            modal.run(SKAction.sequence([
+                SKAction.fadeOut(withDuration: 0.15),
+                SKAction.removeFromParent()
+            ]))
+        } else {
+            modal.removeFromParent()
+        }
     }
 
     private func handleBlessingPickerTap(_ location: CGPoint) {
