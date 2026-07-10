@@ -208,6 +208,12 @@ enum GameConfig {
         static let glowColorHex: UInt32 = 0x22BB44
     }
     
+    // MARK: - Analytics (v1.7)
+    enum Analytics {
+        /// Max runs kept in the on-disk ring buffer
+        static let maxStoredRuns = 200
+    }
+
     // MARK: - Magnet Orb (v1.4)
     enum MagnetOrb {
         /// Min time between spawns (seconds)

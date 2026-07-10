@@ -914,10 +914,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         switch gameState {
         case .playing:
-            // v1.4: Check pause button tap (right side, top)
-            if let view = view {
-                let viewLoc = touch.location(in: view)
-                if viewLoc.x > view.bounds.width - 60 && viewLoc.y < 60 {
+            // v1.7: Pause hit zone is anchored to the drawn button, expanded to thumb size
+            if let cam = camera {
+                let camLoc = touch.location(in: cam)
+                let hitZone = pauseButton.frame.insetBy(dx: -28, dy: -28)
+                if hitZone.contains(camLoc) {
                     pauseGame()
                     return
                 }
