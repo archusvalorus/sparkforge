@@ -43,7 +43,12 @@ final class UpgradeManager {
     
     /// Cards the player has picked this run (by ID)
     private(set) var pickedCardIDs: [String] = []
-    
+
+    /// v1.7: Picked cards in pick order, for the pause build viewer
+    var pickedCards: [UpgradeCard] {
+        pickedCardIDs.compactMap { id in allCards.first { $0.id == id } }
+    }
+
     /// Tag counts for synergy tracking
     private(set) var tagCounts: [Tag: Int] = [:]
     

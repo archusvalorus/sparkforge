@@ -104,7 +104,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let deathOverlay = SKNode()
     private let levelUpOverlay = SKNode()
     private let synergyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-    private let pauseOverlay = SKNode()  // v1.4: Pause menu
+    private let pauseMenu = PauseMenuNode()  // v1.7: Pause Menu v2
     private let pauseButton = SKLabelNode(fontNamed: "Menlo-Bold")  // v1.4
     
     // MARK: - Stats Tracking
@@ -615,73 +615,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera.addChild(levelUpOverlay)
     }
     
-    // v1.4: Pause Overlay
+    // v1.7: Pause Menu v2 — panes and build viewer live in PauseMenuNode
     private func setupPauseOverlay() {
-        pauseOverlay.zPosition = 200
-        pauseOverlay.alpha = 0
-        
-        let bg = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
-        bg.fillColor = SKColor(hex: 0x000000, alpha: 0.7)
-        bg.strokeColor = .clear
-        pauseOverlay.addChild(bg)
-        
-        let title = SKLabelNode(fontNamed: "Menlo-Bold")
-        title.text = "PAUSED"
-        title.fontSize = 28
-        title.fontColor = SKColor(hex: 0xFFAA33)
-        title.position = CGPoint(x: 0, y: 50)
-        pauseOverlay.addChild(title)
-        
-        // Resume button
-        let resumeBtn = SKNode()
-        resumeBtn.name = "resumeButton"
-        resumeBtn.position = CGPoint(x: 0, y: -10)
-        
-        let resumeBg = SKShapeNode(rectOf: CGSize(width: 160, height: 36), cornerRadius: 6)
-        resumeBg.fillColor = SKColor(hex: 0x334433)
-        resumeBg.strokeColor = SKColor(hex: 0x66AA66, alpha: 0.6)
-        resumeBg.lineWidth = 1
-        resumeBtn.addChild(resumeBg)
-        
-        let resumeText = SKLabelNode(fontNamed: "Menlo-Bold")
-        resumeText.text = "RESUME"
-        resumeText.fontSize = 14
-        resumeText.fontColor = SKColor(hex: 0x88DD88)
-        resumeText.verticalAlignmentMode = .center
-        resumeBtn.addChild(resumeText)
-        pauseOverlay.addChild(resumeBtn)
-        
-        // Menu button
-        let menuBtn = SKNode()
-        menuBtn.name = "pauseMenuButton"
-        menuBtn.position = CGPoint(x: 0, y: -60)
-        
-        let menuBg = SKShapeNode(rectOf: CGSize(width: 120, height: 30), cornerRadius: 5)
-        menuBg.fillColor = SKColor(hex: 0x333333)
-        menuBg.strokeColor = SKColor(hex: 0x888888, alpha: 0.4)
-        menuBg.lineWidth = 1
-        menuBtn.addChild(menuBg)
-        
-        let menuText = SKLabelNode(fontNamed: "Menlo")
-        menuText.text = "MENU"
-        menuText.fontSize = 12
-        menuText.fontColor = SKColor(hex: 0xAAAAAA)
-        menuText.verticalAlignmentMode = .center
-        menuBtn.addChild(menuText)
-        pauseOverlay.addChild(menuBtn)
-
-        // v1.7 interim SFX toggle — Unit 2's settings pane replaces this
-        let sfxBtn = SKLabelNode(fontNamed: "Menlo")
-        sfxBtn.name = "sfxToggleButton"
-        sfxBtn.text = SettingsManager.shared.sfxEnabled ? "SFX: ON" : "SFX: OFF"
-        sfxBtn.fontSize = 12
-        sfxBtn.fontColor = SKColor(hex: 0xAAAAAA)
-        sfxBtn.verticalAlignmentMode = .center
-        sfxBtn.position = CGPoint(x: 0, y: -105)
-        pauseOverlay.addChild(sfxBtn)
-
+        pauseMenu.onResume = { [weak self] in self?.resumeGame() }
+        pauseMenu.onReturnToMenu = { [weak self] in self?.returnToTitle() }
         guard let camera = camera else { return }
-        camera.addChild(pauseOverlay)
+        camera.addChild(pauseMenu)
     }
     
     private func setupEmberParticles() {
@@ -1037,57 +976,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         view.presentScene(titleScene, transition: transition)
     }
     
-    // MARK: - v1.4: Pause
-    
+    // MARK: - v1.4: Pause (v1.7: Pause Menu v2)
+
     private func pauseGame() {
         guard gameState == .playing else { return }
         gameState = .paused
         joystick.forceRelease()
-        pauseOverlay.run(SKAction.fadeIn(withDuration: 0.15))
+        pauseMenu.show(upgradeManager: upgradeManager)
     }
-    
+
     private func resumeGame() {
         guard gameState == .paused else { return }
         gameState = .playing
         // Brief invulnerability after unpause so player can reorient
         invulnerableTimer = 1.0
-        pauseOverlay.run(SKAction.fadeOut(withDuration: 0.15))
+        pauseMenu.hide()
     }
-    
-    private func handlePauseScreenTap(_ touch: UITouch) {
-        let location = touch.location(in: pauseOverlay)
-        
-        // Resume button
-        if let resumeBtn = pauseOverlay.childNode(withName: "resumeButton") {
-            let btnFrame = CGRect(x: resumeBtn.position.x - 80, y: resumeBtn.position.y - 18,
-                                  width: 160, height: 36)
-            if btnFrame.contains(location) {
-                resumeGame()
-                return
-            }
-        }
-        
-        // Menu button
-        if let menuBtn = pauseOverlay.childNode(withName: "pauseMenuButton") {
-            let btnFrame = CGRect(x: menuBtn.position.x - 60, y: menuBtn.position.y - 15,
-                                  width: 120, height: 30)
-            if btnFrame.contains(location) {
-                returnToTitle()
-                return
-            }
-        }
 
-        // v1.7: SFX toggle
-        if let sfxBtn = pauseOverlay.childNode(withName: "sfxToggleButton") as? SKLabelNode {
-            let btnFrame = CGRect(x: sfxBtn.position.x - 60, y: sfxBtn.position.y - 16,
-                                  width: 120, height: 32)
-            if btnFrame.contains(location) {
-                SettingsManager.shared.sfxEnabled.toggle()
-                sfxBtn.text = SettingsManager.shared.sfxEnabled ? "SFX: ON" : "SFX: OFF"
-                AudioManager.shared.play(.cardSelect)
-                return
-            }
-        }
+    private func handlePauseScreenTap(_ touch: UITouch) {
+        pauseMenu.handleTap(at: touch.location(in: pauseMenu))
     }
     
     // MARK: - Card Selection
