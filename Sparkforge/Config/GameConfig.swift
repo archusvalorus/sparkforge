@@ -208,6 +208,24 @@ enum GameConfig {
         static let glowColorHex: UInt32 = 0x22BB44
     }
     
+    // MARK: - Spark Visuals (v1.7)
+    enum Spark {
+        /// White-hot inner core color
+        static let innerCoreColorHex: UInt32 = 0xFFF6E0
+        /// Inner core radius as a fraction of the player's visualRadius
+        static let innerCoreRadiusFactor: CGFloat = 0.55
+        /// Ember trail: particles per second at full stick deflection
+        static let trailMaxBirthRate: CGFloat = 40
+        /// Ember trail: fleck lifetime (seconds)
+        static let trailLifetime: CGFloat = 0.38
+        /// Ember trail: fleck drift speed opposite movement (points/sec)
+        static let trailSpeed: CGFloat = 26
+        /// Level-up flare ring color
+        static let flareRingColorHex: UInt32 = 0xFFCC66
+        /// Outer glow level scaling cap (never implies a larger hitbox)
+        static let maxGlowScale: CGFloat = 2.2
+    }
+
     // MARK: - Analytics (v1.7)
     enum Analytics {
         /// Max runs kept in the on-disk ring buffer
