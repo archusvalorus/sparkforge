@@ -208,6 +208,43 @@ enum GameConfig {
         static let glowColorHex: UInt32 = 0x22BB44
     }
     
+    // MARK: - Coilworks Enemies (v1.7)
+    enum CoilworksEnemies {
+        // Relay Imp — danger arcs between nearby imps
+        /// Max distance between two imps for an arc to form
+        static let relayArcRange: CGFloat = 140
+        /// Seconds the arc charges (faint, harmless tell)
+        static let relayArcChargeTime: TimeInterval = 1.1
+        /// Seconds the arc is live (bright, damaging)
+        static let relayArcFireTime: TimeInterval = 0.45
+        /// Damage on crossing a live arc
+        static let relayArcDamage: Int = 8
+        /// Distance from the arc line that counts as crossing
+        static let relayArcHitDistance: CGFloat = 16
+
+        // Grounder — plants itself, periodic danger pulses
+        /// Distance from the player at which it roots
+        static let grounderPlantRange: CGFloat = 170
+        /// Seconds the expanding tell ring shows before the pulse fires
+        static let grounderPulseTell: TimeInterval = 0.9
+        /// Pulse damage radius
+        static let grounderPulseRadius: CGFloat = 85
+        /// Damage inside the pulse
+        static let grounderPulseDamage: Int = 10
+        /// Rest between pulses
+        static let grounderPulseRest: TimeInterval = 2.2
+
+        // Circuit Wasp — angular snap-orbiter
+        /// Orbit distance from the player
+        static let waspOrbitRadius: CGFloat = 120
+        /// Seconds drifting toward the current angle slot
+        static let waspDriftTime: TimeInterval = 0.7
+        /// Seconds paused between moves (the metronome's rest)
+        static let waspPauseTime: TimeInterval = 0.35
+        /// Speed multiplier during the snap to the next slot
+        static let waspSnapMultiplier: CGFloat = 4.5
+    }
+
     // MARK: - Spark Visuals (v1.7)
     enum Spark {
         /// White-hot inner core color

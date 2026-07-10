@@ -621,7 +621,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         let xpBoostAdIcon = SKLabelNode(fontNamed: "Menlo")
         xpBoostAdIcon.fontSize = 9
-        xpBoostAdIcon.fontColor = SKColor(hex: 0x999999)
+        xpBoostAdIcon.fontColor = SKColor(hex: 0xCCCCCC)
         xpBoostAdIcon.text = "▶ AD"
         xpBoostAdIcon.verticalAlignmentMode = .center
         xpBoostAdIcon.position = CGPoint(x: 62, y: 0)
@@ -702,9 +702,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         rerollBg.lineWidth = 1
         rerollBtn.addChild(rerollBg)
 
-        let rerollText = SKLabelNode(fontNamed: "Menlo")
-        rerollText.fontSize = 10
-        rerollText.fontColor = SKColor(hex: 0xBB88CC)
+        let rerollText = SKLabelNode(fontNamed: "Menlo-Bold")
+        rerollText.fontSize = 11
+        // v1.7 readability canon: tinted-toward-white, bold
+        rerollText.fontColor = SKColor(hex: 0xE2CCEA)
         rerollText.text = "⟳ REFORGE"
         rerollText.verticalAlignmentMode = .center
         rerollText.position = CGPoint(x: -14, y: 0)
@@ -712,8 +713,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         rerollBtn.addChild(rerollText)
 
         let adIcon = SKLabelNode(fontNamed: "Menlo")
-        adIcon.fontSize = 8
-        adIcon.fontColor = SKColor(hex: 0x777777)
+        adIcon.fontSize = 9
+        // Cost info is a decision input — it pops too
+        adIcon.fontColor = SKColor(hex: 0xCCCCCC)
         adIcon.text = adText
         adIcon.verticalAlignmentMode = .center
         adIcon.position = CGPoint(x: 50, y: 0)
@@ -733,9 +735,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         extraBg.lineWidth = 1
         extraBtn.addChild(extraBg)
 
-        let extraText = SKLabelNode(fontNamed: "Menlo")
-        extraText.fontSize = 10
-        extraText.fontColor = SKColor(hex: 0x88CCCC)
+        let extraText = SKLabelNode(fontNamed: "Menlo-Bold")
+        extraText.fontSize = 11
+        // v1.7 readability canon: tinted-toward-white, bold
+        extraText.fontColor = SKColor(hex: 0xC9E8E8)
         extraText.text = "✦ +1 CARD"
         extraText.verticalAlignmentMode = .center
         extraText.position = CGPoint(x: -14, y: 0)
@@ -743,8 +746,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         extraBtn.addChild(extraText)
 
         let extraAdIcon = SKLabelNode(fontNamed: "Menlo")
-        extraAdIcon.fontSize = 8
-        extraAdIcon.fontColor = SKColor(hex: 0x777777)
+        extraAdIcon.fontSize = 9
+        extraAdIcon.fontColor = SKColor(hex: 0xCCCCCC)
         extraAdIcon.text = adText
         extraAdIcon.verticalAlignmentMode = .center
         extraAdIcon.position = CGPoint(x: 50, y: 0)
@@ -1437,6 +1440,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.4: Update boss AI
         boss?.update(deltaTime: dt, playerPosition: player.position)
 
+        // v1.7: Relay Imp danger arcs (Coilworks only)
+        if arenaConfig.id == 2 {
+            updateRelayArcs(dt)
+        }
+
         // v1.6: Quench Field — momentum pressure on the player
         if fieldImpulseRemaining > 0 {
             fieldImpulseRemaining -= dt
@@ -2011,6 +2019,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             spawnQuenchEnemy()
             return
         }
+        // v1.7: so does The Coilworks
+        if arenaConfig.id == 2 {
+            spawnCoilworksEnemy()
+            return
+        }
 
         let elapsed = waveManager.elapsedTime
 
@@ -2115,11 +2128,79 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func spawnCinderHalo(elapsed: TimeInterval) {
-        let halo = CinderHaloNode(elapsed: elapsed)
+    // MARK: - v1.7: Coilworks Spawning (Unit 8)
+
+    /// Arena 3 spawn table — Lyra's curriculum: the first 20s teach the
+    /// Relay Imp's arc language alongside familiar bodies and the smooth
+    /// Static Halo orbit; Grounders join at 45s (routing pressure), the
+    /// Circuit Wasp's snap rhythm arrives at 80s. Imps sometimes arrive
+    /// in pairs mid-run — arcs need partners.
+    private func spawnCoilworksEnemy() {
+        let elapsed = waveManager.elapsedTime
+        let roll = CGFloat.random(in: 0...1)
+
+        if elapsed < 20 {
+            if roll < 0.40 {
+                spawnBasicMelee(elapsed: elapsed)
+            } else if roll < 0.75 {
+                spawnRelayImp(elapsed: elapsed)
+            } else {
+                spawnStaticHalo(elapsed: elapsed)
+            }
+            return
+        }
+
+        if elapsed >= 80 && roll < 0.12 {
+            spawnCircuitWasp(elapsed: elapsed)
+        } else if elapsed >= 45 && roll < 0.26 {
+            spawnGrounder(elapsed: elapsed)
+        } else if roll < 0.48 {
+            spawnRelayImp(elapsed: elapsed)
+            if elapsed >= 45 && CGFloat.random(in: 0...1) < 0.35 {
+                spawnRelayImp(elapsed: elapsed)
+            }
+        } else if roll < 0.66 {
+            spawnStaticHalo(elapsed: elapsed)
+        } else if elapsed >= 55 && roll < 0.78 {
+            spawnRangedEnemy()
+        } else {
+            spawnBasicMelee(elapsed: elapsed)
+        }
+    }
+
+    private func spawnStaticHalo(elapsed: TimeInterval) {
+        let halo = StaticHaloNode(elapsed: elapsed)
         halo.position = EnemyNode.spawnPosition()
         enemies.append(halo)
         worldNode.addChild(halo)
+    }
+
+    private func spawnRelayImp(elapsed: TimeInterval) {
+        let imp = RelayImpNode(elapsed: elapsed)
+        imp.position = EnemyNode.spawnPosition()
+        enemies.append(imp)
+        worldNode.addChild(imp)
+    }
+
+    private func spawnGrounder(elapsed: TimeInterval) {
+        let grounder = GrounderNode(elapsed: elapsed)
+        grounder.position = EnemyNode.spawnPosition()
+        grounder.onDangerPulse = { [weak self] center, radius, damage in
+            guard let self = self else { return }
+            let reach = radius + self.playerStats.effectiveCollisionRadius
+            if self.player.position.distance(to: center) <= reach {
+                self.applyBossHazardDamage(damage, shakeIntensity: 8)
+            }
+        }
+        enemies.append(grounder)
+        worldNode.addChild(grounder)
+    }
+
+    private func spawnCircuitWasp(elapsed: TimeInterval) {
+        let wasp = CircuitWaspNode(elapsed: elapsed)
+        wasp.position = EnemyNode.spawnPosition()
+        enemies.append(wasp)
+        worldNode.addChild(wasp)
     }
 
     private func spawnBraceguard(elapsed: TimeInterval) {
@@ -2284,6 +2365,118 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(warden)
 
         showBossEntrance(name: "THE QUENCH WARDEN", colorHex: 0xB8B0A4)
+    }
+
+    // MARK: - v1.7: Relay Imp Arcs
+
+    /// A charge/fire arc between a live imp pair. Keyed by imp IDs;
+    /// pairs rebuild every frame, so death or separation kills the arc.
+    private struct RelayArcKey: Hashable {
+        let a: Int
+        let b: Int
+    }
+
+    private struct RelayArcState {
+        let line: SKShapeNode
+        var phase: TimeInterval
+    }
+
+    private var relayArcs: [RelayArcKey: RelayArcState] = [:]
+
+    /// Chain pressure: each imp pairs with its nearest unpaired partner
+    /// in range. The arc charges faint (harmless tell), then fires
+    /// bright — crossing a live arc hurts. "Every step completes or
+    /// breaks the circuit."
+    private func updateRelayArcs(_ dt: TimeInterval) {
+        let cfg = GameConfig.CoilworksEnemies.self
+        let range = cfg.relayArcRange * DeviceScale.gameplay
+
+        // Greedy nearest-partner pairing
+        let imps = enemies.compactMap { $0 as? RelayImpNode }
+        var paired = Set<Int>()
+        var activePairs: [(RelayImpNode, RelayImpNode)] = []
+        for imp in imps where !paired.contains(imp.impID) {
+            var best: RelayImpNode?
+            var bestDist = range
+            for other in imps
+            where other.impID != imp.impID && !paired.contains(other.impID) {
+                let d = imp.position.distance(to: other.position)
+                if d < bestDist {
+                    best = other
+                    bestDist = d
+                }
+            }
+            if let partner = best {
+                paired.insert(imp.impID)
+                paired.insert(partner.impID)
+                activePairs.append((imp, partner))
+            }
+        }
+
+        var liveKeys = Set<RelayArcKey>()
+        for (impA, impB) in activePairs {
+            let key = RelayArcKey(a: min(impA.impID, impB.impID),
+                                  b: max(impA.impID, impB.impID))
+            liveKeys.insert(key)
+
+            var state: RelayArcState
+            if let existing = relayArcs[key] {
+                state = existing
+            } else {
+                let line = SKShapeNode()
+                line.fillColor = .clear
+                line.zPosition = 4
+                worldNode.addChild(line)
+                state = RelayArcState(line: line, phase: 0)
+            }
+            state.phase += dt
+            let cycle = cfg.relayArcChargeTime + cfg.relayArcFireTime
+            if state.phase >= cycle {
+                state.phase -= cycle
+            }
+
+            let path = CGMutablePath()
+            path.move(to: impA.position)
+            path.addLine(to: impB.position)
+            state.line.path = path
+
+            if state.phase >= cfg.relayArcChargeTime {
+                // Live — bright, damaging
+                state.line.strokeColor = SKColor(hex: 0xF6D36B, alpha: 0.9)
+                state.line.lineWidth = 2.5
+                state.line.glowWidth = 4
+
+                let dist = distanceFromPoint(player.position,
+                                             toSegment: impA.position, impB.position)
+                if dist < cfg.relayArcHitDistance + playerStats.effectiveCollisionRadius {
+                    applyBossHazardDamage(cfg.relayArcDamage, shakeIntensity: 6)
+                }
+            } else {
+                // Charging — a faint tell that brightens toward the fire
+                let charge = state.phase / cfg.relayArcChargeTime
+                state.line.strokeColor = SKColor(hex: 0xF6D36B, alpha: 0.12 + 0.20 * charge)
+                state.line.lineWidth = 1.2
+                state.line.glowWidth = 0
+            }
+            relayArcs[key] = state
+        }
+
+        // Broken pairs (death, separation) lose their arc immediately
+        for (key, state) in relayArcs where !liveKeys.contains(key) {
+            state.line.removeFromParent()
+            relayArcs.removeValue(forKey: key)
+        }
+    }
+
+    private func distanceFromPoint(_ point: CGPoint,
+                                   toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let ab = b - a
+        let lengthSq = ab.x * ab.x + ab.y * ab.y
+        guard lengthSq > 0 else { return (point - a).length }
+        let ap = point - a
+        let t = max(0, min(1, (ap.x * ab.x + ap.y * ab.y) / lengthSq))
+        let projection = a + ab * t
+        return (point - projection).length
     }
 
     /// Shared damage path for boss arena hazards (lanes, future patterns).

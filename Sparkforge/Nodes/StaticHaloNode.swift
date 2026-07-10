@@ -1,15 +1,17 @@
-// CinderHaloNode.swift
+// StaticHaloNode.swift
 // Sparkforge
 //
-// v1.6 Arena 2 enemy (Lyra canon): the orbiter.
-// Drifts into orbit around the player at medium range and tightens the
-// circle over time. "Creates movement pressure without copying ranged
-// enemies — the player has to cut through or reposition, not simply
-// kite backward forever."
+// v1.7 Arena 3 enemy (Lyra canon): the returned orbiter.
+// Cinder Halo reborn — renamed because "cinder" pointed at the player's
+// ember lane, and restyled per the v1.6 field report: the halo floats
+// ABOVE the head (gently bobbing, never a ring around the body — rings
+// read as shields). Pale-gold static family, serene slit eyes.
+// "Not every threat beelines. Some threats choose position."
+// The proven v1.6 orbit AI carries over unchanged.
 
 import SpriteKit
 
-final class CinderHaloNode: EnemyNode {
+final class StaticHaloNode: EnemyNode {
 
     // MARK: - Orbit State
 
@@ -27,7 +29,7 @@ final class CinderHaloNode: EnemyNode {
         super.init(health: health,
                    moveSpeed: GameConfig.Enemy.baseSpeed * 0.9,
                    xpValue: health + 1)
-        applyHaloVisuals()
+        applyStaticVisuals()
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -36,42 +38,50 @@ final class CinderHaloNode: EnemyNode {
 
     // MARK: - Visuals
 
-    private func applyHaloVisuals() {
+    private func applyStaticVisuals() {
         for child in children {
             if let shape = child as? SKShapeNode {
-                if shape.fillColor != .clear && shape.glowWidth == 0 {
+                if shape.fillColor != .clear && shape.glowWidth == 0 && shape.zPosition != 6 {
                     shape.fillColor = SKColor(hex: 0x15181D)
                 }
                 if shape.glowWidth > 0 && shape.fillColor == .clear {
-                    shape.strokeColor = SKColor(hex: 0x6A6256, alpha: 0.5)
+                    // Rim — dark machinery with a static-gold undertone
+                    shape.strokeColor = SKColor(hex: 0xF6D36B, alpha: 0.35)
+                }
+                // Face → pale gold, eyes squashed into serene slits
+                if shape.zPosition == 6 {
+                    if shape.fillColor != .clear {
+                        shape.fillColor = SKColor(hex: 0xF6D36B)
+                        shape.yScale = 0.35
+                    }
+                    if shape.strokeColor != .clear {
+                        shape.strokeColor = SKColor(hex: 0xE8C455, alpha: 0.85)
+                    }
                 }
             }
         }
 
-        // The broken halo — an offset rotating arc ring
+        // The halo — a small ellipse floating ABOVE the head, bobbing.
+        // Never around the body: ornament, not armor.
         let r = GameConfig.Enemy.visualRadius
-        let haloContainer = SKNode()
-        haloContainer.position = CGPoint(x: 3, y: 2)  // offset = "broken" feel
-        haloContainer.zPosition = 7
-
-        let halo = SKShapeNode()
-        let haloPath = CGMutablePath()
-        haloPath.addArc(center: .zero, radius: r + 6,
-                        startAngle: 0, endAngle: .pi * 1.65, clockwise: false)
-        halo.path = haloPath
-        halo.strokeColor = SKColor(hex: 0x8A8478, alpha: 0.8)
+        let halo = SKShapeNode(ellipseOf: CGSize(width: r * 1.1, height: 4.5))
         halo.fillColor = .clear
+        halo.strokeColor = SKColor(hex: 0xF6D36B, alpha: 0.85)
         halo.lineWidth = 1.5
         halo.glowWidth = 2
-        haloContainer.addChild(halo)
-        addChild(haloContainer)
+        halo.position = CGPoint(x: 0, y: r + 9)
+        halo.zPosition = 7
+        addChild(halo)
 
-        haloContainer.run(SKAction.repeatForever(
-            SKAction.rotate(byAngle: .pi * 2, duration: 1.8)
-        ))
+        let bob = SKAction.sequence([
+            SKAction.moveBy(x: 0, y: 2, duration: 1.1),
+            SKAction.moveBy(x: 0, y: -2, duration: 1.1)
+        ])
+        bob.timingMode = .easeInEaseOut
+        halo.run(SKAction.repeatForever(bob))
     }
 
-    // MARK: - Orbit AI
+    // MARK: - Orbit AI (v1.6, proven)
 
     override func chase(target: CGPoint, deltaTime: TimeInterval, globalSlow: CGFloat = 0) {
         guard !isStunned else { return }

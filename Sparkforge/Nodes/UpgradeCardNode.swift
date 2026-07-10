@@ -40,6 +40,20 @@ final class UpgradeCardNode: SKNode {
         }
     }
     
+    /// v1.7 readability canon: the tree color pushed toward white, for
+    /// text that must be READ — keeps the tint, kills the squint.
+    static func brightColor(for tag: UpgradeManager.Tag) -> SKColor {
+        let hex = color(for: tag)
+        let r = CGFloat((hex >> 16) & 0xFF) / 255
+        let g = CGFloat((hex >> 8) & 0xFF) / 255
+        let b = CGFloat(hex & 0xFF) / 255
+        let blend: CGFloat = 0.55
+        return SKColor(red: r + (1 - r) * blend,
+                       green: g + (1 - g) * blend,
+                       blue: b + (1 - b) * blend,
+                       alpha: 1.0)
+    }
+
     static func emoji(for tag: UpgradeManager.Tag) -> String {
         switch tag {
         case .fire:    return "🔥"
@@ -112,7 +126,7 @@ final class UpgradeCardNode: SKNode {
         // Card name — auto-shrink to fit within card width
         let nameLabel = SKLabelNode(fontNamed: "Menlo-Bold")
         nameLabel.text = card.name
-        nameLabel.fontColor = tagColor
+        nameLabel.fontColor = UpgradeCardNode.brightColor(for: card.tag)
         nameLabel.verticalAlignmentMode = .center
         nameLabel.horizontalAlignmentMode = .center
         nameLabel.position = CGPoint(x: 0, y: 10)

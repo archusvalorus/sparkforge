@@ -203,7 +203,8 @@ final class PauseMenuNode: SKNode {
 
         let name = SKLabelNode(fontNamed: "Menlo-Bold")
         name.text = card.name
-        name.fontColor = SKColor(hex: colorHex)
+        // Same brightness treatment as the card titles (readability canon)
+        name.fontColor = UpgradeCardNode.brightColor(for: card.tag)
         name.verticalAlignmentMode = .center
         name.horizontalAlignmentMode = .left
         name.position = CGPoint(x: -chipSize.width / 2 + 26, y: 0)
