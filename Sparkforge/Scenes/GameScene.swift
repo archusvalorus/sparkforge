@@ -46,7 +46,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - New Additions for health orbs + magnet orbs
     
-    private let hpBar = HPBarNode(width: 120)
+    private let hpBar = HPBarNode(width: 210)  // v1.7 legibility pass
     private var healthOrbs: [HealthOrbNode] = []
     private var magnetOrbs: [MagnetOrbNode] = []
     private var healthOrbTimer: TimeInterval = 0
@@ -99,7 +99,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private let timerLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     private let levelLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-    private let xpBar = XPBarNode(width: 120)
+    private let xpBar = XPBarNode(width: 210)  // v1.7 legibility pass
     private let buffTracker = BuffTrackerNode()
     private let deathOverlay = SKNode()
     private let levelUpOverlay = SKNode()
@@ -210,6 +210,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         switch arenaConfig.id {
         case 1:
             buildQuenchMotif(radius: radius)
+        case 2:
+            buildCoilworksMotif(radius: radius)
         default:
             buildCrucibleMotif(radius: radius)
         }
@@ -328,6 +330,144 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    /// v1.7 Arena 3 motif: a brass circuit. Gapped trace rings, radial
+    /// conduits, junction nodes — and sequenced pulses: one node flickers,
+    /// a conduit catches, connected nodes answer, and the pulse dies
+    /// before the circuit completes. "An old machine trying to solve the
+    /// player." Idle linework stays very faint; pulses sit below combat.
+    private func buildCoilworksMotif(radius: CGFloat) {
+        // Gapped trace rings — arcs with deliberate breaks, not full circles
+        let ringSpecs: [(r: CGFloat, gaps: Int, phase: CGFloat)] = [
+            (radius * 0.30, 3, 0.3),
+            (radius * 0.55, 4, 1.2),
+            (radius * 0.82, 5, 2.4)
+        ]
+        for (i, spec) in ringSpecs.enumerated() {
+            let segmentSweep = (2 * CGFloat.pi / CGFloat(spec.gaps)) * 0.78  // 22% gap
+            for s in 0..<spec.gaps {
+                let start = spec.phase + CGFloat(s) * (2 * .pi / CGFloat(spec.gaps))
+                let path = CGMutablePath()
+                path.addArc(center: .zero, radius: spec.r,
+                            startAngle: start, endAngle: start + segmentSweep,
+                            clockwise: false)
+                let arc = SKShapeNode(path: path)
+                arc.fillColor = .clear
+                arc.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.42 - CGFloat(i) * 0.08)
+                arc.lineWidth = 1
+                arc.zPosition = -9.5
+                worldNode.addChild(arc)
+            }
+        }
+
+        // Conduits + junction nodes, grouped into pulse chains.
+        // Each chain: an inner node, a conduit out to an outer node, and
+        // a short branch to a third — the family a pulse travels through.
+        let chainAngles: [CGFloat] = [0.5, 1.55, 2.6, 3.65, 4.7, 5.75]
+        var chains: [(nodes: [SKShapeNode], conduits: [SKShapeNode])] = []
+
+        for (i, angle) in chainAngles.enumerated() {
+            let innerR = radius * 0.30
+            let outerR = radius * (i % 2 == 0 ? 0.55 : 0.82)
+            let branchAngle = angle + 0.35
+
+            let p1 = CGPoint(x: cos(angle) * innerR, y: sin(angle) * innerR)
+            let p2 = CGPoint(x: cos(angle) * outerR, y: sin(angle) * outerR)
+            let p3 = CGPoint(x: cos(branchAngle) * outerR, y: sin(branchAngle) * outerR)
+
+            var nodes: [SKShapeNode] = []
+            var conduits: [SKShapeNode] = []
+
+            // Static linework (very faint, always visible)
+            for (a, b) in [(p1, p2), (p2, p3)] {
+                let path = CGMutablePath()
+                path.move(to: a)
+                path.addLine(to: b)
+                let line = SKShapeNode(path: path)
+                line.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.35)
+                line.lineWidth = 1
+                line.zPosition = -9.5
+                worldNode.addChild(line)
+
+                // Pulse overlay for the same segment (lights up briefly)
+                let pulse = SKShapeNode(path: path)
+                pulse.strokeColor = SKColor(hex: 0xF6D36B)
+                pulse.lineWidth = 1
+                pulse.alpha = 0
+                pulse.zPosition = -9.4
+                worldNode.addChild(pulse)
+                conduits.append(pulse)
+            }
+
+            for point in [p1, p2, p3] {
+                let dot = SKShapeNode(circleOfRadius: 2.5)
+                dot.fillColor = SKColor(hex: arenaConfig.detailLineHex)
+                dot.strokeColor = .clear
+                dot.position = point
+                dot.zPosition = -9.5
+                worldNode.addChild(dot)
+
+                let glow = SKShapeNode(circleOfRadius: 2.5)
+                glow.fillColor = SKColor(hex: 0xF6D36B)
+                glow.strokeColor = .clear
+                glow.position = point
+                glow.alpha = 0
+                glow.zPosition = -9.4
+                worldNode.addChild(glow)
+                nodes.append(glow)
+            }
+
+            chains.append((nodes, conduits))
+        }
+
+        // The calculation: every few seconds the next chain tries to
+        // complete — origin flickers, conduit catches, neighbors answer
+        // weaker, and it dies before the circuit closes.
+        var chainIndex = 0
+        let step = SKAction.sequence([
+            SKAction.run { [weak self] in
+                guard self != nil else { return }
+                let chain = chains[chainIndex % chains.count]
+                chainIndex += 1
+
+                let flicker = SKAction.sequence([
+                    SKAction.fadeAlpha(to: 0.5, duration: 0.10),
+                    SKAction.fadeAlpha(to: 0.25, duration: 0.08),
+                    SKAction.fadeAlpha(to: 0.5, duration: 0.08)
+                ])
+                chain.nodes[0].run(SKAction.sequence([
+                    flicker,
+                    SKAction.wait(forDuration: 0.5),
+                    SKAction.fadeOut(withDuration: 0.35)
+                ]))
+                chain.conduits[0].run(SKAction.sequence([
+                    SKAction.wait(forDuration: 0.24),
+                    SKAction.fadeAlpha(to: 0.30, duration: 0.12),
+                    SKAction.wait(forDuration: 0.25),
+                    SKAction.fadeOut(withDuration: 0.30)
+                ]))
+                chain.nodes[1].run(SKAction.sequence([
+                    SKAction.wait(forDuration: 0.42),
+                    SKAction.fadeAlpha(to: 0.40, duration: 0.10),
+                    SKAction.wait(forDuration: 0.2),
+                    SKAction.fadeOut(withDuration: 0.30)
+                ]))
+                // The answer fades before the last leg — never a closed loop
+                chain.nodes[2].run(SKAction.sequence([
+                    SKAction.wait(forDuration: 0.58),
+                    SKAction.fadeAlpha(to: 0.18, duration: 0.10),
+                    SKAction.fadeOut(withDuration: 0.22)
+                ]))
+                chain.conduits[1].run(SKAction.sequence([
+                    SKAction.wait(forDuration: 0.52),
+                    SKAction.fadeAlpha(to: 0.12, duration: 0.10),
+                    SKAction.fadeOut(withDuration: 0.18)
+                ]))
+            },
+            SKAction.wait(forDuration: 3.2, withRange: 1.6)
+        ])
+        arenaFloor.run(SKAction.repeatForever(step))
+    }
+
     private func setupPlayer() {
         player.position = .zero
         worldNode.addChild(player)
@@ -361,18 +501,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         levelLabel.text = "LV 1"
         camera.addChild(levelLabel)
         
-        // XP Bar — below level
-        xpBar.position = CGPoint(x: 0, y: safeTop - 38)
+        // XP Bar — below level (v1.7: taller bars need more breathing room)
+        xpBar.position = CGPoint(x: 0, y: safeTop - 42)
         xpBar.zPosition = 101
         camera.addChild(xpBar)
-        
+
         // HP Bar - below XP Bar
-        hpBar.position = CGPoint(x: 0, y: safeTop - 50)
+        hpBar.position = CGPoint(x: 0, y: safeTop - 64)
         hpBar.zPosition = 101
         camera.addChild(hpBar)
         
         // Buff tracker — top left
-        buffTracker.position = CGPoint(x: safeLeft, y: safeTop)
+        // v1.7: badges start below the (now much larger) HP bar so the
+        // stack never collides with the bar span on narrow screens
+        buffTracker.position = CGPoint(x: safeLeft, y: safeTop - 96)
         buffTracker.zPosition = 101
         camera.addChild(buffTracker)
         
@@ -643,6 +785,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
+        // v1.7: The Coilworks crackles — static motes jitter and hop
+        if arenaConfig.id == 2 {
+            setupCoilworksStatic(texture: dotTexture)
+            if let view = view {
+                let vignette = VignetteNode(size: view.bounds.size)
+                camera?.addChild(vignette)
+            }
+            return
+        }
+
         // Primary embers — small, frequent, drifting up
         let emitter = SKEmitterNode()
         emitter.particleBirthRate = 12
@@ -720,6 +872,50 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v1.6 Arena 2 ambience (Lyra canon): soft ash falling like verdicts —
     /// slow downward drift with lateral sway; rare pale-amber sparks stay
     /// reserved for player progression moments.
+    /// v1.7: Coilworks static — precise, not cozy. Short-lived motes pop
+    /// in, jitter, and vanish; sharp little sparks, never drifting rewards.
+    private func setupCoilworksStatic(texture: SKTexture) {
+        // Jittering motes — brief, tiny, all directions, no drift language
+        let motes = SKEmitterNode()
+        motes.particleBirthRate = 14
+        motes.particleLifetime = 0.55
+        motes.particleLifetimeRange = 0.35
+        motes.particlePositionRange = CGVector(dx: GameConfig.Arena.radius * 2.1, dy: GameConfig.Arena.radius * 2.1)
+        motes.particleSpeed = 10
+        motes.particleSpeedRange = 14
+        motes.emissionAngleRange = 2 * .pi
+        motes.particleAlpha = 0.5
+        motes.particleAlphaRange = 0.2
+        motes.particleAlphaSpeed = -1.0    // sharp pop-out, not a fade-drift
+        motes.particleScale = 0.045
+        motes.particleScaleRange = 0.02
+        motes.particleColor = SKColor(hex: 0xF6D36B)
+        motes.particleColorBlendFactor = 1.0
+        motes.particleBlendMode = .add
+        motes.zPosition = -5
+        motes.particleTexture = texture
+        worldNode.addChild(motes)
+
+        // Rare longer hop-sparks — a mote that jumps before dying
+        let sparks = SKEmitterNode()
+        sparks.particleBirthRate = 2.5
+        sparks.particleLifetime = 0.35
+        sparks.particleLifetimeRange = 0.15
+        sparks.particlePositionRange = CGVector(dx: GameConfig.Arena.radius * 1.9, dy: GameConfig.Arena.radius * 1.9)
+        sparks.particleSpeed = 55
+        sparks.particleSpeedRange = 25
+        sparks.emissionAngleRange = 2 * .pi
+        sparks.particleAlpha = 0.6
+        sparks.particleAlphaSpeed = -1.7
+        sparks.particleScale = 0.035
+        sparks.particleColor = SKColor(hex: 0xF6D36B)
+        sparks.particleColorBlendFactor = 1.0
+        sparks.particleBlendMode = .add
+        sparks.zPosition = -5
+        sparks.particleTexture = texture
+        worldNode.addChild(sparks)
+    }
+
     private func setupQuenchAsh(texture: SKTexture) {
         // Main ash fall — slow, dim, drifting down
         let ash = SKEmitterNode()
@@ -2069,6 +2265,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
             ProgressionManager.shared.wardenKills += 1
+            // v1.7: felling the Warden opens The Coilworks
+            if ProgressionManager.shared.arenasUnlocked < 3 {
+                ProgressionManager.shared.arenasUnlocked = 3
+            }
             for _ in 0..<10 {
                 let offset = CGPoint(
                     x: CGFloat.random(in: -40...40),
@@ -2214,6 +2414,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.6: kills made in The Quench feed the Warden's gate
         if arenaConfig.id == 1 {
             ProgressionManager.shared.quenchKills += 1
+        }
+        // v1.7: kills made in The Coilworks feed the Choir's gate
+        if arenaConfig.id == 2 {
+            ProgressionManager.shared.coilworksKills += 1
         }
         
         // v1.4: Track kill type for progression
@@ -2366,7 +2570,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                          maxHP: playerStats.maxHP)
         
         levelLabel.text = "LV \(player.currentLevel)"
-        xpBar.updateFill(player.xpProgress)
+        xpBar.updateFill(player.xpProgress,
+                         currentXP: player.currentXP,
+                         requiredXP: player.xpRequired(forLevel: player.currentLevel + 1))
     }
     
     // MARK: - Collision Detection

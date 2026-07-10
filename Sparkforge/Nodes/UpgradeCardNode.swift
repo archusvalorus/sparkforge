@@ -136,7 +136,9 @@ final class UpgradeCardNode: SKNode {
             let descLabel = SKLabelNode(fontNamed: "Menlo")
             descLabel.text = line
             descLabel.fontSize = 10
-            descLabel.fontColor = SKColor(hex: 0xBBBBBB)
+            // v1.7 playtest: fluorescent white — 0xBBBBBB gray washed out
+            // at low screen brightness (reading problems, not vibes)
+            descLabel.fontColor = SKColor(hex: 0xFFFFFF)
             descLabel.position = CGPoint(x: 0, y: -12 - CGFloat(i) * 13)
             descLabel.verticalAlignmentMode = .center
             descLabel.horizontalAlignmentMode = .center

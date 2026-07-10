@@ -22,18 +22,12 @@ final class AshlingNode: EnemyNode {
     init(elapsed: TimeInterval, isShard: Bool) {
         self.isShard = isShard
 
-        let health: Int
-        let speedScale: CGFloat
-        let xp: Int
-        if isShard {
-            health = 1
-            speedScale = 1.3
-            xp = 1
-        } else {
-            health = elapsed < 60 ? 1 : 2
-            speedScale = 0.95
-            xp = 2
-        }
+        // v1.7 playtest (Brandon): one hit at every stage, parent and
+        // shard alike — the split IS the health. Multi-hit splitters felt
+        // unfairly hard as the board filled.
+        let health = 1
+        let speedScale: CGFloat = isShard ? 1.3 : 0.95
+        let xp = isShard ? 1 : 2
 
         super.init(health: health,
                    moveSpeed: GameConfig.Enemy.baseSpeed * speedScale,

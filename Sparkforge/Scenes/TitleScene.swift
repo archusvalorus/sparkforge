@@ -67,6 +67,12 @@ final class TitleScene: SKScene {
     // v1.7: Forge Paths
     private var forgePathModal: SKNode?
     private var forgePathRowY: CGFloat = 0
+
+    // v1.7: arena browser can show the next LOCKED arena (with its
+    // requirement); pm.currentArena only follows unlocked selections
+    private var displayedArenaIndex = 0
+    /// Widest a box text row may be before it auto-shrinks clear of the arrows
+    private var arenaTextMaxWidth: CGFloat = 240
     
     // MARK: - Scene Lifecycle
     
@@ -80,6 +86,8 @@ final class TitleScene: SKScene {
         let screenHeight = size.height > 100 ? size.height : 667
         layoutY = min(screenHeight * 0.30, 280)
         
+        displayedArenaIndex = ArenaConfig.current.id
+
         setupEmberParticles()
         setupForgeGlow()
         setupTitle()
@@ -348,22 +356,43 @@ final class TitleScene: SKScene {
         arenaBox.zPosition = 9
         addChild(arenaBox)
 
+        // v1.7 polish: rows sit 8pt lower so the content centers in the
+        // box instead of crowding its top edge
         arenaHeader.fontSize = 15
-        arenaHeader.position = CGPoint(x: 0, y: layoutY)
+        arenaHeader.position = CGPoint(x: 0, y: layoutY - 8)
         arenaHeader.zPosition = 10
         addChild(arenaHeader)
 
+        // v1.7 playtest (Brandon): genre-standard BIG chevrons — the arena
+        // choice is a headline decision, the arrows should look like one.
+        // Device-aware: outside the box on modern widths, tucked in on SE;
+        // the box text auto-shrinks clear of the arrow lanes either way.
+        let arrowX = min(size.width / 2 - 26, arenaBox.frame.width / 2 + 26)
+        arenaTextMaxWidth = 2 * (arrowX - 30)
         arenaPrevArrow.text = "◀"
         arenaNextArrow.text = "▶"
-        for (arrow, x) in [(arenaPrevArrow, CGFloat(-125)), (arenaNextArrow, CGFloat(125))] {
-            arrow.fontSize = 20
+        for (arrow, x) in [(arenaPrevArrow, -arrowX), (arenaNextArrow, arrowX)] {
+            arrow.fontSize = 44
             arrow.fontColor = SKColor(hex: 0xFFAA33)
-            arrow.position = CGPoint(x: x, y: layoutY - 2)
+            arrow.verticalAlignmentMode = .center
+            arrow.position = CGPoint(x: x, y: layoutY - 42)
             arrow.zPosition = 10
             addChild(arrow)
+
+            let breathe = SKAction.sequence([
+                SKAction.group([
+                    SKAction.fadeAlpha(to: 0.7, duration: 1.0),
+                    SKAction.scale(to: 0.94, duration: 1.0)
+                ]),
+                SKAction.group([
+                    SKAction.fadeAlpha(to: 1.0, duration: 1.0),
+                    SKAction.scale(to: 1.0, duration: 1.0)
+                ])
+            ])
+            arrow.run(SKAction.repeatForever(breathe))
         }
 
-        layoutY -= 26
+        layoutY -= 34
 
         // Row 1: kill progress (both arenas track their own gate kills)
         killProgressLabel.fontSize = 12
@@ -398,24 +427,65 @@ final class TitleScene: SKScene {
         ])
         arenaReadyLabel.run(SKAction.repeatForever(pulse))
 
-        layoutY -= 32
+        layoutY -= 24  // total row spend unchanged — layout below the box holds
 
         refreshArenaSection()
     }
 
-    private func refreshArenaSection() {
-        let pm = ProgressionManager.shared
-        let arena = ArenaConfig.current
-        let selectorVisible = pm.arenasUnlocked >= 2
+    /// v1.7: every box text row re-fits inside the arrow lanes after each
+    /// refresh (base size first, shrink only if the row would collide)
+    private func fitArenaRows() {
+        let rows: [(SKLabelNode, CGFloat)] = [
+            (killProgressLabel, 12),
+            (survivalCheckLabel, 12),
+            (arenaFlavorLabel, 11),
+            (arenaReadyLabel, arenaReadyLabel.fontSize)
+        ]
+        for (label, baseSize) in rows where !label.isHidden {
+            label.fontSize = baseSize
+            while label.frame.width > arenaTextMaxWidth && label.fontSize > 8 {
+                label.fontSize -= 0.5
+            }
+        }
+    }
 
-        arenaHeader.text = arena.displayName
-        arenaHeader.fontColor = arena.id == 1 ? SKColor(hex: 0xB8B0A4) : SKColor(hex: 0xCCCCCC)
+    private func refreshArenaSection() {
+        defer { fitArenaRows() }
+        let pm = ProgressionManager.shared
+        let browsableCount = min(pm.arenasUnlocked + 1, ArenaConfig.all.count)
+        displayedArenaIndex = min(displayedArenaIndex, browsableCount - 1)
+        let arena = ArenaConfig.all[displayedArenaIndex]
+        let isLocked = displayedArenaIndex >= pm.arenasUnlocked
+        let selectorVisible = browsableCount >= 2
+
+        arenaHeader.text = isLocked ? "🔒 \(arena.displayName)" : arena.displayName
+        arenaHeader.fontColor = isLocked
+            ? SKColor(hex: 0x777777)
+            : (arena.id == 0 ? SKColor(hex: 0xCCCCCC) : SKColor(hex: arena.accentColorHex))
         arenaPrevArrow.isHidden = !selectorVisible
         arenaNextArrow.isHidden = !selectorVisible
 
         // v1.6: the box wears the arena's vibe — same treatment as skill cards
-        arenaBox.fillColor = SKColor(hex: arena.accentColorHex, alpha: 0.12)
-        arenaBox.strokeColor = SKColor(hex: arena.accentColorHex, alpha: 0.5)
+        // v1.7: locked arenas wear it dimmed, through frosted glass
+        arenaBox.fillColor = SKColor(hex: arena.accentColorHex, alpha: isLocked ? 0.05 : 0.12)
+        arenaBox.strokeColor = SKColor(hex: arena.accentColorHex, alpha: isLocked ? 0.25 : 0.5)
+
+        // v1.7: a locked arena shows what opens it, nothing else
+        if isLocked {
+            killProgressLabel.isHidden = true
+            survivalCheckLabel.isHidden = true
+            arenaFlavorLabel.text = arena.flavorLine
+            arenaFlavorLabel.isHidden = false
+
+            let requirement = displayedArenaIndex == 1
+                ? "fell \(ProgressionManager.arena1Gate.bossName) to unlock"
+                : "fell \(ProgressionManager.arena2Gate.bossName) to unlock"
+            arenaReadyLabel.text = "🔒 \(requirement)"
+            arenaReadyLabel.fontSize = 11
+            arenaReadyLabel.fontColor = SKColor(hex: 0x999999)
+            arenaReadyLabel.isHidden = false
+            return
+        }
 
         if arena.id == 0 {
             let progress = pm.arena1Progress
@@ -451,7 +521,7 @@ final class TitleScene: SKScene {
                 arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
                 arenaReadyLabel.isHidden = false
             }
-        } else {
+        } else if arena.id == 1 {
             // v1.6 Unit 6: The Quench shows the Warden's gate
             let gate = ProgressionManager.arena2Gate
             let kills = pm.quenchKills
@@ -467,10 +537,39 @@ final class TitleScene: SKScene {
             arenaFlavorLabel.text = arena.flavorLine
             arenaFlavorLabel.isHidden = false
 
-            if met {
+            if met && pm.arenasUnlocked < 3 {
                 arenaReadyLabel.text = "★ THE WARDEN STIRS ★"
                 arenaReadyLabel.fontSize = 13
                 arenaReadyLabel.fontColor = SKColor(hex: 0xD8A94A)
+                arenaReadyLabel.isHidden = false
+            } else if pm.arenasUnlocked < 3 {
+                arenaReadyLabel.text = "🔒 THE COILWORKS hums beyond the Warden"
+                arenaReadyLabel.fontSize = 11
+                arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
+                arenaReadyLabel.isHidden = false
+            } else {
+                arenaReadyLabel.isHidden = true
+            }
+        } else {
+            // v1.7 Unit 7: The Coilworks shows the Choir's gate
+            let gate = ProgressionManager.arena3Gate
+            let kills = pm.coilworksKills
+            let met = pm.dynamoChoirUnlocked
+
+            let killText = "\(min(kills, gate.totalKillsRequired))/\(gate.totalKillsRequired) kills in the Coilworks"
+            killProgressLabel.text = met ? "✓ \(killText)" : "○ \(killText)"
+            killProgressLabel.fontColor = met
+                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
+            killProgressLabel.isHidden = false
+
+            survivalCheckLabel.isHidden = true
+            arenaFlavorLabel.text = arena.flavorLine
+            arenaFlavorLabel.isHidden = false
+
+            if met {
+                arenaReadyLabel.text = "★ THE CHOIR FINDS TEMPO ★"
+                arenaReadyLabel.fontSize = 13
+                arenaReadyLabel.fontColor = SKColor(hex: 0xF6D36B)
                 arenaReadyLabel.isHidden = false
             } else {
                 arenaReadyLabel.isHidden = true
@@ -606,17 +705,21 @@ final class TitleScene: SKScene {
             return
         }
 
-        // v1.6: Arena selector arrows (visible once Arena 2 is unlocked)
-        if ProgressionManager.shared.arenasUnlocked >= 2 {
-            for arrow in [arenaPrevArrow, arenaNextArrow] where !arrow.isHidden {
-                let frame = CGRect(x: arrow.position.x - 32, y: arrow.position.y - 26,
-                                   width: 64, height: 52)
-                if frame.contains(location) {
-                    let pm = ProgressionManager.shared
-                    pm.currentArena = pm.currentArena == 0 ? 1 : 0
-                    refreshArenaSection()
-                    return
+        // v1.7: arrows cycle every unlocked arena PLUS the next locked one
+        // (shown with its unlock requirement); thumb-size hit zones
+        for arrow in [arenaPrevArrow, arenaNextArrow] where !arrow.isHidden {
+            let frame = CGRect(x: arrow.position.x - 55, y: arrow.position.y - 65,
+                               width: 110, height: 130)
+            if frame.contains(location) {
+                let pm = ProgressionManager.shared
+                let count = min(pm.arenasUnlocked + 1, ArenaConfig.all.count)
+                let delta = arrow === arenaNextArrow ? 1 : -1
+                displayedArenaIndex = (displayedArenaIndex + delta + count) % count
+                if displayedArenaIndex < pm.arenasUnlocked {
+                    pm.currentArena = displayedArenaIndex
                 }
+                refreshArenaSection()
+                return
             }
         }
 
@@ -870,7 +973,8 @@ final class TitleScene: SKScene {
             let desc = SKLabelNode(fontNamed: "Menlo")
             desc.text = blessing.description
             desc.fontSize = 9
-            desc.fontColor = SKColor(hex: 0x66AA66)
+            // v1.7: choice-driving text pops (readability canon, July 10)
+            desc.fontColor = SKColor(hex: 0xFFFFFF)
             desc.verticalAlignmentMode = .center
             desc.horizontalAlignmentMode = .left
             desc.position = CGPoint(x: -88, y: y - 9)
@@ -971,7 +1075,8 @@ final class TitleScene: SKScene {
             let nodeLabel = SKLabelNode(fontNamed: "Menlo")
             nodeLabel.text = "\(node.name) — \(node.effectText)"
             nodeLabel.fontSize = 10
-            nodeLabel.fontColor = SKColor(hex: 0xBBBBBB)
+            // v1.7: functional text pops (readability canon, July 10)
+            nodeLabel.fontColor = SKColor(hex: 0xFFFFFF)
             nodeLabel.verticalAlignmentMode = .center
             nodeLabel.horizontalAlignmentMode = .left
             nodeLabel.position = CGPoint(x: -84, y: y - 10)
@@ -1147,8 +1252,20 @@ final class TitleScene: SKScene {
     // MARK: - Transitions
     
     private func startGame() {
+        // v1.7: browsing a locked arena — the forge won't ignite here.
+        // Nudge the requirement line instead of starting.
+        if displayedArenaIndex >= ProgressionManager.shared.arenasUnlocked {
+            let nudge = SKAction.sequence([
+                SKAction.moveBy(x: 6, y: 0, duration: 0.05),
+                SKAction.moveBy(x: -12, y: 0, duration: 0.08),
+                SKAction.moveBy(x: 6, y: 0, duration: 0.05)
+            ])
+            arenaReadyLabel.run(nudge)
+            return
+        }
+
         isTransitioning = true
-        
+
         // Flash effect
         let flash = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
         flash.fillColor = SKColor(hex: 0xFFAA33, alpha: 0.0)

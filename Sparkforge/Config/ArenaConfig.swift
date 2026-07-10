@@ -45,7 +45,22 @@ struct ArenaConfig {
         accentColorHex: 0xB8B0A4
     )
 
-    static let all: [ArenaConfig] = [crucible, quench]
+    // v1.7: palette is Lyra canon — static gold reads as pale electrical
+    // static, never treasure; idle circuit lines stay very faint (floor
+    // must sit below combat priority). See docs/lyra-response-v1.7.md.
+    static let coilworks = ArenaConfig(
+        id: 2,
+        name: "The Coilworks",
+        displayName: "ARENA 3: THE COILWORKS",
+        flavorLine: "the engine is calculating you",
+        floorColorHex: 0x121315,
+        boundaryColorHex: 0x5B4A22,
+        dangerGlowHex: 0x33290E,
+        detailLineHex: 0x23231B,
+        accentColorHex: 0xF6D36B
+    )
+
+    static let all: [ArenaConfig] = [crucible, quench, coilworks]
 
     /// The currently selected arena, clamped to what's unlocked.
     static var current: ArenaConfig {

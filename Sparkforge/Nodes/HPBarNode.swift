@@ -13,7 +13,7 @@ final class HPBarNode: SKNode {
     // MARK: - Config
     
     private let barWidth: CGFloat
-    private let barHeight: CGFloat = 5
+    private let barHeight: CGFloat = 16  // v1.7 legibility pass: 5 → 16
     
     // MARK: - Nodes
     
@@ -35,33 +35,33 @@ final class HPBarNode: SKNode {
         self.barWidth = width
 
         // Background (dark track, green-tinted)
-        backgroundBar = SKShapeNode(rectOf: CGSize(width: width, height: barHeight), cornerRadius: 2.5)
+        backgroundBar = SKShapeNode(rectOf: CGSize(width: width, height: barHeight), cornerRadius: 4)
         backgroundBar.fillColor = SKColor(hex: 0x112211)
-        backgroundBar.strokeColor = SKColor(hex: 0x224422, alpha: 0.5)
-        backgroundBar.lineWidth = 0.5
+        backgroundBar.strokeColor = SKColor(hex: 0x224422, alpha: 0.6)
+        backgroundBar.lineWidth = 1
 
         // Fill (health green — same family as health orbs)
-        fillBar = SKShapeNode(rectOf: CGSize(width: 1, height: barHeight), cornerRadius: 2.5)
+        fillBar = SKShapeNode(rectOf: CGSize(width: 1, height: barHeight), cornerRadius: 4)
         fillBar.fillColor = SKColor(hex: 0x44DD66)
         fillBar.strokeColor = .clear
 
-        // HP number label — only visible when damaged
+        // v1.7: HP numbers live ON the bar, always visible
         hpLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-        hpLabel.fontSize = 8
-        hpLabel.fontColor = SKColor(hex: 0x66CC77)
+        hpLabel.fontSize = 11
+        hpLabel.fontColor = SKColor(hex: 0xFFFFFF)
         hpLabel.verticalAlignmentMode = .center
         hpLabel.horizontalAlignmentMode = .center
-        hpLabel.position = CGPoint(x: 0, y: -12)
-        hpLabel.alpha = 0
+        hpLabel.position = .zero
+        hpLabel.zPosition = 2
 
         // v1.6: "HP" tag left of the bar
         tagLabel = SKLabelNode(fontNamed: "Menlo-Bold")
         tagLabel.text = "HP"
-        tagLabel.fontSize = 7
+        tagLabel.fontSize = 11
         tagLabel.fontColor = SKColor(hex: 0x44DD66, alpha: 0.8)
         tagLabel.verticalAlignmentMode = .center
         tagLabel.horizontalAlignmentMode = .right
-        tagLabel.position = CGPoint(x: -width / 2 - 6, y: 0)
+        tagLabel.position = CGPoint(x: -width / 2 - 7, y: 0)
 
         super.init()
 
@@ -91,8 +91,8 @@ final class HPBarNode: SKNode {
                 width: fillWidth,
                 height: barHeight
             ),
-            cornerWidth: 2.5,
-            cornerHeight: 2.5,
+            cornerWidth: 4,
+            cornerHeight: 4,
             transform: nil
         )
         
@@ -106,17 +106,8 @@ final class HPBarNode: SKNode {
         }
         fillBar.fillColor = baseColor
         
-        // Show/hide HP label
-        if currentHP < maxHP && currentHP > 0 {
-            hpLabel.text = "\(currentHP)/\(maxHP)"
-            if hpLabel.alpha < 1 {
-                hpLabel.run(SKAction.fadeAlpha(to: 1.0, duration: 0.15))
-            }
-        } else {
-            if hpLabel.alpha > 0 {
-                hpLabel.run(SKAction.fadeAlpha(to: 0, duration: 0.3))
-            }
-        }
+        // v1.7: numbers always on the bar
+        hpLabel.text = "\(max(currentHP, 0))/\(maxHP)"
         
         // Low HP pulse
         let newLowHP = clamped <= 0.25 && currentHP > 0

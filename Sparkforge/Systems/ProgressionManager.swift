@@ -25,6 +25,7 @@ final class ProgressionManager {
         static let bossKills = "sf_boss_kills"
         static let quenchKills = "sf_quench_kills"    // v1.6: kills made in Arena 2
         static let wardenKills = "sf_warden_kills"    // v1.6: Quench Warden kills
+        static let coilworksKills = "sf_coilworks_kills"  // v1.7: kills made in Arena 3
         static let longestSurvival = "sf_longest_survival"
         static let survived2Min = "sf_survived_2min"
         static let forgeXP = "sf_forge_xp"
@@ -62,6 +63,12 @@ final class ProgressionManager {
     var wardenKills: Int {
         get { defaults.integer(forKey: Keys.wardenKills) }
         set { defaults.set(newValue, forKey: Keys.wardenKills) }
+    }
+
+    /// v1.7: kills made while fighting in The Coilworks (feeds the Choir gate)
+    var coilworksKills: Int {
+        get { defaults.integer(forKey: Keys.coilworksKills) }
+        set { defaults.set(newValue, forKey: Keys.coilworksKills) }
     }
     
     // MARK: - Survival
@@ -185,6 +192,23 @@ final class ProgressionManager {
     var quenchWardenUnlocked: Bool {
         return quenchKills >= ProgressionManager.arena2Gate.totalKillsRequired
     }
+
+    // MARK: - v1.7: Arena 3 Gate (The Dynamo Choir)
+
+    /// Arena access itself proves the Warden fell (arenasUnlocked = 3 on
+    /// warden kill); the Choir answers once the Coilworks has fed enough.
+    static let arena3Gate = ArenaGate(
+        totalKillsRequired: 100,
+        bossKillsRequired: 0,
+        survivalRequired: false,
+        arenaName: "The Coilworks",
+        bossName: "The Dynamo Choir"
+    )
+
+    /// Check if the Dynamo Choir will answer the 90s bell
+    var dynamoChoirUnlocked: Bool {
+        return coilworksKills >= ProgressionManager.arena3Gate.totalKillsRequired
+    }
     
     /// Progress toward Arena 1 gate as individual fractions
     struct GateProgress {
@@ -273,10 +297,19 @@ final class ProgressionManager {
         defaults.removeObject(forKey: Keys.survived2Min)
         defaults.removeObject(forKey: Keys.forgeXP)
         defaults.removeObject(forKey: Keys.forgeLevel)
+        defaults.removeObject(forKey: Keys.quenchKills)
+        defaults.removeObject(forKey: Keys.wardenKills)
+        defaults.removeObject(forKey: Keys.coilworksKills)
         defaults.removeObject(forKey: Keys.currentArena)
         defaults.removeObject(forKey: Keys.arenasUnlocked)
         ForgePathManager.shared.resetAll()
     }
     
-    private init() {}
+    private init() {
+        // v1.7 migration: players who felled the Warden before the
+        // Coilworks existed already earned Arena 3 — unlock retroactively.
+        if wardenKills > 0 && arenasUnlocked < 3 {
+            arenasUnlocked = 3
+        }
+    }
 }
