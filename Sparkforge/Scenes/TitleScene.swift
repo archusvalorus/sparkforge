@@ -58,6 +58,11 @@ final class TitleScene: SKScene {
     // itself over whatever the layout had moved into its spot)
     private var blessingModal: SKNode?
     private var dailyForgeRowY: CGFloat = 0
+
+    // v1.7: Daily Forge choose-your-blessing
+    private var blessingChoiceModal: SKNode?
+    private var blessingPickerModal: SKNode?
+    private let adManager = AdReviveManager()
     
     // MARK: - Scene Lifecycle
     
@@ -80,6 +85,11 @@ final class TitleScene: SKScene {
         setupDailyForge()
         setupTapPrompt()
         setupSettings()
+
+        // v1.7: warm up the blessing-choice ad while the forge is unclaimed
+        if !DailyForgeManager.shared.hasClaimedToday && !IAPManager.shared.hasRemovedAds {
+            adManager.preloadBlessingChoiceAd()
+        }
     }
     
     // MARK: - Setup
@@ -509,6 +519,16 @@ final class TitleScene: SKScene {
         
         let location = touch.location(in: self)
 
+        // v1.7: choice + picker modals capture taps first
+        if blessingChoiceModal != nil {
+            handleBlessingChoiceTap(location)
+            return
+        }
+        if blessingPickerModal != nil {
+            handleBlessingPickerTap(location)
+            return
+        }
+
         // v1.6: blessing modal eats every tap until dismissed
         if blessingModal != nil {
             dismissBlessingModal()
@@ -575,20 +595,245 @@ final class TitleScene: SKScene {
     
     // MARK: - Daily Forge
     
+    // v1.7: the forge tap opens a choice — free random stays whole,
+    // the rewarded ad buys agency (Remove Ads owners choose free).
+    // Nothing is claimed until a path completes; cancel costs nothing.
     private func handleDailyForge() {
-        let dfm = DailyForgeManager.shared
+        showBlessingChoiceModal()
+    }
 
-        // If ads are removed, claim directly
-        if IAPManager.shared.hasRemovedAds {
-            let blessing = dfm.claimBlessing()
+    private func showBlessingChoiceModal() {
+        let adsRemoved = IAPManager.shared.hasRemovedAds
+
+        let modal = SKNode()
+        modal.zPosition = 300
+
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
+        dim.strokeColor = .clear
+        modal.addChild(dim)
+
+        let panel = SKShapeNode(rectOf: CGSize(width: 280, height: 224), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x1A1208)
+        panel.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.7)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        modal.addChild(panel)
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "🔥 DAILY FORGE"
+        title.fontSize = 16
+        title.fontColor = SKColor(hex: 0xFFAA33)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: 82)
+        modal.addChild(title)
+
+        // Random path — free, unchanged
+        let randomBtn = SKShapeNode(rectOf: CGSize(width: 232, height: 46), cornerRadius: 8)
+        randomBtn.fillColor = SKColor(hex: 0x332200)
+        randomBtn.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.6)
+        randomBtn.lineWidth = 1.5
+        randomBtn.position = CGPoint(x: 0, y: 30)
+        modal.addChild(randomBtn)
+
+        let randomLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        randomLabel.text = "🎲 RANDOM BLESSING"
+        randomLabel.fontSize = 13
+        randomLabel.fontColor = SKColor(hex: 0xFFAA33)
+        randomLabel.verticalAlignmentMode = .center
+        randomLabel.position = CGPoint(x: 0, y: 36)
+        modal.addChild(randomLabel)
+
+        let randomSub = SKLabelNode(fontNamed: "Menlo")
+        randomSub.text = "free"
+        randomSub.fontSize = 9
+        randomSub.fontColor = SKColor(hex: 0x888888)
+        randomSub.verticalAlignmentMode = .center
+        randomSub.position = CGPoint(x: 0, y: 20)
+        modal.addChild(randomSub)
+
+        // Choose path — the ad buys agency
+        let chooseBtn = SKShapeNode(rectOf: CGSize(width: 232, height: 46), cornerRadius: 8)
+        chooseBtn.fillColor = SKColor(hex: 0x11222E)
+        chooseBtn.strokeColor = SKColor(hex: 0x44BBFF, alpha: 0.6)
+        chooseBtn.lineWidth = 1.5
+        chooseBtn.position = CGPoint(x: 0, y: -32)
+        modal.addChild(chooseBtn)
+
+        let chooseLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        chooseLabel.text = adsRemoved ? "✨ CHOOSE YOUR BLESSING" : "📺 CHOOSE YOUR BLESSING"
+        chooseLabel.fontSize = 12
+        chooseLabel.fontColor = SKColor(hex: 0x44BBFF)
+        chooseLabel.verticalAlignmentMode = .center
+        chooseLabel.position = CGPoint(x: 0, y: -26)
+        modal.addChild(chooseLabel)
+
+        let chooseSub = SKLabelNode(fontNamed: "Menlo")
+        chooseSub.name = "chooseSubLabel"
+        chooseSub.text = adsRemoved ? "ad-free — you own the forge" : "watch a short ad"
+        chooseSub.fontSize = 9
+        chooseSub.fontColor = SKColor(hex: 0x888888)
+        chooseSub.verticalAlignmentMode = .center
+        chooseSub.position = CGPoint(x: 0, y: -42)
+        modal.addChild(chooseSub)
+
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "tap outside to cancel"
+        hint.fontSize = 9
+        hint.fontColor = SKColor(hex: 0x666666)
+        hint.verticalAlignmentMode = .center
+        hint.position = CGPoint(x: 0, y: -92)
+        modal.addChild(hint)
+
+        addChild(modal)
+        blessingChoiceModal = modal
+
+        modal.alpha = 0
+        panel.setScale(0.85)
+        modal.run(SKAction.fadeIn(withDuration: 0.2))
+        let pop = SKAction.scale(to: 1.0, duration: 0.2)
+        pop.timingMode = .easeOut
+        panel.run(pop)
+    }
+
+    private func handleBlessingChoiceTap(_ location: CGPoint) {
+        let randomFrame = CGRect(x: -116, y: 30 - 23, width: 232, height: 46)
+        let chooseFrame = CGRect(x: -116, y: -32 - 23, width: 232, height: 46)
+
+        if randomFrame.contains(location) {
+            dismissBlessingChoiceModal()
+            let blessing = DailyForgeManager.shared.claimBlessing()
+            AudioManager.shared.play(.cardSelect)
             showBlessingModal(blessing)
             return
         }
 
-        // Otherwise, show rewarded ad then claim
-        // TODO: Wire AdReviveManager for Daily Forge ad placement
-        let blessing = dfm.claimBlessing()
-        showBlessingModal(blessing)
+        if chooseFrame.contains(location) {
+            let vc = view?.window?.rootViewController
+            adManager.requestBlessingChoiceAd(from: vc) { [weak self] granted in
+                guard let self = self else { return }
+                if granted {
+                    self.dismissBlessingChoiceModal()
+                    self.showBlessingPickerModal()
+                } else if let sub = self.blessingChoiceModal?.childNode(withName: "chooseSubLabel") as? SKLabelNode {
+                    sub.text = "ad not ready — try again soon"
+                    sub.fontColor = SKColor(hex: 0xCC6644)
+                }
+            }
+            return
+        }
+
+        // Anywhere else cancels — the claim is untouched
+        dismissBlessingChoiceModal()
+    }
+
+    private func dismissBlessingChoiceModal() {
+        guard let modal = blessingChoiceModal else { return }
+        blessingChoiceModal = nil
+        modal.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: 0.15),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    // v1.7: post-ad picker — all five blessings, tap one to claim
+    private func showBlessingPickerModal() {
+        let modal = SKNode()
+        modal.zPosition = 300
+
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
+        dim.strokeColor = .clear
+        modal.addChild(dim)
+
+        let panel = SKShapeNode(rectOf: CGSize(width: 292, height: 296), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x1A1208)
+        panel.strokeColor = SKColor(hex: 0x44BBFF, alpha: 0.7)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        modal.addChild(panel)
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "CHOOSE YOUR BLESSING"
+        title.fontSize = 14
+        title.fontColor = SKColor(hex: 0x44BBFF)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: 122)
+        modal.addChild(title)
+
+        for (i, blessing) in DailyForgeManager.blessings.enumerated() {
+            let y = 76 - CGFloat(i) * 42
+
+            let row = SKShapeNode(rectOf: CGSize(width: 256, height: 38), cornerRadius: 7)
+            row.fillColor = SKColor(hex: 0x332200, alpha: 0.85)
+            row.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.45)
+            row.lineWidth = 1
+            row.position = CGPoint(x: 0, y: y)
+            modal.addChild(row)
+
+            let icon = SKLabelNode(text: blessing.icon)
+            icon.fontSize = 18
+            icon.verticalAlignmentMode = .center
+            icon.position = CGPoint(x: -108, y: y)
+            modal.addChild(icon)
+
+            let name = SKLabelNode(fontNamed: "Menlo-Bold")
+            name.text = blessing.name
+            name.fontSize = 13
+            name.fontColor = SKColor(hex: 0xFFAA33)
+            name.verticalAlignmentMode = .center
+            name.horizontalAlignmentMode = .left
+            name.position = CGPoint(x: -88, y: y + 8)
+            modal.addChild(name)
+
+            let desc = SKLabelNode(fontNamed: "Menlo")
+            desc.text = blessing.description
+            desc.fontSize = 9
+            desc.fontColor = SKColor(hex: 0x66AA66)
+            desc.verticalAlignmentMode = .center
+            desc.horizontalAlignmentMode = .left
+            desc.position = CGPoint(x: -88, y: y - 9)
+            modal.addChild(desc)
+        }
+
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "your forge, your choice"
+        hint.fontSize = 9
+        hint.fontColor = SKColor(hex: 0x666666)
+        hint.verticalAlignmentMode = .center
+        hint.position = CGPoint(x: 0, y: -132)
+        modal.addChild(hint)
+
+        addChild(modal)
+        blessingPickerModal = modal
+
+        modal.alpha = 0
+        panel.setScale(0.85)
+        modal.run(SKAction.fadeIn(withDuration: 0.2))
+        let pop = SKAction.scale(to: 1.0, duration: 0.2)
+        pop.timingMode = .easeOut
+        panel.run(pop)
+    }
+
+    private func handleBlessingPickerTap(_ location: CGPoint) {
+        for (i, blessing) in DailyForgeManager.blessings.enumerated() {
+            let y = 76 - CGFloat(i) * 42
+            let rowFrame = CGRect(x: -128, y: y - 19, width: 256, height: 38)
+            if rowFrame.contains(location) {
+                DailyForgeManager.shared.claimChosenBlessing(blessing)
+                AudioManager.shared.play(.cardSelect)
+                if let modal = blessingPickerModal {
+                    blessingPickerModal = nil
+                    modal.run(SKAction.sequence([
+                        SKAction.fadeOut(withDuration: 0.15),
+                        SKAction.removeFromParent()
+                    ]))
+                }
+                showBlessingModal(blessing)
+                return
+            }
+        }
+        // The reward is already earned — taps outside the rows do nothing
     }
 
     // v1.6: blessing claim is a modal — the old inline text was positioned

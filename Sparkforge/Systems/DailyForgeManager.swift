@@ -83,13 +83,19 @@ final class DailyForgeManager {
     /// Call this after the rewarded ad completes (or immediately if Remove Ads).
     func claimBlessing() -> Blessing {
         defaults.set(Date(), forKey: Keys.lastBlessingDate)
-        
+
         let blessing = DailyForgeManager.blessings.randomElement()!
         activeBlessingID = blessing.id
-        
+
         return blessing
     }
-    
+
+    /// v1.7: Claim a specific blessing — the rewarded ad bought agency.
+    func claimChosenBlessing(_ blessing: Blessing) {
+        defaults.set(Date(), forKey: Keys.lastBlessingDate)
+        activeBlessingID = blessing.id
+    }
+
     // MARK: - Apply
     
     /// Apply the active blessing to PlayerStats at run start, then clear it.

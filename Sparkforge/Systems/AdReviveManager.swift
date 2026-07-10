@@ -18,15 +18,17 @@ final class AdReviveManager: NSObject {
     // protects the AdMob account (watching/clicking your own live ads
     // reads as invalid traffic). Release builds use the real units.
     #if DEBUG
-    static let reviveAdUnitID    = "ca-app-pub-3940256099942544/1712485313"
-    static let rerollAdUnitID    = "ca-app-pub-3940256099942544/1712485313"
-    static let xpBoostAdUnitID   = "ca-app-pub-3940256099942544/1712485313"
-    static let extraCardAdUnitID = "ca-app-pub-3940256099942544/1712485313"
+    static let reviveAdUnitID         = "ca-app-pub-3940256099942544/1712485313"
+    static let rerollAdUnitID         = "ca-app-pub-3940256099942544/1712485313"
+    static let xpBoostAdUnitID        = "ca-app-pub-3940256099942544/1712485313"
+    static let extraCardAdUnitID      = "ca-app-pub-3940256099942544/1712485313"
+    static let blessingChoiceAdUnitID = "ca-app-pub-3940256099942544/1712485313"
     #else
-    static let reviveAdUnitID    = "ca-app-pub-3734133983597932/3682515394"
-    static let rerollAdUnitID    = "ca-app-pub-3734133983597932/9266014563"
-    static let xpBoostAdUnitID   = "ca-app-pub-3734133983597932/4094068573"  // v1.6: corrected — matches AdMob console + registry
-    static let extraCardAdUnitID = "ca-app-pub-3734133983597932/8893772917"  // v1.6: level-up +1 card choice
+    static let reviveAdUnitID         = "ca-app-pub-3734133983597932/3682515394"
+    static let rerollAdUnitID         = "ca-app-pub-3734133983597932/9266014563"
+    static let xpBoostAdUnitID        = "ca-app-pub-3734133983597932/4094068573"  // v1.6: corrected — matches AdMob console + registry
+    static let extraCardAdUnitID      = "ca-app-pub-3734133983597932/8893772917"  // v1.6: level-up +1 card choice
+    static let blessingChoiceAdUnitID = "ca-app-pub-3734133983597932/8585404316"  // v1.7: Daily Forge choose-your-blessing
     #endif
     
     // MARK: - State
@@ -37,16 +39,19 @@ final class AdReviveManager: NSObject {
     private var rerollAd: RewardedAd?
     private var xpBoostAd: RewardedAd?  // v1.5
     private var extraCardAd: RewardedAd?  // v1.6
+    private var blessingChoiceAd: RewardedAd?  // v1.7
     private var reviveCompletion: ((Bool) -> Void)?
     private var rerollCompletion: ((Bool) -> Void)?
     private var xpBoostCompletion: ((Bool) -> Void)?  // v1.5
     private var extraCardCompletion: ((Bool) -> Void)?  // v1.6
+    private var blessingChoiceCompletion: ((Bool) -> Void)?  // v1.7
 
     private enum ActiveAd {
         case revive
         case reroll
-        case xpBoost   // v1.5
-        case extraCard // v1.6
+        case xpBoost        // v1.5
+        case extraCard      // v1.6
+        case blessingChoice // v1.7
     }
     private var activeAd: ActiveAd?
     
@@ -70,6 +75,7 @@ final class AdReviveManager: NSObject {
         preloadRerollAd()
         preloadXPBoostAd()
         preloadExtraCardAd()
+        preloadBlessingChoiceAd()
     }
     
     private func preloadReviveAd() {
@@ -129,6 +135,48 @@ final class AdReviveManager: NSObject {
             self?.extraCardAd = ad
             self?.extraCardAd?.fullScreenContentDelegate = self
             print("[AdRevive] Extra card ad loaded")
+        }
+    }
+
+    /// Internal so TitleScene can warm just this unit without loading the run ads
+    func preloadBlessingChoiceAd() {
+        RewardedAd.load(
+            with: AdReviveManager.blessingChoiceAdUnitID,
+            request: Request()
+        ) { [weak self] ad, error in
+            if let error = error {
+                print("[AdRevive] Failed to load blessing choice ad: \(error.localizedDescription)")
+                return
+            }
+            self?.blessingChoiceAd = ad
+            self?.blessingChoiceAd?.fullScreenContentDelegate = self
+            print("[AdRevive] Blessing choice ad loaded")
+        }
+    }
+
+    // MARK: - v1.7: Blessing Choice Flow
+
+    /// Remove Ads owners choose free — completion fires true immediately.
+    func requestBlessingChoiceAd(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        if adsRemoved {
+            completion(true)
+            return
+        }
+
+        guard let ad = blessingChoiceAd, let vc = viewController else {
+            print("[AdRevive] Blessing choice ad not ready")
+            completion(false)
+            return
+        }
+
+        blessingChoiceCompletion = completion
+        activeAd = .blessingChoice
+
+        ad.present(from: vc) { [weak self] in
+            self?.blessingChoiceCompletion?(true)
+            self?.blessingChoiceCompletion = nil
+            self?.activeAd = nil
+            self?.preloadBlessingChoiceAd()
         }
     }
 
@@ -281,6 +329,10 @@ extension AdReviveManager: FullScreenContentDelegate {
                 self.extraCardCompletion?(false)
                 self.extraCardCompletion = nil
                 self.preloadExtraCardAd()
+            case .blessingChoice:
+                self.blessingChoiceCompletion?(false)
+                self.blessingChoiceCompletion = nil
+                self.preloadBlessingChoiceAd()
             case .none:
                 break
             }
@@ -315,6 +367,12 @@ extension AdReviveManager: FullScreenContentDelegate {
                     self.extraCardCompletion = nil
                 }
                 self.preloadExtraCardAd()
+            case .blessingChoice:
+                if let completion = self.blessingChoiceCompletion {
+                    completion(false)
+                    self.blessingChoiceCompletion = nil
+                }
+                self.preloadBlessingChoiceAd()
             case .none:
                 break
             }
