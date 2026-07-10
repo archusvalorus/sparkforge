@@ -669,7 +669,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         menuText.verticalAlignmentMode = .center
         menuBtn.addChild(menuText)
         pauseOverlay.addChild(menuBtn)
-        
+
+        // v1.7 interim SFX toggle — Unit 2's settings pane replaces this
+        let sfxBtn = SKLabelNode(fontNamed: "Menlo")
+        sfxBtn.name = "sfxToggleButton"
+        sfxBtn.text = SettingsManager.shared.sfxEnabled ? "SFX: ON" : "SFX: OFF"
+        sfxBtn.fontSize = 12
+        sfxBtn.fontColor = SKColor(hex: 0xAAAAAA)
+        sfxBtn.verticalAlignmentMode = .center
+        sfxBtn.position = CGPoint(x: 0, y: -105)
+        pauseOverlay.addChild(sfxBtn)
+
         guard let camera = camera else { return }
         camera.addChild(pauseOverlay)
     }
@@ -1066,6 +1076,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 return
             }
         }
+
+        // v1.7: SFX toggle
+        if let sfxBtn = pauseOverlay.childNode(withName: "sfxToggleButton") as? SKLabelNode {
+            let btnFrame = CGRect(x: sfxBtn.position.x - 60, y: sfxBtn.position.y - 16,
+                                  width: 120, height: 32)
+            if btnFrame.contains(location) {
+                SettingsManager.shared.sfxEnabled.toggle()
+                sfxBtn.text = SettingsManager.shared.sfxEnabled ? "SFX: ON" : "SFX: OFF"
+                AudioManager.shared.play(.cardSelect)
+                return
+            }
+        }
     }
     
     // MARK: - Card Selection
@@ -1114,6 +1136,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     private func selectCard(_ selectedNode: UpgradeCardNode) {
+        AudioManager.shared.play(.cardSelect)
         upgradeManager.pickCard(selectedNode.card, stats: playerStats)
         let synergies = upgradeManager.checkSynergies(stats: playerStats)
         player.updateCollisionRadius()
@@ -1241,6 +1264,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     private func showSynergyNotification(_ text: String) {
+        AudioManager.shared.play(.buildHint)
         synergyLabel.text = text
         synergyLabel.alpha = 0
         
@@ -1847,6 +1871,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.4: Self-damage is HP-based instead of losing a lethal save
         let died = playerStats.takeDamage(playerStats.unstableCoreSelfDamage)
         hpBar.flashDamage()
+        AudioManager.shared.play(.playerDamage)
         if died {
             if player.tryLethalSave() {
                 // Survived — continue
@@ -2075,6 +2100,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 let died = self.player.applyDamage(damage)
                 self.damageCooldownTimer = GameConfig.Player.damageCooldown
                 self.hpBar.flashDamage()
+                AudioManager.shared.play(.playerDamage)
                 self.worldNode.shake(intensity: 10, duration: 0.3)
                 if died {
                     if self.player.tryLethalSave() { return }
@@ -2176,6 +2202,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let died = player.applyDamage(damage)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
+        AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: shakeIntensity, duration: 0.2)
 
         if died {
@@ -2188,6 +2215,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func showBossEntrance(name: String, colorHex: UInt32) {
+        AudioManager.shared.play(.bossEntrance)
         let dim = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.5)
         dim.strokeColor = .clear
@@ -2230,6 +2258,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hpBar.flashHeal()
         healthOrbs.remove(at: idx)
         orb.collect()
+        AudioManager.shared.play(.orbPickup)
     }
     
     // MARK: - v1.4: Magnet Orb Collection
@@ -2239,6 +2268,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let idx = magnetOrbs.firstIndex(where: { $0 === orb }) else { return }
         magnetOrbs.remove(at: idx)
         orb.collect()
+        AudioManager.shared.play(.orbPickup)
         // Vacuum ALL XP orbs to player
         for xpOrb in xpOrbs {
             let flyTo = SKAction.move(to: player.position, duration: 0.3)
@@ -2250,6 +2280,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - v1.4: Build Identity Hints
     
     private func showBuildHint(_ text: String) {
+        AudioManager.shared.play(.buildHint)
         let hint = SKLabelNode(fontNamed: "Menlo-Bold")
         hint.text = text
         hint.fontSize = 14
@@ -2541,6 +2572,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let died = player.applyDamage(damage)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
+        AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: 6, duration: 0.2)
         
         if died {
@@ -2601,6 +2633,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let died = player.applyDamage(projNode.damage)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
+        AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: 4, duration: 0.15)
         
         if died {
@@ -2820,6 +2853,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             xpOrbs.remove(at: index)
         }
         orbNode.collect()
+        AudioManager.shared.play(.orbPickup)
         
         // v1.3: Magnetic Core — speed boost on XP pickup
         playerStats.triggerMagneticCoreBoost()
@@ -2833,6 +2867,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func triggerLevelUp() {
         gameState = .levelUp
+        AudioManager.shared.play(.levelUp)
         xpBar.flashLevelUp()
         levelLabel.text = "LV \(player.currentLevel)"
         
