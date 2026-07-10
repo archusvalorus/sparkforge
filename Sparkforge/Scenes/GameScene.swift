@@ -43,6 +43,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v1.6: Quench Field momentum pulses (points/sec toward boss when positive)
     private var fieldImpulseStrength: CGFloat = 0
     private var fieldImpulseRemaining: TimeInterval = 0
+    /// v1.7: the player's last real heading — Polarity Hymn's snap
+    /// projects enemies onto this path, never onto the player
+    private var lastMoveDirection = CGPoint(x: 0, y: 1)
     
     // MARK: - New Additions for health orbs + magnet orbs
     
@@ -1409,6 +1412,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         player.move(direction: joystick.direction, deltaTime: dt)
+        if joystick.direction != .zero {
+            lastMoveDirection = joystick.direction.normalized
+        }
         updateEnemies(dt)
         updateAutoAttack(dt)
         updateProjectiles(dt)
@@ -1432,6 +1438,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 spawnBoss()
             } else if arenaConfig.id == 1 && ProgressionManager.shared.quenchWardenUnlocked && boss == nil {
                 spawnQuenchWarden()
+            } else if arenaConfig.id == 2 && ProgressionManager.shared.dynamoChoirUnlocked && boss == nil {
+                spawnDynamoChoir()
             } else {
                 spawnMiniBoss()
             }
@@ -2365,6 +2373,87 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(warden)
 
         showBossEntrance(name: "THE QUENCH WARDEN", colorHex: 0xB8B0A4)
+    }
+
+    // MARK: - v1.7: Dynamo Choir Spawn
+
+    private func spawnDynamoChoir() {
+        let elapsed = waveManager.elapsedTime
+        let hpScaling = Int(elapsed / 30) * 5
+
+        let choir = DynamoChoirNode(hpScaling: hpScaling)
+        choir.position = DynamoChoirNode.spawnPosition()
+        choir.zPosition = 6
+
+        // Broken Measure beats ride the enemy projectile pipeline
+        choir.onFireProjectile = { [weak self] position, direction in
+            self?.spawnEnemyProjectile(at: position, direction: direction)
+        }
+
+        // Circuit Litany — crossing a lit conduit hurts
+        choir.onLineDamage = { [weak self] damage in
+            self?.applyBossHazardDamage(damage, shakeIntensity: 6)
+        }
+
+        // Polarity Hymn pulses 1+2 reuse the Quench Field plumbing
+        choir.onFieldPulse = { [weak self] strength, duration in
+            self?.fieldImpulseStrength = strength
+            self?.fieldImpulseRemaining = duration
+        }
+
+        // Pulse 3: snap enemies toward the player's PATH, never onto the
+        // player — electrical tell first, then the lurch (Lyra guardrail)
+        choir.onEnemySnap = { [weak self] radius in
+            guard let self = self else { return }
+            let projected = self.player.position + self.lastMoveDirection * 90
+
+            for enemy in self.enemies
+            where enemy.position.distance(to: self.player.position) < radius {
+                let toward = projected - enemy.position
+                let lurch = toward.normalized * min(toward.length * 0.7, 120)
+
+                // Tell: a static spark above the enemy about to be conducted
+                let spark = SKLabelNode(text: "⌁")
+                spark.fontSize = 12
+                spark.fontColor = SKColor(hex: 0xF6D36B)
+                spark.position = CGPoint(x: 0, y: 16)
+                spark.zPosition = 8
+                enemy.addChild(spark)
+                spark.run(SKAction.sequence([
+                    SKAction.repeat(SKAction.sequence([
+                        SKAction.fadeAlpha(to: 0.2, duration: 0.06),
+                        SKAction.fadeAlpha(to: 1.0, duration: 0.06)
+                    ]), count: 2),
+                    SKAction.removeFromParent()
+                ]))
+
+                enemy.run(SKAction.sequence([
+                    SKAction.wait(forDuration: 0.28),
+                    SKAction.move(by: CGVector(dx: lurch.x, dy: lurch.y), duration: 0.12)
+                ]))
+            }
+        }
+
+        choir.onDeath = { [weak self] pos, xp in
+            guard let self = self else { return }
+            self.bossDefeatedThisRun = true
+            ProgressionManager.shared.recordKill(.boss)
+            ProgressionManager.shared.choirKills += 1  // banked for Arena 4's gate
+            for _ in 0..<10 {
+                let offset = CGPoint(
+                    x: CGFloat.random(in: -40...40),
+                    y: CGFloat.random(in: -40...40)
+                )
+                self.spawnXPOrb(at: pos + offset, value: xp / 10)
+            }
+            self.boss = nil
+            self.worldNode.shake(intensity: 15, duration: 0.5)
+        }
+
+        boss = choir
+        worldNode.addChild(choir)
+
+        showBossEntrance(name: "THE DYNAMO CHOIR", colorHex: 0xF6D36B)
     }
 
     // MARK: - v1.7: Relay Imp Arcs
@@ -3429,6 +3518,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         magnetOrbs.forEach { $0.removeFromParent() }
         magnetOrbs.removeAll()
         (boss as? QuenchWardenNode)?.cleanupWorldEffects()
+        (boss as? DynamoChoirNode)?.cleanupWorldEffects()
         boss?.removeFromParent()
         boss = nil
         fieldImpulseStrength = 0

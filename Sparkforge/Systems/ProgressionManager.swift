@@ -26,6 +26,7 @@ final class ProgressionManager {
         static let quenchKills = "sf_quench_kills"    // v1.6: kills made in Arena 2
         static let wardenKills = "sf_warden_kills"    // v1.6: Quench Warden kills
         static let coilworksKills = "sf_coilworks_kills"  // v1.7: kills made in Arena 3
+        static let choirKills = "sf_choir_kills"          // v1.7: Dynamo Choir kills (arena 4 gate feed)
         static let longestSurvival = "sf_longest_survival"
         static let survived2Min = "sf_survived_2min"
         static let forgeXP = "sf_forge_xp"
@@ -69,6 +70,12 @@ final class ProgressionManager {
     var coilworksKills: Int {
         get { defaults.integer(forKey: Keys.coilworksKills) }
         set { defaults.set(newValue, forKey: Keys.coilworksKills) }
+    }
+
+    /// v1.7: Dynamo Choir kills (banked — Arena 4's gate will feed on these)
+    var choirKills: Int {
+        get { defaults.integer(forKey: Keys.choirKills) }
+        set { defaults.set(newValue, forKey: Keys.choirKills) }
     }
     
     // MARK: - Survival
