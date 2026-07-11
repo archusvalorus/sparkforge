@@ -35,6 +35,9 @@ final class UpgradeManager {
         let id: String
         let name: String
         let tag: Tag
+        /// v1.7 dual-tag cards (Lyra rule): counts toward BOTH tag totals,
+        /// no pick popup. Rare — bridges, not soup.
+        var secondaryTag: Tag? = nil
         let description: String
         let apply: (PlayerStats) -> Void
     }
@@ -120,12 +123,16 @@ final class UpgradeManager {
     /// Player picks a card — apply its effects and track it
     func pickCard(_ card: UpgradeCard, stats: PlayerStats) {
         pickedCardIDs.append(card.id)
-        
+
         // Track tag
         if card.tag != .neutral {
             tagCounts[card.tag, default: 0] += 1
         }
-        
+        // v1.7: dual-tag cards count toward BOTH totals
+        if let second = card.secondaryTag, second != .neutral {
+            tagCounts[second, default: 0] += 1
+        }
+
         // Apply card effect
         card.apply(stats)
     }
@@ -731,6 +738,53 @@ final class UpgradeManager {
             description: "Slowly regenerate while at low HP"
         ) { stats in
             stats.cauterizeActive = true
+        })
+
+        // ═══════════════════════════════════
+        // ⚙️ v1.7 COILWORKS (Lyra's six — lyra-response-v1.7.md)
+        // ═══════════════════════════════════
+
+        cards.append(UpgradeCard(
+            id: "v17_induction_step", name: "Induction Step", tag: .shock,
+            description: "Moving charges your next attack"
+        ) { stats in
+            stats.inductionStepActive = true
+        })
+
+        cards.append(UpgradeCard(
+            id: "v17_copper_vein", name: "Copper Vein", tag: .shock,
+            description: "Shock chains reach farther"
+        ) { stats in
+            stats.shockChainRadiusBonus += 50
+        })
+
+        // The first bridge card — counts toward Fire AND Shock
+        cards.append(UpgradeCard(
+            id: "v17_relay_burn", name: "Relay Burn", tag: .fire, secondaryTag: .shock,
+            description: "Burning foes can arc Shock"
+        ) { stats in
+            stats.relayBurnActive = true
+        })
+
+        cards.append(UpgradeCard(
+            id: "v17_overclock", name: "Overclock", tag: .neutral,
+            description: "Level-ups grant speed briefly"
+        ) { stats in
+            stats.overclockActive = true
+        })
+
+        cards.append(UpgradeCard(
+            id: "v17_dead_circuit", name: "Dead Circuit", tag: .voidT,
+            description: "Void zones linger longer"
+        ) { stats in
+            stats.voidZoneDurationMultiplier += 0.5
+        })
+
+        cards.append(UpgradeCard(
+            id: "v17_grounded_core", name: "Grounded Core", tag: .guardT,
+            description: "Standing still builds DEF"
+        ) { stats in
+            stats.groundedCoreActive = true
         })
 
         return cards

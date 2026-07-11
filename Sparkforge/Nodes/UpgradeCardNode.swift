@@ -116,12 +116,26 @@ final class UpgradeCardNode: SKNode {
         let w = UpgradeCardNode.cardWidth
         let h = UpgradeCardNode.cardHeight
         
-        // Tag emoji
-        let tagLabel = SKLabelNode(text: UpgradeCardNode.emoji(for: card.tag))
+        // Tag emoji — dual-tag cards show both
+        var emojiText = UpgradeCardNode.emoji(for: card.tag)
+        if let second = card.secondaryTag {
+            emojiText += UpgradeCardNode.emoji(for: second)
+        }
+        let tagLabel = SKLabelNode(text: emojiText)
         tagLabel.fontSize = 24
         tagLabel.position = CGPoint(x: 0, y: h / 2 - 44)
         tagLabel.verticalAlignmentMode = .center
         addChild(tagLabel)
+
+        // v1.7 dual-tag: the accent bar splits — right half wears the second tree
+        if let second = card.secondaryTag {
+            let half = SKShapeNode(rectOf: CGSize(width: (w - 10) / 2, height: 5), cornerRadius: 2.5)
+            half.fillColor = SKColor(hex: UpgradeCardNode.color(for: second))
+            half.strokeColor = .clear
+            half.position = CGPoint(x: (w - 10) / 4, y: h / 2 - 14)
+            half.zPosition = 0.1
+            addChild(half)
+        }
 
         // Card name — auto-shrink to fit within card width
         let nameLabel = SKLabelNode(fontNamed: "Menlo-Bold")
@@ -159,9 +173,11 @@ final class UpgradeCardNode: SKNode {
             addChild(descLabel)
         }
 
-        // Tag name at bottom
+        // Tag name at bottom — dual-tag cards show both trees
         let tagNameLabel = SKLabelNode(fontNamed: "Menlo")
-        tagNameLabel.text = card.tag.rawValue.uppercased()
+        tagNameLabel.text = card.secondaryTag.map {
+            "\(card.tag.rawValue.uppercased()) / \($0.rawValue.uppercased())"
+        } ?? card.tag.rawValue.uppercased()
         tagNameLabel.fontSize = 9
         tagNameLabel.fontColor = SKColor(hex: 0x999999)
         tagNameLabel.position = CGPoint(x: 0, y: -h / 2 + 14)

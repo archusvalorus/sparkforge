@@ -36,7 +36,9 @@ final class PlayerStats {
     /// Take damage after DEF reduction. Returns true if player died (HP <= 0).
     @discardableResult
     func takeDamage(_ rawDamage: Int) -> Bool {
-        let reduced = max(1, rawDamage - defense)
+        // v1.7 Grounded Core: the brace adds DEF while standing still
+        let effectiveDefense = defense + (groundedCoreBraced ? groundedCoreBonusDEF : 0)
+        let reduced = max(1, rawDamage - effectiveDefense)
         currentHP -= reduced
         if currentHP < 0 { currentHP = 0 }
         return currentHP <= 0
@@ -130,12 +132,79 @@ final class PlayerStats {
     var globalEnemySlow: CGFloat = 0.0
     
     // MARK: - Chain Lightning (Shock)
-    
+
     /// Number of chain targets on hit (base: 0)
     var chainTargets: Int = 0
     /// Chain damage multiplier relative to original hit
     var chainDamageMultiplier: CGFloat = 0.5
-    
+    /// v1.7 Copper Vein: extra chain target search radius
+    var shockChainRadiusBonus: CGFloat = 0
+
+    // MARK: - v1.7: Coilworks Cards
+
+    /// Induction Step — distance traveled charges the next attack
+    var inductionStepActive: Bool = false
+    /// Points of travel for a full charge
+    var inductionChargeDistance: CGFloat = 380
+    private(set) var inductionCharge: CGFloat = 0  // 0.0–1.0
+
+    func addInductionCharge(distance: CGFloat) {
+        guard inductionStepActive else { return }
+        inductionCharge = min(1.0, inductionCharge + distance / inductionChargeDistance)
+    }
+
+    /// Consume a full charge. Returns the bonus Shock damage (0 if not charged).
+    func consumeInductionCharge() -> Int {
+        guard inductionStepActive, inductionCharge >= 1.0 else { return 0 }
+        inductionCharge = 0
+        return max(3, Int(CGFloat(baseAttack) * 1.5))
+    }
+
+    /// Relay Burn (Fire/Shock) — burning foes can arc Shock
+    var relayBurnActive: Bool = false
+    /// Expected arcs per burning enemy per second (dt-scaled roll)
+    var relayBurnRate: CGFloat = 0.9
+    var relayBurnDamage: Int = 4
+    var relayBurnRadius: CGFloat = 90
+
+    /// Overclock — level-ups grant speed briefly
+    var overclockActive: Bool = false
+    var overclockBoost: CGFloat = 0.35
+    var overclockDuration: TimeInterval = 3.0
+    private(set) var overclockTimer: TimeInterval = 0
+
+    func triggerOverclock() {
+        guard overclockActive else { return }
+        overclockTimer = overclockDuration
+    }
+
+    /// Dead Circuit — player-created void zones linger longer
+    var voidZoneDurationMultiplier: CGFloat = 1.0
+
+    /// Grounded Core — standing still builds DEF
+    var groundedCoreActive: Bool = false
+    var groundedCoreBonusDEF: Int = 8
+    /// Seconds of stillness before the brace engages
+    var groundedCoreWindow: TimeInterval = 0.7
+    private(set) var groundedCoreBraced: Bool = false
+    private var stationaryTime: TimeInterval = 0
+
+    /// Micro-adjustments don't break the brace — the caller treats tiny
+    /// stick deflection as stillness (Lyra tuning guardrail)
+    func updateGroundedCore(isMoving: Bool, dt: TimeInterval) {
+        guard groundedCoreActive else {
+            groundedCoreBraced = false
+            return
+        }
+        if isMoving {
+            stationaryTime = 0
+            groundedCoreBraced = false
+        } else {
+            stationaryTime += dt
+            groundedCoreBraced = stationaryTime >= groundedCoreWindow
+        }
+    }
+
     // MARK: - Special Mechanics
     
     /// Whether kills explode (Ember Burst)
@@ -489,16 +558,20 @@ final class PlayerStats {
         magneticCoreBoostTimer = magneticCoreBoostDuration
     }
     
-    /// Update boost timer
+    /// Update boost timers (magnetic core + v1.7 overclock)
     func updateMagneticCore(_ dt: TimeInterval) {
         if magneticCoreBoostTimer > 0 { magneticCoreBoostTimer -= dt }
+        if overclockTimer > 0 { overclockTimer -= dt }
     }
-    
-    /// Effective move speed including magnetic core boost
+
+    /// Effective move speed including boosts
     var effectiveMoveSpeedWithBoosts: CGFloat {
         var speed = GameConfig.Player.speed * moveSpeedMultiplier
         if magneticCoreBoostTimer > 0 {
             speed *= (1.0 + magneticCoreSpeedBoost)
+        }
+        if overclockTimer > 0 {
+            speed *= (1.0 + overclockBoost)
         }
         return speed
     }
@@ -556,6 +629,16 @@ final class PlayerStats {
         globalEnemySlow = 0.0
         chainTargets = 0
         chainDamageMultiplier = 0.5
+        shockChainRadiusBonus = 0
+        inductionStepActive = false
+        inductionCharge = 0
+        relayBurnActive = false
+        overclockActive = false
+        overclockTimer = 0
+        voidZoneDurationMultiplier = 1.0
+        groundedCoreActive = false
+        groundedCoreBraced = false
+        stationaryTime = 0
         killsExplode = false
         explosionRadius = 40.0
         explosionDamagePercent = 0.3

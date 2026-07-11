@@ -1095,7 +1095,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             handlePauseScreenTap(touch)
             
         case .reviving:
-            break
+            // v1.7: the post-ad hold — resume only on the player's tap
+            if reviveHoldOverlay != nil {
+                resumeFromRevive()
+            }
         }
     }
     
@@ -1411,10 +1414,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damageCooldownTimer -= dt
         }
         
+        let preMovePosition = player.position
         player.move(direction: joystick.direction, deltaTime: dt)
         if joystick.direction != .zero {
             lastMoveDirection = joystick.direction.normalized
         }
+        // v1.7 Coilworks cards: movement charges Induction Step;
+        // stillness (micro-adjustments included) braces Grounded Core
+        playerStats.addInductionCharge(distance: player.position.distance(to: preMovePosition))
+        playerStats.updateGroundedCore(isMoving: joystick.direction.length > 0.15, dt: dt)
+        updateGroundedCoreRing()
         updateEnemies(dt)
         updateAutoAttack(dt)
         updateProjectiles(dt)
@@ -1526,14 +1535,97 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if playerStats.burnSpreads && enemy.isBurning {
                 spreadBurn(from: enemy)
             }
+
+            // v1.7 Relay Burn: burning foes can arc Shock (dt-scaled roll)
+            if playerStats.relayBurnActive && enemy.isBurning
+               && CGFloat.random(in: 0...1) < playerStats.relayBurnRate * CGFloat(dt) {
+                relayArcSources.append(enemy)
+            }
         }
-        
+
         for index in diedFromDOT.reversed() {
             let enemy = enemies[index]
             let pos = enemy.position
             let xp = enemy.xpValue
             enemies.remove(at: index)
             onEnemyKilled(at: pos, xpValue: xp, enemy: enemy)
+        }
+
+        // Fire queued Relay Burn arcs after the removal pass (safe mutation)
+        if !relayArcSources.isEmpty {
+            for source in relayArcSources where source.parent != nil {
+                fireRelayBurnArc(from: source)
+            }
+            relayArcSources.removeAll()
+        }
+    }
+
+    // MARK: - v1.7: Relay Burn (Fire/Shock bridge card)
+
+    private var relayArcSources: [EnemyNode] = []
+
+    /// A small Shock arc jumps from a burning enemy to one nearby enemy.
+    /// One hop, no recursion — a bridge, not free chain lightning.
+    private func fireRelayBurnArc(from source: EnemyNode) {
+        var closest: EnemyNode?
+        var closestDist = playerStats.relayBurnRadius
+        for enemy in enemies where enemy !== source {
+            let dist = source.position.distance(to: enemy.position)
+            if dist < closestDist {
+                closestDist = dist
+                closest = enemy
+            }
+        }
+        guard let target = closest else { return }
+
+        let line = SKShapeNode()
+        let path = CGMutablePath()
+        path.move(to: source.position)
+        path.addLine(to: target.position)
+        line.path = path
+        line.strokeColor = SKColor(hex: 0x44BBFF, alpha: 0.8)
+        line.lineWidth = 1.5
+        line.glowWidth = 3
+        line.zPosition = 8
+        worldNode.addChild(line)
+        line.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: 0.15),
+            SKAction.removeFromParent()
+        ]))
+
+        if target.takeDamage(playerStats.relayBurnDamage) {
+            if let index = enemies.firstIndex(where: { $0 === target }) {
+                enemies.remove(at: index)
+            }
+            onEnemyKilled(at: target.position, xpValue: target.xpValue, enemy: target)
+        }
+    }
+
+    // MARK: - v1.7: Grounded Core brace indicator
+
+    private var groundedCoreRing: SKShapeNode?
+
+    /// A quiet guard-green ring at the spark's feet while braced
+    private func updateGroundedCoreRing() {
+        if playerStats.groundedCoreBraced {
+            if groundedCoreRing == nil {
+                let ring = SKShapeNode(circleOfRadius: GameConfig.Player.visualRadius + 7)
+                ring.strokeColor = SKColor(hex: 0x88AA44, alpha: 0.65)
+                ring.fillColor = .clear
+                ring.lineWidth = 1.5
+                ring.glowWidth = 2
+                ring.zPosition = 9
+                ring.setScale(1.3)
+                player.addChild(ring)
+                ring.run(SKAction.scale(to: 1.0, duration: 0.15))
+                groundedCoreRing = ring
+            }
+        } else if let ring = groundedCoreRing {
+            groundedCoreRing = nil
+            ring.run(SKAction.sequence([
+                SKAction.fadeOut(withDuration: 0.12),
+                SKAction.removeFromParent()
+            ]))
         }
     }
     
@@ -1639,9 +1731,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let projectile = projectiles[index]
             // v1.6: Gravity Well — projectiles that expire at max range leave a pull zone
             if projectile.spawnsGravityWell {
+                // v1.7 Dead Circuit: void zones linger longer
                 spawnGravityWell(at: projectile.position,
                                  radius: playerStats.gravityWellRadius,
-                                 duration: playerStats.gravityWellDuration,
+                                 duration: playerStats.gravityWellDuration * playerStats.voidZoneDurationMultiplier,
                                  dps: playerStats.gravityWellDPS)
             }
             projectile.removeFromParent()
@@ -3070,11 +3163,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         var damage = max(1, Int(projectileNode.damageMultiplier))
-        
+
+        // v1.7 Induction Step: a fully charged attack discharges as bonus Shock
+        let inductionBonus = playerStats.consumeInductionCharge()
+        if inductionBonus > 0 {
+            damage += inductionBonus
+            let burst = SKShapeNode(circleOfRadius: 14)
+            burst.strokeColor = SKColor(hex: 0x44BBFF, alpha: 0.9)
+            burst.fillColor = SKColor(hex: 0x44BBFF, alpha: 0.2)
+            burst.lineWidth = 1.5
+            burst.glowWidth = 4
+            burst.position = enemyNode.position
+            burst.zPosition = 8
+            worldNode.addChild(burst)
+            burst.run(SKAction.sequence([
+                SKAction.group([
+                    SKAction.scale(to: 1.8, duration: 0.18),
+                    SKAction.fadeOut(withDuration: 0.18)
+                ]),
+                SKAction.removeFromParent()
+            ]))
+        }
+
         if projectileNode.isCrit {
             damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
         }
-        
+
         if playerStats.executionThreshold > 0 && enemyNode.healthPercent < playerStats.executionThreshold {
             damage *= 2
         }
@@ -3205,8 +3319,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard remaining > 0 else { return }
         
         var closest: EnemyNode?
-        var closestDist: CGFloat = 80
-        
+        // v1.7 Copper Vein: chains reach farther
+        var closestDist: CGFloat = 80 + playerStats.shockChainRadiusBonus
+
         for enemy in enemies where enemy !== excludeEnemy {
             let dist = position.distance(to: enemy.position)
             if dist < closestDist {
@@ -3263,6 +3378,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func triggerLevelUp() {
         gameState = .levelUp
         AudioManager.shared.play(.levelUp)
+        playerStats.triggerOverclock()  // v1.7: level-ups grant speed briefly
         xpBar.flashLevelUp()
         levelLabel.text = "LV \(player.currentLevel)"
         
@@ -3451,19 +3567,71 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             enemies.remove(at: index)
         }
         
-        // v1.4: Generous invulnerability — reward for watching the ad
+        // Hide death overlay
+        deathOverlay.run(SKAction.fadeOut(withDuration: 0.2))
+
+        // v1.7 fix: the reward callback fires while the ad still covers the
+        // screen — flipping to .playing here ran the game (and burned the
+        // i-frames) under the ad, so players returned mid-swarm and died.
+        // Hold the run frozen until the player taps; the pause is the
+        // mental-snapshot moment. gameState stays .reviving.
+        showReviveHold()
+    }
+
+    // MARK: - v1.7: Revive Hold ("breathe, then dive back in")
+
+    private var reviveHoldOverlay: SKNode?
+
+    private func showReviveHold() {
+        let overlay = SKNode()
+        overlay.zPosition = 250
+
+        let dim = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.55)
+        dim.strokeColor = .clear
+        overlay.addChild(dim)
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "REFORGED"
+        title.fontSize = 26
+        title.fontColor = SKColor(hex: 0xFFAA33)
+        title.position = CGPoint(x: 0, y: 30)
+        overlay.addChild(title)
+
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "tap when ready"
+        hint.fontSize = 14
+        hint.fontColor = SKColor(hex: 0xFFFFFF)
+        hint.position = CGPoint(x: 0, y: -8)
+        overlay.addChild(hint)
+        hint.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.35, duration: 0.9),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.9)
+        ])))
+
+        camera?.addChild(overlay)
+        overlay.alpha = 0
+        overlay.run(SKAction.fadeIn(withDuration: 0.25))
+        reviveHoldOverlay = overlay
+    }
+
+    /// The player taps: NOW the run resumes and the full 5s of
+    /// invulnerability starts counting — none of it burns under the ad.
+    private func resumeFromRevive() {
+        guard let overlay = reviveHoldOverlay else { return }
+        reviveHoldOverlay = nil
+        overlay.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: 0.15),
+            SKAction.removeFromParent()
+        ]))
+
         invulnerableTimer = 5.0
-        
-        // Invulnerability visual (blinking)
         let blink = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.3, duration: 0.1),
             SKAction.fadeAlpha(to: 1.0, duration: 0.1)
         ])
         player.run(SKAction.repeat(blink, count: 25), withKey: "invulnBlink")
-        
-        // Hide death overlay
-        deathOverlay.run(SKAction.fadeOut(withDuration: 0.2))
-        
+
         gameState = .playing
         lastUpdateTime = 0  // Reset delta time to avoid jump
     }
