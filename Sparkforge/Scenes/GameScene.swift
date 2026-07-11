@@ -131,6 +131,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - v1.6: Extra Card (ad reward)
 
     private var extraCardUsedThisRun: Bool = false
+    // v1.7: Extra Pick — an ad banks a SECOND selection from the same spread
+    private var extraPickUsedThisRun: Bool = false
+    private var extraPicksRemaining: Int = 0
+    private var pendingSynergies: [String] = []
     
     // MARK: - Scene Lifecycle
     
@@ -758,7 +762,39 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         extraBtn.addChild(extraAdIcon)
 
         levelUpOverlay.addChild(extraBtn)
-        
+
+        // v1.7: Extra Pick button (centered below the pair) — the ad banks
+        // a second selection from the same spread. Stacks with both above.
+        let pickBtn = SKNode()
+        pickBtn.name = "extraPickButton"
+        pickBtn.position = CGPoint(x: 0, y: -182)
+
+        let pickBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
+        pickBg.fillColor = SKColor(hex: 0x2A2418)
+        pickBg.strokeColor = SKColor(hex: 0xCCAA44, alpha: 0.5)
+        pickBg.lineWidth = 1
+        pickBtn.addChild(pickBg)
+
+        let pickText = SKLabelNode(fontNamed: "Menlo-Bold")
+        pickText.fontSize = 11
+        pickText.fontColor = SKColor(hex: 0xEEDDAA)
+        pickText.text = "★ +1 PICK"
+        pickText.verticalAlignmentMode = .center
+        pickText.position = CGPoint(x: -14, y: 0)
+        pickText.name = "extraPickLabel"
+        pickBtn.addChild(pickText)
+
+        let pickAdIcon = SKLabelNode(fontNamed: "Menlo")
+        pickAdIcon.fontSize = 9
+        pickAdIcon.fontColor = SKColor(hex: 0xCCCCCC)
+        pickAdIcon.text = adText
+        pickAdIcon.verticalAlignmentMode = .center
+        pickAdIcon.position = CGPoint(x: 50, y: 0)
+        pickAdIcon.name = "extraPickAdIcon"
+        pickBtn.addChild(pickAdIcon)
+
+        levelUpOverlay.addChild(pickBtn)
+
         guard let camera = camera else { return }
         camera.addChild(levelUpOverlay)
     }
@@ -1229,6 +1265,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
+        // v1.7: Extra pick button
+        if let pickBtn = levelUpOverlay.childNode(withName: "extraPickButton"),
+           pickBtn.alpha > 0 {
+            let btnFrame = CGRect(x: pickBtn.position.x - 75, y: pickBtn.position.y - 14,
+                                  width: 150, height: 28)
+            if btnFrame.contains(location) {
+                performExtraPick()
+                return
+            }
+        }
+
         // Check card taps (frames scale down when 4 cards are shown)
         for cardNode in displayedCards {
             let w = UpgradeCardNode.cardWidth * cardNode.xScale
@@ -1250,17 +1297,35 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func selectCard(_ selectedNode: UpgradeCardNode) {
         AudioManager.shared.play(.cardSelect)
         upgradeManager.pickCard(selectedNode.card, stats: playerStats)
-        let synergies = upgradeManager.checkSynergies(stats: playerStats)
+        pendingSynergies.append(contentsOf: upgradeManager.checkSynergies(stats: playerStats))
         player.updateCollisionRadius()
-        
+
         // Update buff tracker
         buffTracker.update(tagCounts: upgradeManager.tagCounts)
-        
+
         // v1.4: Build identity hint
         if let buildHint = upgradeManager.checkBuildHint() {
             showBuildHint(buildHint)
         }
-        
+
+        // v1.7 Extra Pick: a banked pick keeps the rest of the spread on
+        // the table — consume this card with the usual flourish and wait
+        // for the second selection
+        if extraPicksRemaining > 0, displayedCards.count > 1 {
+            extraPicksRemaining -= 1
+            if let index = displayedCards.firstIndex(where: { $0 === selectedNode }) {
+                displayedCards.remove(at: index)
+            }
+            selectedNode.animateSelection { }
+            if let pickBtn = levelUpOverlay.childNode(withName: "extraPickButton"),
+               let label = pickBtn.childNode(withName: "extraPickLabel") as? SKLabelNode {
+                label.text = "★ PICK AGAIN"
+            }
+            return
+        }
+
+        let synergies = pendingSynergies
+        pendingSynergies = []
         for cardNode in displayedCards {
             if cardNode === selectedNode {
                 cardNode.animateSelection { [weak self] in
@@ -1292,26 +1357,68 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func executeReroll() {
         rerollUsedThisRun = true
-        
+
+        // v1.7 fix: a reforge preserves the spread SIZE — if +1 Card
+        // already bought a fourth card, rerolling keeps four (the chain
+        // melted it back to three)
+        let spreadSize = max(3, displayedCards.count)
+
         // Dismiss current cards
         for card in displayedCards {
             card.animateDismiss()
         }
         displayedCards.removeAll()
-        
+
         // Hide reroll button
         if let rerollBtn = levelUpOverlay.childNode(withName: "rerollButton") {
             rerollBtn.run(SKAction.fadeOut(withDuration: 0.15))
         }
-        
+
         // Draw new cards after brief delay
         run(SKAction.wait(forDuration: 0.25)) { [weak self] in
             guard let self = self else { return }
-            let newCards = self.upgradeManager.drawCards(count: 3)
+            let newCards = self.upgradeManager.drawCards(count: spreadSize)
             self.showCardSelection(newCards)
         }
     }
     
+    // MARK: - v1.7: Extra Pick
+
+    /// The ad banks a SECOND selection from whatever the spread holds —
+    /// pick 2 of 3, or 2 of 4 with +1 Card stacked. Once per run; the
+    /// chain with Reforge and +1 Card is intentional (rewards cleverness).
+    private func performExtraPick() {
+        guard !extraPickUsedThisRun else { return }
+        guard extraPicksRemaining == 0 else { return }
+        guard displayedCards.count > 1 else { return }
+
+        if IAPManager.shared.hasRemovedAds {
+            executeExtraPick()
+            return
+        }
+
+        let vc = view?.window?.rootViewController
+        adReviveManager.requestExtraPickAd(from: vc) { [weak self] success in
+            guard success else { return }
+            self?.executeExtraPick()
+        }
+    }
+
+    private func executeExtraPick() {
+        extraPickUsedThisRun = true
+        extraPicksRemaining = 1
+
+        if let pickBtn = levelUpOverlay.childNode(withName: "extraPickButton") {
+            if let label = pickBtn.childNode(withName: "extraPickLabel") as? SKLabelNode {
+                label.text = "✓ PICK 2"
+                label.fontColor = SKColor(hex: 0x88DD88)
+            }
+            if let adIcon = pickBtn.childNode(withName: "extraPickAdIcon") as? SKLabelNode {
+                adIcon.alpha = 0
+            }
+        }
+    }
+
     // MARK: - v1.6: Extra Card
 
     private func performExtraCard() {
@@ -1345,6 +1452,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func finishLevelUp(synergies: [String]) {
+        extraPicksRemaining = 0  // v1.7: safety — banked picks never outlive the spread
+
         if let firstSynergy = synergies.first {
             showSynergyNotification(firstSynergy)
         }
@@ -1661,14 +1770,27 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         if shotCount == 1 {
             fireProjectile(direction: baseDirection)
-        } else {
+        } else if isSpreadShot {
+            // The spread-shot card's fan IS its identity — it keeps the V
             let totalSpread = playerStats.spreadAngle * CGFloat(shotCount - 1)
             let startAngle = atan2(baseDirection.y, baseDirection.x) - totalSpread / 2
-            
+
             for i in 0..<shotCount {
                 let angle = startAngle + playerStats.spreadAngle * CGFloat(i)
                 let dir = CGPoint(x: cos(angle), y: sin(angle))
                 fireProjectile(direction: dir)
+            }
+        } else {
+            // v1.7 fix (Brandon field report): extra projectiles fly as
+            // aligned parallel columns (:), not a V — all forward, offset
+            // perpendicular to the shot line
+            let perp = CGPoint(x: -baseDirection.y, y: baseDirection.x)
+            let spacing: CGFloat = 12
+            let startOffset = -spacing * CGFloat(shotCount - 1) / 2
+
+            for i in 0..<shotCount {
+                let offset = perp * (startOffset + spacing * CGFloat(i))
+                fireProjectile(direction: baseDirection, originOffset: offset)
             }
         }
     }
@@ -1698,9 +1820,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return closestPosition
     }
     
-    private func fireProjectile(direction: CGPoint) {
+    private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero) {
         let isCrit = CGFloat.random(in: 0...1) < playerStats.critChance
-        
+
         let projectile = ProjectileNode(
             direction: direction,
             speed: playerStats.effectiveProjectileSpeed,
@@ -1710,7 +1832,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             isCrit: isCrit,
             spawnsGravityWell: playerStats.gravityWellOnExpire
         )
-        projectile.position = player.position
+        projectile.position = player.position + originOffset
         projectile.zPosition = 8
         projectiles.append(projectile)
         worldNode.addChild(projectile)
@@ -3388,12 +3510,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         showCardSelection(upgradeManager.drawCards(count: 3))
         
-        // Show/hide reroll + extra card buttons
+        // Show/hide reroll + extra card + extra pick buttons
         if let rerollBtn = levelUpOverlay.childNode(withName: "rerollButton") {
             rerollBtn.alpha = rerollUsedThisRun ? 0.0 : 1.0
         }
         if let extraBtn = levelUpOverlay.childNode(withName: "extraCardButton") {
             extraBtn.alpha = extraCardUsedThisRun ? 0.0 : 1.0
+        }
+        if let pickBtn = levelUpOverlay.childNode(withName: "extraPickButton") {
+            pickBtn.alpha = extraPickUsedThisRun ? 0.0 : 1.0
+            // Restore the button's face — the overlay outlives runs
+            if !extraPickUsedThisRun {
+                if let label = pickBtn.childNode(withName: "extraPickLabel") as? SKLabelNode {
+                    label.text = "★ +1 PICK"
+                    label.fontColor = SKColor(hex: 0xEEDDAA)
+                }
+                if let adIcon = pickBtn.childNode(withName: "extraPickAdIcon") as? SKLabelNode {
+                    adIcon.alpha = 1.0
+                }
+            }
         }
         
         levelUpOverlay.alpha = 0
@@ -3715,6 +3850,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         killCount = 0
         rerollUsedThisRun = false
         extraCardUsedThisRun = false
+        extraPickUsedThisRun = false
+        extraPicksRemaining = 0
+        pendingSynergies = []
         bossDefeatedThisRun = false
         pendingForgeXP = 0
         

@@ -23,12 +23,14 @@ final class AdReviveManager: NSObject {
     static let xpBoostAdUnitID        = "ca-app-pub-3940256099942544/1712485313"
     static let extraCardAdUnitID      = "ca-app-pub-3940256099942544/1712485313"
     static let blessingChoiceAdUnitID = "ca-app-pub-3940256099942544/1712485313"
+    static let extraPickAdUnitID      = "ca-app-pub-3940256099942544/1712485313"
     #else
     static let reviveAdUnitID         = "ca-app-pub-3734133983597932/3682515394"
     static let rerollAdUnitID         = "ca-app-pub-3734133983597932/9266014563"
     static let xpBoostAdUnitID        = "ca-app-pub-3734133983597932/4094068573"  // v1.6: corrected — matches AdMob console + registry
     static let extraCardAdUnitID      = "ca-app-pub-3734133983597932/8893772917"  // v1.6: level-up +1 card choice
     static let blessingChoiceAdUnitID = "ca-app-pub-3734133983597932/8585404316"  // v1.7: Daily Forge choose-your-blessing
+    static let extraPickAdUnitID      = "ca-app-pub-3734133983597932/8417230383"  // v1.7: level-up +1 pick
     #endif
     
     // MARK: - State
@@ -40,11 +42,13 @@ final class AdReviveManager: NSObject {
     private var xpBoostAd: RewardedAd?  // v1.5
     private var extraCardAd: RewardedAd?  // v1.6
     private var blessingChoiceAd: RewardedAd?  // v1.7
+    private var extraPickAd: RewardedAd?  // v1.7
     private var reviveCompletion: ((Bool) -> Void)?
     private var rerollCompletion: ((Bool) -> Void)?
     private var xpBoostCompletion: ((Bool) -> Void)?  // v1.5
     private var extraCardCompletion: ((Bool) -> Void)?  // v1.6
     private var blessingChoiceCompletion: ((Bool) -> Void)?  // v1.7
+    private var extraPickCompletion: ((Bool) -> Void)?  // v1.7
 
     private enum ActiveAd {
         case revive
@@ -52,6 +56,7 @@ final class AdReviveManager: NSObject {
         case xpBoost        // v1.5
         case extraCard      // v1.6
         case blessingChoice // v1.7
+        case extraPick      // v1.7
     }
     private var activeAd: ActiveAd?
     
@@ -76,6 +81,7 @@ final class AdReviveManager: NSObject {
         preloadXPBoostAd()
         preloadExtraCardAd()
         preloadBlessingChoiceAd()
+        preloadExtraPickAd()
     }
     
     private func preloadReviveAd() {
@@ -151,6 +157,46 @@ final class AdReviveManager: NSObject {
             self?.blessingChoiceAd = ad
             self?.blessingChoiceAd?.fullScreenContentDelegate = self
             print("[AdRevive] Blessing choice ad loaded")
+        }
+    }
+
+    private func preloadExtraPickAd() {
+        RewardedAd.load(
+            with: AdReviveManager.extraPickAdUnitID,
+            request: Request()
+        ) { [weak self] ad, error in
+            if let error = error {
+                print("[AdRevive] Failed to load extra pick ad: \(error.localizedDescription)")
+                return
+            }
+            self?.extraPickAd = ad
+            self?.extraPickAd?.fullScreenContentDelegate = self
+            print("[AdRevive] Extra pick ad loaded")
+        }
+    }
+
+    // MARK: - v1.7: Extra Pick Flow
+
+    func requestExtraPickAd(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        if adsRemoved {
+            completion(true)
+            return
+        }
+
+        guard let ad = extraPickAd, let vc = viewController else {
+            print("[AdRevive] Extra pick ad not ready")
+            completion(false)
+            return
+        }
+
+        extraPickCompletion = completion
+        activeAd = .extraPick
+
+        ad.present(from: vc) { [weak self] in
+            self?.extraPickCompletion?(true)
+            self?.extraPickCompletion = nil
+            self?.activeAd = nil
+            self?.preloadExtraPickAd()
         }
     }
 
@@ -333,6 +379,10 @@ extension AdReviveManager: FullScreenContentDelegate {
                 self.blessingChoiceCompletion?(false)
                 self.blessingChoiceCompletion = nil
                 self.preloadBlessingChoiceAd()
+            case .extraPick:
+                self.extraPickCompletion?(false)
+                self.extraPickCompletion = nil
+                self.preloadExtraPickAd()
             case .none:
                 break
             }
@@ -373,6 +423,12 @@ extension AdReviveManager: FullScreenContentDelegate {
                     self.blessingChoiceCompletion = nil
                 }
                 self.preloadBlessingChoiceAd()
+            case .extraPick:
+                if let completion = self.extraPickCompletion {
+                    completion(false)
+                    self.extraPickCompletion = nil
+                }
+                self.preloadExtraPickAd()
             case .none:
                 break
             }
