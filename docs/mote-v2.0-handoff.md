@@ -27,6 +27,22 @@ changes, the design is canon):*
    design requirement — Lyra already flagged it below.
 5. **Analytics**: tag Mote encounters in run data — this is THE
    shareable moment; we'll want to know how many players have met him.
+6. **Studio canon (source of truth):** Notion "Mote — Studio Mascot
+   Canon" (39a87a89-786e-81c1-a24f-fd97a4f74cf4). Mote predates this
+   handoff — live on the Forgebound Labs site hero art since ~May 2026,
+   with planned roles in Delve (Floor 1000 companion) and Chaos
+   Confluence (uncontrollable party member with hidden preferences).
+   Sparkforge's assassination intro is one game's slice of a
+   cross-project mythology. Visual DNA is canon there: floating body,
+   black void face, glowing purple eyes, cracked horn crown, tattered
+   cloak, THREE-fingered hands, purple arcane over greyscale, slight
+   asymmetry GOOD — do not over-polish. Character sheet + hero render
+   exist as Lyra exports (on the canon page).
+7. **Asset pipeline note:** Mote is the natural first textured sprite
+   in Sparkforge — the Assets.xcassets atlas pipeline we deferred from
+   the spark glow-up (Phase B) has its real customer here. A code-drawn
+   Mote would violate "don't over-polish" in the wrong direction; the
+   character sheet exists, use it.
 
 ---
 
