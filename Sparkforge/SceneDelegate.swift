@@ -30,6 +30,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard !Self.hasRequestedTracking else { return }
         Self.hasRequestedTracking = true
 
+        #if DEBUG
+        // 0 = notDetermined (prompt will show), 1 = restricted,
+        // 2 = denied (master toggle off or cached), 3 = authorized
+        print("[ATT] Pre-request status: \(ATTrackingManager.trackingAuthorizationStatus.rawValue)")
+        #endif
+
         ATTrackingManager.requestTrackingAuthorization { status in
             // Initialize Google Mobile Ads regardless of the choice —
             // AdMob serves non-personalized ads when tracking is denied.
