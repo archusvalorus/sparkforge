@@ -2,46 +2,21 @@
 // Sparkforge
 
 import UIKit
-import GoogleMobileAds
-import AppTrackingTransparency
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
-    
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        
-        // Request ATT permission, then initialize ads
-        // Delay slightly to ensure the app's UI is ready (ATT requires a presented window)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.requestTrackingAndStartAds()
-        }
-        
+        // v1.7 ATT fix: the tracking prompt + ads start moved to
+        // SceneDelegate.sceneDidBecomeActive — the old launch-timer
+        // request raced scene activation, and iOS silently skips the
+        // prompt when the scene isn't active yet (App Review flag, v1.6).
         return true
     }
-    
-    private func requestTrackingAndStartAds() {
-        ATTrackingManager.requestTrackingAuthorization { status in
-            // Initialize Google Mobile Ads regardless of tracking permission
-            // AdMob will serve non-personalized ads if tracking is denied
-            DispatchQueue.main.async {
-                MobileAds.shared.start(completionHandler: nil)
-            }
-            
-            #if DEBUG
-            switch status {
-            case .authorized:    print("[ATT] Tracking authorized")
-            case .denied:        print("[ATT] Tracking denied")
-            case .restricted:    print("[ATT] Tracking restricted")
-            case .notDetermined: print("[ATT] Tracking not determined")
-            @unknown default:    print("[ATT] Unknown status")
-            }
-            #endif
-        }
-    }
-    
+
     // MARK: - UISceneSession Lifecycle
-    
+
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
