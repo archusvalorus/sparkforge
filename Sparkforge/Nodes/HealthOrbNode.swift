@@ -70,7 +70,7 @@ final class HealthOrbNode: SKNode {
     // MARK: - Physics
     
     private func setupPhysics() {
-        let body = SKPhysicsBody(circleOfRadius: GameConfig.HealthOrb.visualRadius + 20)
+        let body = SKPhysicsBody(circleOfRadius: GameConfig.HealthOrb.pickupRadius)
         body.isDynamic = false
         body.categoryBitMask = GameConfig.Physics.healthOrb
         body.contactTestBitMask = GameConfig.Physics.player

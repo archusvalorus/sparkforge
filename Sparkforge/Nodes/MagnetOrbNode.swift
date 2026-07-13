@@ -72,7 +72,7 @@ final class MagnetOrbNode: SKNode {
     // MARK: - Physics
     
     private func setupPhysics() {
-        let body = SKPhysicsBody(circleOfRadius: GameConfig.MagnetOrb.visualRadius + 20)
+        let body = SKPhysicsBody(circleOfRadius: GameConfig.MagnetOrb.pickupRadius)
         body.isDynamic = false
         body.categoryBitMask = GameConfig.Physics.magnetOrb
         body.contactTestBitMask = GameConfig.Physics.player

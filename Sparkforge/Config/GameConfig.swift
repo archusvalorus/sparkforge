@@ -228,8 +228,14 @@ enum GameConfig {
         static let maxSpawnInterval: TimeInterval = 30
         /// HP restored on pickup
         static let healAmount: Int = 20
-        /// Visual radius
-        static let visualRadius: CGFloat = 10
+        /// Visual radius — v1.8: 10 → 14 for legibility (bigger, easier to
+        /// read). Pickup is pinned separately below, so a larger visual does
+        /// NOT make the orb easier to grab.
+        static let visualRadius: CGFloat = 14
+        /// Interactible/pickup radius — decoupled from the visual so the art
+        /// can grow without changing how easy the orb is to collect (was
+        /// visualRadius + 20 = 30 when the visual was 10; pinned here).
+        static let pickupRadius: CGFloat = 30
         /// Despawn timer (seconds)
         static let despawnTime: TimeInterval = 10
         /// Color
@@ -305,8 +311,11 @@ enum GameConfig {
         static let minSpawnInterval: TimeInterval = 25
         /// Max time between spawns (seconds)
         static let maxSpawnInterval: TimeInterval = 35
-        /// Visual radius
-        static let visualRadius: CGFloat = 10
+        /// Visual radius — v1.8: 10 → 14 for legibility (see HealthOrb).
+        static let visualRadius: CGFloat = 14
+        /// Interactible/pickup radius — decoupled from the visual (was
+        /// visualRadius + 20 = 30). Pinned so bigger art ≠ easier pickup.
+        static let pickupRadius: CGFloat = 30
         /// Despawn timer (seconds)
         static let despawnTime: TimeInterval = 8
         /// Color
