@@ -3469,12 +3469,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         path.move(to: position)
         path.addLine(to: target.position)
         line.path = path
-        line.strokeColor = SKColor(hex: 0x44BBFF, alpha: 0.8)
-        line.lineWidth = 1.5
-        line.glowWidth = 3
+        line.strokeColor = SKColor(hex: GameConfig.ChainLightning.colorHex,
+                                   alpha: GameConfig.ChainLightning.alpha)
+        line.lineWidth = GameConfig.ChainLightning.lineWidth
+        line.glowWidth = GameConfig.ChainLightning.glowWidth
         line.zPosition = 8
         worldNode.addChild(line)
-        line.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.15), SKAction.removeFromParent()]))
+        line.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: GameConfig.ChainLightning.fadeDuration),
+            SKAction.removeFromParent()
+        ]))
         
         if target.takeDamage(damage) {
             let pos = target.position

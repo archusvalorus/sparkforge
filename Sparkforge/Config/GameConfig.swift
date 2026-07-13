@@ -155,6 +155,17 @@ enum GameConfig {
         static let splitTelegraphColorHex: UInt32 = 0xE6FF33
     }
 
+    // MARK: - Chain Lightning VFX (Shock)
+    enum ChainLightning {
+        /// v1.8: bigger, bolder, longer-lived arc between chained enemies
+        /// (Brandon playtest 7/13 — was 1.5 / 3 / 0.8α / 0.15s: too faint & brief)
+        static let colorHex: UInt32 = 0x44BBFF
+        static let alpha: CGFloat = 0.95
+        static let lineWidth: CGFloat = 3.0
+        static let glowWidth: CGFloat = 7.0
+        static let fadeDuration: TimeInterval = 0.30
+    }
+
     // MARK: - XP & Leveling
     enum Leveling {
         /// XP required for level 2
