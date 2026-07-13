@@ -133,13 +133,28 @@ enum GameConfig {
         /// skipped to thin the crowd
         static let meleeThinningStart: TimeInterval = 30
         /// Chance a melee spawn is skipped after the thinning mark
-        static let meleeThinningChance: CGFloat = 0.30
+        /// v1.8 (B1): 0.30 → 0.22 — Arena 1 played "stand still and machine
+        /// gun"; thin fewer spawns for a slightly denser Crucible crowd
+        static let meleeThinningChance: CGFloat = 0.22
         /// Mini-boss spawn time
         static let miniBossSpawnTime: TimeInterval = 90.0
         /// Spawn distance from arena center (just outside boundary)
         static let spawnDistance: CGFloat = Arena.radius + 40
     }
-    
+
+    // MARK: - Ashling splitter (v1.6; v1.8 B2 shard protection)
+    enum Ashling {
+        /// v1.8 (B2): beat between an Ashling parent's death and its shards
+        /// gaining physics, so the parent's death-AoE (Open Vein / Whiteout
+        /// bursts, splash) can't insta-kill the trio at spawn. The pause IS
+        /// the protection — shards pop up vulnerable once visible. Tune 0.4–0.6.
+        static let shardSpawnDelay: TimeInterval = 0.5
+        /// Telegraph ring at the split point during the delay — reads as the
+        /// parent bursting, then shards appear. Neon yellow = shard tell.
+        static let splitTelegraphRadius: CGFloat = 20
+        static let splitTelegraphColorHex: UInt32 = 0xE6FF33
+    }
+
     // MARK: - XP & Leveling
     enum Leveling {
         /// XP required for level 2
@@ -185,9 +200,13 @@ enum GameConfig {
         /// Projectile color
         static let projectileColorHex: UInt32 = 0x9933CC
         /// First spawn time — ranged enemies appear after this many seconds
-        static let firstSpawnTime: TimeInterval = 45
+        /// v1.8 (B1): 45 → 40 — earlier purple pressure so Arena 1 can't be
+        /// camped in one spot (Crucible-only path; Quench/Coilworks gate their
+        /// own ranged spawns and are unaffected)
+        static let firstSpawnTime: TimeInterval = 40
         /// Chance a spawn is ranged (vs melee) after firstSpawnTime
-        static let spawnChance: CGFloat = 0.25
+        /// v1.8 (B1): 0.25 → 0.30 — a touch more ranged to keep the player moving
+        static let spawnChance: CGFloat = 0.30
     }
     
     // MARK: - Health Orb (v1.4)

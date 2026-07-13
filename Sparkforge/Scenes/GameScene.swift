@@ -2935,9 +2935,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         _ = playerStats.recordKill(atTime: waveManager.elapsedTime)
         playerStats.recordBloodlustKill(atTime: waveManager.elapsedTime)
 
-        // v1.6: Ashlings split into two shards on death
+        // v1.6: Ashlings split into two shards on death.
+        // v1.8 (B2): the parent's death-AoE (the Open Vein / Whiteout bursts
+        // below, plus any splash that landed this frame) was insta-killing the
+        // shards the instant they spawned. Telegraph the split, then let the
+        // shards gain physics a beat later — the pause IS the protection; they
+        // pop up vulnerable only once visible.
         if let ashling = enemy as? AshlingNode, !ashling.isShard {
-            spawnAshlingShards(at: position)
+            showRingPulse(at: position,
+                          radius: GameConfig.Ashling.splitTelegraphRadius,
+                          colorHex: GameConfig.Ashling.splitTelegraphColorHex)
+            run(SKAction.wait(forDuration: GameConfig.Ashling.shardSpawnDelay)) { [weak self] in
+                self?.spawnAshlingShards(at: position)
+            }
         }
 
         // v1.6: Siphon — kills restore HP
