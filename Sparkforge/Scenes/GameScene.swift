@@ -2873,11 +2873,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         magnetOrbs.remove(at: idx)
         orb.collect()
         AudioManager.shared.play(.orbPickup)
-        // Vacuum ALL XP orbs to player
+        // v1.8 fix: vacuum every XP orb toward the player's LIVE position —
+        // updateXPOrbs homes them each frame, so they track a moving player
+        // instead of flying to a stale snapshot of player.position. The old
+        // one-shot SKAction.move missed the player if they moved and read as
+        // a bug (Brandon 7/13).
         for xpOrb in xpOrbs {
-            let flyTo = SKAction.move(to: player.position, duration: 0.3)
-            flyTo.timingMode = .easeIn
-            xpOrb.run(flyTo)
+            xpOrb.startVacuum()
         }
     }
     
