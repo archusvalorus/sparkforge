@@ -15,6 +15,7 @@
 // v1.4b: Fixed layout — proper top-to-bottom spacing via layoutY cursor.
 
 import SpriteKit
+import StoreKit
 
 final class TitleScene: SKScene {
     
@@ -656,13 +657,14 @@ final class TitleScene: SKScene {
         // Remove Ads button (hidden if already purchased)
         if !IAPManager.shared.hasRemovedAds {
             let removeAdsLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-            removeAdsLabel.text = "Remove Ads - $2.99"
+            removeAdsLabel.text = removeAdsButtonText()
             removeAdsLabel.fontSize = 13 * s
             removeAdsLabel.fontColor = SKColor(hex: 0xFFAA33)
             removeAdsLabel.position = CGPoint(x: 0, y: layoutY)
             removeAdsLabel.zPosition = 10
             removeAdsLabel.name = "removeAdsButton"
             addChild(removeAdsLabel)
+            loadRemoveAdsPrice()
 
             layoutY -= 26
         }
@@ -1334,6 +1336,29 @@ final class TitleScene: SKScene {
         }
     }
     
+    // Localized Remove Ads price from StoreKit (e.g. "$3.99"); nil until the
+    // product loads. Never hardcode the price — StoreKit is the source of
+    // truth, so the label stays correct in every storefront's currency.
+    private var removeAdsPriceText: String?
+
+    private func removeAdsButtonText() -> String {
+        if let price = removeAdsPriceText {
+            return "Remove Ads — \(price)"
+        }
+        // No price known yet — show no number rather than a wrong one.
+        return "Remove Ads"
+    }
+
+    private func loadRemoveAdsPrice() {
+        Task { @MainActor in
+            guard let product = await IAPManager.shared.getRemoveAdsProduct() else { return }
+            removeAdsPriceText = product.displayPrice
+            if let removeBtn = childNode(withName: "removeAdsButton") as? SKLabelNode {
+                removeBtn.text = removeAdsButtonText()
+            }
+        }
+    }
+
     private func handleRemoveAdsPurchase() {
         guard let removeBtn = childNode(withName: "removeAdsButton") as? SKLabelNode else { return }
         
@@ -1351,7 +1376,7 @@ final class TitleScene: SKScene {
                     removeBtn.removeFromParent()
                 }
             } else {
-                removeBtn.text = "Remove Ads — $2.99"
+                removeBtn.text = removeAdsButtonText()
                 removeBtn.fontColor = SKColor(hex: 0xFFAA33)
             }
         }
