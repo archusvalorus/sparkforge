@@ -525,6 +525,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         buffTracker.position = CGPoint(x: safeLeft, y: safeTop - 96)
         buffTracker.zPosition = 101
         camera.addChild(buffTracker)
+
+        // v1.8 (E4): subtle "ad-free" owner badge — upper-left, above the buff
+        // badges, out of the field of play. Owner status, NOT a mid-run buy
+        // prompt (that would break the no-aggressive-monetization ethos).
+        // DEBUG forces it visible so placement can be validated without a
+        // sandbox purchase; release keeps it owner-only.
+        #if DEBUG
+        let showAdFreeBadge = true
+        #else
+        let showAdFreeBadge = IAPManager.shared.hasRemovedAds
+        #endif
+        if showAdFreeBadge {
+            let noAds = SKNode()
+            noAds.position = CGPoint(x: safeLeft + 30, y: safeTop)
+            noAds.zPosition = 101
+            let pill = SKShapeNode(rectOf: CGSize(width: 62, height: 18), cornerRadius: 5)
+            pill.fillColor = SKColor(hex: 0x141414, alpha: 0.55)
+            pill.strokeColor = SKColor(hex: 0x8A7A55, alpha: 0.45)
+            pill.lineWidth = 1
+            noAds.addChild(pill)
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.text = "AD-FREE"
+            label.fontSize = 9
+            label.fontColor = SKColor(hex: 0xC8B488)
+            label.verticalAlignmentMode = .center
+            noAds.addChild(label)
+            camera.addChild(noAds)
+        }
         
         // Synergy notification — bottom center
         synergyLabel.fontSize = 12
