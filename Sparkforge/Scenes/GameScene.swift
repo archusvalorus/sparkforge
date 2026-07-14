@@ -1660,9 +1660,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             showSynergyNotification(firstSynergy)
         }
         
-        if synergies.contains(where: { $0.contains("Barrier Pulse") }) {
-            barrierPulse()
-        }
+        // v1.8 Unit 5b: Barrier Pulse dropped from Guard (Repulse card owns
+        // knockback). Guard 3 is now Ironhide — no level-up effect.
 
         // v1.6: Static Crown — level-ups release a shock burst
         if playerStats.staticCrownDamage > 0 {
@@ -1697,13 +1696,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.fadeOut(withDuration: 0.5)
         ])
         synergyLabel.run(show)
-    }
-    
-    private func barrierPulse() {
-        for enemy in enemies {
-            let direction = (enemy.position - player.position).normalized
-            enemy.position += direction * 60
-        }
     }
     
     // MARK: - Game Loop
@@ -1835,7 +1827,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func updateEnemies(_ dt: TimeInterval) {
         var diedFromDOT: [Int] = []
-        
+        var crowdCount = 0  // v1.8 Ironhide: enemies pressing the player
+
         for (index, enemy) in enemies.enumerated() {
             // Use ranged AI for ranged enemies
             if let ranged = enemy as? RangedEnemyNode {
@@ -1843,12 +1836,27 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             } else {
                 enemy.chase(target: player.position, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
             }
-            
+
+            // v1.8 Undertow (Void 3): a subtle passive pull toward the player
+            if playerStats.voidPullForce > 0 {
+                let dist = enemy.position.distance(to: player.position)
+                if dist < playerStats.voidPullRadius && dist > 1 {
+                    let dir = (player.position - enemy.position).normalized
+                    enemy.position += dir * (playerStats.voidPullForce * CGFloat(dt))
+                }
+            }
+
+            // v1.8 Ironhide (Guard 3): tally the crowd pressing the player
+            if playerStats.pressureDefBonus > 0
+                && enemy.position.distance(to: player.position) < playerStats.pressureDefRadius {
+                crowdCount += 1
+            }
+
             let diedDOT = enemy.updateStatusEffects(deltaTime: dt)
             if diedDOT {
                 diedFromDOT.append(index)
             }
-            
+
             if playerStats.burnSpreads && enemy.isBurning {
                 spreadBurn(from: enemy)
             }
@@ -1859,6 +1867,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 relayArcSources.append(enemy)
             }
         }
+
+        // v1.8 Ironhide: pressure-DEF holds while the crowd condition is met
+        playerStats.pressureDefActive = playerStats.pressureDefBonus > 0
+            && crowdCount >= playerStats.pressureDefEnemyCount
 
         for index in diedFromDOT.reversed() {
             let enemy = enemies[index]
@@ -2203,6 +2215,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 var killed: [EnemyNode] = []
                 for enemy in enemies
                 where enemy.position.distance(to: well.position) < well.radius {
+                    // v1.8 Event Horizon (Void 5): enemies inside struggle to escape
+                    if playerStats.inWellSlow > 0 {
+                        enemy.applySlow(playerStats.effectiveSlow(playerStats.inWellSlow), duration: 0.5)
+                    }
                     if enemy.takeDamage(result.dotDamage) {
                         killed.append(enemy)
                     }
@@ -3262,6 +3278,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             playerStats.heal(playerStats.killHealAmount)
         }
 
+        // v1.8 Red Harvest (Bleed 7) — killing a BLEEDING enemy restores HP
+        if playerStats.bleedKillHeal > 0, let enemy = enemy, enemy.isBleeding {
+            playerStats.heal(playerStats.bleedKillHeal)
+        }
+
         // v1.6: Open Vein — bleeding enemies burst on death
         if playerStats.openVeinDamage > 0, let enemy = enemy, enemy.isBleeding {
             damageEnemiesInRadius(playerStats.openVeinRadius, around: position,
@@ -3527,6 +3548,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: 6, duration: 0.2)
+
+        // v1.8 Thornwall (Guard 5): reflect a fraction of the contact damage
+        // back to whatever touched you (mirrors the Iron Bloom thorns pattern).
+        if playerStats.thornsContactReflect > 0 {
+            let reflect = max(1, Int(CGFloat(damage) * playerStats.thornsContactReflect))
+            if let bossNode = enemyBody.node as? (any ArenaBossNode) {
+                bossNode.takeDamage(reflect)
+            } else if let enemy = enemyBody.node as? EnemyNode {
+                if enemy.takeDamage(reflect) {
+                    if let index = enemies.firstIndex(where: { $0 === enemy }) {
+                        enemies.remove(at: index)
+                    }
+                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                }
+            }
+        }
         
         if died {
             if player.tryLethalSave() {
@@ -3666,7 +3703,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.slowedDamageBonus > 0 && enemyNode.isSlowed {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.slowedDamageBonus))
         }
-        
+
+        // v1.8 Open Wounds (Bleed 3): bleeding enemies take more damage
+        if playerStats.bleedingEnemyDamageTaken > 0 && enemyNode.isBleeding {
+            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
+        }
+
         if playerStats.isBloodlustActive(atTime: waveManager.elapsedTime) {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
         }

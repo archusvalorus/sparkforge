@@ -267,32 +267,33 @@ final class UpgradeManager {
             stats.spreadShotInterval = 3
             stats.spreadShotCount = 3
 
-        // BLEED — mechanics reworked in Unit 5b Chunk B
+        // BLEED — vulnerability → execution → sustain (v1.8 5b)
         case (.bleed, 3):
-            stats.critAppliesBleed = true
-            stats.bleedDPS = 0.5
+            stats.bleedingEnemyDamageTaken = 0.15   // Open Wounds
         case (.bleed, 5):
-            stats.bloodlustDamagePerKill = 0.05
+            stats.executionThreshold = 0.3          // Exsanguinate (remap from old B7)
         case (.bleed, 7):
-            stats.executionThreshold = 0.3
+            stats.bleedKillHeal = 1                  // Red Harvest (start 1; test 2)
 
-        // GUARD — mechanics reworked in Unit 5b Chunk B
+        // GUARD — endure → punish contact → weaponize defense (defensive-first)
         case (.guardT, 3):
-            break  // Barrier Pulse — handled in level-up logic (push enemies back)
+            stats.pressureDefBonus = 10             // Ironhide — pressure-DEF ONLY
         case (.guardT, 5):
-            stats.defense += 15
+            stats.thornsContactReflect = 0.30       // Thornwall (start 0.30)
         case (.guardT, 7):
-            stats.globalEnemySlow += 0.15
-            stats.collisionShrink *= 0.85
+            stats.defAsDamageMult = 0.01 / 3.0      // Unbroken Core: +1% dmg / 3 DEF
+            stats.collisionShrink *= 0.85           // keep the defensive shrink
 
-        // VOID — mechanics reworked in Unit 5b Chunk B
+        // VOID — pull → contain → collapse (v1.8 5b)
         case (.voidT, 3):
-            stats.pierceCount += 1
+            stats.voidPullForce = 30                // Undertow — subtle gather
+            stats.voidPullRadius = 120
         case (.voidT, 5):
-            stats.gravityWellDuration = 2.0
+            stats.gravityWellDuration = 2.0         // Event Horizon
             stats.gravityWellDPS = 0.5
+            stats.inWellSlow = 0.4
         case (.voidT, 7):
-            stats.singularityActive = true
+            stats.singularityActive = true          // Singularity
 
         // CHILL
         case (.chill, 3):
@@ -340,17 +341,17 @@ final class UpgradeManager {
                     SynergyTier(threshold: 5, title: "Tesla Field", effect: "A charged aura damages nearby enemies"),
                     SynergyTier(threshold: 7, title: "Storm Engine", effect: "Every 3rd shot fires a chaining spread")]
         case .bleed:
-            return [SynergyTier(threshold: 3, title: "Open Wound", effect: "Crits apply bleed"),
-                    SynergyTier(threshold: 5, title: "Bloodlust", effect: "Kill streaks grant stacking damage"),
-                    SynergyTier(threshold: 7, title: "Exsanguinate", effect: "Low HP enemies take double damage")]
+            return [SynergyTier(threshold: 3, title: "Open Wounds", effect: "Bleeding enemies take more damage"),
+                    SynergyTier(threshold: 5, title: "Exsanguinate", effect: "Low-HP enemies take double damage"),
+                    SynergyTier(threshold: 7, title: "Red Harvest", effect: "Bleed kills restore HP")]
         case .guardT:
-            return [SynergyTier(threshold: 3, title: "Barrier Pulse", effect: "Enemies pushed back on level up"),
-                    SynergyTier(threshold: 5, title: "Iron Skin", effect: "+15 DEF, shrug off weak hits"),
-                    SynergyTier(threshold: 7, title: "Unbreakable", effect: "Enemies slowed, hitbox shrinks further")]
+            return [SynergyTier(threshold: 3, title: "Ironhide", effect: "Gain DEF while enemies crowd you"),
+                    SynergyTier(threshold: 5, title: "Thornwall", effect: "Enemies that touch you take damage back"),
+                    SynergyTier(threshold: 7, title: "Unbroken Core", effect: "Your DEF fuels damage and steadies your core")]
         case .voidT:
-            return [SynergyTier(threshold: 3, title: "Rift", effect: "Projectiles pierce an additional enemy"),
-                    SynergyTier(threshold: 5, title: "Event Horizon", effect: "Gravity wells last longer and deal damage"),
-                    SynergyTier(threshold: 7, title: "Singularity", effect: "Massive gravity wells spawn periodically")]
+            return [SynergyTier(threshold: 3, title: "Undertow", effect: "Void pulls nearby enemies inward"),
+                    SynergyTier(threshold: 5, title: "Event Horizon", effect: "Enemies caught in Void struggle to escape"),
+                    SynergyTier(threshold: 7, title: "Singularity", effect: "Void collapses enemies into ruin")]
         case .chill:
             return [SynergyTier(threshold: 3, title: "Frostbite", effect: "Chilled enemies move even slower"),
                     SynergyTier(threshold: 5, title: "Shatter", effect: "Frozen enemies burst when struck"),

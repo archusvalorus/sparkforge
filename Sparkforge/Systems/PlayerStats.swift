@@ -37,7 +37,10 @@ final class PlayerStats {
     @discardableResult
     func takeDamage(_ rawDamage: Int) -> Bool {
         // v1.7 Grounded Core: the brace adds DEF while standing still
-        let effectiveDefense = defense + (groundedCoreBraced ? groundedCoreBonusDEF : 0)
+        // v1.8 Ironhide: pressure-DEF while crowded (set per-frame by GameScene)
+        let effectiveDefense = defense
+            + (groundedCoreBraced ? groundedCoreBonusDEF : 0)
+            + (pressureDefActive ? pressureDefBonus : 0)
         let reduced = max(1, rawDamage - effectiveDefense)
         currentHP -= reduced
         if currentHP < 0 { currentHP = 0 }
@@ -115,7 +118,37 @@ final class PlayerStats {
     var bleedDPS: CGFloat = 0.0
     /// Bleed duration
     var bleedDuration: TimeInterval = 3.0
-    
+
+    // MARK: - v1.8 Unit 5b: reworked synergy tree fields
+    // Starting values live in UpgradeManager.applySynergy; the balance pass
+    // tunes them. All default to inert (0 / false).
+
+    // Bleed
+    /// Open Wounds: bleeding enemies take this much MORE damage (0.15 = +15%)
+    var bleedingEnemyDamageTaken: CGFloat = 0.0
+    /// Red Harvest: HP restored when a BLEEDING enemy dies
+    var bleedKillHeal: Int = 0
+
+    // Guard
+    /// Ironhide: DEF gained while crowded (applied via pressureDefActive)
+    var pressureDefBonus: Int = 0
+    var pressureDefRadius: CGFloat = 90.0
+    var pressureDefEnemyCount: Int = 3
+    /// Set per-frame by GameScene when the crowd condition is met
+    var pressureDefActive: Bool = false
+    /// Thornwall: fraction of contact damage reflected to the toucher
+    var thornsContactReflect: CGFloat = 0.0
+    /// Unbroken Core: added to the damage multiplier per point of DEF
+    /// (spec: +1% dmg per 3 DEF → 0.01/3 per DEF)
+    var defAsDamageMult: CGFloat = 0.0
+
+    // Void
+    /// Undertow: passive per-second pull of nearby enemies toward the player
+    var voidPullForce: CGFloat = 0.0
+    var voidPullRadius: CGFloat = 0.0
+    /// Event Horizon: extra slow applied to enemies inside a gravity well
+    var inWellSlow: CGFloat = 0.0
+
     // MARK: - Knockback
     
     /// Knockback distance on projectile hit (base: 0)
@@ -488,6 +521,10 @@ final class PlayerStats {
         if bloodPriceBonus > 0 && currentHP * 2 <= maxHP {
             total += bloodPriceBonus
         }
+        // v1.8 Unbroken Core: DEF fuels damage (+1% per 3 DEF)
+        if defAsDamageMult > 0 {
+            total += CGFloat(defense) * defAsDamageMult
+        }
         return total
     }
 
@@ -623,6 +660,18 @@ final class PlayerStats {
         critAppliesBleed = false
         bleedDPS = 0.0
         bleedDuration = 3.0
+        // v1.8 Unit 5b reworked-tree fields
+        bleedingEnemyDamageTaken = 0.0
+        bleedKillHeal = 0
+        pressureDefBonus = 0
+        pressureDefRadius = 90.0
+        pressureDefEnemyCount = 3
+        pressureDefActive = false
+        thornsContactReflect = 0.0
+        defAsDamageMult = 0.0
+        voidPullForce = 0.0
+        voidPullRadius = 0.0
+        inWellSlow = 0.0
         knockbackForce = 0.0
         lethalSaves = 0
         collisionShrink = 1.0
