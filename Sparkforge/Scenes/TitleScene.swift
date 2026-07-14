@@ -47,7 +47,14 @@ final class TitleScene: SKScene {
     private let arenaNextArrow = SKLabelNode(fontNamed: "Menlo-Bold")
     private let arenaFlavorLabel = SKLabelNode(fontNamed: "Menlo")
     private let arenaReadyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-    
+    // v1.8 (Unit 3): default row Ys, captured at setup. The locked branch
+    // swaps these two so the prominent LOCKED sits above its requirement.
+    private var arenaFlavorRowY: CGFloat = 0
+    private var arenaReadyRowY: CGFloat = 0
+    // v1.8 (Unit 3): lock glyph as its own node so the icon + "LOCKED" center
+    // as a clean group (an inline emoji renders low and off-center).
+    private let arenaLockIcon = SKLabelNode(fontNamed: "Menlo-Bold")
+
     // MARK: - State
 
     private var isTransitioning = false
@@ -413,6 +420,7 @@ final class TitleScene: SKScene {
         arenaFlavorLabel.fontColor = SKColor(hex: 0x8A8478)
         arenaFlavorLabel.position = CGPoint(x: 0, y: layoutY)
         arenaFlavorLabel.zPosition = 10
+        arenaFlavorRowY = layoutY
         addChild(arenaFlavorLabel)
 
         layoutY -= 26
@@ -421,12 +429,23 @@ final class TitleScene: SKScene {
         arenaReadyLabel.fontSize = 13
         arenaReadyLabel.position = CGPoint(x: 0, y: layoutY)
         arenaReadyLabel.zPosition = 10
+        arenaReadyRowY = layoutY
         addChild(arenaReadyLabel)
         let pulse = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.5, duration: 0.8),
             SKAction.fadeAlpha(to: 1.0, duration: 0.8)
         ])
         arenaReadyLabel.run(SKAction.repeatForever(pulse))
+
+        // v1.8 (Unit 3): lock glyph, vertically centered; shown only when a
+        // locked arena is browsed. Same pulse (started now) keeps it in sync
+        // with the LOCKED label.
+        arenaLockIcon.fontSize = 16
+        arenaLockIcon.verticalAlignmentMode = .center
+        arenaLockIcon.zPosition = 10
+        arenaLockIcon.isHidden = true
+        addChild(arenaLockIcon)
+        arenaLockIcon.run(SKAction.repeatForever(pulse))
 
         layoutY -= 24  // total row spend unchanged — layout below the box holds
 
@@ -459,10 +478,19 @@ final class TitleScene: SKScene {
         let isLocked = displayedArenaIndex >= pm.arenasUnlocked
         let selectorVisible = browsableCount >= 2
 
-        arenaHeader.text = isLocked ? "🔒 \(arena.displayName)" : arena.displayName
+        // v1.8 (Unit 3): no lock on the header — the single lock lives on the
+        // prominent LOCKED line below, keeping the icon hierarchy tidy.
+        arenaHeader.text = arena.displayName
         arenaHeader.fontColor = isLocked
             ? SKColor(hex: 0x777777)
             : (arena.id == 0 ? SKColor(hex: 0xCCCCCC) : SKColor(hex: arena.accentColorHex))
+
+        // v1.8 (Unit 3): restore defaults; the locked branch overrides these.
+        arenaFlavorLabel.position.y = arenaFlavorRowY
+        arenaReadyLabel.position.y = arenaReadyRowY
+        arenaReadyLabel.position.x = 0
+        arenaReadyLabel.verticalAlignmentMode = .baseline
+        arenaLockIcon.isHidden = true
         arenaPrevArrow.isHidden = !selectorVisible
         arenaNextArrow.isHidden = !selectorVisible
 
@@ -471,20 +499,41 @@ final class TitleScene: SKScene {
         arenaBox.fillColor = SKColor(hex: arena.accentColorHex, alpha: isLocked ? 0.05 : 0.12)
         arenaBox.strokeColor = SKColor(hex: arena.accentColorHex, alpha: isLocked ? 0.25 : 0.5)
 
-        // v1.7: a locked arena shows what opens it, nothing else
+        // v1.7/v1.8: a locked arena shows what opens it, nothing else.
+        // v1.8 (Unit 3): clear hierarchy — a big, all-caps, pulsing "🔒 LOCKED"
+        // above a small requirement line (was one dim "🔒 fell X to unlock").
         if isLocked {
             killProgressLabel.isHidden = true
             survivalCheckLabel.isHidden = true
-            arenaFlavorLabel.text = arena.flavorLine
-            arenaFlavorLabel.isHidden = false
 
             let requirement = displayedArenaIndex == 1
                 ? "fell \(ProgressionManager.arena1Gate.bossName) to unlock"
                 : "fell \(ProgressionManager.arena2Gate.bossName) to unlock"
-            arenaReadyLabel.text = "🔒 \(requirement)"
-            arenaReadyLabel.fontSize = 11
-            arenaReadyLabel.fontColor = SKColor(hex: 0x999999)
+
+            // Requirement (small) drops to the lower row…
+            arenaFlavorLabel.position.y = arenaReadyRowY
+            arenaFlavorLabel.text = requirement
+            arenaFlavorLabel.fontColor = SKColor(hex: 0x8A8478)
+            arenaFlavorLabel.isHidden = false
+
+            // …and the prominent LOCKED takes the upper row (it already pulses).
+            // Icon + text are separate nodes, both vertically centered, offset
+            // so the pair reads centered as a group.
+            arenaReadyLabel.text = "LOCKED"
+            arenaReadyLabel.fontSize = 18
+            arenaReadyLabel.fontColor = SKColor(hex: 0xB0B0B0)
+            arenaReadyLabel.verticalAlignmentMode = .center
+            arenaReadyLabel.position.y = arenaFlavorRowY
             arenaReadyLabel.isHidden = false
+
+            let gap: CGFloat = 8
+            let textW = arenaReadyLabel.frame.width
+            arenaLockIcon.text = "🔒"
+            arenaLockIcon.position.y = arenaFlavorRowY
+            let iconW = arenaLockIcon.frame.width
+            arenaReadyLabel.position.x = (iconW + gap) / 2
+            arenaLockIcon.position.x = -(textW + gap) / 2
+            arenaLockIcon.isHidden = false
             return
         }
 
