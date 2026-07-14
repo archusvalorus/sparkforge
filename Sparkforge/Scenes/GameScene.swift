@@ -556,7 +556,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Title
         let deathText = SKLabelNode(fontNamed: "Menlo-Bold")
-        deathText.fontSize = 26
+        deathText.fontSize = 28
         deathText.fontColor = SKColor(hex: 0xFF4444)
         deathText.text = "SPARK EXTINGUISHED"
         deathText.position = CGPoint(x: 0, y: 90)
@@ -564,7 +564,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Run stats
         let scoreText = SKLabelNode(fontNamed: "Menlo-Bold")
-        scoreText.fontSize = 16
+        scoreText.fontSize = 18
         scoreText.fontColor = SKColor(hex: 0xFFAA33)
         scoreText.name = "deathScore"
         scoreText.position = CGPoint(x: 0, y: 55)
@@ -572,7 +572,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // New record badge (hidden by default)
         let recordBadge = SKLabelNode(fontNamed: "Menlo-Bold")
-        recordBadge.fontSize = 14
+        recordBadge.fontSize = 16
         recordBadge.fontColor = SKColor(hex: 0xFFDD55)
         recordBadge.name = "recordBadge"
         recordBadge.position = CGPoint(x: 0, y: 30)
@@ -581,8 +581,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Best time display
         let bestLabel = SKLabelNode(fontNamed: "Menlo")
-        bestLabel.fontSize = 11
-        bestLabel.fontColor = SKColor(hex: 0x666666)
+        bestLabel.fontSize = 18  // v1.8: +4 — bigger Best/Runs
+        bestLabel.fontColor = SKColor(hex: 0xE0E0E0)  // v1.8: whiter + brighter
         bestLabel.name = "bestLabel"
         bestLabel.position = CGPoint(x: 0, y: 10)
         deathOverlay.addChild(bestLabel)
@@ -592,14 +592,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         reviveBtn.name = "reviveButton"
         reviveBtn.position = CGPoint(x: 0, y: -30)
         
-        let reviveBg = SKShapeNode(rectOf: CGSize(width: 180, height: 36), cornerRadius: 6)
+        let reviveBg = SKShapeNode(rectOf: CGSize(width: 240, height: 42), cornerRadius: 6)
         reviveBg.fillColor = SKColor(hex: 0x334433)
         reviveBg.strokeColor = SKColor(hex: 0x66AA66, alpha: 0.6)
         reviveBg.lineWidth = 1
         reviveBtn.addChild(reviveBg)
         
         let reviveText = SKLabelNode(fontNamed: "Menlo-Bold")
-        reviveText.fontSize = 13
+        reviveText.fontSize = 15
         reviveText.fontColor = SKColor(hex: 0x88DD88)
         reviveText.text = "REIGNITE THE FORGE"
         reviveText.verticalAlignmentMode = .center
@@ -611,16 +611,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.5: XP Boost button
         let xpBoostBtn = SKNode()
         xpBoostBtn.name = "xpBoostButton"
-        xpBoostBtn.position = CGPoint(x: 0, y: -72)
+        xpBoostBtn.position = CGPoint(x: 0, y: -84)
         
-        let xpBoostBg = SKShapeNode(rectOf: CGSize(width: 160, height: 32), cornerRadius: 6)
+        let xpBoostBg = SKShapeNode(rectOf: CGSize(width: 240, height: 42), cornerRadius: 6)
         xpBoostBg.fillColor = SKColor(hex: 0x332211)
         xpBoostBg.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.6)
         xpBoostBg.lineWidth = 1
+        xpBoostBg.name = "xpBoostBg"
         xpBoostBtn.addChild(xpBoostBg)
         
         let xpBoostText = SKLabelNode(fontNamed: "Menlo-Bold")
-        xpBoostText.fontSize = 12
+        xpBoostText.fontSize = 14
         xpBoostText.fontColor = SKColor(hex: 0xFFAA33)
         xpBoostText.text = "2x FORGE XP"
         xpBoostText.verticalAlignmentMode = .center
@@ -628,7 +629,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         xpBoostBtn.addChild(xpBoostText)
         
         let xpBoostAdIcon = SKLabelNode(fontNamed: "Menlo")
-        xpBoostAdIcon.fontSize = 9
+        xpBoostAdIcon.fontSize = 11
         xpBoostAdIcon.fontColor = SKColor(hex: 0xCCCCCC)
         xpBoostAdIcon.text = "▶ AD"
         xpBoostAdIcon.verticalAlignmentMode = .center
@@ -641,36 +642,70 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Restart button
         let restartBtn = SKNode()
         restartBtn.name = "restartButton"
-        restartBtn.position = CGPoint(x: 0, y: -115)
+        restartBtn.position = CGPoint(x: 0, y: -138)
         
-        let restartBg = SKShapeNode(rectOf: CGSize(width: 140, height: 32), cornerRadius: 6)
-        restartBg.fillColor = SKColor(hex: 0x333333)
-        restartBg.strokeColor = SKColor(hex: 0x888888, alpha: 0.4)
-        restartBg.lineWidth = 1
+        // v1.8: blue button, bright white bold lettering, uniform size
+        let restartBg = SKShapeNode(rectOf: CGSize(width: 240, height: 42), cornerRadius: 6)
+        restartBg.fillColor = SKColor(hex: 0x18345C)
+        restartBg.strokeColor = SKColor(hex: 0x5AA0F0, alpha: 0.85)
+        restartBg.lineWidth = 1.5
         restartBtn.addChild(restartBg)
-        
-        let restartText = SKLabelNode(fontNamed: "Menlo")
-        restartText.fontSize = 12
-        restartText.fontColor = SKColor(hex: 0xAAAAAA)
+
+        let restartText = SKLabelNode(fontNamed: "Menlo-Bold")
+        restartText.fontSize = 14
+        restartText.fontColor = .white
         restartText.text = "RESTART"
         restartText.verticalAlignmentMode = .center
         restartBtn.addChild(restartText)
         
         deathOverlay.addChild(restartBtn)
         
-        // Menu button
-        let menuLabel = SKLabelNode(fontNamed: "Menlo")
-        menuLabel.fontSize = 10
-        menuLabel.fontColor = SKColor(hex: 0x666666)
+        // Menu button — v1.8: neon dark purple pill, white bold letters,
+        // uniform size. (Purple is the in-game danger color, but this lives on
+        // the death screen, outside the gameplay field.)
+        let menuBtn = SKNode()
+        menuBtn.name = "menuButton"
+        menuBtn.position = CGPoint(x: 0, y: -192)
+
+        let menuBg = SKShapeNode(rectOf: CGSize(width: 240, height: 42), cornerRadius: 6)
+        menuBg.fillColor = SKColor(hex: 0x2A1140)
+        menuBg.strokeColor = SKColor(hex: 0xB566FF, alpha: 0.85)
+        menuBg.lineWidth = 1.5
+        menuBtn.addChild(menuBg)
+
+        let menuLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        menuLabel.fontSize = 14
+        menuLabel.fontColor = .white
         menuLabel.text = "MENU"
-        menuLabel.name = "menuButton"
-        menuLabel.position = CGPoint(x: 0, y: -155)
-        deathOverlay.addChild(menuLabel)
+        menuLabel.verticalAlignmentMode = .center
+        menuBtn.addChild(menuLabel)
+
+        deathOverlay.addChild(menuBtn)
         
         guard let camera = camera else { return }
         camera.addChild(deathOverlay)
     }
-    
+
+    /// v1.8: lay out the XP-boost button so the label + "▶ AD" tag never
+    /// collide — wraps them as a centered group and sizes the pill to fit.
+    /// Survives any forge-XP amount and font size (call after setting text).
+    private func layoutXPBoostButton(_ btn: SKNode) {
+        guard let label = btn.childNode(withName: "xpBoostLabel") as? SKLabelNode else { return }
+        let adIcon = btn.childNode(withName: "xpBoostAdIcon") as? SKLabelNode
+        let showAd = (adIcon?.alpha ?? 0) > 0
+        let gap: CGFloat = 12
+        let labelW = label.frame.width
+
+        // Center the [label][gap][AD] group inside the fixed uniform pill.
+        if showAd, let adIcon = adIcon {
+            let adW = adIcon.frame.width
+            label.position = CGPoint(x: -(gap + adW) / 2, y: 0)
+            adIcon.position = CGPoint(x: (labelW + gap) / 2, y: 0)
+        } else {
+            label.position = .zero
+        }
+    }
+
     private func setupLevelUpOverlay() {
         levelUpOverlay.zPosition = 190
         levelUpOverlay.alpha = 0
@@ -1165,8 +1200,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Revive button
         if let reviveBtn = deathOverlay.childNode(withName: "reviveButton"),
            reviveBtn.alpha > 0 {
-            let btnFrame = CGRect(x: reviveBtn.position.x - 90, y: reviveBtn.position.y - 18,
-                                  width: 180, height: 36)
+            let btnFrame = CGRect(x: reviveBtn.position.x - 120, y: reviveBtn.position.y - 21,
+                                  width: 240, height: 42)
             if btnFrame.contains(location) {
                 performRevive()
                 return
@@ -1176,8 +1211,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.5: XP Boost button
         if let xpBoostBtn = deathOverlay.childNode(withName: "xpBoostButton"),
            xpBoostBtn.alpha > 0 {
-            let btnFrame = CGRect(x: xpBoostBtn.position.x - 80, y: xpBoostBtn.position.y - 16,
-                                  width: 160, height: 32)
+            let btnFrame = CGRect(x: xpBoostBtn.position.x - 120, y: xpBoostBtn.position.y - 21,
+                                  width: 240, height: 42)
             if btnFrame.contains(location) {
                 performXPBoost()
                 return
@@ -1186,8 +1221,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Restart button
         if let restartBtn = deathOverlay.childNode(withName: "restartButton") {
-            let btnFrame = CGRect(x: restartBtn.position.x - 70, y: restartBtn.position.y - 16,
-                                  width: 140, height: 32)
+            let btnFrame = CGRect(x: restartBtn.position.x - 120, y: restartBtn.position.y - 21,
+                                  width: 240, height: 42)
             if btnFrame.contains(location) {
                 restartGame()
                 return
@@ -1196,8 +1231,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Menu button
         if let menuBtn = deathOverlay.childNode(withName: "menuButton") {
-            let btnFrame = CGRect(x: menuBtn.position.x - 40, y: menuBtn.position.y - 12,
-                                  width: 80, height: 24)
+            let btnFrame = CGRect(x: menuBtn.position.x - 120, y: menuBtn.position.y - 21,
+                                  width: 240, height: 42)
             if btnFrame.contains(location) {
                 returnToTitle()
                 return
@@ -3735,6 +3770,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         if let scoreLabel = deathOverlay.childNode(withName: "deathScore") as? SKLabelNode {
             scoreLabel.text = String(format: "Survived %d:%02d  •  Level %d  •  %d kills", minutes, seconds, player.currentLevel, killCount)
+            // v1.8: bound to the screen — the stats line was spilling off both edges.
+            scoreLabel.fontSize = 18
+            let maxScoreWidth = size.width - 32
+            while scoreLabel.frame.width > maxScoreWidth && scoreLabel.fontSize > 11 {
+                scoreLabel.fontSize -= 0.5
+            }
         }
         
         // New record badge
@@ -3782,6 +3823,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     adIcon.text = "FREE"
                 }
             }
+            layoutXPBoostButton(xpBoostBtn)
         }
         
         deathOverlay.run(SKAction.fadeIn(withDuration: 0.3))
@@ -3912,6 +3954,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 if let adIcon = xpBoostBtn.childNode(withName: "xpBoostAdIcon") as? SKLabelNode {
                     adIcon.alpha = 0
                 }
+                self.layoutXPBoostButton(xpBoostBtn)
             }
             
             self.pendingForgeXP = 0
