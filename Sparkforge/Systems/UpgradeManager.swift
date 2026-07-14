@@ -239,7 +239,10 @@ final class UpgradeManager {
         let key = synergyKey(tag, tier)
         guard !appliedSynergies.contains(key) else { return nil }
         appliedSynergies.insert(key)
-        
+
+        // v1.8 Unit 5: a tier firing IS its Codex discovery (lifetime).
+        CodexManager.shared.recordSynergySeen(tag: tag, tier: tier)
+
         switch (tag, tier) {
             
         // FIRE

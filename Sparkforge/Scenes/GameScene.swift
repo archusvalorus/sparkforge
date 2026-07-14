@@ -151,7 +151,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func didMove(to view: SKView) {
         backgroundColor = .black
-        
+
+        #if DEBUG
+        // v1.8 Unit 5: lifetime Codex snapshot at run start — lets persistence
+        // be validated across app restarts before any Codex page exists.
+        print(CodexManager.shared.debugSummary())
+        #endif
+
         physicsWorld.gravity = .zero
         physicsWorld.contactDelegate = self
         
@@ -2769,6 +2775,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
+            CodexManager.shared.recordDefeat(.slagTitan)  // v1.8 Unit 5
             // Spawn massive XP shower
             for _ in 0..<10 {
                 let offset = CGPoint(
@@ -2821,6 +2828,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
+            CodexManager.shared.recordDefeat(.quenchWarden)  // v1.8 Unit 5
             ProgressionManager.shared.wardenKills += 1
             // v1.7: felling the Warden opens The Coilworks
             if ProgressionManager.shared.arenasUnlocked < 3 {
@@ -2909,6 +2917,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
+            CodexManager.shared.recordDefeat(.dynamoChoir)  // v1.8 Unit 5
             ProgressionManager.shared.choirKills += 1  // banked for Arena 4's gate
             for _ in 0..<10 {
                 let offset = CGPoint(
@@ -3220,6 +3229,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             } else {
                 ProgressionManager.shared.recordKill(.melee)
             }
+            // v1.8 Unit 5: lifetime bestiary — defeat marks the family
+            // encountered and increments its kill count. (Bosses are recorded
+            // at their own death handlers.)
+            CodexManager.shared.recordDefeat(bestiaryFamily(for: enemy))
         } else {
             ProgressionManager.shared.recordKill(.melee)
         }
@@ -3282,7 +3295,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         worldNode.shake(intensity: 2, duration: 0.08)
     }
-    
+
+    /// v1.8 Unit 5: map a live enemy node onto its bestiary family. Mirrors the
+    /// type ladder the rest of GameScene uses (isMiniBoss, then subclass).
+    /// Arena bosses aren't in the `enemies` array — they record at their own
+    /// death handlers — so they don't appear here.
+    private func bestiaryFamily(for enemy: EnemyNode) -> BestiaryFamily {
+        if enemy.isMiniBoss { return .miniBoss }
+        switch enemy {
+        case is AshlingNode:     return .ashling
+        case is RangedEnemyNode: return .ranged
+        case is BraceguardNode:  return .braceguard
+        case is RelayImpNode:    return .relayImp
+        case is GrounderNode:    return .grounder
+        case is StaticHaloNode:  return .staticHalo
+        case is CircuitWaspNode: return .circuitWasp
+        default:                 return .melee
+        }
+    }
+
     private func chainReactionAt(_ position: CGPoint) {
         let radius = playerStats.chainReactionRadius
         let damage = playerStats.chainReactionDamage
@@ -3871,6 +3902,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let cardY: CGFloat = -40  // v1.4: lower on screen, closer to joystick area
 
         for (i, card) in cards.enumerated() {
+            // v1.8 Unit 5: a card shown in a spread IS discovered (offered,
+            // whether or not it's picked).
+            CodexManager.shared.recordCardOffered(card.id)
+
             let cardNode = UpgradeCardNode(card: card)
             cardNode.position = CGPoint(x: startX + spacing * CGFloat(i), y: cardY)
             cardNode.setScale(0.0)
