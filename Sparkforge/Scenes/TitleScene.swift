@@ -191,20 +191,42 @@ final class TitleScene: SKScene {
         // Main title
         titleLabel.text = "SPARKFORGE"
         titleLabel.fontSize = 36
-        titleLabel.fontColor = SKColor(hex: 0xFFAA33)
+        titleLabel.fontColor = SKColor(hex: 0x1589C4)  // v1.8: ocean blue
         titleLabel.position = CGPoint(x: 0, y: layoutY)
         titleLabel.zPosition = 10
         addChild(titleLabel)
-        
+
         // Glow effect on title
         let titleGlow = SKLabelNode(fontNamed: "Menlo-Bold")
         titleGlow.text = "SPARKFORGE"
         titleGlow.fontSize = 36
-        titleGlow.fontColor = SKColor(hex: 0xFF6600, alpha: 0.4)
+        titleGlow.fontColor = SKColor(hex: 0x0E6BA6, alpha: 0.5)  // v1.8: deep ocean glow
         titleGlow.position = CGPoint(x: 0, y: layoutY)
         titleGlow.zPosition = 9
         addChild(titleGlow)
-        
+
+        // v1.8: star-spark glints at BOTH ends of the title (four-point spark,
+        // echoing the forge-coin motif). Offset in phase so they alternate.
+        let glintX = titleLabel.frame.width / 2 + 8
+        for sign: CGFloat in [-1, 1] {
+            let glint = SKLabelNode(text: "✦")
+            glint.fontSize = 18
+            glint.fontColor = SKColor(hex: 0xEAF6FF)
+            glint.verticalAlignmentMode = .center
+            glint.position = CGPoint(x: sign * glintX, y: layoutY + 13)
+            glint.zPosition = 11
+            glint.alpha = 0.6
+            addChild(glint)
+            let twinkle = SKAction.repeatForever(SKAction.sequence([
+                SKAction.group([SKAction.scale(to: 1.5, duration: 0.3),
+                                SKAction.fadeAlpha(to: 1.0, duration: 0.3)]),
+                SKAction.group([SKAction.scale(to: 0.85, duration: 0.4),
+                                SKAction.fadeAlpha(to: 0.55, duration: 0.4)]),
+                SKAction.wait(forDuration: 2.0)
+            ]))
+            glint.run(SKAction.sequence([SKAction.wait(forDuration: sign < 0 ? 0 : 1.35), twinkle]))
+        }
+
         layoutY -= 34
 
         // Subtitle
@@ -639,7 +661,7 @@ final class TitleScene: SKScene {
 
         if !dfm.hasClaimedToday {
             // Show claimable button
-            let bg = SKShapeNode(rectOf: CGSize(width: 200, height: 42), cornerRadius: 10)
+            let bg = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 10)  // v1.8: match arena box width
             bg.fillColor = SKColor(hex: 0x332200)
             bg.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.6)
             bg.lineWidth = 1.5
@@ -667,7 +689,7 @@ final class TitleScene: SKScene {
             ])
             bg.run(SKAction.repeatForever(pulse))
 
-            layoutY -= 50
+            layoutY -= 20  // v1.8: + tap-prompt's -34 = 54 to the ignite button (equidistant)
 
         } else if let blessing = dfm.activeBlessing {
             // Show active blessing indicator
@@ -683,41 +705,72 @@ final class TitleScene: SKScene {
     }
     
     private func setupTapPrompt() {
-        layoutY -= 26  // v1.8 (Unit 4a): 14 → 26, more room above "tap to ignite"
+        layoutY -= 34  // v1.8: extra room above the taller "tap to ignite" CTA
 
+        // v1.8: "tap to ignite" is the CTA — restyled as a blue button
+        // (Restart style) for a splash of color + contrast. Font stays Menlo
+        // (that courier vibe) but italic and larger; 312-wide to match the home
+        // column. Tapping anywhere still ignites — this box is purely visual.
+        let igniteBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
+        igniteBox.fillColor = SKColor(hex: 0x18345C)
+        igniteBox.strokeColor = SKColor(hex: 0x5AA0F0, alpha: 0.85)
+        igniteBox.lineWidth = 1.5
+        igniteBox.position = CGPoint(x: 0, y: layoutY)
+        igniteBox.zPosition = 9
+        igniteBox.name = "ignitePromptBox"
+        addChild(igniteBox)
+
+        tapPrompt.fontName = "Menlo-BoldItalic"  // v1.8: bold + italic, courier vibe kept
         tapPrompt.text = "tap to ignite"
-        tapPrompt.fontSize = 19
-        tapPrompt.fontColor = SKColor(hex: 0xCCCCCC)
+        tapPrompt.fontSize = 22
+        tapPrompt.fontColor = SKColor(hex: 0xF2FBFF)  // v1.8: neon-white (crisp, cool-white)
+        tapPrompt.verticalAlignmentMode = .center
         tapPrompt.position = CGPoint(x: 0, y: layoutY)
         tapPrompt.zPosition = 10
         addChild(tapPrompt)
-        
-        // Breathing pulse
+
+        // Gentle breathing pulse on the whole CTA (box + text together).
         let breathe = SKAction.sequence([
-            SKAction.fadeAlpha(to: 0.3, duration: 1.2),
+            SKAction.fadeAlpha(to: 0.65, duration: 1.2),
             SKAction.fadeAlpha(to: 1.0, duration: 1.2)
         ])
-        tapPrompt.run(SKAction.repeatForever(breathe))
+        igniteBox.run(SKAction.repeatForever(breathe))
+        // Text stays solid (no dim) so the neon-white reads bright and constant.
     }
     
     private func setupSettings() {
         let s = DeviceScale.ui
 
-        layoutY -= 44  // v1.8 (Unit 4a): 34 → 44 — push Remove Ads further from the tap zone
+        layoutY -= 54  // v1.8: 54 to match the DF→ignite gap (buttons equidistant)
 
-        // Remove Ads button (hidden if already purchased)
+        // Remove Ads button — v1.8 (E2): a distinct bordered pill so it reads
+        // as a deliberate button, low-emphasis vs Daily Forge (softer border,
+        // no pulse). The container node is the tap target; the label lives
+        // inside (named for price/purchase text updates).
         if !IAPManager.shared.hasRemovedAds {
+            let removeAdsBtn = SKNode()
+            removeAdsBtn.position = CGPoint(x: 0, y: layoutY)
+            removeAdsBtn.zPosition = 10
+            removeAdsBtn.name = "removeAdsButton"
+
+            let box = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)  // v1.8: match arena box width
+            box.fillColor = SKColor(hex: 0x1E1710)
+            box.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.4)
+            box.lineWidth = 1.5
+            removeAdsBtn.addChild(box)
+
             let removeAdsLabel = SKLabelNode(fontNamed: "Menlo-Bold")
             removeAdsLabel.text = removeAdsButtonText()
             removeAdsLabel.fontSize = 15 * s
             removeAdsLabel.fontColor = SKColor(hex: 0xFFAA33)
-            removeAdsLabel.position = CGPoint(x: 0, y: layoutY)
-            removeAdsLabel.zPosition = 10
-            removeAdsLabel.name = "removeAdsButton"
-            addChild(removeAdsLabel)
+            removeAdsLabel.verticalAlignmentMode = .center
+            removeAdsLabel.name = "removeAdsLabel"
+            removeAdsBtn.addChild(removeAdsLabel)
+
+            addChild(removeAdsBtn)
             loadRemoveAdsPrice()
 
-            layoutY -= 26
+            layoutY -= 48
         }
 
         // Restore purchases link
@@ -780,9 +833,9 @@ final class TitleScene: SKScene {
         if dailyForgeButton.parent != nil,
            let bg = dailyForgeButton.childNode(withName: "dailyForgeBG") {
             let forgeFrame = CGRect(
-                x: bg.position.x - 105,
+                x: bg.position.x - 156,
                 y: bg.position.y - 25,
-                width: 210, height: 50
+                width: 312, height: 50
             )
             if forgeFrame.contains(location) {
                 handleDailyForge()
@@ -803,9 +856,9 @@ final class TitleScene: SKScene {
         // Check Remove Ads tap
         if let removeBtn = childNode(withName: "removeAdsButton") {
             let btnFrame = CGRect(
-                x: removeBtn.position.x - 100,
-                y: removeBtn.position.y - 15,
-                width: 200, height: 30
+                x: removeBtn.position.x - 156,
+                y: removeBtn.position.y - 21,
+                width: 312, height: 42
             )
             if btnFrame.contains(location) {
                 handleRemoveAdsPurchase()
@@ -859,7 +912,7 @@ final class TitleScene: SKScene {
 
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
         title.text = "🔥 DAILY FORGE"
-        title.fontSize = 16
+        title.fontSize = 18
         title.fontColor = SKColor(hex: 0xFFAA33)
         title.verticalAlignmentMode = .center
         title.position = CGPoint(x: 0, y: 82)
@@ -875,7 +928,7 @@ final class TitleScene: SKScene {
 
         let randomLabel = SKLabelNode(fontNamed: "Menlo-Bold")
         randomLabel.text = "🎲 RANDOM BLESSING"
-        randomLabel.fontSize = 13
+        randomLabel.fontSize = 15
         randomLabel.fontColor = SKColor(hex: 0xFFAA33)
         randomLabel.verticalAlignmentMode = .center
         randomLabel.position = CGPoint(x: 0, y: 36)
@@ -883,7 +936,7 @@ final class TitleScene: SKScene {
 
         let randomSub = SKLabelNode(fontNamed: "Menlo")
         randomSub.text = "free"
-        randomSub.fontSize = 9
+        randomSub.fontSize = 11
         randomSub.fontColor = SKColor(hex: 0x888888)
         randomSub.verticalAlignmentMode = .center
         randomSub.position = CGPoint(x: 0, y: 20)
@@ -899,7 +952,7 @@ final class TitleScene: SKScene {
 
         let chooseLabel = SKLabelNode(fontNamed: "Menlo-Bold")
         chooseLabel.text = adsRemoved ? "✨ CHOOSE YOUR BLESSING" : "📺 CHOOSE YOUR BLESSING"
-        chooseLabel.fontSize = 12
+        chooseLabel.fontSize = 14
         chooseLabel.fontColor = SKColor(hex: 0x44BBFF)
         chooseLabel.verticalAlignmentMode = .center
         chooseLabel.position = CGPoint(x: 0, y: -26)
@@ -908,7 +961,7 @@ final class TitleScene: SKScene {
         let chooseSub = SKLabelNode(fontNamed: "Menlo")
         chooseSub.name = "chooseSubLabel"
         chooseSub.text = adsRemoved ? "ad-free — you own the forge" : "watch a short ad"
-        chooseSub.fontSize = 9
+        chooseSub.fontSize = 11
         chooseSub.fontColor = SKColor(hex: 0x888888)
         chooseSub.verticalAlignmentMode = .center
         chooseSub.position = CGPoint(x: 0, y: -42)
@@ -916,7 +969,7 @@ final class TitleScene: SKScene {
 
         let hint = SKLabelNode(fontNamed: "Menlo")
         hint.text = "tap outside to cancel"
-        hint.fontSize = 9
+        hint.fontSize = 11
         hint.fontColor = SKColor(hex: 0x666666)
         hint.verticalAlignmentMode = .center
         hint.position = CGPoint(x: 0, y: -92)
@@ -992,7 +1045,7 @@ final class TitleScene: SKScene {
 
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
         title.text = "CHOOSE YOUR BLESSING"
-        title.fontSize = 14
+        title.fontSize = 16
         title.fontColor = SKColor(hex: 0x44BBFF)
         title.verticalAlignmentMode = .center
         title.position = CGPoint(x: 0, y: 122)
@@ -1016,7 +1069,7 @@ final class TitleScene: SKScene {
 
             let name = SKLabelNode(fontNamed: "Menlo-Bold")
             name.text = blessing.name
-            name.fontSize = 13
+            name.fontSize = 15
             name.fontColor = SKColor(hex: 0xFFAA33)
             name.verticalAlignmentMode = .center
             name.horizontalAlignmentMode = .left
@@ -1025,7 +1078,7 @@ final class TitleScene: SKScene {
 
             let desc = SKLabelNode(fontNamed: "Menlo")
             desc.text = blessing.description
-            desc.fontSize = 9
+            desc.fontSize = 11
             // v1.7: choice-driving text pops (readability canon, July 10)
             desc.fontColor = SKColor(hex: 0xFFFFFF)
             desc.verticalAlignmentMode = .center
@@ -1036,7 +1089,7 @@ final class TitleScene: SKScene {
 
         let hint = SKLabelNode(fontNamed: "Menlo")
         hint.text = "your forge, your choice"
-        hint.fontSize = 9
+        hint.fontSize = 11
         hint.fontColor = SKColor(hex: 0x666666)
         hint.verticalAlignmentMode = .center
         hint.position = CGPoint(x: 0, y: -132)
@@ -1076,7 +1129,7 @@ final class TitleScene: SKScene {
 
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
         title.text = "⚒ FORGE PATH"
-        title.fontSize = 16
+        title.fontSize = 18
         title.fontColor = SKColor(hex: 0xFFCC66)
         title.verticalAlignmentMode = .center
         title.position = CGPoint(x: 0, y: 108)
@@ -1085,7 +1138,7 @@ final class TitleScene: SKScene {
         let n = fpm.picksAvailable
         let subtitle = SKLabelNode(fontNamed: "Menlo")
         subtitle.text = "choose a permanent node — \(n) pick\(n == 1 ? "" : "s") left"
-        subtitle.fontSize = 10
+        subtitle.fontSize = 12
         subtitle.fontColor = SKColor(hex: 0x999999)
         subtitle.verticalAlignmentMode = .center
         subtitle.position = CGPoint(x: 0, y: 86)
@@ -1118,7 +1171,7 @@ final class TitleScene: SKScene {
 
             let branchName = SKLabelNode(fontNamed: "Menlo-Bold")
             branchName.text = branch.rawValue.uppercased()
-            branchName.fontSize = 12
+            branchName.fontSize = 14
             branchName.fontColor = color
             branchName.verticalAlignmentMode = .center
             branchName.horizontalAlignmentMode = .left
@@ -1127,7 +1180,7 @@ final class TitleScene: SKScene {
 
             let nodeLabel = SKLabelNode(fontNamed: "Menlo")
             nodeLabel.text = "\(node.name) — \(node.effectText)"
-            nodeLabel.fontSize = 10
+            nodeLabel.fontSize = 12
             // v1.7: functional text pops (readability canon, July 10)
             nodeLabel.fontColor = SKColor(hex: 0xFFFFFF)
             nodeLabel.verticalAlignmentMode = .center
@@ -1138,7 +1191,7 @@ final class TitleScene: SKScene {
 
         let hint = SKLabelNode(fontNamed: "Menlo")
         hint.text = "tap outside to bank picks for later"
-        hint.fontSize = 9
+        hint.fontSize = 11
         hint.fontColor = SKColor(hex: 0x666666)
         hint.verticalAlignmentMode = .center
         hint.position = CGPoint(x: 0, y: -122)
@@ -1242,7 +1295,7 @@ final class TitleScene: SKScene {
 
         let name = SKLabelNode(fontNamed: "Menlo-Bold")
         name.text = blessing.name
-        name.fontSize = 18
+        name.fontSize = 20
         name.fontColor = SKColor(hex: 0xFFAA33)
         name.verticalAlignmentMode = .center
         name.position = CGPoint(x: 0, y: 8)
@@ -1250,7 +1303,7 @@ final class TitleScene: SKScene {
 
         let desc = SKLabelNode(fontNamed: "Menlo")
         desc.text = blessing.description
-        desc.fontSize = 12
+        desc.fontSize = 14
         desc.fontColor = SKColor(hex: 0x66AA66)
         desc.verticalAlignmentMode = .center
         desc.position = CGPoint(x: 0, y: -20)
@@ -1258,7 +1311,7 @@ final class TitleScene: SKScene {
 
         let hint = SKLabelNode(fontNamed: "Menlo")
         hint.text = "tap to continue"
-        hint.fontSize = 10
+        hint.fontSize = 12
         hint.fontColor = SKColor(hex: 0x888888)
         hint.verticalAlignmentMode = .center
         hint.position = CGPoint(x: 0, y: -62)
@@ -1404,31 +1457,33 @@ final class TitleScene: SKScene {
         Task { @MainActor in
             guard let product = await IAPManager.shared.getRemoveAdsProduct() else { return }
             removeAdsPriceText = product.displayPrice
-            if let removeBtn = childNode(withName: "removeAdsButton") as? SKLabelNode {
-                removeBtn.text = removeAdsButtonText()
+            if let label = childNode(withName: "removeAdsButton")?
+                .childNode(withName: "removeAdsLabel") as? SKLabelNode {
+                label.text = removeAdsButtonText()
             }
         }
     }
 
     private func handleRemoveAdsPurchase() {
-        guard let removeBtn = childNode(withName: "removeAdsButton") as? SKLabelNode else { return }
-        
-        removeBtn.text = "Purchasing..."
-        removeBtn.fontColor = SKColor(hex: 0xCCCCCC)
-        
+        guard let removeBtn = childNode(withName: "removeAdsButton"),
+              let label = removeBtn.childNode(withName: "removeAdsLabel") as? SKLabelNode else { return }
+
+        label.text = "Purchasing..."
+        label.fontColor = SKColor(hex: 0xCCCCCC)
+
         Task { @MainActor in
             let success = await IAPManager.shared.purchaseRemoveAds()
-            
+
             if success {
-                removeBtn.text = "Ads Removed ✓"
-                removeBtn.fontColor = SKColor(hex: 0x66AA66)
-                
+                label.text = "Ads Removed ✓"
+                label.fontColor = SKColor(hex: 0x66AA66)
+
                 run(SKAction.wait(forDuration: 1.5)) {
-                    removeBtn.removeFromParent()
+                    removeBtn.removeFromParent()  // remove the whole pill
                 }
             } else {
-                removeBtn.text = removeAdsButtonText()
-                removeBtn.fontColor = SKColor(hex: 0xFFAA33)
+                label.text = removeAdsButtonText()
+                label.fontColor = SKColor(hex: 0xFFAA33)
             }
         }
     }
