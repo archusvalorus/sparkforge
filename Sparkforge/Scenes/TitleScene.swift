@@ -209,7 +209,7 @@ final class TitleScene: SKScene {
 
         // Subtitle
         subtitleLabel.text = "arena survival roguelite"
-        subtitleLabel.fontSize = 12
+        subtitleLabel.fontSize = 14
         subtitleLabel.fontColor = SKColor(hex: 0xCCCCCC)
         subtitleLabel.position = CGPoint(x: 0, y: layoutY)
         subtitleLabel.zPosition = 10
@@ -226,7 +226,7 @@ final class TitleScene: SKScene {
         // Forge Level badge
         let level = pm.forgeLevel
         forgeLevelLabel.text = level > 0 ? "FORGE LV \(level)" : "FORGE LV 0"
-        forgeLevelLabel.fontSize = 14
+        forgeLevelLabel.fontSize = 16
         forgeLevelLabel.fontColor = SKColor(hex: 0xFFAA33)
         forgeLevelLabel.position = CGPoint(x: 0, y: layoutY)
         forgeLevelLabel.zPosition = 10
@@ -296,7 +296,7 @@ final class TitleScene: SKScene {
             let label = SKLabelNode(fontNamed: "Menlo-Bold")
             let n = fpm.picksAvailable
             label.text = "⚒ FORGE PATH — \(n) PICK\(n == 1 ? "" : "S") READY"
-            label.fontSize = 11
+            label.fontSize = 13
             label.fontColor = SKColor(hex: 0xFFCC66)
             label.verticalAlignmentMode = .center
             label.position = CGPoint(x: 0, y: forgePathRowY)
@@ -313,7 +313,7 @@ final class TitleScene: SKScene {
             let parts = fpm.summary.map { "\($0.branch.icon)\($0.count)" }
             let summaryLabel = SKLabelNode(fontNamed: "Menlo")
             summaryLabel.text = parts.joined(separator: "  ")
-            summaryLabel.fontSize = 11
+            summaryLabel.fontSize = 13
             summaryLabel.fontColor = SKColor(hex: 0x999999)
             summaryLabel.verticalAlignmentMode = .center
             summaryLabel.position = CGPoint(x: 0, y: forgePathRowY)
@@ -329,7 +329,7 @@ final class TitleScene: SKScene {
         if hs.totalRuns > 0 {
             // Best time + level
             bestLabel.text = "Best: \(hs.bestTimeFormatted)  •  Level \(hs.bestLevel)"
-            bestLabel.fontSize = 15
+            bestLabel.fontSize = 17
             bestLabel.fontColor = SKColor(hex: 0xFFAA33)
             bestLabel.position = CGPoint(x: 0, y: layoutY)
             bestLabel.zPosition = 10
@@ -340,7 +340,7 @@ final class TitleScene: SKScene {
             // Total stats — now shows typed kills
             let pm = ProgressionManager.shared
             statsLabel.text = "\(hs.totalRuns) runs  •  \(pm.totalKills) kills"
-            statsLabel.fontSize = 12
+            statsLabel.fontSize = 14
             statsLabel.fontColor = SKColor(hex: 0xBBBBBB)
             statsLabel.position = CGPoint(x: 0, y: layoutY)
             statsLabel.zPosition = 10
@@ -366,7 +366,7 @@ final class TitleScene: SKScene {
 
         // v1.7 polish: rows sit 8pt lower so the content centers in the
         // box instead of crowding its top edge
-        arenaHeader.fontSize = 15
+        arenaHeader.fontSize = 17
         arenaHeader.position = CGPoint(x: 0, y: layoutY - 8)
         arenaHeader.zPosition = 10
         addChild(arenaHeader)
@@ -403,7 +403,7 @@ final class TitleScene: SKScene {
         layoutY -= 34
 
         // Row 1: kill progress (both arenas track their own gate kills)
-        killProgressLabel.fontSize = 12
+        killProgressLabel.fontSize = 14
         killProgressLabel.position = CGPoint(x: 0, y: layoutY)
         killProgressLabel.zPosition = 10
         addChild(killProgressLabel)
@@ -411,12 +411,12 @@ final class TitleScene: SKScene {
         layoutY -= 22
 
         // Row 2: survival check (Crucible, when required) / flavor line (Quench)
-        survivalCheckLabel.fontSize = 12
+        survivalCheckLabel.fontSize = 14
         survivalCheckLabel.position = CGPoint(x: 0, y: layoutY)
         survivalCheckLabel.zPosition = 10
         addChild(survivalCheckLabel)
 
-        arenaFlavorLabel.fontSize = 11
+        arenaFlavorLabel.fontSize = 13
         arenaFlavorLabel.fontColor = SKColor(hex: 0x8A8478)
         arenaFlavorLabel.position = CGPoint(x: 0, y: layoutY)
         arenaFlavorLabel.zPosition = 10
@@ -426,7 +426,7 @@ final class TitleScene: SKScene {
         layoutY -= 26
 
         // Row 3: "boss unlocked" pulse / locked-arena teaser
-        arenaReadyLabel.fontSize = 13
+        arenaReadyLabel.fontSize = 15
         arenaReadyLabel.position = CGPoint(x: 0, y: layoutY)
         arenaReadyLabel.zPosition = 10
         arenaReadyRowY = layoutY
@@ -440,7 +440,7 @@ final class TitleScene: SKScene {
         // v1.8 (Unit 3): lock glyph, vertically centered; shown only when a
         // locked arena is browsed. Same pulse (started now) keeps it in sync
         // with the LOCKED label.
-        arenaLockIcon.fontSize = 16
+        arenaLockIcon.fontSize = 18
         arenaLockIcon.verticalAlignmentMode = .center
         arenaLockIcon.zPosition = 10
         arenaLockIcon.isHidden = true
@@ -456,9 +456,9 @@ final class TitleScene: SKScene {
     /// refresh (base size first, shrink only if the row would collide)
     private func fitArenaRows() {
         let rows: [(SKLabelNode, CGFloat)] = [
-            (killProgressLabel, 12),
-            (survivalCheckLabel, 12),
-            (arenaFlavorLabel, 11),
+            (killProgressLabel, 14),   // v1.8 (Unit 4a): +2 across the opening screen
+            (survivalCheckLabel, 14),
+            (arenaFlavorLabel, 13),
             (arenaReadyLabel, arenaReadyLabel.fontSize)
         ]
         for (label, baseSize) in rows where !label.isHidden {
@@ -520,7 +520,7 @@ final class TitleScene: SKScene {
             // Icon + text are separate nodes, both vertically centered, offset
             // so the pair reads centered as a group.
             arenaReadyLabel.text = "LOCKED"
-            arenaReadyLabel.fontSize = 18
+            arenaReadyLabel.fontSize = 20
             arenaReadyLabel.fontColor = SKColor(hex: 0xB0B0B0)
             arenaReadyLabel.verticalAlignmentMode = .center
             arenaReadyLabel.position.y = arenaFlavorRowY
@@ -562,12 +562,12 @@ final class TitleScene: SKScene {
                 arenaReadyLabel.isHidden = true
             } else if progress.allMet {
                 arenaReadyLabel.text = "★ BOSS UNLOCKED ★"
-                arenaReadyLabel.fontSize = 13
+                arenaReadyLabel.fontSize = 15
                 arenaReadyLabel.fontColor = SKColor(hex: 0xFFAA33)
                 arenaReadyLabel.isHidden = false
             } else {
                 arenaReadyLabel.text = "🔒 THE QUENCH lies beyond the Titan"
-                arenaReadyLabel.fontSize = 11
+                arenaReadyLabel.fontSize = 13
                 arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
                 arenaReadyLabel.isHidden = false
             }
@@ -589,12 +589,12 @@ final class TitleScene: SKScene {
 
             if met && pm.arenasUnlocked < 3 {
                 arenaReadyLabel.text = "★ THE WARDEN STIRS ★"
-                arenaReadyLabel.fontSize = 13
+                arenaReadyLabel.fontSize = 15
                 arenaReadyLabel.fontColor = SKColor(hex: 0xD8A94A)
                 arenaReadyLabel.isHidden = false
             } else if pm.arenasUnlocked < 3 {
                 arenaReadyLabel.text = "🔒 THE COILWORKS hums beyond the Warden"
-                arenaReadyLabel.fontSize = 11
+                arenaReadyLabel.fontSize = 13
                 arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
                 arenaReadyLabel.isHidden = false
             } else {
@@ -618,7 +618,7 @@ final class TitleScene: SKScene {
 
             if met {
                 arenaReadyLabel.text = "★ THE CHOIR FINDS TEMPO ★"
-                arenaReadyLabel.fontSize = 13
+                arenaReadyLabel.fontSize = 15
                 arenaReadyLabel.fontColor = SKColor(hex: 0xF6D36B)
                 arenaReadyLabel.isHidden = false
             } else {
@@ -632,7 +632,9 @@ final class TitleScene: SKScene {
     private func setupDailyForge() {
         let dfm = DailyForgeManager.shared
 
-        layoutY -= 22  // Extra breathing room (clears the arena box's bottom edge)
+        // v1.8 (Unit 4a): 22 → 46 — Daily Forge sat ~5px under the arena box's
+        // bottom edge; give it real clearance so the two buttons don't crowd.
+        layoutY -= 46
         dailyForgeRowY = layoutY  // v1.6: remembered so the post-claim indicator lands here
 
         if !dfm.hasClaimedToday {
@@ -647,7 +649,7 @@ final class TitleScene: SKScene {
             dailyForgeButton.addChild(bg)
 
             dailyForgeLabel.text = "🔥 DAILY FORGE"
-            dailyForgeLabel.fontSize = 14
+            dailyForgeLabel.fontSize = 16
             dailyForgeLabel.fontColor = SKColor(hex: 0xFFAA33)
             dailyForgeLabel.verticalAlignmentMode = .center
             dailyForgeLabel.position = CGPoint(x: 0, y: layoutY)
@@ -670,7 +672,7 @@ final class TitleScene: SKScene {
         } else if let blessing = dfm.activeBlessing {
             // Show active blessing indicator
             blessingActiveLabel.text = "\(blessing.icon) \(blessing.name) ready"
-            blessingActiveLabel.fontSize = 12
+            blessingActiveLabel.fontSize = 14
             blessingActiveLabel.fontColor = SKColor(hex: 0x66AA66)
             blessingActiveLabel.position = CGPoint(x: 0, y: layoutY)
             blessingActiveLabel.zPosition = 10
@@ -681,10 +683,10 @@ final class TitleScene: SKScene {
     }
     
     private func setupTapPrompt() {
-        layoutY -= 14  // Breathing room
+        layoutY -= 26  // v1.8 (Unit 4a): 14 → 26, more room above "tap to ignite"
 
         tapPrompt.text = "tap to ignite"
-        tapPrompt.fontSize = 17
+        tapPrompt.fontSize = 19
         tapPrompt.fontColor = SKColor(hex: 0xCCCCCC)
         tapPrompt.position = CGPoint(x: 0, y: layoutY)
         tapPrompt.zPosition = 10
@@ -701,13 +703,13 @@ final class TitleScene: SKScene {
     private func setupSettings() {
         let s = DeviceScale.ui
 
-        layoutY -= 34  // Breathing room before settings
+        layoutY -= 44  // v1.8 (Unit 4a): 34 → 44 — push Remove Ads further from the tap zone
 
         // Remove Ads button (hidden if already purchased)
         if !IAPManager.shared.hasRemovedAds {
             let removeAdsLabel = SKLabelNode(fontNamed: "Menlo-Bold")
             removeAdsLabel.text = removeAdsButtonText()
-            removeAdsLabel.fontSize = 13 * s
+            removeAdsLabel.fontSize = 15 * s
             removeAdsLabel.fontColor = SKColor(hex: 0xFFAA33)
             removeAdsLabel.position = CGPoint(x: 0, y: layoutY)
             removeAdsLabel.zPosition = 10
@@ -720,7 +722,7 @@ final class TitleScene: SKScene {
 
         // Restore purchases link
         restoreLabel.text = "Restore Purchases"
-        restoreLabel.fontSize = 11 * s
+        restoreLabel.fontSize = 13 * s
         restoreLabel.fontColor = SKColor(hex: 0x999999)
         restoreLabel.position = CGPoint(x: 0, y: layoutY)
         restoreLabel.zPosition = 10
@@ -1290,7 +1292,7 @@ final class TitleScene: SKScene {
         if let blessing = DailyForgeManager.shared.activeBlessing,
            blessingActiveLabel.parent == nil {
             blessingActiveLabel.text = "\(blessing.icon) \(blessing.name) ready"
-            blessingActiveLabel.fontSize = 12
+            blessingActiveLabel.fontSize = 14
             blessingActiveLabel.fontColor = SKColor(hex: 0x66AA66)
             blessingActiveLabel.position = CGPoint(x: 0, y: dailyForgeRowY)
             blessingActiveLabel.zPosition = 10
