@@ -43,6 +43,14 @@ changes, the design is canon):*
    the spark glow-up (Phase B) has its real customer here. A code-drawn
    Mote would violate "don't over-polish" in the wrong direction; the
    character sheet exists, use it.
+8. **Mote CARD color direction (Brandon, July 14 2026):** the Mote
+   bestiary/codex card should be **VERY purple + neon-white** — lean hard
+   into it, brighter/more saturated than the normal tree-tint treatment.
+   Fits the purple-danger canon (Mote IS danger) and makes the reveal
+   card feel like a secret, not a normal entry. When the reserved `????`
+   bestiary slot renders (v2.0), its card is the loudest purple in the
+   suite. (The v1.8 reserved slot stays hidden/no-render — this is the
+   v2.0 reveal styling.)
 
 ---
 
