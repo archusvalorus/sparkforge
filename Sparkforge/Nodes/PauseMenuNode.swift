@@ -77,21 +77,23 @@ final class PauseMenuNode: SKNode {
         buildViewer.position = .zero
         mainPane.addChild(buildViewer)
 
+        // v1.8: uniform 224x36; RESUME green (unchanged), SETTINGS blue/white,
+        // MENU purple/white — matches the death-overlay button treatment.
         mainPane.addChild(Self.button(name: "resumeButton", text: "RESUME",
-                                      size: CGSize(width: 160, height: 36),
+                                      size: CGSize(width: 240, height: 42),
                                       position: CGPoint(x: 0, y: -160),
                                       fillHex: 0x334433, strokeHex: 0x66AA66,
-                                      textHex: 0x88DD88, fontSize: 14, bold: true))
+                                      textHex: 0x88DD88, fontSize: 15, bold: true))
         mainPane.addChild(Self.button(name: "settingsButton", text: "SETTINGS",
-                                      size: CGSize(width: 140, height: 32),
-                                      position: CGPoint(x: 0, y: -208),
-                                      fillHex: 0x333344, strokeHex: 0x8888AA,
-                                      textHex: 0xAAAACC, fontSize: 12, bold: false))
+                                      size: CGSize(width: 240, height: 42),
+                                      position: CGPoint(x: 0, y: -214),
+                                      fillHex: 0x18345C, strokeHex: 0x5AA0F0,
+                                      textHex: 0xFFFFFF, fontSize: 14, bold: true))
         mainPane.addChild(Self.button(name: "pauseMenuButton", text: "MENU",
-                                      size: CGSize(width: 120, height: 30),
-                                      position: CGPoint(x: 0, y: -252),
-                                      fillHex: 0x333333, strokeHex: 0x888888,
-                                      textHex: 0xAAAAAA, fontSize: 12, bold: false))
+                                      size: CGSize(width: 240, height: 42),
+                                      position: CGPoint(x: 0, y: -268),
+                                      fillHex: 0x2A1140, strokeHex: 0xB566FF,
+                                      textHex: 0xFFFFFF, fontSize: 14, bold: true))
     }
 
     // MARK: - Build viewer
@@ -225,34 +227,34 @@ final class PauseMenuNode: SKNode {
     private func setupSettingsPane() {
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
         title.text = "SETTINGS"
-        title.fontSize = 22
+        title.fontSize = 24
         title.fontColor = SKColor(hex: 0xFFAA33)
         title.position = CGPoint(x: 0, y: 80)
         settingsPane.addChild(title)
 
         settingsPane.addChild(Self.button(name: "sfxToggle", text: sfxText,
-                                          size: CGSize(width: 180, height: 34),
+                                          size: CGSize(width: 240, height: 42),
                                           position: CGPoint(x: 0, y: 20),
                                           fillHex: 0x2A2A2A, strokeHex: 0x777777,
-                                          textHex: 0xCCCCCC, fontSize: 13, bold: true))
+                                          textHex: 0xCCCCCC, fontSize: 15, bold: true))
         settingsPane.addChild(Self.button(name: "bgmToggle", text: bgmText,
-                                          size: CGSize(width: 180, height: 34),
+                                          size: CGSize(width: 240, height: 42),
                                           position: CGPoint(x: 0, y: -32),
                                           fillHex: 0x2A2A2A, strokeHex: 0x777777,
-                                          textHex: 0xCCCCCC, fontSize: 13, bold: true))
+                                          textHex: 0xCCCCCC, fontSize: 15, bold: true))
 
         let bgmNote = SKLabelNode(fontNamed: "Menlo")
         bgmNote.text = "music coming soon"
-        bgmNote.fontSize = 8
+        bgmNote.fontSize = 10
         bgmNote.fontColor = SKColor(hex: 0x666666)
         bgmNote.position = CGPoint(x: 0, y: -56)
         settingsPane.addChild(bgmNote)
 
         settingsPane.addChild(Self.button(name: "settingsBackButton", text: "BACK",
-                                          size: CGSize(width: 120, height: 30),
+                                          size: CGSize(width: 240, height: 42),
                                           position: CGPoint(x: 0, y: -104),
                                           fillHex: 0x333333, strokeHex: 0x888888,
-                                          textHex: 0xAAAAAA, fontSize: 12, bold: false))
+                                          textHex: 0xE0E0E0, fontSize: 14, bold: false))
     }
 
     private var sfxText: String { SettingsManager.shared.sfxEnabled ? "SFX: ON" : "SFX: OFF" }
