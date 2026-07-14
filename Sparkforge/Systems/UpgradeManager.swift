@@ -243,84 +243,77 @@ final class UpgradeManager {
         // v1.8 Unit 5: a tier firing IS its Codex discovery (lifetime).
         CodexManager.shared.recordSynergySeen(tag: tag, tier: tier)
 
+        // v1.8 Unit 5b: stat mutations only — the player-facing line comes
+        // from the single `synergyTiers(for:)` source (copy consolidation), so
+        // the notification, pause card-detail, and Codex can never drift.
         switch (tag, tier) {
-            
+
         // FIRE
         case (.fire, 3):
             stats.burnSpreads = true
-            return "🔥 Spreading Flame — Burns spread to nearby enemies"
         case (.fire, 5):
             stats.burnDPS *= 2.0
             stats.burnDuration = 4.0
-            return "🔥 Inferno — Burn damage doubled, duration 4s"
+            stats.burnSpreadRadius *= 1.25   // v1.8 5b: Wildfire Heart
         case (.fire, 7):
             stats.passiveArenaDPS += 0.5
-            return "🔥 Meltdown — All enemies take passive burn damage"
-            
+
         // SHOCK
         case (.shock, 3):
             stats.chainTargets += 1  // Now chains to 2
-            return "⚡ Charged — Chain lightning hits 2 targets"
         case (.shock, 5):
             stats.teslaFieldDPS = 0.3
-            return "⚡ Tesla Field — Passive aura damages nearby enemies"
         case (.shock, 7):
             stats.spreadShotInterval = 3
             stats.spreadShotCount = 3
-            // All spread shots also chain
-            return "⚡ Lightning Storm — Every 3rd shot fires a spread, all chain"
-            
-        // BLEED
+
+        // BLEED — mechanics reworked in Unit 5b Chunk B
         case (.bleed, 3):
             stats.critAppliesBleed = true
             stats.bleedDPS = 0.5
-            return "🩸 Open Wound — Crits apply bleed"
         case (.bleed, 5):
             stats.bloodlustDamagePerKill = 0.05
-            return "🩸 Bloodlust — Kill streaks grant stacking damage"
         case (.bleed, 7):
             stats.executionThreshold = 0.3
-            return "🩸 Exsanguinate — Low HP enemies take double damage"
-            
-        // GUARD — v1.4: Iron Skin now grants DEF instead of lethal saves
+
+        // GUARD — mechanics reworked in Unit 5b Chunk B
         case (.guardT, 3):
-            // Barrier Pulse — handled in level-up logic (push enemies back)
-            return "🛡️ Barrier Pulse — Enemies pushed back on level up"
+            break  // Barrier Pulse — handled in level-up logic (push enemies back)
         case (.guardT, 5):
             stats.defense += 15
-            return "🛡️ Iron Skin — +15 DEF, shrug off weak hits"
         case (.guardT, 7):
             stats.globalEnemySlow += 0.15
             stats.collisionShrink *= 0.85
-            return "🛡️ Unbreakable — Enemies slowed, hitbox shrinks further"
-            
-        // VOID
+
+        // VOID — mechanics reworked in Unit 5b Chunk B
         case (.voidT, 3):
             stats.pierceCount += 1
-            return "🕳️ Rift — Projectiles pierce an additional enemy"
         case (.voidT, 5):
             stats.gravityWellDuration = 2.0
             stats.gravityWellDPS = 0.5
-            return "🕳️ Event Horizon — Gravity wells last longer and deal damage"
         case (.voidT, 7):
             stats.singularityActive = true
-            return "🕳️ Singularity — Massive gravity wells spawn periodically"
-            
+
         // CHILL
         case (.chill, 3):
             stats.slowPotencyMultiplier = 2.0
-            return "❄️ Deep Freeze — All slow effects doubled"
         case (.chill, 5):
             stats.shatterChance = 0.2
-            return "❄️ Shatter — Heavily slowed enemies can shatter on hit"
         case (.chill, 7):
             stats.globalEnemySlow += 0.25
             stats.shatterSlowThreshold = 0.3
-            return "❄️ Absolute Zero — Permanent global slow, easier shatters"
-            
+
         default:
             return nil
         }
+
+        return synergyLine(tag, tier)
+    }
+
+    /// Composes the player-facing synergy line from the single copy source.
+    private func synergyLine(_ tag: Tag, _ tier: Int) -> String? {
+        guard let info = UpgradeManager.synergyTiers(for: tag).first(where: { $0.threshold == tier }) else { return nil }
+        return "\(UpgradeCardNode.emoji(for: tag)) \(info.title) — \(info.effect)"
     }
 
     // MARK: - Synergy tier copy (read-only, for detail surfaces)
@@ -339,13 +332,13 @@ final class UpgradeManager {
     static func synergyTiers(for tag: Tag) -> [SynergyTier] {
         switch tag {
         case .fire:
-            return [SynergyTier(threshold: 3, title: "Spreading Flame", effect: "Burns spread to nearby enemies"),
-                    SynergyTier(threshold: 5, title: "Inferno", effect: "Burn damage doubled, duration 4s"),
-                    SynergyTier(threshold: 7, title: "Meltdown", effect: "All enemies take passive burn damage")]
+            return [SynergyTier(threshold: 3, title: "Spreading Flame", effect: "Burns leap to nearby enemies"),
+                    SynergyTier(threshold: 5, title: "Wildfire Heart", effect: "Burns spread farther and hit harder"),
+                    SynergyTier(threshold: 7, title: "Inferno Crown", effect: "Every enemy in the arena is burning")]
         case .shock:
-            return [SynergyTier(threshold: 3, title: "Charged", effect: "Chain lightning hits 2 targets"),
-                    SynergyTier(threshold: 5, title: "Tesla Field", effect: "Passive aura damages nearby enemies"),
-                    SynergyTier(threshold: 7, title: "Lightning Storm", effect: "Every 3rd shot fires a spread, all chain")]
+            return [SynergyTier(threshold: 3, title: "Chain Current", effect: "Lightning chains to one more enemy"),
+                    SynergyTier(threshold: 5, title: "Tesla Field", effect: "A charged aura damages nearby enemies"),
+                    SynergyTier(threshold: 7, title: "Storm Engine", effect: "Every 3rd shot fires a chaining spread")]
         case .bleed:
             return [SynergyTier(threshold: 3, title: "Open Wound", effect: "Crits apply bleed"),
                     SynergyTier(threshold: 5, title: "Bloodlust", effect: "Kill streaks grant stacking damage"),
@@ -359,9 +352,9 @@ final class UpgradeManager {
                     SynergyTier(threshold: 5, title: "Event Horizon", effect: "Gravity wells last longer and deal damage"),
                     SynergyTier(threshold: 7, title: "Singularity", effect: "Massive gravity wells spawn periodically")]
         case .chill:
-            return [SynergyTier(threshold: 3, title: "Deep Freeze", effect: "All slow effects doubled"),
-                    SynergyTier(threshold: 5, title: "Shatter", effect: "Heavily slowed enemies can shatter on hit"),
-                    SynergyTier(threshold: 7, title: "Absolute Zero", effect: "Permanent global slow, easier shatters")]
+            return [SynergyTier(threshold: 3, title: "Frostbite", effect: "Chilled enemies move even slower"),
+                    SynergyTier(threshold: 5, title: "Shatter", effect: "Frozen enemies burst when struck"),
+                    SynergyTier(threshold: 7, title: "Absolute Zero", effect: "The arena slows; shatters come easy")]
         case .neutral:
             return []
         }
@@ -832,6 +825,38 @@ final class UpgradeManager {
             description: "Standing still builds DEF"
         ) { stats in
             stats.groundedCoreActive = true
+        })
+
+        // ═══════════════════════════════════
+        // v1.8 Unit 5b — rehome cards: preserve mechanics the synergy rework
+        // moves off the tiers (crit-bleed, capped killstreak, pierce). Numbers
+        // are starting values; balance pass tunes them.
+        // ═══════════════════════════════════
+
+        cards.append(UpgradeCard(
+            id: "v18_needlepoint", name: "Needlepoint", tag: .bleed,
+            description: "Crits apply Bleed."
+        ) { stats in
+            stats.critAppliesBleed = true
+            stats.bleedDPS += 0.5
+        })
+
+        cards.append(UpgradeCard(
+            id: "v18_bloodlust", name: "Bloodlust", tag: .bleed,
+            description: "Bleed kills briefly boost damage."
+        ) { stats in
+            // Capped killstreak (spec: ~3 stacks, refreshable 4–6s) — reuses
+            // the existing bloodlust machinery (stacks × per-kill, min-capped).
+            stats.bloodlustDamagePerKill = 0.06
+            stats.bloodlustMaxBonus = 0.18   // 3 stacks × 0.06
+            stats.bloodlustWindow = 5.0
+        })
+
+        cards.append(UpgradeCard(
+            id: "v18_riftline", name: "Riftline", tag: .voidT,
+            description: "Shots pierce one extra enemy."
+        ) { stats in
+            stats.pierceCount += 1
         })
 
         return cards
