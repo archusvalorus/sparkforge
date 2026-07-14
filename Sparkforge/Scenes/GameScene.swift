@@ -2103,6 +2103,54 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
+    /// v1.8: a loud, unmistakable "it split!" telegraph at an Ashling's death —
+    /// a bright core flash plus a bold double shockwave in shard-yellow, so
+    /// players read the split and don't path into the incoming shards. Louder
+    /// than showRingPulse on purpose (the thin single ring wasn't landing).
+    private func showAshlingSplitTelegraph(at position: CGPoint) {
+        let color = GameConfig.Ashling.splitTelegraphColorHex
+        let r = GameConfig.Ashling.splitTelegraphRadius
+
+        // Bright filled core flash — grabs the eye the instant the parent dies.
+        let flash = SKShapeNode(circleOfRadius: r * 0.5)
+        flash.fillColor = SKColor(hex: color, alpha: 0.9)
+        flash.strokeColor = .clear
+        flash.glowWidth = 6
+        flash.position = position
+        flash.zPosition = 7
+        worldNode.addChild(flash)
+        flash.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 1.8, duration: 0.18),
+                SKAction.fadeOut(withDuration: 0.22)
+            ]),
+            SKAction.removeFromParent()
+        ]))
+
+        // Bold expanding shockwave — two staggered rings, thicker + brighter
+        // + glowing vs the plain pulse.
+        for delay in [0.0, 0.08] {
+            let ring = SKShapeNode(circleOfRadius: 1)
+            ring.strokeColor = SKColor(hex: color, alpha: 0.95)
+            ring.fillColor = .clear
+            ring.lineWidth = 3
+            ring.glowWidth = 3
+            ring.position = position
+            ring.zPosition = 7
+            ring.alpha = 0
+            worldNode.addChild(ring)
+            ring.run(SKAction.sequence([
+                SKAction.wait(forDuration: delay),
+                SKAction.fadeIn(withDuration: 0.02),
+                SKAction.group([
+                    SKAction.scale(to: r * 1.6, duration: 0.3),
+                    SKAction.fadeOut(withDuration: 0.32)
+                ]),
+                SKAction.removeFromParent()
+            ]))
+        }
+    }
+
     // MARK: - v1.6: Arc Wake (Unit 3)
 
     private func updateArcWake(_ dt: TimeInterval) {
@@ -2995,9 +3043,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // shards gain physics a beat later — the pause IS the protection; they
         // pop up vulnerable only once visible.
         if let ashling = enemy as? AshlingNode, !ashling.isShard {
-            showRingPulse(at: position,
-                          radius: GameConfig.Ashling.splitTelegraphRadius,
-                          colorHex: GameConfig.Ashling.splitTelegraphColorHex)
+            showAshlingSplitTelegraph(at: position)
             run(SKAction.wait(forDuration: GameConfig.Ashling.shardSpawnDelay)) { [weak self] in
                 self?.spawnAshlingShards(at: position)
             }

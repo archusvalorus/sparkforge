@@ -146,9 +146,13 @@ enum GameConfig {
     enum Ashling {
         /// v1.8 (B2): beat between an Ashling parent's death and its shards
         /// gaining physics, so the parent's death-AoE (Open Vein / Whiteout
-        /// bursts, splash) can't insta-kill the trio at spawn. The pause IS
-        /// the protection — shards pop up vulnerable once visible. Tune 0.4–0.6.
-        static let shardSpawnDelay: TimeInterval = 0.5
+        /// bursts, splash) can't insta-kill the trio at spawn.
+        /// v1.8 (Unit 2 follow-up): 0.5 → 0.15 — the longer beat let players
+        /// move on ("dead!") then get surprised when shards popped into their
+        /// path. Shards now appear almost immediately after the kill, but the
+        /// deferral still lands them a beat AFTER the death-frame burst, so the
+        /// protection holds. NOT 0.0 — a true zero would re-break B2.
+        static let shardSpawnDelay: TimeInterval = 0.15
         /// Telegraph ring at the split point during the delay — reads as the
         /// parent bursting, then shards appear. Neon yellow = shard tell.
         static let splitTelegraphRadius: CGFloat = 20
