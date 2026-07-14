@@ -104,6 +104,13 @@ final class IAPManager {
     func getRemoveAdsProduct() async -> Product? {
         return try? await fetchProduct()
     }
+
+    /// Localized display price string for the Remove Ads product, or nil if
+    /// StoreKit hasn't returned it. Lets callers show the price without
+    /// importing StoreKit themselves.
+    func removeAdsDisplayPrice() async -> String? {
+        return await getRemoveAdsProduct()?.displayPrice
+    }
     
     // MARK: - Transaction Listener
     

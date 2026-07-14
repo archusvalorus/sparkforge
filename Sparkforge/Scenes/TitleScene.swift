@@ -74,7 +74,7 @@ final class TitleScene: SKScene {
 
     // v1.7: Forge Paths
     private var forgePathModal: SKNode?
-    private var removeAdsValueModal: SKNode?  // v1.8 (E3): value-prop before purchase
+    private var removeAdsValueModal: RemoveAdsModalNode?  // v1.8 (E3): value-prop before purchase
     private var forgePathRowY: CGFloat = 0
 
     // v1.7: arena browser can show the next LOCKED arena (with its
@@ -1473,110 +1473,28 @@ final class TitleScene: SKScene {
 
     /// Shown BEFORE the purchase sheet — the rewarded placements are invisible
     /// until players hit them, so this makes the value legible: removing ads
-    /// keeps every earned reward, now as a free tap.
+    /// keeps every earned reward, now as a free tap. Rendered via the shared
+    /// `RemoveAdsModalNode` (same modal the in-run E4 button presents).
     private func showRemoveAdsValueModal() {
-        let modal = SKNode()
-        modal.zPosition = 300
-
-        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
-        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
-        dim.strokeColor = .clear
-        modal.addChild(dim)
-
-        let panel = SKShapeNode(rectOf: CGSize(width: 300, height: 300), cornerRadius: 14)
-        panel.fillColor = SKColor(hex: 0x1A1208)
-        panel.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.7)
-        panel.lineWidth = 1.5
-        panel.glowWidth = 5
-        modal.addChild(panel)
-
-        let title = SKLabelNode(fontNamed: "Menlo-Bold")
-        title.text = "REMOVE ALL ADS"
-        title.fontSize = 18
-        title.fontColor = SKColor(hex: 0xFFAA33)
-        title.verticalAlignmentMode = .center
-        title.position = CGPoint(x: 0, y: 122)
-        modal.addChild(title)
-
-        let sub = SKLabelNode(fontNamed: "Menlo")
-        sub.text = "keep every reward"
-        sub.fontSize = 13
-        sub.fontColor = SKColor(hex: 0xCCCCCC)
-        sub.verticalAlignmentMode = .center
-        sub.position = CGPoint(x: 0, y: 98)
-        modal.addChild(sub)
-
-        let explain = SKLabelNode(fontNamed: "Menlo")
-        explain.text = "every rewarded moment becomes a free tap:"
-        explain.fontSize = 10
-        explain.fontColor = SKColor(hex: 0x999999)
-        explain.verticalAlignmentMode = .center
-        explain.position = CGPoint(x: 0, y: 70)
-        modal.addChild(explain)
-
-        let rewards = ["Revive", "Extra Pick", "Reroll", "Blessing Choice", "Extra Card", "XP Boost"]
-        for (i, r) in rewards.enumerated() {
-            let item = SKLabelNode(fontNamed: "Menlo-Bold")
-            item.text = "✓ \(r)"
-            item.fontSize = 12
-            item.fontColor = SKColor(hex: 0x88CC88)
-            item.verticalAlignmentMode = .center
-            item.horizontalAlignmentMode = .left
-            item.position = CGPoint(x: i % 2 == 0 ? -124 : 8, y: 42 - CGFloat(i / 2) * 24)
-            modal.addChild(item)
-        }
-
-        let buyBtn = SKShapeNode(rectOf: CGSize(width: 240, height: 44), cornerRadius: 9)
-        buyBtn.fillColor = SKColor(hex: 0x332200)
-        buyBtn.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.7)
-        buyBtn.lineWidth = 1.5
-        buyBtn.position = CGPoint(x: 0, y: -74)
-        modal.addChild(buyBtn)
-
-        let buyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-        buyLabel.text = removeAdsButtonText()
-        buyLabel.fontSize = 15
-        buyLabel.fontColor = SKColor(hex: 0xFFAA33)
-        buyLabel.verticalAlignmentMode = .center
-        buyLabel.position = CGPoint(x: 0, y: -74)
-        modal.addChild(buyLabel)
-
-        let hint = SKLabelNode(fontNamed: "Menlo")
-        hint.text = "tap outside to cancel"
-        hint.fontSize = 11
-        hint.fontColor = SKColor(hex: 0x666666)
-        hint.verticalAlignmentMode = .center
-        hint.position = CGPoint(x: 0, y: -118)
-        modal.addChild(hint)
-
-        addChild(modal)
+        let modal = RemoveAdsModalNode()
+        modal.priceText = removeAdsPriceText
+        modal.present(in: self)
         removeAdsValueModal = modal
-
-        modal.alpha = 0
-        panel.setScale(0.85)
-        modal.run(SKAction.fadeIn(withDuration: 0.2))
-        let pop = SKAction.scale(to: 1.0, duration: 0.2)
-        pop.timingMode = .easeOut
-        panel.run(pop)
     }
 
     private func handleRemoveAdsValueTap(_ location: CGPoint) {
-        let buyFrame = CGRect(x: -120, y: -74 - 22, width: 240, height: 44)
-        if buyFrame.contains(location) {
-            dismissRemoveAdsValueModal()
+        guard let modal = removeAdsValueModal else { return }
+        let buy = modal.hitTestBuy(at: location)
+        dismissRemoveAdsValueModal()
+        if buy {
             handleRemoveAdsPurchase()  // → StoreKit sheet
-            return
         }
-        dismissRemoveAdsValueModal()  // tap outside cancels
     }
 
     private func dismissRemoveAdsValueModal() {
         guard let modal = removeAdsValueModal else { return }
         removeAdsValueModal = nil
-        modal.run(SKAction.sequence([
-            SKAction.fadeOut(withDuration: 0.15),
-            SKAction.removeFromParent()
-        ]))
+        modal.dismiss()
     }
 
     private func handleRemoveAdsPurchase() {

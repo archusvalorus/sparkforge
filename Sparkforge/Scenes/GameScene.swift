@@ -21,6 +21,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case levelUp
         case reviving  // Brief state during ad revive
         case paused    // v1.4: Pause menu
+        case removeAdsPrompt  // v1.8 (E4): in-run value-prop modal is up
     }
     
     private(set) var gameState: GameState = .playing
@@ -110,6 +111,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let synergyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     private let pauseMenu = PauseMenuNode()  // v1.7: Pause Menu v2
     private let pauseButton = SKLabelNode(fontNamed: "Menlo-Bold")  // v1.4
+
+    // v1.8 (E4): the upper-left ad affordance. Non-owners get a "Remove Ads"
+    // button that opens the value-prop → purchase flow; owners get the
+    // static "AD-FREE" status badge. Both live in the same spot.
+    private var removeAdsButton: SKNode?          // non-owner state
+    private var removeAdsModal: RemoveAdsModalNode?  // shared value-prop modal
+    private var removeAdsPriceText: String?
+    /// The gameState to restore to when the in-run modal dismisses.
+    private var stateBeforeRemoveAdsPrompt: GameState = .playing
     
     // MARK: - Stats Tracking
     
@@ -526,34 +536,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         buffTracker.zPosition = 101
         camera.addChild(buffTracker)
 
-        // v1.8 (E4): subtle "ad-free" owner badge — upper-left, above the buff
-        // badges, out of the field of play. Owner status, NOT a mid-run buy
-        // prompt (that would break the no-aggressive-monetization ethos).
-        // DEBUG forces it visible so placement can be validated without a
-        // sandbox purchase; release keeps it owner-only.
+        // v1.8 (E4): the upper-left ad affordance — above the buff badges, out
+        // of the field of play, clear of the pause target (top-right). Two
+        // states in the same spot:
+        //   owner     → a static "AD-FREE" status badge (they're covered)
+        //   non-owner → a player-initiated "Remove Ads" button that opens the
+        //               value-prop modal → purchase (optional, never a
+        //               forced/interstitial prompt — studio monetization ethos)
+        // DEBUG can force either state so placement is validated without a
+        // sandbox purchase; release is owner-driven.
         #if DEBUG
-        let showAdFreeBadge = true
+        // Flip to preview the owner badge without a sandbox purchase.
+        let debugForceAdFree = false
+        let isAdFreeOwner = debugForceAdFree || IAPManager.shared.hasRemovedAds
         #else
-        let showAdFreeBadge = IAPManager.shared.hasRemovedAds
+        let isAdFreeOwner = IAPManager.shared.hasRemovedAds
         #endif
-        if showAdFreeBadge {
-            let noAds = SKNode()
-            noAds.position = CGPoint(x: safeLeft + 30, y: safeTop)
-            noAds.zPosition = 101
-            let pill = SKShapeNode(rectOf: CGSize(width: 62, height: 18), cornerRadius: 5)
-            pill.fillColor = SKColor(hex: 0x141414, alpha: 0.55)
-            pill.strokeColor = SKColor(hex: 0x8A7A55, alpha: 0.45)
-            pill.lineWidth = 1
-            noAds.addChild(pill)
-            let label = SKLabelNode(fontNamed: "Menlo-Bold")
-            label.text = "AD-FREE"
-            label.fontSize = 9
-            label.fontColor = SKColor(hex: 0xC8B488)
-            label.verticalAlignmentMode = .center
-            noAds.addChild(label)
-            camera.addChild(noAds)
-        }
-        
+        setupRemoveAdsAffordance(isOwner: isAdFreeOwner, safeLeft: safeLeft, safeTop: safeTop)
+
         // Synergy notification — bottom center
         synergyLabel.fontSize = 12
         synergyLabel.fontColor = SKColor(hex: 0xFFDD55)
@@ -1174,8 +1174,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     return
                 }
             }
+            // v1.8 (E4): the upper-left "Remove Ads" button (non-owners only)
+            if handleRemoveAdsButtonTap(touch) {
+                return
+            }
             _ = joystick.handleTouchBegan(touch, in: self)
-            
+
+        case .removeAdsPrompt:
+            handleRemoveAdsModalTap(touch)
+
         case .dead:
             handleDeathScreenTap(touch)
             
@@ -1301,7 +1308,132 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func handlePauseScreenTap(_ touch: UITouch) {
         pauseMenu.handleTap(at: touch.location(in: pauseMenu))
     }
-    
+
+    // MARK: - v1.8 (E4): in-run Remove Ads affordance
+
+    /// Builds the upper-left affordance in its owner/non-owner state. Both
+    /// occupy the same spot; only one is present at a time.
+    private func setupRemoveAdsAffordance(isOwner: Bool, safeLeft: CGFloat, safeTop: CGFloat) {
+        guard let camera = camera else { return }
+        removeAdsButton?.removeFromParent()
+        removeAdsButton = nil
+        camera.childNode(withName: "adFreeBadge")?.removeFromParent()
+
+        let anchor = CGPoint(x: safeLeft + 30, y: safeTop)
+
+        if isOwner {
+            let badge = SKNode()
+            badge.name = "adFreeBadge"
+            badge.position = anchor
+            badge.zPosition = 101
+            let pill = SKShapeNode(rectOf: CGSize(width: 62, height: 18), cornerRadius: 5)
+            pill.fillColor = SKColor(hex: 0x141414, alpha: 0.55)
+            pill.strokeColor = SKColor(hex: 0x8A7A55, alpha: 0.45)
+            pill.lineWidth = 1
+            badge.addChild(pill)
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.text = "AD-FREE"
+            label.fontSize = 9
+            label.fontColor = SKColor(hex: 0xC8B488)
+            label.verticalAlignmentMode = .center
+            badge.addChild(label)
+            camera.addChild(badge)
+        } else {
+            let button = SKNode()
+            button.name = "removeAdsButton"
+            button.position = anchor
+            button.zPosition = 101
+            let pill = SKShapeNode(rectOf: CGSize(width: 62, height: 18), cornerRadius: 5)
+            pill.name = "removeAdsPill"
+            pill.fillColor = SKColor(hex: 0x1A1208, alpha: 0.65)
+            pill.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.5)
+            pill.lineWidth = 1
+            button.addChild(pill)
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.name = "removeAdsButtonLabel"
+            label.text = "REMOVE ADS"
+            label.fontSize = 8
+            label.fontColor = SKColor(hex: 0xFFAA33)
+            label.verticalAlignmentMode = .center
+            button.addChild(label)
+            camera.addChild(button)
+            removeAdsButton = button
+            loadRemoveAdsPrice()
+        }
+    }
+
+    private func loadRemoveAdsPrice() {
+        Task { @MainActor in
+            guard let price = await IAPManager.shared.removeAdsDisplayPrice() else { return }
+            removeAdsPriceText = price
+            removeAdsModal?.priceText = price
+        }
+    }
+
+    /// `true` if the touch hit the non-owner button (and the modal was opened).
+    private func handleRemoveAdsButtonTap(_ touch: UITouch) -> Bool {
+        guard gameState == .playing,
+              let camera = camera,
+              let button = removeAdsButton else { return false }
+        // Thumb-sized hit zone anchored to the small pill.
+        let hitZone = button.calculateAccumulatedFrame().insetBy(dx: -22, dy: -22)
+        if hitZone.contains(touch.location(in: camera)) {
+            presentRemoveAdsModal()
+            return true
+        }
+        return false
+    }
+
+    private func presentRemoveAdsModal() {
+        guard let camera = camera, removeAdsModal == nil else { return }
+        stateBeforeRemoveAdsPrompt = gameState
+        gameState = .removeAdsPrompt
+        joystick.forceRelease()
+
+        let modal = RemoveAdsModalNode()
+        modal.priceText = removeAdsPriceText
+        modal.present(in: camera)
+        removeAdsModal = modal
+    }
+
+    private func handleRemoveAdsModalTap(_ touch: UITouch) {
+        guard let camera = camera, let modal = removeAdsModal else { return }
+        let buy = modal.hitTestBuy(at: touch.location(in: camera))
+        if buy {
+            dismissRemoveAdsModal(resume: false)  // hold the run behind the sheet
+            handleInRunRemoveAdsPurchase()
+        } else {
+            dismissRemoveAdsModal(resume: true)   // tap outside cancels
+        }
+    }
+
+    private func dismissRemoveAdsModal(resume: Bool) {
+        removeAdsModal?.dismiss()
+        removeAdsModal = nil
+        if resume {
+            gameState = stateBeforeRemoveAdsPrompt
+            invulnerableTimer = 1.0  // brief reorient window, mirrors unpause
+        }
+    }
+
+    private func handleInRunRemoveAdsPurchase() {
+        Task { @MainActor in
+            let success = await IAPManager.shared.purchaseRemoveAds()
+            if success {
+                // Swap the button for the AD-FREE badge in place.
+                let anchor = removeAdsButton?.position ?? .zero
+                setupRemoveAdsAffordance(isOwner: true,
+                                         safeLeft: anchor.x - 30,
+                                         safeTop: anchor.y)
+            }
+            // Purchase sheet dismissed either way — resume the run.
+            if gameState == .removeAdsPrompt {
+                gameState = stateBeforeRemoveAdsPrompt
+                invulnerableTimer = 1.0
+            }
+        }
+    }
+
     // MARK: - Card Selection
     
     private func handleCardSelection(_ touch: UITouch) {
