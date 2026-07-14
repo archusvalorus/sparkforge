@@ -188,6 +188,8 @@ enum GameConfig {
         static let enemyProjectile: UInt32 = 0x1 << 5  // 32
         static let healthOrb:       UInt32 = 0x1 << 6  // 64   — v1.4
         static let magnetOrb:       UInt32 = 0x1 << 7  // 128  — v1.4
+        static let forgeCoin:       UInt32 = 0x1 << 8  // 256  — v1.8 (Unit 2)
+        // Next free bit: 0x1 << 9 — update the Notion App Portfolio Registry
     }
     
     // MARK: - Ranged Enemy
@@ -322,5 +324,32 @@ enum GameConfig {
         static let colorHex: UInt32 = 0x44AAFF
         /// Glow color
         static let glowColorHex: UInt32 = 0x2288DD
+    }
+
+    // MARK: - Forge XP Coin (v1.8 Unit 2)
+    enum ForgeCoin {
+        /// FLAT forge XP per coin — intentionally NOT routed through
+        /// pendingForgeXP (which the XP Boost ad doubles), so coins bank
+        /// immediately and are never boosted (decided at kickoff).
+        static let forgeXPValue: Int = 5
+        /// Coins that erupt and scatter arena-wide on a boss's death (tune).
+        static let scatterCount: Int = 12
+        /// Seconds before an uncollected coin despawns.
+        static let despawnTime: TimeInterval = 12
+        /// Visual radius — a large disc (medallion), clearly bigger than the
+        /// small XP pebbles.
+        static let visualRadius: CGFloat = 15
+        /// Pickup radius — NO magnet; a forgiving contact body so walking over
+        /// the coin collects it. Walking to them is the point (health-orb canon).
+        static let pickupRadius: CGFloat = 22
+        /// Seconds for one xScale spin oscillation (narrow → wide).
+        static let spinPeriod: TimeInterval = 1.1
+        /// Ember burst radius shown at pickup.
+        static let pickupBurstRadius: CGFloat = 16
+        // Lyra palette (Ask 4a) — spark-stamped forge token:
+        static let coreColorHex: UInt32 = 0xFFAA33
+        static let rimColorHex: UInt32 = 0xFF6600
+        static let stampColorHex: UInt32 = 0xFFD27A
+        static let shadowColorHex: UInt32 = 0x7A2F00
     }
 }

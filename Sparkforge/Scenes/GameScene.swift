@@ -52,6 +52,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let hpBar = HPBarNode(width: 210)  // v1.7 legibility pass
     private var healthOrbs: [HealthOrbNode] = []
     private var magnetOrbs: [MagnetOrbNode] = []
+    private var forgeCoins: [ForgeCoinNode] = []  // v1.8 Unit 2: boss-death forge XP
     private var healthOrbTimer: TimeInterval = 0
     private var magnetOrbTimer: TimeInterval = 0
     private var nextHealthOrbSpawn: TimeInterval = 20  // randomize later
@@ -1616,7 +1617,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if orb.update(deltaTime: dt) { orb.removeFromParent(); return true }
             return false
         }
-        
+
+        // v1.8 Unit 2: forge XP coins (boss-death) — despawn when aged out
+        forgeCoins.removeAll { coin in
+            if coin.update(deltaTime: dt) { coin.removeFromParent(); return true }
+            return false
+        }
+
         updateHUD()
         
         // Camera follows player
@@ -2527,6 +2534,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 )
                 self.spawnXPOrb(at: pos + offset, value: xp / 10)
             }
+            // v1.8 (Unit 2): forge XP coins erupt and scatter arena-wide, on
+            // top of the XP shower — bonus forge XP for pushing the post-boss swarm.
+            self.spawnForgeCoins(at: pos)
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -2580,6 +2590,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 )
                 self.spawnXPOrb(at: pos + offset, value: xp / 10)
             }
+            // v1.8 (Unit 2): forge XP coins erupt and scatter arena-wide, on
+            // top of the XP shower — bonus forge XP for pushing the post-boss swarm.
+            self.spawnForgeCoins(at: pos)
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -2661,6 +2674,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 )
                 self.spawnXPOrb(at: pos + offset, value: xp / 10)
             }
+            // v1.8 (Unit 2): forge XP coins erupt and scatter arena-wide, on
+            // top of the XP shower — bonus forge XP for pushing the post-boss swarm.
+            self.spawnForgeCoins(at: pos)
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -2881,6 +2897,41 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for xpOrb in xpOrbs {
             xpOrb.startVacuum()
         }
+    }
+
+    // MARK: - v1.8 Unit 2: Forge XP Coins
+
+    /// A boss's death erupts forge XP coins that scatter arena-wide (on top of
+    /// the XP shower). Tossed outward from the corpse to random arena spots,
+    /// then collected by walking over them — no magnet.
+    private func spawnForgeCoins(at bossPos: CGPoint) {
+        for _ in 0..<GameConfig.ForgeCoin.scatterCount {
+            let coin = ForgeCoinNode()
+            coin.position = bossPos
+            coin.zPosition = 4
+            forgeCoins.append(coin)
+            worldNode.addChild(coin)
+
+            let toss = SKAction.move(to: ForgeCoinNode.randomArenaPosition(),
+                                     duration: TimeInterval.random(in: 0.35...0.6))
+            toss.timingMode = .easeOut
+            coin.run(toss)
+        }
+    }
+
+    private func handleForgeCoinCollection(coinBody: SKPhysicsBody) {
+        guard let coin = coinBody.node as? ForgeCoinNode else { return }
+        guard let idx = forgeCoins.firstIndex(where: { $0 === coin }) else { return }
+        forgeCoins.remove(at: idx)
+        let pos = coin.position
+        coin.collect()
+        AudioManager.shared.play(.orbPickup)  // TODO(v1.8 polish): distinct metallic spark tick (Lyra)
+        // FLAT forge XP — intentionally NOT via pendingForgeXP (the XP Boost ad
+        // doubles that pool); coins bank immediately and are never boosted.
+        ProgressionManager.shared.addForgeXP(coin.forgeXPValue)
+        // Small ember burst — ember-orange, never green/blue.
+        showRingPulse(at: pos, radius: GameConfig.ForgeCoin.pickupBurstRadius,
+                      colorHex: GameConfig.ForgeCoin.rimColorHex)
     }
     
     // MARK: - v1.4: Build Identity Hints
@@ -3136,6 +3187,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
            (masks == (GameConfig.Physics.magnetOrb, GameConfig.Physics.player)) {
             let orbBody = bodyA.categoryBitMask == GameConfig.Physics.magnetOrb ? bodyA : bodyB
             handleMagnetOrbCollection(orbBody: orbBody)
+            return
+        }
+
+        // v1.8 Unit 2: Player ↔ Forge XP Coin
+        if (masks == (GameConfig.Physics.player, GameConfig.Physics.forgeCoin)) ||
+           (masks == (GameConfig.Physics.forgeCoin, GameConfig.Physics.player)) {
+            let coinBody = bodyA.categoryBitMask == GameConfig.Physics.forgeCoin ? bodyA : bodyB
+            handleForgeCoinCollection(coinBody: coinBody)
             return
         }
     }
@@ -3836,6 +3895,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         healthOrbs.removeAll()
         magnetOrbs.forEach { $0.removeFromParent() }
         magnetOrbs.removeAll()
+        forgeCoins.forEach { $0.removeFromParent() }
+        forgeCoins.removeAll()
         (boss as? QuenchWardenNode)?.cleanupWorldEffects()
         (boss as? DynamoChoirNode)?.cleanupWorldEffects()
         boss?.removeFromParent()
