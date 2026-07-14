@@ -319,7 +319,51 @@ final class UpgradeManager {
             return nil
         }
     }
-    
+
+    // MARK: - Synergy tier copy (read-only, for detail surfaces)
+
+    struct SynergyTier {
+        let threshold: Int
+        let title: String
+        let effect: String
+    }
+
+    /// Pure, read-only synergy-tier copy for a tree — for detail surfaces
+    /// (the pause card-detail modal, and the Card/Synergy Codex in Units 7–8).
+    /// Mirrors the copy returned by `applySynergy(tag:tier:)`; keep the two in
+    /// sync. Unit 5b reworks these titles/mechanics and should fold both into
+    /// a single source of truth at that point.
+    static func synergyTiers(for tag: Tag) -> [SynergyTier] {
+        switch tag {
+        case .fire:
+            return [SynergyTier(threshold: 3, title: "Spreading Flame", effect: "Burns spread to nearby enemies"),
+                    SynergyTier(threshold: 5, title: "Inferno", effect: "Burn damage doubled, duration 4s"),
+                    SynergyTier(threshold: 7, title: "Meltdown", effect: "All enemies take passive burn damage")]
+        case .shock:
+            return [SynergyTier(threshold: 3, title: "Charged", effect: "Chain lightning hits 2 targets"),
+                    SynergyTier(threshold: 5, title: "Tesla Field", effect: "Passive aura damages nearby enemies"),
+                    SynergyTier(threshold: 7, title: "Lightning Storm", effect: "Every 3rd shot fires a spread, all chain")]
+        case .bleed:
+            return [SynergyTier(threshold: 3, title: "Open Wound", effect: "Crits apply bleed"),
+                    SynergyTier(threshold: 5, title: "Bloodlust", effect: "Kill streaks grant stacking damage"),
+                    SynergyTier(threshold: 7, title: "Exsanguinate", effect: "Low HP enemies take double damage")]
+        case .guardT:
+            return [SynergyTier(threshold: 3, title: "Barrier Pulse", effect: "Enemies pushed back on level up"),
+                    SynergyTier(threshold: 5, title: "Iron Skin", effect: "+15 DEF, shrug off weak hits"),
+                    SynergyTier(threshold: 7, title: "Unbreakable", effect: "Enemies slowed, hitbox shrinks further")]
+        case .voidT:
+            return [SynergyTier(threshold: 3, title: "Rift", effect: "Projectiles pierce an additional enemy"),
+                    SynergyTier(threshold: 5, title: "Event Horizon", effect: "Gravity wells last longer and deal damage"),
+                    SynergyTier(threshold: 7, title: "Singularity", effect: "Massive gravity wells spawn periodically")]
+        case .chill:
+            return [SynergyTier(threshold: 3, title: "Deep Freeze", effect: "All slow effects doubled"),
+                    SynergyTier(threshold: 5, title: "Shatter", effect: "Heavily slowed enemies can shatter on hit"),
+                    SynergyTier(threshold: 7, title: "Absolute Zero", effect: "Permanent global slow, easier shatters")]
+        case .neutral:
+            return []
+        }
+    }
+
     // MARK: - Card Pool Builder
     
     private static func buildCardPool() -> [UpgradeCard] {

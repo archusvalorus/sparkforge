@@ -28,6 +28,12 @@ final class PauseMenuNode: SKNode {
     /// Rebuilt on every show() from the run's picked cards
     private let buildViewer = SKNode()
 
+    /// v1.8: the card-detail modal opened by tapping a build chip. Any tap
+    /// closes it. Held here so taps route to it before the pane buttons.
+    private var detailNode: CardDetailNode?
+    /// Captured on show() so a chip tap can resolve its card + tag counts.
+    private weak var upgradeManager: UpgradeManager?
+
     // MARK: - Init
 
     override init() {
@@ -54,6 +60,8 @@ final class PauseMenuNode: SKNode {
     // MARK: - Show / Hide
 
     func show(upgradeManager: UpgradeManager) {
+        self.upgradeManager = upgradeManager
+        dismissDetail()
         rebuildBuildViewer(upgradeManager: upgradeManager)
         settingsPane.isHidden = true
         mainPane.isHidden = false
@@ -61,6 +69,7 @@ final class PauseMenuNode: SKNode {
     }
 
     func hide() {
+        dismissDetail()
         run(SKAction.fadeOut(withDuration: 0.15))
     }
 
@@ -164,7 +173,7 @@ final class PauseMenuNode: SKNode {
             let row = i / 2
             let x: CGFloat = cards.count == 1 ? 0 : (col == 0 ? -80 : 80)
             let y = 105 - CGFloat(row) * Self.chipRowHeight
-            buildViewer.addChild(Self.chip(for: card, at: CGPoint(x: x, y: y)))
+            buildViewer.addChild(Self.chip(for: card, index: i, at: CGPoint(x: x, y: y)))
         }
 
         if overflow > 0 {
@@ -180,10 +189,15 @@ final class PauseMenuNode: SKNode {
         }
     }
 
-    /// Mini tree-tinted card: dark plate, translucent tag wash, emoji + name
-    private static func chip(for card: UpgradeManager.UpgradeCard, at position: CGPoint) -> SKNode {
+    /// Mini tree-tinted card: dark plate, translucent tag wash, emoji + name.
+    /// Tappable — carries its pick-order index so a tap opens the detail modal.
+    private static func chip(for card: UpgradeManager.UpgradeCard, index: Int, at position: CGPoint) -> SKNode {
         let chip = SKNode()
+        chip.name = "buildChip"
         chip.position = position
+        chip.userData = NSMutableDictionary(dictionary: [
+            "index": index, "w": chipSize.width, "h": chipSize.height
+        ])
         let colorHex = UpgradeCardNode.color(for: card.tag)
 
         let plate = SKShapeNode(rectOf: chipSize, cornerRadius: 5)
@@ -265,6 +279,18 @@ final class PauseMenuNode: SKNode {
     /// Location is in this node's coordinate space. Buttons carry their
     /// hit size in userData so panes stay declarative.
     func handleTap(at location: CGPoint) {
+        // The detail modal is topmost and informational — any tap closes it.
+        if detailNode != nil {
+            dismissDetail()
+            return
+        }
+
+        // Build-viewer chips (main pane only) open the card-detail modal.
+        if settingsPane.isHidden, let index = Self.chipHitIndex(in: buildViewer, at: location) {
+            presentDetail(forCardAt: index)
+            return
+        }
+
         let pane = settingsPane.isHidden ? mainPane : settingsPane
 
         guard let hit = Self.buttonHit(in: pane, at: location) else { return }
@@ -291,6 +317,46 @@ final class PauseMenuNode: SKNode {
         default:
             break
         }
+    }
+
+    // MARK: - Card detail
+
+    private static func chipHitIndex(in container: SKNode, at location: CGPoint) -> Int? {
+        for child in container.children {
+            guard child.name == "buildChip",
+                  let index = child.userData?["index"] as? Int,
+                  let w = child.userData?["w"] as? CGFloat,
+                  let h = child.userData?["h"] as? CGFloat else { continue }
+            let frame = CGRect(x: child.position.x - w / 2, y: child.position.y - h / 2,
+                               width: w, height: h)
+            if frame.contains(location) { return index }
+        }
+        return nil
+    }
+
+    private func presentDetail(forCardAt index: Int) {
+        guard let manager = upgradeManager else { return }
+        let cards = manager.pickedCards
+        guard index < cards.count else { return }
+        let card = cards[index]
+
+        let count = manager.tagCounts[card.tag] ?? 0
+        let tiers = UpgradeManager.synergyTiers(for: card.tag).map {
+            CardDetailNode.TierLine(threshold: $0.threshold, title: $0.title,
+                                    effect: $0.effect, reached: count >= $0.threshold)
+        }
+        let content = CardDetailNode.Content(name: card.name, tag: card.tag,
+                                             secondaryTag: card.secondaryTag,
+                                             effect: card.description, tiers: tiers)
+        let detail = CardDetailNode(content: content)
+        detail.present(in: self)
+        detailNode = detail
+        AudioManager.shared.play(.cardSelect)
+    }
+
+    private func dismissDetail() {
+        detailNode?.dismiss()
+        detailNode = nil
     }
 
     // MARK: - Button helpers
