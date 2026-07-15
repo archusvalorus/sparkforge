@@ -48,6 +48,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v1.7: the player's last real heading — Polarity Hymn's snap
     /// projects enemies onto this path, never onto the player
     private var lastMoveDirection = CGPoint(x: 0, y: 1)
+
+    /// v1.8 Unit 14: False Opening — a lagging reference heading; when the live
+    /// heading cuts sharply away from it, the pivot drops a delayed Void pulse.
+    private var falseOpeningRefDir = CGPoint(x: 0, y: 1)
+    private var falseOpeningCooldownTimer: TimeInterval = 0
     
     // MARK: - New Additions for health orbs + magnet orbs
     
@@ -1869,6 +1874,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                           colorHex: 0xFFE066)
         }
 
+        // v1.8 Unit 14: Silver Skin (Guard/Void) — a level-up arms a one-hit block.
+        if playerStats.hasSilverSkin {
+            playerStats.silverSkinArmed = true
+        }
+
         // v1.8 Unit 6: earned tiers reveal one card-style modal at a time
         // (holds the game). Empty → resume straight away.
         levelUpOverlay.run(SKAction.fadeOut(withDuration: 0.15))
@@ -1958,7 +1968,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateChillTrail(dt)
         updateArcWake(dt)
         updateNullBlooms(dt)
-        
+        updateFalseOpening(dt)
+
         let spawnEvent = waveManager.update(deltaTime: dt)
         // v1.6 tuning: wave spawns pause while a boss holds the arena —
         // the stage belongs to him. Boss-summoned minions (Titan's spawn
@@ -2074,6 +2085,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 && enemy.position.distance(to: player.position) < playerStats.pressureDefRadius {
                 crowdCount += 1
             }
+
+            // v1.8 (Unit 14): situational bleed scaling — Glass Blood (vs
+            // chilled/slowed) and Red Smile (player below the HP threshold).
+            // Defaults are 1.0, so this is a no-op unless a card is owned.
+            var bleedMult: CGFloat = 1.0
+            if enemy.isSlowed { bleedMult *= playerStats.bleedVsSlowedMultiplier }
+            if playerStats.hpPercent < playerStats.bleedLowHpThreshold {
+                bleedMult *= playerStats.bleedLowHpBonus
+            }
+            enemy.bleedDamageMultiplier = bleedMult
 
             let diedDOT = enemy.updateStatusEffects(deltaTime: dt)
             if diedDOT {
@@ -2263,7 +2284,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return closestPosition
     }
     
-    private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero) {
+    private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero,
+                                damageScale: CGFloat = 1.0, allowModifiers: Bool = true) {
         let isCrit = CGFloat.random(in: 0...1) < playerStats.critChance
 
         let projectile = ProjectileNode(
@@ -2271,7 +2293,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             speed: playerStats.effectiveProjectileSpeed,
             range: playerStats.effectiveProjectileRange,
             pierces: playerStats.pierceCount,
-            damageMultiplier: playerStats.effectiveDamageMultiplier,
+            damageMultiplier: playerStats.effectiveDamageMultiplier * damageScale,
             isCrit: isCrit,
             spawnsGravityWell: playerStats.gravityWellOnExpire
         )
@@ -2279,6 +2301,39 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         projectile.zPosition = 8
         projectiles.append(projectile)
         worldNode.addChild(projectile)
+
+        // Modifiers fire only from primary shots — fragments/echoes don't
+        // themselves split or echo (no runaway multiplication).
+        guard allowModifiers else { return }
+
+        // Fracture Shot (Neutral): each shot launches split fragments at
+        // reduced damage, angled off the main line.
+        if playerStats.splitCount > 0 {
+            let baseAngle = atan2(direction.y, direction.x)
+            for k in 0..<playerStats.splitCount {
+                // Fan the fragments symmetrically: -a, +a, -2a, +2a, …
+                let step = CGFloat(k / 2 + 1) * playerStats.splitAngle
+                let sign: CGFloat = (k % 2 == 0) ? -1 : 1
+                let angle = baseAngle + sign * step
+                let dir = CGPoint(x: cos(angle), y: sin(angle))
+                fireProjectile(direction: dir, originOffset: originOffset,
+                               damageScale: damageScale * playerStats.splitDamageMultiplier,
+                               allowModifiers: false)
+            }
+        }
+
+        // Mirror Edge (Void): a shot can echo once, later, for less damage.
+        if playerStats.echoChance > 0 && CGFloat.random(in: 0...1) < playerStats.echoChance {
+            run(SKAction.sequence([
+                SKAction.wait(forDuration: playerStats.echoDelay),
+                SKAction.run { [weak self] in
+                    guard let self = self, self.gameState == .playing, !self.player.isDead else { return }
+                    self.fireProjectile(direction: direction, originOffset: originOffset,
+                                        damageScale: damageScale * self.playerStats.echoDamageMultiplier,
+                                        allowModifiers: false)
+                }
+            ]))
+        }
     }
     
     // MARK: - Projectile Updates
@@ -2634,6 +2689,63 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
             }
         }
+    }
+
+    // MARK: - v1.8 Unit 14: False Opening (Void card)
+
+    /// A hard direction-change while moving — a dodge — drops a short-delayed
+    /// Void pulse at the pivot. A lagging reference heading distinguishes a
+    /// sharp cut (wide gap) from a gradual arc (stays close). One-shot, not a
+    /// lingering field; a cooldown keeps it from carpeting the floor.
+    private func updateFalseOpening(_ dt: TimeInterval) {
+        guard playerStats.falseOpeningActive else { return }
+        if falseOpeningCooldownTimer > 0 { falseOpeningCooldownTimer -= dt }
+
+        let dir = joystick.direction
+        guard dir.length > 0.3 else { return }
+        let norm = dir.normalized
+
+        let dot = max(-1, min(1, norm.x * falseOpeningRefDir.x + norm.y * falseOpeningRefDir.y))
+        let angleDelta = acos(dot)
+
+        // The reference lags the live heading, so a sharp reversal opens a gap.
+        let blended = falseOpeningRefDir + (norm - falseOpeningRefDir) * min(1.0, CGFloat(dt) * 5.0)
+        if blended.length > 0.01 { falseOpeningRefDir = blended.normalized }
+
+        if angleDelta > (CGFloat.pi * 0.5) && falseOpeningCooldownTimer <= 0 {
+            falseOpeningCooldownTimer = playerStats.falseOpeningCooldown
+            spawnFalseOpeningPulse(at: player.position)
+        }
+    }
+
+    private func spawnFalseOpeningPulse(at position: CGPoint) {
+        // A faint purple mark blooms into the pulse after the delay — readable,
+        // and the delay is what makes it a trap you lay behind you.
+        let tell = SKShapeNode(circleOfRadius: playerStats.falseOpeningRadius * 0.5)
+        tell.strokeColor = SKColor(hex: 0x8E44FF, alpha: 0.5)
+        tell.fillColor = SKColor(hex: 0x8E44FF, alpha: 0.08)
+        tell.lineWidth = 1.5
+        tell.position = position
+        tell.zPosition = 4
+        worldNode.addChild(tell)
+        tell.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: playerStats.falseOpeningDelay),
+            SKAction.removeFromParent()
+        ]))
+
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: playerStats.falseOpeningDelay),
+            SKAction.run { [weak self] in
+                guard let self = self, self.gameState == .playing else { return }
+                let r = self.playerStats.falseOpeningRadius
+                self.showRingPulse(at: position, radius: r, colorHex: 0x8E44FF)
+                self.damageEnemiesInRadius(r, around: position, damage: self.playerStats.falseOpeningDamage)
+                for enemy in self.enemies where enemy.position.distance(to: position) < r {
+                    enemy.applySlow(self.playerStats.falseOpeningSlow,
+                                    duration: self.playerStats.falseOpeningSlowDuration)
+                }
+            }
+        ]))
     }
 
     private func spawnArcWakeVisual(at position: CGPoint) {
@@ -3426,6 +3538,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard gameState == .playing else { return }
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
+        if consumeSilverSkin() { return }
 
         if playerStats.triggerPhaseSkin() {
             playerStats.resetOvercharge()
@@ -3854,10 +3967,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - Player ↔ Enemy
     
+    /// v1.8 Unit 14: Silver Skin (Guard/Void) — if a level-up armed a block,
+    /// spend it here to fully negate this hit (silver flash + brief i-frames).
+    /// Consumed at all three player-damage entry points.
+    private func consumeSilverSkin() -> Bool {
+        guard playerStats.silverSkinArmed else { return false }
+        playerStats.silverSkinArmed = false
+        invulnerableTimer = 0.3
+        let blink = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.3, duration: 0.08),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.08)
+        ])
+        player.run(SKAction.repeat(blink, count: 3), withKey: "invulnBlink")
+        showRingPulse(at: player.position, radius: 42, colorHex: 0xD6CCC2)
+        worldNode.shake(intensity: 3, duration: 0.12)
+        return true
+    }
+
     private func handlePlayerEnemyContact(enemyBody: SKPhysicsBody) {
         guard gameState == .playing else { return }
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
+        if consumeSilverSkin() { return }
 
         // v1.6: Iron Bloom — attackers take DEF-scaled thorns damage.
         // Fires before Phase Skin so absorbed hits still bite back.
@@ -3960,9 +4091,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             enemyProjectiles.remove(at: index)
         }
         projNode.removeFromParent()
-        
+
         guard damageCooldownTimer <= 0 else { return }
-        
+        if consumeSilverSkin() { return }
+
         // v1.3: Phase Skin — absorb the hit
         if playerStats.triggerPhaseSkin() {
             playerStats.resetOvercharge()

@@ -866,6 +866,54 @@ final class UpgradeManager {
             stats.pierceCount += 1
         })
 
+        // ═══════════════════════════════════
+        // v1.8 Unit 14 — Mirrorwound cards (Lyra set): reflection, delayed
+        // echoes, perception, status exploitation. Numbers are starting values;
+        // Brandon's device gate tunes. Dual-tag cards count toward BOTH trees.
+        // ═══════════════════════════════════
+
+        cards.append(UpgradeCard(
+            id: "v18_mirror_edge", name: "Mirror Edge", tag: .voidT,
+            description: "Attacks can echo once for less damage."
+        ) { stats in
+            stats.echoChance = 0.35
+        })
+
+        cards.append(UpgradeCard(
+            id: "v18_glass_blood", name: "Glass Blood", tag: .bleed, secondaryTag: .chill,
+            description: "Bleed bites harder on slowed foes."
+        ) { stats in
+            stats.bleedVsSlowedMultiplier = 1.5
+        })
+
+        cards.append(UpgradeCard(
+            id: "v18_silver_skin", name: "Silver Skin", tag: .guardT, secondaryTag: .voidT,
+            description: "After a level-up, block the next hit."
+        ) { stats in
+            stats.hasSilverSkin = true
+        })
+
+        cards.append(UpgradeCard(
+            id: "v18_fracture_shot", name: "Fracture Shot", tag: .neutral,
+            description: "Shots split into weaker fragments."
+        ) { stats in
+            stats.splitCount = 2
+        })
+
+        cards.append(UpgradeCard(
+            id: "v18_red_smile", name: "Red Smile", tag: .bleed,
+            description: "Low HP increases Bleed damage."
+        ) { stats in
+            stats.bleedLowHpBonus = 1.5
+        })
+
+        cards.append(UpgradeCard(
+            id: "v18_false_opening", name: "False Opening", tag: .voidT,
+            description: "A sharp turn leaves a delayed Void pulse."
+        ) { stats in
+            stats.falseOpeningActive = true
+        })
+
         return cards
     }
 }

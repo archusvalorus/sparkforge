@@ -26,6 +26,9 @@ class EnemyNode: SKNode {
     private var burnTimer: TimeInterval = 0
     private(set) var bleedDPS: CGFloat = 0.0
     private var bleedTimer: TimeInterval = 0
+    /// v1.8 (Unit 14): situational bleed scaling set by GameScene each frame —
+    /// Glass Blood (vs chilled/slowed) and Red Smile (player low HP). 1.0 = none.
+    var bleedDamageMultiplier: CGFloat = 1.0
     private var stunTimer: TimeInterval = 0
     private var dotAccumulator: CGFloat = 0.0
     
@@ -305,7 +308,7 @@ class EnemyNode: SKNode {
         
         if bleedTimer > 0 {
             bleedTimer -= deltaTime
-            totalDOT += bleedDPS
+            totalDOT += bleedDPS * bleedDamageMultiplier
             if bleedTimer <= 0 { bleedDPS = 0 }
         }
         

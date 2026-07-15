@@ -358,7 +358,40 @@ final class PlayerStats {
     var whiteoutRadius: CGFloat = 50.0
     var whiteoutSlow: CGFloat = 0.3
     var whiteoutDuration: TimeInterval = 2.0
-    
+
+    // MARK: - v1.8 Mirrorwound Cards (Unit 14)
+
+    /// Mirror Edge (Void): a shot can echo once at reduced damage after a delay.
+    var echoChance: CGFloat = 0.0            // 0 = off
+    var echoDamageMultiplier: CGFloat = 0.5
+    var echoDelay: TimeInterval = 0.15
+
+    /// Glass Blood (Bleed/Chill): bleed deals more vs chilled/slowed foes.
+    var bleedVsSlowedMultiplier: CGFloat = 1.0   // 1.0 = no bonus
+
+    /// Red Smile (Bleed): below the HP threshold, bleed deals more.
+    var bleedLowHpBonus: CGFloat = 1.0           // 1.0 = no bonus
+    var bleedLowHpThreshold: CGFloat = 0.5
+
+    /// Silver Skin (Guard/Void): a level-up arms a one-hit block.
+    var hasSilverSkin: Bool = false
+    var silverSkinArmed: Bool = false
+
+    /// Fracture Shot (Neutral): each shot launches split fragments at reduced damage.
+    var splitCount: Int = 0                       // 0 = off
+    var splitDamageMultiplier: CGFloat = 0.5
+    var splitAngle: CGFloat = 0.22
+
+    /// False Opening (Void): a hard direction-change while moving leaves a
+    /// short-delayed one-shot Void pulse (NOT a lingering field).
+    var falseOpeningActive: Bool = false
+    var falseOpeningDelay: TimeInterval = 0.3
+    var falseOpeningRadius: CGFloat = 72.0
+    var falseOpeningDamage: Int = 12
+    var falseOpeningSlow: CGFloat = 0.3
+    var falseOpeningSlowDuration: TimeInterval = 1.2
+    var falseOpeningCooldown: TimeInterval = 1.1
+
     // MARK: - v1.3 Card Properties
     
     /// Overcharge: damage bonus that builds while unhit, resets on hit
@@ -748,6 +781,26 @@ final class PlayerStats {
         whiteoutRadius = 50.0
         whiteoutSlow = 0.3
         whiteoutDuration = 2.0
+
+        // v1.8 Mirrorwound cards
+        echoChance = 0.0
+        echoDamageMultiplier = 0.5
+        echoDelay = 0.15
+        bleedVsSlowedMultiplier = 1.0
+        bleedLowHpBonus = 1.0
+        bleedLowHpThreshold = 0.5
+        hasSilverSkin = false
+        silverSkinArmed = false
+        splitCount = 0
+        splitDamageMultiplier = 0.5
+        splitAngle = 0.22
+        falseOpeningActive = false
+        falseOpeningDelay = 0.3
+        falseOpeningRadius = 72.0
+        falseOpeningDamage = 12
+        falseOpeningSlow = 0.3
+        falseOpeningSlowDuration = 1.2
+        falseOpeningCooldown = 1.1
 
         currentKillStreak = 0
         lastKillTime = 0
