@@ -8,6 +8,13 @@ Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store at **v1
 2. **One unit at a time, DoD gate between.** Build the unit, run the quality gates, then STOP. Brandon validates on-device or in simulator and approves before the next unit begins.
 3. **One commit per unit, at DoD-pass, with explicit approval. Never push without approval.**
 4. **Real-device testing is the final gate.** Simulator pass ≠ device pass.
+5. **Division of labor on validation.** Claude builds and runs the quality
+   gates (build + zero-new-warnings), deterministic validators, and *static*
+   sim checks (launch, screenshot reachable menus, confirm no-crash/60fps).
+   **Brandon owns the interactive playthrough** — driving the joystick, playing
+   like a real player, feeling in-run states. It's his design instrument, not
+   just a test. Don't puppeteer gameplay in the simulator to validate in-run
+   behavior; hand that to Brandon's device pass.
 
 ## Quality gates
 
