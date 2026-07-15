@@ -201,6 +201,7 @@ final class BestiaryCodexNode: SKNode, CodexPage {
         case .slagTitan:    node = BossNode(config: BossNode.slagTitan)
         case .quenchWarden: node = QuenchWardenNode()
         case .dynamoChoir:  node = DynamoChoirNode()
+        case .facetedLie:   node = FacetedLieNode()
         case .mote:         return nil
         }
         stripPhysics(node)

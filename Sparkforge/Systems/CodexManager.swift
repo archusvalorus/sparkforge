@@ -168,6 +168,7 @@ enum BestiaryFamily: String, CaseIterable {
     case slagTitan    = "slag_titan"
     case quenchWarden = "quench_warden"
     case dynamoChoir  = "dynamo_choir"
+    case facetedLie   = "faceted_lie"   // v1.8 Unit 13 — Arena 4 boss
     /// Reserved v2.0 slot — the hidden nemesis. Present in the schema NOW so it
     /// doesn't churn at v2.0; the bestiary page MUST skip entries where
     /// `hiddenUntilFutureVersion` is true until Mote ships. See
@@ -193,13 +194,14 @@ enum BestiaryFamily: String, CaseIterable {
         case .slagTitan:    return "The Slag Titan"
         case .quenchWarden: return "The Quench Warden"
         case .dynamoChoir:  return "The Dynamo Choir"
+        case .facetedLie:   return "The Faceted Lie"
         case .mote:         return "????"
         }
     }
 
     var isBoss: Bool {
         switch self {
-        case .slagTitan, .quenchWarden, .dynamoChoir: return true
+        case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie: return true
         default: return false
         }
     }
@@ -228,6 +230,8 @@ enum BestiaryFamily: String, CaseIterable {
         case .slagTitan:    return "The first answer of the forge: heat, weight, and no subtlety whatsoever."
         case .quenchWarden: return "It does not attack so much as compress the room around your decisions."
         case .dynamoChoir:  return "A broken engine singing in circuits. The wrong note is usually you."
+        // v1.8 Unit 13 — PROVISIONAL (Claude, in-voice), awaiting Lyra's pass.
+        case .facetedLie:   return "It wears five faces and means none of them. The safe path is the one it wants you to trust."
         case .mote:         return ""
         }
     }
@@ -251,6 +255,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .slagTitan:    return 0xFF5522
         case .quenchWarden: return 0x4499FF
         case .dynamoChoir:  return 0xBB66FF
+        case .facetedLie:   return 0x8E44FF   // hostile mirror purple
         case .mote:         return 0x8E44FF
         }
     }

@@ -27,6 +27,7 @@ final class ProgressionManager {
         static let wardenKills = "sf_warden_kills"    // v1.6: Quench Warden kills
         static let coilworksKills = "sf_coilworks_kills"  // v1.7: kills made in Arena 3
         static let choirKills = "sf_choir_kills"          // v1.7: Dynamo Choir kills (arena 4 gate feed)
+        static let mirrorwoundKills = "sf_mirrorwound_kills"  // v1.8: kills made in Arena 4 (feeds the Faceted Lie gate)
         static let longestSurvival = "sf_longest_survival"
         static let survived2Min = "sf_survived_2min"
         static let forgeXP = "sf_forge_xp"
@@ -76,6 +77,12 @@ final class ProgressionManager {
     var choirKills: Int {
         get { defaults.integer(forKey: Keys.choirKills) }
         set { defaults.set(newValue, forKey: Keys.choirKills) }
+    }
+
+    /// v1.8: kills made while fighting in The Mirrorwound (feeds the Faceted Lie gate)
+    var mirrorwoundKills: Int {
+        get { defaults.integer(forKey: Keys.mirrorwoundKills) }
+        set { defaults.set(newValue, forKey: Keys.mirrorwoundKills) }
     }
     
     // MARK: - Survival
@@ -216,6 +223,23 @@ final class ProgressionManager {
     var dynamoChoirUnlocked: Bool {
         return coilworksKills >= ProgressionManager.arena3Gate.totalKillsRequired
     }
+
+    // MARK: - v1.8: Arena 4 Gate (The Faceted Lie)
+
+    /// Arena access itself proves the Choir fell (arenasUnlocked = 4 on choir
+    /// kill); the Faceted Lie answers once the Mirrorwound has fed enough.
+    static let arena4Gate = ArenaGate(
+        totalKillsRequired: 100,
+        bossKillsRequired: 0,
+        survivalRequired: false,
+        arenaName: "The Mirrorwound",
+        bossName: "The Faceted Lie"
+    )
+
+    /// Check if the Faceted Lie will answer the Mirrorwound bell
+    var facetedLieUnlocked: Bool {
+        return mirrorwoundKills >= ProgressionManager.arena4Gate.totalKillsRequired
+    }
     
     /// Progress toward Arena 1 gate as individual fractions
     struct GateProgress {
@@ -307,6 +331,7 @@ final class ProgressionManager {
         defaults.removeObject(forKey: Keys.quenchKills)
         defaults.removeObject(forKey: Keys.wardenKills)
         defaults.removeObject(forKey: Keys.coilworksKills)
+        defaults.removeObject(forKey: Keys.mirrorwoundKills)
         defaults.removeObject(forKey: Keys.currentArena)
         defaults.removeObject(forKey: Keys.arenasUnlocked)
         ForgePathManager.shared.resetAll()

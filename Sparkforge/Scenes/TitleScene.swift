@@ -658,14 +658,29 @@ final class TitleScene: SKScene {
                 arenaReadyLabel.isHidden = true
             }
         } else {
-            // v1.8 Unit 11: The Mirrorwound — the deepest arena. Its own boss
-            // gate (The Faceted Lie) arrives with the boss in Unit 13; for now
-            // an unlocked Mirrorwound simply shows its flavor line, no kill row.
-            killProgressLabel.isHidden = true
+            // v1.8 Unit 13: The Mirrorwound shows the Faceted Lie's gate.
+            let gate = ProgressionManager.arena4Gate
+            let kills = pm.mirrorwoundKills
+            let met = pm.facetedLieUnlocked
+
+            let killText = "\(min(kills, gate.totalKillsRequired))/\(gate.totalKillsRequired) kills in the Mirrorwound"
+            killProgressLabel.text = met ? "✓ \(killText)" : "○ \(killText)"
+            killProgressLabel.fontColor = met
+                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
+            killProgressLabel.isHidden = false
+
             survivalCheckLabel.isHidden = true
             arenaFlavorLabel.text = arena.flavorLine
             arenaFlavorLabel.isHidden = false
-            arenaReadyLabel.isHidden = true
+
+            if met {
+                arenaReadyLabel.text = "★ THE LIE TAKES SHAPE ★"
+                arenaReadyLabel.fontSize = 15
+                arenaReadyLabel.fontColor = SKColor(hex: 0x9C748C)
+                arenaReadyLabel.isHidden = false
+            } else {
+                arenaReadyLabel.isHidden = true
+            }
         }
     }
     

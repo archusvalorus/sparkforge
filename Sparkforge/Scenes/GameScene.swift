@@ -1973,6 +1973,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 spawnQuenchWarden()
             } else if arenaConfig.id == 2 && ProgressionManager.shared.dynamoChoirUnlocked && boss == nil {
                 spawnDynamoChoir()
+            } else if arenaConfig.id == 3 && ProgressionManager.shared.facetedLieUnlocked && boss == nil {
+                spawnFacetedLie()
             } else {
                 spawnMiniBoss()
             }
@@ -2977,19 +2979,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let leech = EchoLeechNode(elapsed: elapsed)
         leech.position = EnemyNode.spawnPosition()
         leech.onEchoShot = { [weak self] position, direction in
-            self?.spawnEchoShot(at: position, direction: direction)
+            self?.spawnMirrorProjectile(at: position, direction: direction)
         }
         enemies.append(leech)
         worldNode.addChild(leech)
     }
 
-    /// The Echo Leech's single reflected shot — a mirror-purple enemy bullet.
-    private func spawnEchoShot(at position: CGPoint, direction: CGPoint) {
+    /// A mirror-purple enemy bullet — the Echo Leech's reflected shot and the
+    /// Faceted Lie's Reflection Volley both fire through this. The boss passes a
+    /// faster speed; the Leech uses the default.
+    private func spawnMirrorProjectile(at position: CGPoint, direction: CGPoint,
+                                       speed: CGFloat = GameConfig.RangedEnemy.projectileSpeed) {
         let elapsed = waveManager.elapsedTime
         let scalingTicks = Int(elapsed / 30)
         let damage = GameConfig.Enemy.baseRangedDamage + (scalingTicks * GameConfig.Enemy.rangedDamageScaling)
         let proj = EnemyProjectileNode(direction: direction,
                                        damage: damage,
+                                       speed: speed,
                                        colorHex: GameConfig.MirrorwoundEnemies.hostilePurpleHex)
         proj.position = position
         proj.zPosition = 7
@@ -3256,6 +3262,50 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(choir)
 
         showBossEntrance(name: "THE DYNAMO CHOIR", colorHex: 0xF6D36B)
+    }
+
+    // MARK: - v1.8: The Faceted Lie (Arena 4 boss, Unit 13)
+
+    private func spawnFacetedLie() {
+        let elapsed = waveManager.elapsedTime
+        let hpScaling = Int(elapsed / 30) * 5
+
+        let lie = FacetedLieNode(hpScaling: hpScaling)
+        lie.position = FacetedLieNode.spawnPosition()
+        lie.zPosition = 6
+
+        // Reflection Volley — mirrored purple shots ride the projectile pipeline
+        lie.onFireProjectile = { [weak self] position, direction, speed in
+            self?.spawnMirrorProjectile(at: position, direction: direction, speed: speed)
+        }
+
+        // False Safe (purple shards) + Pane Shift (re-entry burst) hazards.
+        // Silver shards never call this — the node only fires it for real danger.
+        lie.onHazardDamage = { [weak self] damage in
+            self?.applyBossHazardDamage(damage, shakeIntensity: 6)
+        }
+
+        lie.onDeath = { [weak self] pos, xp in
+            guard let self = self else { return }
+            self.bossDefeatedThisRun = true
+            ProgressionManager.shared.recordKill(.boss)
+            CodexManager.shared.recordDefeat(.facetedLie)
+            for _ in 0..<10 {
+                let offset = CGPoint(
+                    x: CGFloat.random(in: -40...40),
+                    y: CGFloat.random(in: -40...40)
+                )
+                self.spawnXPOrb(at: pos + offset, value: xp / 10)
+            }
+            self.spawnForgeCoins(at: pos)
+            self.boss = nil
+            self.worldNode.shake(intensity: 15, duration: 0.5)
+        }
+
+        boss = lie
+        worldNode.addChild(lie)
+
+        showBossEntrance(name: "THE FACETED LIE", colorHex: 0x8E44FF)
     }
 
     // MARK: - v1.7: Relay Imp Arcs
@@ -3539,6 +3589,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.7: kills made in The Coilworks feed the Choir's gate
         if arenaConfig.id == 2 {
             ProgressionManager.shared.coilworksKills += 1
+        }
+        // v1.8: kills made in The Mirrorwound feed the Faceted Lie's gate
+        if arenaConfig.id == 3 {
+            ProgressionManager.shared.mirrorwoundKills += 1
         }
         
         // v1.4: Track kill type for progression
@@ -4554,6 +4608,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         forgeCoins.removeAll()
         (boss as? QuenchWardenNode)?.cleanupWorldEffects()
         (boss as? DynamoChoirNode)?.cleanupWorldEffects()
+        (boss as? FacetedLieNode)?.cleanupWorldEffects()
         boss?.removeFromParent()
         boss = nil
         fieldImpulseStrength = 0
