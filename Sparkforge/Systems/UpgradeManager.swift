@@ -137,30 +137,36 @@ final class UpgradeManager {
         card.apply(stats)
     }
     
-    /// Check and apply any newly reached synergy thresholds
-    /// Returns descriptions of triggered synergies
-    func checkSynergies(stats: PlayerStats) -> [String] {
-        var triggered: [String] = []
-        
+    /// A synergy tier that JUST fired — structured so the reveal modal can
+    /// render it in tree-tint card language (v1.8 Unit 6).
+    struct SynergyUnlock {
+        let tag: Tag
+        let tier: Int
+        let title: String
+        let effect: String
+    }
+
+    /// Check and apply any newly reached synergy thresholds.
+    /// Returns the tiers that fired this pick (may be several via Extra Pick).
+    func checkSynergies(stats: PlayerStats) -> [SynergyUnlock] {
+        var triggered: [SynergyUnlock] = []
+
         for (tag, count) in tagCounts {
             if tag == .neutral { continue }
-            
-            // Check each threshold — only trigger if we JUST hit it
-            if count == 3 {
-                if let desc = applySynergy(tag: tag, tier: 3, stats: stats) {
-                    triggered.append(desc)
-                }
-            } else if count == 5 {
-                if let desc = applySynergy(tag: tag, tier: 5, stats: stats) {
-                    triggered.append(desc)
-                }
-            } else if count == 7 {
-                if let desc = applySynergy(tag: tag, tier: 7, stats: stats) {
-                    triggered.append(desc)
-                }
+
+            // Only trigger the threshold we JUST hit.
+            let tier: Int
+            if count == 3 { tier = 3 }
+            else if count == 5 { tier = 5 }
+            else if count == 7 { tier = 7 }
+            else { continue }
+
+            if applySynergy(tag: tag, tier: tier, stats: stats) != nil,
+               let info = UpgradeManager.synergyTiers(for: tag).first(where: { $0.threshold == tier }) {
+                triggered.append(SynergyUnlock(tag: tag, tier: tier, title: info.title, effect: info.effect))
             }
         }
-        
+
         return triggered
     }
     

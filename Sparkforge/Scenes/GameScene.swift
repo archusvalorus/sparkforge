@@ -22,6 +22,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case reviving  // Brief state during ad revive
         case paused    // v1.4: Pause menu
         case removeAdsPrompt  // v1.8 (E4): in-run value-prop modal is up
+        case synergyReveal    // v1.8 (Unit 6): synergy-unlock modal is up
     }
     
     private(set) var gameState: GameState = .playing
@@ -145,7 +146,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v1.7: Extra Pick — an ad banks a SECOND selection from the same spread
     private var extraPickUsedThisRun: Bool = false
     private var extraPicksRemaining: Int = 0
-    private var pendingSynergies: [String] = []
+    private var pendingSynergies: [UpgradeManager.SynergyUnlock] = []
+
+    // v1.8 Unit 6: synergy-unlock reveal queue. Tiers earned this pick present
+    // one card-style modal at a time, holding the game between taps.
+    private var synergyQueue: [UpgradeManager.SynergyUnlock] = []
+    private var synergyModal: SynergyUnlockNode?
     
     // MARK: - Scene Lifecycle
     
@@ -1189,6 +1195,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .removeAdsPrompt:
             handleRemoveAdsModalTap(touch)
 
+        case .synergyReveal:
+            advanceSynergy()
+
         case .dead:
             handleDeathScreenTap(touch)
             
@@ -1653,13 +1662,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func finishLevelUp(synergies: [String]) {
+    private func finishLevelUp(synergies: [UpgradeManager.SynergyUnlock]) {
         extraPicksRemaining = 0  // v1.7: safety — banked picks never outlive the spread
 
-        if let firstSynergy = synergies.first {
-            showSynergyNotification(firstSynergy)
-        }
-        
         // v1.8 Unit 5b: Barrier Pulse dropped from Guard (Repulse card owns
         // knockback). Guard 3 is now Ironhide — no level-up effect.
 
@@ -1672,30 +1677,55 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                           radius: playerStats.staticCrownRadius,
                           colorHex: 0xFFE066)
         }
-        
-        // v1.4: Post-pick buffer — brief invulnerability so the player can reorient
+
+        // v1.8 Unit 6: earned tiers reveal one card-style modal at a time
+        // (holds the game). Empty → resume straight away.
+        levelUpOverlay.run(SKAction.fadeOut(withDuration: 0.15))
+        if synergies.isEmpty {
+            completeLevelUp()
+        } else {
+            synergyQueue = synergies
+            gameState = .synergyReveal
+            presentNextSynergy()
+        }
+    }
+
+    /// Resume play after the pick (and any synergy reveals) — the post-pick
+    /// invulnerability buffer so the player can reorient.
+    private func completeLevelUp() {
         invulnerableTimer = 2.5
         let blink = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.5, duration: 0.2),
             SKAction.fadeAlpha(to: 1.0, duration: 0.2)
         ])
         player.run(SKAction.repeat(blink, count: 4), withKey: "invulnBlink")
-        
         gameState = .playing
-        levelUpOverlay.run(SKAction.fadeOut(withDuration: 0.15))
     }
-    
-    private func showSynergyNotification(_ text: String) {
+
+    // MARK: - v1.8 Unit 6: Synergy unlock reveal (queued)
+
+    private func presentNextSynergy() {
+        guard let next = synergyQueue.first else {
+            completeLevelUp()  // queue drained
+            return
+        }
+        synergyQueue.removeFirst()
         AudioManager.shared.play(.buildHint)
-        synergyLabel.text = text
-        synergyLabel.alpha = 0
-        
-        let show = SKAction.sequence([
-            SKAction.fadeIn(withDuration: 0.2),
-            SKAction.wait(forDuration: 2.0),
-            SKAction.fadeOut(withDuration: 0.5)
-        ])
-        synergyLabel.run(show)
+        let modal = SynergyUnlockNode(unlock: next)
+        modal.present(in: camera ?? self)
+        synergyModal = modal
+    }
+
+    /// Called on a tap while a synergy modal is up — dismiss it and advance.
+    private func advanceSynergy() {
+        guard let modal = synergyModal else { return }
+        modal.dismiss()
+        synergyModal = nil
+        if synergyQueue.isEmpty {
+            completeLevelUp()
+        } else {
+            presentNextSynergy()
+        }
     }
     
     // MARK: - Game Loop
