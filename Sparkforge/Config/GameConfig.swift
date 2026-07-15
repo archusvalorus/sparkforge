@@ -350,6 +350,22 @@ enum GameConfig {
         static let flareRingColorHex: UInt32 = 0xFFCC66
         /// Outer glow level scaling cap (never implies a larger hitbox)
         static let maxGlowScale: CGFloat = 2.2
+
+        // v1.8: base-Spark eyes. Two small black dots that drift toward the
+        // direction of travel — the spark "looks" where it floats. This is the
+        // BASELINE face; the earned Arena-5 skin evolves these into focused,
+        // flame-detailed eyes (future sprint). All as fractions of visualRadius.
+        static let eyeRadiusFactor: CGFloat = 0.17
+        /// Half the center-to-center gap between the two eyes.
+        static let eyeSpacingHalfFactor: CGFloat = 0.26
+        /// Resting vertical bias — eyes sit slightly above center (a face).
+        static let eyeBaseYFactor: CGFloat = 0.14
+        /// How far the eye pair slides toward the travel direction (leading edge).
+        static let eyeMaxShiftFactor: CGFloat = 0.30
+        /// Eye color — flat black for the base spark.
+        static let eyeColorHex: UInt32 = 0x0A0A0A
+        /// Follow smoothing (higher = snappier); framerate-normalized in code.
+        static let eyeFollowRate: CGFloat = 12
     }
 
     // MARK: - Analytics (v1.7)

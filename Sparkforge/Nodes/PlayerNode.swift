@@ -34,6 +34,12 @@ final class PlayerNode: SKNode {
     private let glowNode: SKShapeNode       // soft outer aura, grows with level
     private let trailEmitter = SKEmitterNode()
 
+    // v1.8: base-Spark eyes — two black dots that look toward travel.
+    private let eyesNode = SKNode()
+    private let leftEye: SKShapeNode
+    private let rightEye: SKShapeNode
+    private var eyeOffset: CGPoint = .zero   // current directional slide (smoothed)
+
     // MARK: - Init
 
     override init() {
@@ -56,12 +62,32 @@ final class PlayerNode: SKNode {
         glowNode.zPosition = 9
         glowNode.glowWidth = config.baseGlowWidth
 
+        // v1.8: two small black eyes, above the white-hot core so they read
+        // clearly. They ride an eyesNode container that slides toward travel.
+        let eyeR = config.visualRadius * GameConfig.Spark.eyeRadiusFactor
+        leftEye = SKShapeNode(circleOfRadius: eyeR)
+        rightEye = SKShapeNode(circleOfRadius: eyeR)
+        for eye in [leftEye, rightEye] {
+            eye.fillColor = SKColor(hex: GameConfig.Spark.eyeColorHex)
+            eye.strokeColor = .clear
+            eye.zPosition = 13  // above innerCore (12)
+        }
+        let half = config.visualRadius * GameConfig.Spark.eyeSpacingHalfFactor
+        leftEye.position = CGPoint(x: -half, y: 0)
+        rightEye.position = CGPoint(x: half, y: 0)
+
         super.init()
 
         addChild(glowNode)
         emberWrap.addChild(coreNode)
         addChild(emberWrap)
         addChild(innerCoreNode)
+
+        eyesNode.zPosition = 13
+        eyesNode.addChild(leftEye)
+        eyesNode.addChild(rightEye)
+        eyesNode.position = CGPoint(x: 0, y: config.visualRadius * GameConfig.Spark.eyeBaseYFactor)
+        addChild(eyesNode)
 
         setupTrail()
         addChild(trailEmitter)
@@ -169,6 +195,7 @@ final class PlayerNode: SKNode {
 
     func move(direction: CGPoint, deltaTime: TimeInterval) {
         updateTrail(direction: direction)
+        updateEyes(direction: direction, deltaTime: deltaTime)
         guard !isDead else { return }
 
         let speed = stats?.effectiveMoveSpeedWithBoosts ?? GameConfig.Player.speed
@@ -176,6 +203,24 @@ final class PlayerNode: SKNode {
         position += displacement
 
         clampToArena()
+    }
+
+    /// The eyes drift toward the travel direction — the spark looks where it
+    /// floats — and recenter at rest. Framerate-normalized smoothing.
+    private func updateEyes(direction: CGPoint, deltaTime: TimeInterval) {
+        let config = GameConfig.Player.self
+        let maxShift = config.visualRadius * GameConfig.Spark.eyeMaxShiftFactor
+        let magnitude = min(direction.length, 1.0)
+
+        let target = magnitude > 0.05
+            ? direction.normalized * (maxShift * magnitude)
+            : .zero  // recenter when idle
+
+        let lerp = min(1.0, CGFloat(deltaTime) * GameConfig.Spark.eyeFollowRate)
+        eyeOffset = eyeOffset + (target - eyeOffset) * lerp
+
+        let baseY = config.visualRadius * GameConfig.Spark.eyeBaseYFactor
+        eyesNode.position = CGPoint(x: eyeOffset.x, y: baseY + eyeOffset.y)
     }
 
     private func clampToArena() {
@@ -405,6 +450,8 @@ final class PlayerNode: SKNode {
         glowNode.removeAction(forKey: "glowBreathe")
         coreNode.fillColor = SKColor(hex: GameConfig.Player.coreColorHex)
         trailEmitter.particleBirthRate = 0
+        eyeOffset = .zero
+        eyesNode.position = CGPoint(x: 0, y: GameConfig.Player.visualRadius * GameConfig.Spark.eyeBaseYFactor)
         applyLevelVisuals()
         physicsBody?.categoryBitMask = GameConfig.Physics.player
         setupPhysics()  // Reset collision radius to base
