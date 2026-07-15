@@ -75,6 +75,12 @@ final class TitleScene: SKScene {
     // v1.7: Forge Paths
     private var forgePathModal: SKNode?
     private var removeAdsValueModal: RemoveAdsModalNode?  // v1.8 (E3): value-prop before purchase
+
+    // v1.8 Unit 10: the CODEX hub + the scrollable page it opens.
+    private var codexHub: CodexHubNode?
+    private var codexPage: CodexPage?
+    private var codexScrollLastY: CGFloat = 0
+    private var codexScrollMovement: CGFloat = 0
     private var forgePathRowY: CGFloat = 0
 
     // v1.7: arena browser can show the next LOCKED arena (with its
@@ -744,6 +750,28 @@ final class TitleScene: SKScene {
 
         layoutY -= 54  // v1.8: 54 to match the DF→ignite gap (buttons equidistant)
 
+        // v1.8 Unit 10: the CODEX hub entry — a distinct violet-bordered pill,
+        // deliberately a different color from the amber Remove Ads box below so
+        // the two never get confused (and Remove Ads keeps its clear gap).
+        let codexBtn = SKNode()
+        codexBtn.position = CGPoint(x: 0, y: layoutY)
+        codexBtn.zPosition = 10
+        codexBtn.name = "codexHubButton"
+        let codexBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
+        codexBox.fillColor = SKColor(hex: 0x1A1420)
+        codexBox.strokeColor = SKColor(hex: 0xB98AE0, alpha: 0.55)
+        codexBox.lineWidth = 1.5
+        codexBtn.addChild(codexBox)
+        let codexLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        codexLabel.text = "📖  CODEX"
+        codexLabel.fontSize = 15 * s
+        codexLabel.fontColor = UITheme.Color.info
+        codexLabel.verticalAlignmentMode = .center
+        codexBtn.addChild(codexLabel)
+        addChild(codexBtn)
+
+        layoutY -= 54  // clear gap before the Remove Ads box (anti-mistap)
+
         // Remove Ads button — v1.8 (E2): a distinct bordered pill so it reads
         // as a deliberate button, low-emphasis vs Daily Forge (softer border,
         // no pulse). The container node is the tap target; the label lives
@@ -782,6 +810,29 @@ final class TitleScene: SKScene {
         restoreLabel.zPosition = 10
         restoreLabel.name = "restoreButton"
         addChild(restoreLabel)
+
+        // v1.8 Unit 10: a direct line to the devs at the very bottom — tap the
+        // address to open Mail. Small studio, real humans.
+        layoutY -= 34
+        let contactPrompt = SKLabelNode(fontNamed: "Menlo")
+        contactPrompt.text = "Want to connect with the devs?"
+        contactPrompt.fontSize = 11 * s
+        contactPrompt.fontColor = SKColor(hex: 0x888888)
+        contactPrompt.verticalAlignmentMode = .center
+        contactPrompt.position = CGPoint(x: 0, y: layoutY)
+        contactPrompt.zPosition = 10
+        addChild(contactPrompt)
+
+        layoutY -= 20
+        let contactEmail = SKLabelNode(fontNamed: "Menlo-Bold")
+        contactEmail.text = "games@hearthandhammer.ai"
+        contactEmail.fontSize = 12 * s
+        contactEmail.fontColor = SKColor(hex: 0xB98AE0)  // tappable-accent (matches CODEX)
+        contactEmail.verticalAlignmentMode = .center
+        contactEmail.position = CGPoint(x: 0, y: layoutY)
+        contactEmail.zPosition = 10
+        contactEmail.name = "contactEmailButton"
+        addChild(contactEmail)
     }
     
     // MARK: - Touch Handling
@@ -791,6 +842,19 @@ final class TitleScene: SKScene {
         guard !isTransitioning else { return }
         
         let location = touch.location(in: self)
+
+        // v1.8 Unit 10: codex overlays capture taps first. A page drags to
+        // scroll (began just records the start; close is decided on touch-up),
+        // the hub resolves taps to open/close.
+        if codexPage != nil {
+            codexScrollLastY = location.y
+            codexScrollMovement = 0
+            return
+        }
+        if let hub = codexHub {
+            handleHubAction(hub.action(at: location))
+            return
+        }
 
         // v1.7: choice + picker modals capture taps first
         if blessingChoiceModal != nil {
@@ -871,6 +935,16 @@ final class TitleScene: SKScene {
             }
         }
 
+        // v1.8 Unit 10: CODEX hub entry
+        if let codexBtn = childNode(withName: "codexHubButton") {
+            let frame = CGRect(x: codexBtn.position.x - 156, y: codexBtn.position.y - 21,
+                               width: 312, height: 42)
+            if frame.contains(location) {
+                presentCodexHub()
+                return
+            }
+        }
+
         // Check restore purchases tap
         if let restore = childNode(withName: "restoreButton") {
             let restoreFrame = CGRect(
@@ -883,9 +957,84 @@ final class TitleScene: SKScene {
                 return
             }
         }
-        
+
+        // v1.8 Unit 10: tap the dev email to open Mail
+        if let email = childNode(withName: "contactEmailButton") {
+            let emailFrame = CGRect(x: email.position.x - 120, y: email.position.y - 16,
+                                    width: 240, height: 32)
+            if emailFrame.contains(location) {
+                if let url = URL(string: "mailto:games@hearthandhammer.ai") {
+                    UIApplication.shared.open(url)
+                }
+                return
+            }
+        }
+
         // Any other tap → start game
         startGame()
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first, let page = codexPage else { return }
+        let loc = touch.location(in: self)
+        let dy = loc.y - codexScrollLastY
+        codexScrollLastY = loc.y
+        codexScrollMovement += abs(dy)
+        page.scroll(by: dy)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first, let page = codexPage else { return }
+        // A tap (not a drag) on the ✕ closes the page (back to the hub).
+        if codexScrollMovement < 8 && page.hitTestClose(at: touch.location(in: self)) {
+            dismissCodexPage()
+        }
+    }
+
+    // MARK: - v1.8 Unit 10: Codex hub
+
+    private func presentCodexHub() {
+        guard codexHub == nil, codexPage == nil else { return }
+        let hub = CodexHubNode()
+        hub.present(in: self)
+        codexHub = hub
+    }
+
+    private func handleHubAction(_ action: CodexHubNode.Action?) {
+        guard let action = action else { return }  // disabled / inside-panel tap
+        codexHub?.dismiss()
+        codexHub = nil
+        switch action {
+        case .close:
+            break
+        case .open(let face):
+            presentCodexPage(face)
+        }
+    }
+
+    private func presentCodexPage(_ face: CodexHubNode.Face) {
+        let w = view?.bounds.width ?? size.width
+        let h = view?.bounds.height ?? size.height
+        let insets = view?.safeAreaInsets ?? UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
+        let page: CodexPage
+        switch face {
+        case .synergies:
+            page = SynergyCodexNode(width: w, height: h, topInset: insets.top, bottomInset: insets.bottom)
+        case .bestiary:
+            page = BestiaryCodexNode(width: w, height: h, topInset: insets.top, bottomInset: insets.bottom)
+        case .cards:
+            return  // Card codex — Unit 8
+        }
+        addChild(page)
+        page.alpha = 0
+        page.run(SKAction.fadeIn(withDuration: 0.15))
+        codexPage = page
+    }
+
+    private func dismissCodexPage() {
+        codexPage?.dismiss()
+        codexPage = nil
+        presentCodexHub()  // back to the picker so you can browse another face
     }
     
     // MARK: - Daily Forge
