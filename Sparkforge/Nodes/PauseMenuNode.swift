@@ -19,7 +19,10 @@ final class PauseMenuNode: SKNode {
 
     private static let chipSize = CGSize(width: 152, height: 22)
     private static let chipRowHeight: CGFloat = 26
-    private static let maxChipRows = 8  // two columns → 16 chips before "+N more"
+    // v1.8: trimmed 8→6 so the build viewer reserves less vertical space and
+    // the action buttons can sit higher, closer to PAUSED. The synergy strip
+    // above still shows every tree's count; "+N more" covers the overflow.
+    private static let maxChipRows = 6  // two columns → 12 chips before "+N more"
 
     // MARK: - Nodes
 
@@ -31,6 +34,8 @@ final class PauseMenuNode: SKNode {
     /// v1.8: the card-detail modal opened by tapping a build chip. Any tap
     /// closes it. Held here so taps route to it before the pane buttons.
     private var detailNode: CardDetailNode?
+    /// v1.8 Unit 7: the Synergies codex page, opened from the pause menu.
+    private var codexNode: SynergyCodexNode?
     /// Captured on show() so a chip tap can resolve its card + tag counts.
     private weak var upgradeManager: UpgradeManager?
 
@@ -62,6 +67,7 @@ final class PauseMenuNode: SKNode {
     func show(upgradeManager: UpgradeManager) {
         self.upgradeManager = upgradeManager
         dismissDetail()
+        dismissCodex()
         rebuildBuildViewer(upgradeManager: upgradeManager)
         settingsPane.isHidden = true
         mainPane.isHidden = false
@@ -70,6 +76,7 @@ final class PauseMenuNode: SKNode {
 
     func hide() {
         dismissDetail()
+        dismissCodex()
         run(SKAction.fadeOut(withDuration: 0.15))
     }
 
@@ -86,21 +93,27 @@ final class PauseMenuNode: SKNode {
         buildViewer.position = .zero
         mainPane.addChild(buildViewer)
 
-        // v1.8: uniform 224x36; RESUME green (unchanged), SETTINGS blue/white,
-        // MENU purple/white — matches the death-overlay button treatment.
+        // v1.8: uniform 240x42 stack, lifted up toward PAUSED. SYNERGY CODEX
+        // (amber) → RESUME (green) → SETTINGS (blue) → MENU (purple); all with
+        // white text for a consistent read.
+        mainPane.addChild(Self.button(name: "synergyCodexButton", text: "⬡ SYNERGY CODEX",
+                                      size: CGSize(width: 240, height: 42),
+                                      position: CGPoint(x: 0, y: -70),
+                                      fillHex: 0x2A1A00, strokeHex: 0xFFAA33,
+                                      textHex: 0xFFFFFF, fontSize: 14, bold: true))
         mainPane.addChild(Self.button(name: "resumeButton", text: "RESUME",
                                       size: CGSize(width: 240, height: 42),
-                                      position: CGPoint(x: 0, y: -160),
+                                      position: CGPoint(x: 0, y: -124),
                                       fillHex: 0x334433, strokeHex: 0x66AA66,
-                                      textHex: 0x88DD88, fontSize: 15, bold: true))
+                                      textHex: 0xFFFFFF, fontSize: 15, bold: true))
         mainPane.addChild(Self.button(name: "settingsButton", text: "SETTINGS",
                                       size: CGSize(width: 240, height: 42),
-                                      position: CGPoint(x: 0, y: -214),
+                                      position: CGPoint(x: 0, y: -178),
                                       fillHex: 0x18345C, strokeHex: 0x5AA0F0,
                                       textHex: 0xFFFFFF, fontSize: 14, bold: true))
         mainPane.addChild(Self.button(name: "pauseMenuButton", text: "MENU",
                                       size: CGSize(width: 240, height: 42),
-                                      position: CGPoint(x: 0, y: -268),
+                                      position: CGPoint(x: 0, y: -232),
                                       fillHex: 0x2A1140, strokeHex: 0xB566FF,
                                       textHex: 0xFFFFFF, fontSize: 14, bold: true))
     }
@@ -278,6 +291,36 @@ final class PauseMenuNode: SKNode {
 
     /// Location is in this node's coordinate space. Buttons carry their
     /// hit size in userData so panes stay declarative.
+    // v1.8 Unit 7: while the codex is open, taps scroll it and only the ✕
+    // closes — so GameScene forwards began/moved/ended here (not just a tap).
+    private var scrollLastY: CGFloat = 0
+    private var scrollMovement: CGFloat = 0
+
+    func handleTouchBegan(at location: CGPoint) {
+        if codexNode != nil {
+            scrollLastY = location.y
+            scrollMovement = 0
+            return
+        }
+        handleTap(at: location)
+    }
+
+    func handleTouchMoved(at location: CGPoint) {
+        guard let codex = codexNode else { return }
+        let dy = location.y - scrollLastY
+        scrollLastY = location.y
+        scrollMovement += abs(dy)
+        codex.scroll(by: dy)
+    }
+
+    func handleTouchEnded(at location: CGPoint) {
+        guard let codex = codexNode else { return }
+        // A tap (not a drag) on the ✕ closes; taps elsewhere do nothing.
+        if scrollMovement < 8 && codex.hitTestClose(at: location) {
+            dismissCodex()
+        }
+    }
+
     func handleTap(at location: CGPoint) {
         // The detail modal is topmost and informational — any tap closes it.
         if detailNode != nil {
@@ -298,6 +341,8 @@ final class PauseMenuNode: SKNode {
         switch hit.name {
         case "resumeButton":
             onResume?()
+        case "synergyCodexButton":
+            presentCodex()
         case "settingsButton":
             mainPane.isHidden = true
             settingsPane.isHidden = false
@@ -357,6 +402,24 @@ final class PauseMenuNode: SKNode {
     private func dismissDetail() {
         detailNode?.dismiss()
         detailNode = nil
+    }
+
+    // MARK: - Synergy codex (Unit 7)
+
+    private func presentCodex() {
+        guard codexNode == nil else { return }
+        let width = scene?.view?.bounds.width ?? 390
+        let height = scene?.view?.bounds.height ?? 844
+        let insets = scene?.view?.safeAreaInsets ?? UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
+        let codex = SynergyCodexNode(width: width, height: height,
+                                     topInset: insets.top, bottomInset: insets.bottom)
+        codex.present(in: self)
+        codexNode = codex
+    }
+
+    private func dismissCodex() {
+        codexNode?.dismiss()
+        codexNode = nil
     }
 
     // MARK: - Button helpers

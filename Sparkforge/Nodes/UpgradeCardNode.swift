@@ -43,7 +43,11 @@ final class UpgradeCardNode: SKNode {
     /// v1.7 readability canon: the tree color pushed toward white, for
     /// text that must be READ — keeps the tint, kills the squint.
     static func brightColor(for tag: UpgradeManager.Tag) -> SKColor {
-        let hex = color(for: tag)
+        return brightColor(hex: color(for: tag))
+    }
+
+    /// Same brightening, from a raw tree-color hex.
+    static func brightColor(hex: UInt32) -> SKColor {
         let r = CGFloat((hex >> 16) & 0xFF) / 255
         let g = CGFloat((hex >> 8) & 0xFF) / 255
         let b = CGFloat(hex & 0xFF) / 255

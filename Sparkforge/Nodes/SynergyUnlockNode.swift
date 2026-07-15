@@ -38,8 +38,8 @@ final class SynergyUnlockNode: SKNode {
 
         let header = SKLabelNode(fontNamed: "Menlo-Bold")
         header.text = "SYNERGY UNLOCKED"
-        header.fontSize = 11
-        header.fontColor = SKColor(hex: colorHex, alpha: 0.9)
+        header.fontSize = UITheme.Size.label            // v1.8: theme, ≥10pt
+        header.fontColor = UpgradeCardNode.brightColor(hex: colorHex)  // info, not dimmed
         header.verticalAlignmentMode = .top
         header.horizontalAlignmentMode = .center
         header.position = CGPoint(x: 0, y: y)
@@ -54,10 +54,10 @@ final class SynergyUnlockNode: SKNode {
         body.addChild(emoji)
         y -= 46
 
-        let sub = SKLabelNode(fontNamed: "Menlo")
+        let sub = SKLabelNode(fontNamed: "Menlo-Bold")
         sub.text = "\(unlock.tag.rawValue.uppercased()) · TIER \(unlock.tier)"
-        sub.fontSize = 11
-        sub.fontColor = SKColor(hex: colorHex, alpha: 0.85)
+        sub.fontSize = UITheme.Size.label               // v1.8: theme, ≥10pt
+        sub.fontColor = UpgradeCardNode.brightColor(hex: colorHex)  // info, not dimmed
         sub.verticalAlignmentMode = .top
         sub.horizontalAlignmentMode = .center
         sub.position = CGPoint(x: 0, y: y)
@@ -77,8 +77,8 @@ final class SynergyUnlockNode: SKNode {
         for line in Self.wrap(unlock.effect, maxChars: 34) {
             let l = SKLabelNode(fontNamed: "Menlo")
             l.text = line
-            l.fontSize = 13
-            l.fontColor = SKColor(hex: 0xF0F0F0)
+            l.fontSize = UITheme.Size.body              // v1.8: theme (13pt)
+            l.fontColor = UITheme.Color.info            // bright info
             l.verticalAlignmentMode = .top
             l.horizontalAlignmentMode = .center
             l.position = CGPoint(x: 0, y: y)
@@ -89,8 +89,8 @@ final class SynergyUnlockNode: SKNode {
         y -= 8
         let hint = SKLabelNode(fontNamed: "Menlo")
         hint.text = "tap to continue"
-        hint.fontSize = 10
-        hint.fontColor = SKColor(hex: 0x777777)
+        hint.fontSize = UITheme.Size.hint               // v1.8: theme (10pt)
+        hint.fontColor = UITheme.Color.hint             // decoration only
         hint.verticalAlignmentMode = .top
         hint.horizontalAlignmentMode = .center
         hint.position = CGPoint(x: 0, y: y)

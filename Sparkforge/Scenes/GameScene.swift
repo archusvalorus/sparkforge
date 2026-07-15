@@ -620,7 +620,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         deathOverlay.addChild(recordBadge)
         
         // Best time display
-        let bestLabel = SKLabelNode(fontNamed: "Menlo")
+        let bestLabel = SKLabelNode(fontNamed: "Menlo-Bold")  // v1.8: bold Best/Runs
         bestLabel.fontSize = 18  // v1.8: +4 — bigger Best/Runs
         bestLabel.fontColor = SKColor(hex: 0xE0E0E0)  // v1.8: whiter + brighter
         bestLabel.name = "bestLabel"
@@ -640,7 +640,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         let reviveText = SKLabelNode(fontNamed: "Menlo-Bold")
         reviveText.fontSize = 15
-        reviveText.fontColor = SKColor(hex: 0x88DD88)
+        reviveText.fontColor = SKColor(hex: 0xFFFFFF)  // v1.8: white on the green button
         reviveText.text = "REIGNITE THE FORGE"
         reviveText.verticalAlignmentMode = .center
         reviveText.name = "reviveLabel"
@@ -662,15 +662,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         let xpBoostText = SKLabelNode(fontNamed: "Menlo-Bold")
         xpBoostText.fontSize = 14
-        xpBoostText.fontColor = SKColor(hex: 0xFFAA33)
+        xpBoostText.fontColor = SKColor(hex: 0xFFFFFF)  // v1.8: white on the amber button
         xpBoostText.text = "2x FORGE XP"
         xpBoostText.verticalAlignmentMode = .center
         xpBoostText.name = "xpBoostLabel"
         xpBoostBtn.addChild(xpBoostText)
         
-        let xpBoostAdIcon = SKLabelNode(fontNamed: "Menlo")
-        xpBoostAdIcon.fontSize = 11
-        xpBoostAdIcon.fontColor = SKColor(hex: 0xCCCCCC)
+        let xpBoostAdIcon = SKLabelNode(fontNamed: "Menlo-Bold")
+        xpBoostAdIcon.fontSize = 12                     // v1.8: bigger
+        xpBoostAdIcon.fontColor = SKColor(hex: 0xFFFFFF) // v1.8: white
         xpBoostAdIcon.text = "▶ AD"
         xpBoostAdIcon.verticalAlignmentMode = .center
         xpBoostAdIcon.position = CGPoint(x: 62, y: 0)
@@ -763,11 +763,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         label.position = CGPoint(x: 0, y: 90)  // v1.6: cleared for taller cards
         levelUpOverlay.addChild(label)
 
-        let hint = SKLabelNode(fontNamed: "Menlo")
-        hint.fontSize = 12
-        hint.fontColor = SKColor(hex: 0x777777)
+        // v1.8: match the title CTA convention — bold, bright neon-white
+        // (minus the italics)
+        let hint = SKLabelNode(fontNamed: "Menlo-Bold")
+        hint.fontSize = 18
+        hint.fontColor = SKColor(hex: 0xF2FBFF)
         hint.text = "choose an upgrade"
-        hint.position = CGPoint(x: 0, y: 66)  // v1.6: cleared for taller cards
+        hint.position = CGPoint(x: 0, y: 64)
         levelUpOverlay.addChild(hint)
         
         // v1.6: Reroll + Extra Card sit side by side below the cards.
@@ -779,26 +781,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         rerollBtn.name = "rerollButton"
         rerollBtn.position = CGPoint(x: -80, y: -144)  // v1.6: below taller cards
 
-        let rerollBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
+        let rerollBg = SKShapeNode(rectOf: CGSize(width: 156, height: 32), cornerRadius: 5)
         rerollBg.fillColor = SKColor(hex: 0x332233)
         rerollBg.strokeColor = SKColor(hex: 0x9966AA, alpha: 0.5)
         rerollBg.lineWidth = 1
         rerollBtn.addChild(rerollBg)
 
         let rerollText = SKLabelNode(fontNamed: "Menlo-Bold")
-        rerollText.fontSize = 11
-        // v1.7 readability canon: tinted-toward-white, bold
-        rerollText.fontColor = SKColor(hex: 0xE2CCEA)
+        rerollText.fontSize = 13                       // v1.8: bigger
+        rerollText.fontColor = SKColor(hex: 0xFFFFFF)  // v1.8: white
         rerollText.text = "⟳ REFORGE"
         rerollText.verticalAlignmentMode = .center
-        rerollText.position = CGPoint(x: -14, y: 0)
+        rerollText.position = CGPoint(x: -22, y: 0)
         rerollText.name = "rerollLabel"
         rerollBtn.addChild(rerollText)
 
-        let adIcon = SKLabelNode(fontNamed: "Menlo")
-        adIcon.fontSize = 9
-        // Cost info is a decision input — it pops too
-        adIcon.fontColor = SKColor(hex: 0xCCCCCC)
+        let adIcon = SKLabelNode(fontNamed: "Menlo-Bold")
+        adIcon.fontSize = 12                           // v1.8: bigger
+        adIcon.fontColor = SKColor(hex: 0xFFFFFF)      // v1.8: white
         adIcon.text = adText
         adIcon.verticalAlignmentMode = .center
         adIcon.position = CGPoint(x: 50, y: 0)
@@ -812,25 +812,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         extraBtn.name = "extraCardButton"
         extraBtn.position = CGPoint(x: 80, y: -144)  // v1.6: below taller cards
 
-        let extraBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
+        let extraBg = SKShapeNode(rectOf: CGSize(width: 156, height: 32), cornerRadius: 5)
         extraBg.fillColor = SKColor(hex: 0x223333)
         extraBg.strokeColor = SKColor(hex: 0x66AAAA, alpha: 0.5)
         extraBg.lineWidth = 1
         extraBtn.addChild(extraBg)
 
         let extraText = SKLabelNode(fontNamed: "Menlo-Bold")
-        extraText.fontSize = 11
-        // v1.7 readability canon: tinted-toward-white, bold
-        extraText.fontColor = SKColor(hex: 0xC9E8E8)
+        extraText.fontSize = 13                        // v1.8: bigger
+        extraText.fontColor = SKColor(hex: 0xFFFFFF)   // v1.8: white
         extraText.text = "✦ +1 CARD"
         extraText.verticalAlignmentMode = .center
-        extraText.position = CGPoint(x: -14, y: 0)
+        extraText.position = CGPoint(x: -22, y: 0)
         extraText.name = "extraCardLabel"
         extraBtn.addChild(extraText)
 
-        let extraAdIcon = SKLabelNode(fontNamed: "Menlo")
-        extraAdIcon.fontSize = 9
-        extraAdIcon.fontColor = SKColor(hex: 0xCCCCCC)
+        let extraAdIcon = SKLabelNode(fontNamed: "Menlo-Bold")
+        extraAdIcon.fontSize = 12                      // v1.8: bigger
+        extraAdIcon.fontColor = SKColor(hex: 0xFFFFFF) // v1.8: white
         extraAdIcon.text = adText
         extraAdIcon.verticalAlignmentMode = .center
         extraAdIcon.position = CGPoint(x: 50, y: 0)
@@ -845,24 +844,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pickBtn.name = "extraPickButton"
         pickBtn.position = CGPoint(x: 0, y: -182)
 
-        let pickBg = SKShapeNode(rectOf: CGSize(width: 150, height: 28), cornerRadius: 5)
+        let pickBg = SKShapeNode(rectOf: CGSize(width: 156, height: 32), cornerRadius: 5)
         pickBg.fillColor = SKColor(hex: 0x2A2418)
         pickBg.strokeColor = SKColor(hex: 0xCCAA44, alpha: 0.5)
         pickBg.lineWidth = 1
         pickBtn.addChild(pickBg)
 
         let pickText = SKLabelNode(fontNamed: "Menlo-Bold")
-        pickText.fontSize = 11
-        pickText.fontColor = SKColor(hex: 0xEEDDAA)
+        pickText.fontSize = 13                         // v1.8: bigger
+        pickText.fontColor = SKColor(hex: 0xFFFFFF)    // v1.8: white
         pickText.text = "★ +1 PICK"
         pickText.verticalAlignmentMode = .center
-        pickText.position = CGPoint(x: -14, y: 0)
+        pickText.position = CGPoint(x: -22, y: 0)
         pickText.name = "extraPickLabel"
         pickBtn.addChild(pickText)
 
-        let pickAdIcon = SKLabelNode(fontNamed: "Menlo")
-        pickAdIcon.fontSize = 9
-        pickAdIcon.fontColor = SKColor(hex: 0xCCCCCC)
+        let pickAdIcon = SKLabelNode(fontNamed: "Menlo-Bold")
+        pickAdIcon.fontSize = 12                        // v1.8: bigger
+        pickAdIcon.fontColor = SKColor(hex: 0xFFFFFF)   // v1.8: white
         pickAdIcon.text = adText
         pickAdIcon.verticalAlignmentMode = .center
         pickAdIcon.position = CGPoint(x: 50, y: 0)
@@ -1225,13 +1224,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // v1.8 Unit 7: drag scrolls the synergy codex while paused
+        if gameState == .paused {
+            if let touch = touches.first {
+                pauseMenu.handleTouchMoved(at: touch.location(in: pauseMenu))
+            }
+            return
+        }
         guard gameState == .playing else { return }
         for touch in touches {
             joystick.handleTouchMoved(touch, in: self)
         }
     }
-    
+
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if gameState == .paused {
+            if let touch = touches.first {
+                pauseMenu.handleTouchEnded(at: touch.location(in: pauseMenu))
+            }
+            return
+        }
         for touch in touches {
             joystick.handleTouchEnded(touch)
         }
@@ -1321,7 +1333,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func handlePauseScreenTap(_ touch: UITouch) {
-        pauseMenu.handleTap(at: touch.location(in: pauseMenu))
+        pauseMenu.handleTouchBegan(at: touch.location(in: pauseMenu))
     }
 
     // MARK: - v1.8 (E4): in-run Remove Ads affordance
@@ -3966,20 +3978,33 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for card in displayedCards { card.removeFromParent() }
         displayedCards.removeAll()
 
-        // v1.6: four cards (Extra Card reward) render tighter and smaller
-        // (spacings sized for the 118pt legibility-pass cards; fits iPhone SE)
-        let spacing: CGFloat = cards.count >= 4 ? 92 : 124
-        let cardScale: CGFloat = cards.count >= 4 ? 0.75 : 1.0
-        let startX = -spacing * CGFloat(cards.count - 1) / 2
-        let cardY: CGFloat = -40  // v1.4: lower on screen, closer to joystick area
+        // v1.8: 4+ cards stack into TWO rows instead of one cramped row — 2
+        // (or 3) per row, roomier than the old 4-across squeeze.
+        let count = cards.count
+        let twoRow = count >= 4
+        let perRow = twoRow ? Int(ceil(Double(count) / 2.0)) : count
+        let cardScale: CGFloat = twoRow ? 0.74 : 1.0
+        let colSpacing: CGFloat = twoRow ? 108 : 124
+        let rowSpacing: CGFloat = 126
+        let topRowY: CGFloat = twoRow ? 0 : -40  // v1.4: single row sits lower
+
+        // Drop the ad buttons down when cards take two rows.
+        repositionLevelUpButtons(twoRow: twoRow)
 
         for (i, card) in cards.enumerated() {
             // v1.8 Unit 5: a card shown in a spread IS discovered (offered,
             // whether or not it's picked).
             CodexManager.shared.recordCardOffered(card.id)
 
+            let row = (twoRow && i >= perRow) ? 1 : 0
+            let idxInRow = row == 0 ? i : i - perRow
+            let countInRow = row == 0 ? perRow : (count - perRow)
+            let startX = -colSpacing * CGFloat(countInRow - 1) / 2
+            let x = startX + colSpacing * CGFloat(idxInRow)
+            let y = topRowY - CGFloat(row) * rowSpacing
+
             let cardNode = UpgradeCardNode(card: card)
-            cardNode.position = CGPoint(x: startX + spacing * CGFloat(i), y: cardY)
+            cardNode.position = CGPoint(x: x, y: y)
             cardNode.setScale(0.0)
             levelUpOverlay.addChild(cardNode)
             displayedCards.append(cardNode)
@@ -3989,6 +4014,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             popIn.timingMode = .easeOut
             cardNode.run(SKAction.sequence([delay, popIn]))
         }
+    }
+
+    /// v1.8: the reroll / +1 card / +1 pick buttons drop lower when the card
+    /// spread uses two rows, so they clear the taller layout.
+    private func repositionLevelUpButtons(twoRow: Bool) {
+        let pairY: CGFloat = twoRow ? -210 : -144
+        let pickY: CGFloat = twoRow ? -246 : -182
+        levelUpOverlay.childNode(withName: "rerollButton")?.position.y = pairY
+        levelUpOverlay.childNode(withName: "extraCardButton")?.position.y = pairY
+        levelUpOverlay.childNode(withName: "extraPickButton")?.position.y = pickY
     }
     
     // MARK: - Death
