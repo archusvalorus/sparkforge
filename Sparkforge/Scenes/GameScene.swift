@@ -2740,6 +2740,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             spawnCoilworksEnemy()
             return
         }
+        // v1.8: and The Mirrorwound
+        if arenaConfig.id == 3 {
+            spawnMirrorwoundEnemy()
+            return
+        }
 
         let elapsed = waveManager.elapsedTime
 
@@ -2917,6 +2922,79 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         wasp.position = EnemyNode.spawnPosition()
         enemies.append(wasp)
         worldNode.addChild(wasp)
+    }
+
+    // MARK: - v1.8: Mirrorwound Spawning (Unit 12)
+
+    /// Arena 4 spawn table — Lyra's curriculum: perception pressure in layers,
+    /// never every enemy a trick. The first 20s teach the Shard Twin's
+    /// false/real read alongside familiar bodies; the Pane Stalker's phase
+    /// shift joins at 45s; the Echo Leech (elite) arrives at 80s. Ranged and
+    /// basic melee keep the floor honest. The larger arena + 120s bell give
+    /// this vocabulary room to breathe.
+    private func spawnMirrorwoundEnemy() {
+        let elapsed = waveManager.elapsedTime
+        let roll = CGFloat.random(in: 0...1)
+
+        // Opening: the Shard Twin teaches "check the face" beside known shapes.
+        if elapsed < 20 {
+            if roll < 0.5 {
+                spawnShardTwin(elapsed: elapsed)
+            } else {
+                spawnBasicMelee(elapsed: elapsed)
+            }
+            return
+        }
+
+        if elapsed >= 80 && roll < 0.14 {
+            spawnEchoLeech(elapsed: elapsed)
+        } else if elapsed >= 45 && roll < 0.34 {
+            spawnPaneStalker(elapsed: elapsed)
+        } else if roll < 0.58 {
+            spawnShardTwin(elapsed: elapsed)
+        } else if elapsed >= 55 && roll < 0.72 {
+            spawnRangedEnemy()
+        } else {
+            spawnBasicMelee(elapsed: elapsed)
+        }
+    }
+
+    private func spawnShardTwin(elapsed: TimeInterval) {
+        let twin = ShardTwinNode(elapsed: elapsed)
+        twin.position = EnemyNode.spawnPosition()
+        enemies.append(twin)
+        worldNode.addChild(twin)
+    }
+
+    private func spawnPaneStalker(elapsed: TimeInterval) {
+        let stalker = PaneStalkerNode(elapsed: elapsed)
+        stalker.position = EnemyNode.spawnPosition()
+        enemies.append(stalker)
+        worldNode.addChild(stalker)
+    }
+
+    private func spawnEchoLeech(elapsed: TimeInterval) {
+        let leech = EchoLeechNode(elapsed: elapsed)
+        leech.position = EnemyNode.spawnPosition()
+        leech.onEchoShot = { [weak self] position, direction in
+            self?.spawnEchoShot(at: position, direction: direction)
+        }
+        enemies.append(leech)
+        worldNode.addChild(leech)
+    }
+
+    /// The Echo Leech's single reflected shot — a mirror-purple enemy bullet.
+    private func spawnEchoShot(at position: CGPoint, direction: CGPoint) {
+        let elapsed = waveManager.elapsedTime
+        let scalingTicks = Int(elapsed / 30)
+        let damage = GameConfig.Enemy.baseRangedDamage + (scalingTicks * GameConfig.Enemy.rangedDamageScaling)
+        let proj = EnemyProjectileNode(direction: direction,
+                                       damage: damage,
+                                       colorHex: GameConfig.MirrorwoundEnemies.hostilePurpleHex)
+        proj.position = position
+        proj.zPosition = 7
+        enemyProjectiles.append(proj)
+        worldNode.addChild(proj)
     }
 
     private func spawnBraceguard(elapsed: TimeInterval) {
@@ -3556,6 +3634,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case is GrounderNode:    return .grounder
         case is StaticHaloNode:  return .staticHalo
         case is CircuitWaspNode: return .circuitWasp
+        case is ShardTwinNode:   return .shardTwin
+        case is PaneStalkerNode: return .paneStalker
+        case is EchoLeechNode:   return .echoLeech
         default:                 return .melee
         }
     }

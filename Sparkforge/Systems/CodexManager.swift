@@ -160,6 +160,10 @@ enum BestiaryFamily: String, CaseIterable {
     case grounder     = "grounder"
     case staticHalo   = "static_halo"
     case circuitWasp  = "circuit_wasp"
+    // v1.8 Unit 12 — Mirrorwound family (arena 4).
+    case shardTwin    = "shard_twin"
+    case paneStalker  = "pane_stalker"
+    case echoLeech    = "echo_leech"
     case miniBoss     = "mini_boss"
     case slagTitan    = "slag_titan"
     case quenchWarden = "quench_warden"
@@ -182,6 +186,9 @@ enum BestiaryFamily: String, CaseIterable {
         case .grounder:     return "Grounder"
         case .staticHalo:   return "Static Halo"
         case .circuitWasp:  return "Circuit Wasp"
+        case .shardTwin:    return "Shard Twin"
+        case .paneStalker:  return "Pane Stalker"
+        case .echoLeech:    return "Echo Leech"
         case .miniBoss:     return "Mini-Boss"
         case .slagTitan:    return "The Slag Titan"
         case .quenchWarden: return "The Quench Warden"
@@ -212,6 +219,11 @@ enum BestiaryFamily: String, CaseIterable {
         case .grounder:     return "It plants itself like a bad idea and pulses until the room agrees."
         case .staticHalo:   return "It circles calmly, as if violence were a scheduled appointment."
         case .circuitWasp:  return "A snapped rhythm with wings, pausing only to choose a worse angle."
+        // v1.8 Unit 12 — PROVISIONAL Mirrorwound flavor (Claude, in-voice),
+        // awaiting a Lyra finalization pass (Ask 4b omitted these three).
+        case .shardTwin:    return "Two shapes, one face. Strike the mask and you strike nothing."
+        case .paneStalker:  return "It leaves through a door that was never there, and arrives where you weren't looking."
+        case .echoLeech:    return "It cannot fight you. It only waits for you to fight yourself, then agrees."
         case .miniBoss:     return "Too large to ignore, too small to respect. A dangerous middle child."
         case .slagTitan:    return "The first answer of the forge: heat, weight, and no subtlety whatsoever."
         case .quenchWarden: return "It does not attack so much as compress the room around your decisions."
@@ -232,6 +244,9 @@ enum BestiaryFamily: String, CaseIterable {
         case .grounder:     return 0xB08844
         case .staticHalo:   return 0xFFDD55
         case .circuitWasp:  return 0x77CC66
+        case .shardTwin:    return 0xB8B0C0   // pale glass silver
+        case .paneStalker:  return 0x9C94A8   // tarnished silver-violet
+        case .echoLeech:    return 0x9E6ADF   // reflected-danger purple (elite)
         case .miniBoss:     return 0xFF9933
         case .slagTitan:    return 0xFF5522
         case .quenchWarden: return 0x4499FF

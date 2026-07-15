@@ -291,6 +291,49 @@ enum GameConfig {
         static let waspSnapMultiplier: CGFloat = 4.5
     }
 
+    // MARK: - Mirrorwound Enemies (v1.8 Unit 12)
+    // Lyra canon: perception pressure taught in layers. Hostile purple
+    // (#8E44FF) is reserved for danger actions only — never a resting body.
+    enum MirrorwoundEnemies {
+        /// The one hostile purple — tells, echo shots, danger contact flashes.
+        static let hostilePurpleHex: UInt32 = 0x8E44FF
+        /// Pale glass body tone shared by the mirror family.
+        static let glassBodyHex: UInt32 = 0x2A2830
+        /// Pale glass edge/outline highlight.
+        static let glassEdgeHex: UInt32 = 0xD6CCC2
+
+        // Shard Twin — false/real body. The real body has the face + brighter
+        // core + the only hitbox; the decoy is visual-only (no physics), so
+        // attacks pass through it for free. The decoy re-forms periodically so
+        // the "which is real?" read stays live.
+        /// Offset between the real body and its decoy reflection.
+        static let shardTwinDecoyOffset: CGFloat = 34
+        /// Seconds the decoy holds before it fades and re-forms at a new angle.
+        static let shardTwinDecoyHold: TimeInterval = 2.0
+        /// Decoy fade in/out duration (the flicker).
+        static let shardTwinDecoyFade: TimeInterval = 0.3
+
+        // Pane Stalker — phase shift / offset re-entry. Only player-contact is
+        // disabled while phased (still shootable); no full-invuln machinery.
+        /// Seconds moving normally before a phase begins.
+        static let paneStalkerSolidTime: TimeInterval = 2.4
+        /// Seconds spent phased-out (low alpha, contact off, repositioning).
+        static let paneStalkerPhaseTime: TimeInterval = 0.7
+        /// How far it slides to a new offset angle during a phase.
+        static let paneStalkerReentryDistance: CGFloat = 130
+        /// Low alpha while phased.
+        static let paneStalkerPhaseAlpha: CGFloat = 0.28
+
+        // Echo Leech — fires ONE purple echo shot on a loose cadence. Never
+        // clones every attack; the tell implies a copy even simplified.
+        /// Average seconds between echo shots (loose, not metronomic).
+        static let echoLeechShotInterval: TimeInterval = 3.2
+        /// Random +/- jitter applied to the cadence so it never feels timed.
+        static let echoLeechShotJitter: TimeInterval = 1.1
+        /// Distance at which the leech stops closing and starts echoing.
+        static let echoLeechEngageRange: CGFloat = 240
+    }
+
     // MARK: - Spark Visuals (v1.7)
     enum Spark {
         /// White-hot inner core color

@@ -22,17 +22,18 @@ final class EnemyProjectileNode: SKNode {
     init(direction: CGPoint,
          damage: Int = GameConfig.Enemy.baseRangedDamage,
          speed: CGFloat = GameConfig.RangedEnemy.projectileSpeed,
-         range: CGFloat = GameConfig.RangedEnemy.projectileRange) {
-        
+         range: CGFloat = GameConfig.RangedEnemy.projectileRange,
+         colorHex: UInt32 = GameConfig.RangedEnemy.projectileColorHex) {
+
         self.direction = direction.normalized
         self.damage = damage
         self.projectileSpeed = speed
         self.maxRange = range
-        
+
         let radius = GameConfig.RangedEnemy.projectileRadius
-        
+
         bulletNode = SKShapeNode(circleOfRadius: radius)
-        bulletNode.fillColor = SKColor(hex: GameConfig.RangedEnemy.projectileColorHex)
+        bulletNode.fillColor = SKColor(hex: colorHex)
         bulletNode.strokeColor = .clear
         bulletNode.glowWidth = 4
         

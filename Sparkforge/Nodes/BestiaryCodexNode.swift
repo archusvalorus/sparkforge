@@ -194,6 +194,9 @@ final class BestiaryCodexNode: SKNode, CodexPage {
         case .grounder:     node = GrounderNode(elapsed: 30)
         case .staticHalo:   node = StaticHaloNode(elapsed: 30)
         case .circuitWasp:  node = CircuitWaspNode(elapsed: 30)
+        case .shardTwin:    node = ShardTwinNode(elapsed: 30)
+        case .paneStalker:  node = PaneStalkerNode(elapsed: 30)
+        case .echoLeech:    node = EchoLeechNode(elapsed: 30)
         case .miniBoss:     let e = EnemyNode(); e.isMiniBoss = true; node = e
         case .slagTitan:    node = BossNode(config: BossNode.slagTitan)
         case .quenchWarden: node = QuenchWardenNode()
