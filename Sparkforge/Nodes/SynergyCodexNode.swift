@@ -13,7 +13,15 @@
 
 import SpriteKit
 
-final class SynergyCodexNode: SKNode {
+/// A full-screen scrollable codex page (Synergies / Bestiary / …). The pause
+/// menu drives whichever one is open through this interface.
+protocol CodexPage: SKNode {
+    func scroll(by dy: CGFloat)
+    func hitTestClose(at location: CGPoint) -> Bool
+    func dismiss()
+}
+
+final class SynergyCodexNode: SKNode, CodexPage {
 
     private static let sideMargin: CGFloat = 16
     private static let chipGap: CGFloat = 8

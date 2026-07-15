@@ -200,4 +200,43 @@ enum BestiaryFamily: String, CaseIterable {
     /// The bestiary page must not render this entry until its version ships
     /// (Mote = v2.0). Keeps the schema stable across the version boundary.
     var hiddenUntilFutureVersion: Bool { self == .mote }
+
+    /// Lyra's bestiary voice (v1.8 Ask 4b). Mote has no entry — empty chair.
+    var flavor: String {
+        switch self {
+        case .melee:        return "They do not think. They close distance, and call it purpose."
+        case .ranged:       return "They learned cowardice, then gave it velocity."
+        case .ashling:      return "Small things from the Quench, brittle until broken, worse after."
+        case .braceguard:   return "A shield with feet, a grudge, and just enough discipline to matter."
+        case .relayImp:     return "One is annoying. Two become circuitry. Three become a mistake."
+        case .grounder:     return "It plants itself like a bad idea and pulses until the room agrees."
+        case .staticHalo:   return "It circles calmly, as if violence were a scheduled appointment."
+        case .circuitWasp:  return "A snapped rhythm with wings, pausing only to choose a worse angle."
+        case .miniBoss:     return "Too large to ignore, too small to respect. A dangerous middle child."
+        case .slagTitan:    return "The first answer of the forge: heat, weight, and no subtlety whatsoever."
+        case .quenchWarden: return "It does not attack so much as compress the room around your decisions."
+        case .dynamoChoir:  return "A broken engine singing in circuits. The wrong note is usually you."
+        case .mote:         return ""
+        }
+    }
+
+    /// Family-color stroke (Lyra: "family-color stroke; bosses thicker").
+    /// Ranged leans purple to honor the danger-color canon.
+    var colorHex: UInt32 {
+        switch self {
+        case .melee:        return 0xCC5544
+        case .ranged:       return 0x9944CC
+        case .ashling:      return 0xFF8844
+        case .braceguard:   return 0x8899AA
+        case .relayImp:     return 0x44BBAA
+        case .grounder:     return 0xB08844
+        case .staticHalo:   return 0xFFDD55
+        case .circuitWasp:  return 0x77CC66
+        case .miniBoss:     return 0xFF9933
+        case .slagTitan:    return 0xFF5522
+        case .quenchWarden: return 0x4499FF
+        case .dynamoChoir:  return 0xBB66FF
+        case .mote:         return 0x8E44FF
+        }
+    }
 }

@@ -34,8 +34,8 @@ final class PauseMenuNode: SKNode {
     /// v1.8: the card-detail modal opened by tapping a build chip. Any tap
     /// closes it. Held here so taps route to it before the pane buttons.
     private var detailNode: CardDetailNode?
-    /// v1.8 Unit 7: the Synergies codex page, opened from the pause menu.
-    private var codexNode: SynergyCodexNode?
+    /// v1.8 Unit 7/9: the open codex page (Synergies or Bestiary).
+    private var codexNode: CodexPage?
     /// Captured on show() so a chip tap can resolve its card + tag counts.
     private weak var upgradeManager: UpgradeManager?
 
@@ -93,14 +93,18 @@ final class PauseMenuNode: SKNode {
         buildViewer.position = .zero
         mainPane.addChild(buildViewer)
 
-        // v1.8: uniform 240x42 stack, lifted up toward PAUSED. SYNERGY CODEX
-        // (amber) → RESUME (green) → SETTINGS (blue) → MENU (purple); all with
-        // white text for a consistent read.
-        mainPane.addChild(Self.button(name: "synergyCodexButton", text: "⬡ SYNERGY CODEX",
-                                      size: CGSize(width: 240, height: 42),
-                                      position: CGPoint(x: 0, y: -70),
+        // v1.8: codex access — SYNERGIES + BESTIARY side by side (amber), then
+        // the action stack. All white text for a consistent read.
+        mainPane.addChild(Self.button(name: "synergyCodexButton", text: "⬡ SYNERGIES",
+                                      size: CGSize(width: 116, height: 42),
+                                      position: CGPoint(x: -62, y: -70),
                                       fillHex: 0x2A1A00, strokeHex: 0xFFAA33,
-                                      textHex: 0xFFFFFF, fontSize: 14, bold: true))
+                                      textHex: 0xFFFFFF, fontSize: 13, bold: true))
+        mainPane.addChild(Self.button(name: "bestiaryCodexButton", text: "☖ BESTIARY",
+                                      size: CGSize(width: 116, height: 42),
+                                      position: CGPoint(x: 62, y: -70),
+                                      fillHex: 0x2A1A00, strokeHex: 0xFFAA33,
+                                      textHex: 0xFFFFFF, fontSize: 13, bold: true))
         mainPane.addChild(Self.button(name: "resumeButton", text: "RESUME",
                                       size: CGSize(width: 240, height: 42),
                                       position: CGPoint(x: 0, y: -124),
@@ -342,7 +346,9 @@ final class PauseMenuNode: SKNode {
         case "resumeButton":
             onResume?()
         case "synergyCodexButton":
-            presentCodex()
+            presentCodex { SynergyCodexNode(width: $0, height: $1, topInset: $2, bottomInset: $3) }
+        case "bestiaryCodexButton":
+            presentCodex { BestiaryCodexNode(width: $0, height: $1, topInset: $2, bottomInset: $3) }
         case "settingsButton":
             mainPane.isHidden = true
             settingsPane.isHidden = false
@@ -406,15 +412,16 @@ final class PauseMenuNode: SKNode {
 
     // MARK: - Synergy codex (Unit 7)
 
-    private func presentCodex() {
+    private func presentCodex(_ make: (CGFloat, CGFloat, CGFloat, CGFloat) -> CodexPage) {
         guard codexNode == nil else { return }
         let width = scene?.view?.bounds.width ?? 390
         let height = scene?.view?.bounds.height ?? 844
         let insets = scene?.view?.safeAreaInsets ?? UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
-        let codex = SynergyCodexNode(width: width, height: height,
-                                     topInset: insets.top, bottomInset: insets.bottom)
-        codex.present(in: self)
-        codexNode = codex
+        let page = make(width, height, insets.top, insets.bottom)
+        addChild(page)
+        page.alpha = 0
+        page.run(SKAction.fadeIn(withDuration: 0.15))
+        codexNode = page
     }
 
     private func dismissCodex() {
