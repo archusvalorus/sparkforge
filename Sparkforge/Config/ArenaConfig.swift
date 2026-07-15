@@ -9,6 +9,7 @@
 // with pickup language.
 
 import CoreGraphics
+import Foundation
 
 struct ArenaConfig {
     let id: Int
@@ -20,6 +21,14 @@ struct ArenaConfig {
     let dangerGlowHex: UInt32   // Pulsing ring outside the boundary
     let detailLineHex: UInt32   // Floor motif line work
     let accentColorHex: UInt32  // v1.6: title-screen selector box tint/stroke
+    // v1.8 (Unit 11): per-arena playfield size. 1.0 = the standard
+    // device-aware radius; >1.0 expands the field. Arena is fixed for a run,
+    // so GameConfig.Arena.radius folds this in for every consumer at once.
+    let radiusScale: CGFloat
+    // v1.8 (Unit 11): when the mini-boss/boss bell rings. Standard arenas ring
+    // at GameConfig.Wave.miniBossSpawnTime; the larger Mirrorwound rings later
+    // so the extra space earns a longer escalation before the bell.
+    let bellTime: TimeInterval
 
     static let crucible = ArenaConfig(
         id: 0,
@@ -30,7 +39,9 @@ struct ArenaConfig {
         boundaryColorHex: 0x3A1A0A,
         dangerGlowHex: 0x441100,
         detailLineHex: 0x252525,
-        accentColorHex: 0xFF7722
+        accentColorHex: 0xFF7722,
+        radiusScale: 1.0,
+        bellTime: GameConfig.Wave.miniBossSpawnTime
     )
 
     static let quench = ArenaConfig(
@@ -42,7 +53,9 @@ struct ArenaConfig {
         boundaryColorHex: 0x6A6256,
         dangerGlowHex: 0x3A3A34,
         detailLineHex: 0x272C33,
-        accentColorHex: 0xB8B0A4
+        accentColorHex: 0xB8B0A4,
+        radiusScale: 1.0,
+        bellTime: GameConfig.Wave.miniBossSpawnTime
     )
 
     // v1.7: palette is Lyra canon — static gold reads as pale electrical
@@ -57,10 +70,34 @@ struct ArenaConfig {
         boundaryColorHex: 0x5B4A22,
         dangerGlowHex: 0x33290E,
         detailLineHex: 0x23231B,
-        accentColorHex: 0xF6D36B
+        accentColorHex: 0xF6D36B,
+        radiusScale: 1.0,
+        bellTime: GameConfig.Wave.miniBossSpawnTime
     )
 
-    static let all: [ArenaConfig] = [crucible, quench, coilworks]
+    // v1.8 (Unit 11): Arena 4. Palette is Lyra canon — a wound that reflects,
+    // not a palace. Floor is near-black smoked glass; boundary is dull
+    // tarnished mirror-silver (wounded, not chrome); motif/detail is pale
+    // glass highlight for cracks and shard edges; danger glow sits in the
+    // deep fracture shadow. Hostile purple (#8E44FF) is reserved for enemy
+    // tells/projectiles (Units 12–13), never the environment. Expanded
+    // playfield (radiusScale 1.3) — more room to run than the earlier arenas.
+    // See docs/lyra-response-v1.8.md (Ask 1).
+    static let mirrorwound = ArenaConfig(
+        id: 3,
+        name: "The Mirrorwound",
+        displayName: "ARENA 4: THE MIRRORWOUND",
+        flavorLine: "the arena remembers your shape incorrectly",
+        floorColorHex: 0x17161A,
+        boundaryColorHex: 0x9C948C,
+        dangerGlowHex: 0x0B0A0D,
+        detailLineHex: 0xD6CCC2,
+        accentColorHex: 0x9C948C,
+        radiusScale: 1.3,
+        bellTime: 120.0   // larger arena → later bell, a longer escalation
+    )
+
+    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound]
 
     /// The currently selected arena, clamped to what's unlocked.
     static var current: ArenaConfig {

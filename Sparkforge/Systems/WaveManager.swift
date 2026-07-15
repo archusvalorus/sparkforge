@@ -14,6 +14,11 @@ final class WaveManager {
     private(set) var elapsedTime: TimeInterval = 0
     private var timeSinceLastSpawn: TimeInterval = 0
     private(set) var miniBossSpawned: Bool = false
+
+    /// v1.8 (Unit 11): when the mini-boss/boss bell rings for this run. Set
+    /// from the selected arena (ArenaConfig.bellTime); defaults to the global
+    /// mark so any run without an explicit arena still rings on time.
+    var bellTime: TimeInterval = GameConfig.Wave.miniBossSpawnTime
     
     // MARK: - Computed
     
@@ -61,7 +66,7 @@ final class WaveManager {
         }
         
         // Mini-boss check
-        if !miniBossSpawned && elapsedTime >= GameConfig.Wave.miniBossSpawnTime {
+        if !miniBossSpawned && elapsedTime >= bellTime {
             miniBossSpawned = true
             spawnMiniBoss = true
         }

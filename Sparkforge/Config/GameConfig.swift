@@ -14,8 +14,12 @@ enum GameConfig {
     
     // MARK: - Arena
     enum Arena {
-        /// Radius of the circular arena in points — device-aware
-        static var radius: CGFloat { DeviceScale.arenaRadius }
+        /// Radius of the circular arena in points — device-aware.
+        /// v1.8 (Unit 11): folds in the selected arena's radiusScale so a
+        /// bigger playfield (e.g. the Mirrorwound) flows to every consumer —
+        /// player clamp, spawn distance, boss positioning, orb scatter — from
+        /// one place. Arena is fixed for a run, so this is stable per-run.
+        static var radius: CGFloat { DeviceScale.arenaRadius * ArenaConfig.current.radiusScale }
         /// Color of the arena floor
         static let floorColorHex: UInt32 = 0x1A1A1A
         /// Color of the arena boundary ring

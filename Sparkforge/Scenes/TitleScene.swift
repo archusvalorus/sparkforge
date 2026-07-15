@@ -535,9 +535,13 @@ final class TitleScene: SKScene {
             killProgressLabel.isHidden = true
             survivalCheckLabel.isHidden = true
 
-            let requirement = displayedArenaIndex == 1
-                ? "fell \(ProgressionManager.arena1Gate.bossName) to unlock"
-                : "fell \(ProgressionManager.arena2Gate.bossName) to unlock"
+            // Each locked arena names the boss whose fall opens it.
+            let requirement: String
+            switch displayedArenaIndex {
+            case 1:  requirement = "fell \(ProgressionManager.arena1Gate.bossName) to unlock"
+            case 2:  requirement = "fell \(ProgressionManager.arena2Gate.bossName) to unlock"
+            default: requirement = "fell \(ProgressionManager.arena3Gate.bossName) to unlock"
+            }
 
             // Requirement (small) drops to the lower row…
             arenaFlavorLabel.position.y = arenaReadyRowY
@@ -629,7 +633,7 @@ final class TitleScene: SKScene {
             } else {
                 arenaReadyLabel.isHidden = true
             }
-        } else {
+        } else if arena.id == 2 {
             // v1.7 Unit 7: The Coilworks shows the Choir's gate
             let gate = ProgressionManager.arena3Gate
             let kills = pm.coilworksKills
@@ -653,6 +657,15 @@ final class TitleScene: SKScene {
             } else {
                 arenaReadyLabel.isHidden = true
             }
+        } else {
+            // v1.8 Unit 11: The Mirrorwound — the deepest arena. Its own boss
+            // gate (The Faceted Lie) arrives with the boss in Unit 13; for now
+            // an unlocked Mirrorwound simply shows its flavor line, no kill row.
+            killProgressLabel.isHidden = true
+            survivalCheckLabel.isHidden = true
+            arenaFlavorLabel.text = arena.flavorLine
+            arenaFlavorLabel.isHidden = false
+            arenaReadyLabel.isHidden = true
         }
     }
     

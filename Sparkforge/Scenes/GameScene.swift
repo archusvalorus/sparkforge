@@ -226,6 +226,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.6: colors + motif come from the selected arena's config
         let radius = GameConfig.Arena.radius
 
+        // v1.8 (Unit 11): the arena sets when its bell rings (Mirrorwound rings
+        // later than the standard mark for a longer escalation).
+        waveManager.bellTime = arenaConfig.bellTime
+
         let floorPath = CGPath(ellipseIn: CGRect(
             x: -radius, y: -radius,
             width: radius * 2, height: radius * 2
@@ -242,6 +246,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             buildQuenchMotif(radius: radius)
         case 2:
             buildCoilworksMotif(radius: radius)
+        case 3:
+            buildMirrorwoundMotif(radius: radius)
         default:
             buildCrucibleMotif(radius: radius)
         }
@@ -496,6 +502,140 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.wait(forDuration: 3.2, withRange: 1.6)
         ])
         arenaFloor.run(SKAction.repeatForever(step))
+    }
+
+    /// v1.8 Arena 4 motif (Lyra canon): fractured mirror geometry — irregular
+    /// triangular shard plates paired across center in slightly-off symmetry,
+    /// broken ring fragments, and thin crack paths that never fully connect.
+    /// Reflection is punctuation, not constant copying: an occasional silver
+    /// glint travels a shard edge, then is gone. All linework is pale glass
+    /// (detailLineHex) — thin, sharp, environmental. Purple stays reserved for
+    /// hostile tells (Units 12–13); nothing here may read as a pickup.
+    /// "The arena remembers your shape incorrectly." See lyra-response-v1.8.md.
+    private func buildMirrorwoundMotif(radius: CGFloat) {
+        let glass = arenaConfig.detailLineHex   // #D6CCC2 pale glass highlight
+        let shadow = arenaConfig.dangerGlowHex  // #0B0A0D deep fracture shadow
+
+        // Broken circular ring fragments — a few short arcs at irregular radii
+        // and phases, deliberately never closing (the mirror's frame, cracked).
+        let arcSpecs: [(r: CGFloat, start: CGFloat, sweep: CGFloat)] = [
+            (radius * 0.38, 0.6, 1.1),
+            (radius * 0.63, 2.5, 0.8),
+            (radius * 0.63, 4.3, 0.5),
+            (radius * 0.86, 3.4, 1.3)
+        ]
+        for spec in arcSpecs {
+            let path = CGMutablePath()
+            path.addArc(center: .zero, radius: spec.r,
+                        startAngle: spec.start, endAngle: spec.start + spec.sweep,
+                        clockwise: false)
+            let arc = SKShapeNode(path: path)
+            arc.fillColor = .clear
+            arc.strokeColor = SKColor(hex: glass, alpha: 0.16)
+            arc.lineWidth = 1
+            arc.zPosition = -9.5
+            worldNode.addChild(arc)
+        }
+
+        // Irregular triangular shard plates, each paired with a partner
+        // reflected across center at a slight angular offset — symmetry that
+        // is almost, but not quite, right. Faint shadow fill under a pale edge.
+        // (base angle, distance from center, size, rotation, offset applied to
+        //  the mirrored twin so the reflection sits "incorrectly").
+        let shardSpecs: [(angle: CGFloat, dist: CGFloat, size: CGFloat, rot: CGFloat, twinSkew: CGFloat)] = [
+            (0.7,  radius * 0.34, radius * 0.20, 0.3,  0.14),
+            (2.1,  radius * 0.52, radius * 0.16, 1.1, -0.10),
+            (3.9,  radius * 0.30, radius * 0.24, 2.2,  0.18),
+            (5.2,  radius * 0.58, radius * 0.18, 0.7, -0.16)
+        ]
+        // A glint-carrying edge is collected per shard for the ambient pass.
+        var glintEdges: [SKShapeNode] = []
+
+        func addShard(center c: CGPoint, size: CGFloat, rot: CGFloat) {
+            // An irregular triangle — three uneven vertices around the center.
+            let verts: [CGFloat] = [0.0, 2.3, 4.1]  // uneven angular spread
+            let radii: [CGFloat] = [1.0, 0.78, 0.92] // uneven vertex distances
+            let path = CGMutablePath()
+            var edgePts: [CGPoint] = []
+            for (i, v) in verts.enumerated() {
+                let a = v + rot
+                let p = CGPoint(x: c.x + cos(a) * size * radii[i],
+                                y: c.y + sin(a) * size * radii[i])
+                edgePts.append(p)
+                if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+            }
+            path.closeSubpath()
+
+            let plate = SKShapeNode(path: path)
+            plate.fillColor = SKColor(hex: shadow, alpha: 0.35)
+            plate.strokeColor = SKColor(hex: glass, alpha: 0.22)
+            plate.lineWidth = 1
+            plate.zPosition = -9.6
+            worldNode.addChild(plate)
+
+            // One bright edge of the plate carries the traveling glint.
+            let edge = CGMutablePath()
+            edge.move(to: edgePts[0])
+            edge.addLine(to: edgePts[1])
+            let glint = SKShapeNode(path: edge)
+            glint.strokeColor = SKColor(hex: glass)
+            glint.lineWidth = 1.5
+            glint.alpha = 0
+            glint.zPosition = -9.4
+            worldNode.addChild(glint)
+            glintEdges.append(glint)
+        }
+
+        for spec in shardSpecs {
+            let c = CGPoint(x: cos(spec.angle) * spec.dist,
+                            y: sin(spec.angle) * spec.dist)
+            addShard(center: c, size: spec.size, rot: spec.rot)
+            // Mirrored twin across center, rotation nudged so it reflects wrong.
+            let twin = CGPoint(x: -c.x, y: -c.y)
+            addShard(center: twin, size: spec.size * 0.92, rot: spec.rot + spec.twinSkew)
+        }
+
+        // Thin crack paths — jagged two-segment lines that stop short of both
+        // the center and the boundary, so nothing fully connects.
+        let crackAngles: [CGFloat] = [0.3, 1.4, 2.8, 3.7, 5.0]
+        for (i, angle) in crackAngles.enumerated() {
+            let innerR = radius * (0.22 + CGFloat(i % 3) * 0.08)
+            let breakR = radius * 0.55
+            let outerR = radius * 0.80  // stops short of the boundary
+            let bend = angle - 0.12
+
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: cos(angle) * innerR, y: sin(angle) * innerR))
+            path.addLine(to: CGPoint(x: cos(angle) * breakR, y: sin(angle) * breakR))
+            path.addLine(to: CGPoint(x: cos(bend) * outerR, y: sin(bend) * outerR))
+
+            let crack = SKShapeNode(path: path)
+            crack.strokeColor = SKColor(hex: glass, alpha: 0.12)
+            crack.lineWidth = 0.8
+            crack.zPosition = -9.5
+            worldNode.addChild(crack)
+        }
+
+        // Ambient reflection as punctuation: every few seconds one shard edge
+        // glints — a quick silver flash that fades — then silence. Never a
+        // steady shimmer; the arena reflects in glimpses, not constantly.
+        guard !glintEdges.isEmpty else { return }
+        var glintIndex = 0
+        let pulse = SKAction.sequence([
+            SKAction.run {
+                let edge = glintEdges[glintIndex % glintEdges.count]
+                // Step by a prime-ish stride so the glint doesn't march in order.
+                glintIndex += 3
+                edge.run(SKAction.sequence([
+                    SKAction.fadeAlpha(to: 0.6, duration: 0.10),
+                    SKAction.fadeAlpha(to: 0.0, duration: 0.35)
+                ]))
+            },
+            // v1.8 (Unit 11): glints fire a little more often (Brandon's device
+            // pass) — 0.9–2.1s between flashes, was 1.7–4.4s.
+            SKAction.wait(forDuration: 1.5, withRange: 1.2)
+        ])
+        arenaFloor.run(SKAction.repeatForever(pulse))
     }
 
     private func setupPlayer() {
@@ -912,6 +1052,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
+        // v1.8: The Mirrorwound drifts — sparse pale glass motes, no ember.
+        // Ember/orange is player+forge language (color-discipline canon), so
+        // the mirror arena gets a cold, occasional silver drift instead.
+        if arenaConfig.id == 3 {
+            setupMirrorwoundDrift(texture: dotTexture)
+            if let view = view {
+                let vignette = VignetteNode(size: view.bounds.size)
+                camera?.addChild(vignette)
+            }
+            return
+        }
+
         // Primary embers — small, frequent, drifting up
         let emitter = SKEmitterNode()
         emitter.particleBirthRate = 12
@@ -1031,6 +1183,33 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         sparks.zPosition = -5
         sparks.particleTexture = texture
         worldNode.addChild(sparks)
+    }
+
+    /// v1.8 Arena 4 ambient (Lyra canon): "occasional mirrored particle drift."
+    /// Sparse, slow, low-alpha pale-glass motes — silver/white, never ember,
+    /// never a pickup read. Alpha blend (no additive glow) keeps it cold and
+    /// environmental, sitting well below combat priority.
+    private func setupMirrorwoundDrift(texture: SKTexture) {
+        let drift = SKEmitterNode()
+        drift.particleBirthRate = 5
+        drift.particleLifetime = 7
+        drift.particleLifetimeRange = 3
+        drift.particlePositionRange = CGVector(dx: GameConfig.Arena.radius * 2.2,
+                                               dy: GameConfig.Arena.radius * 2.2)
+        drift.particleSpeed = 9
+        drift.particleSpeedRange = 6
+        drift.emissionAngleRange = 2 * .pi        // no single fall direction
+        drift.particleAlpha = 0.22
+        drift.particleAlphaRange = 0.12
+        drift.particleAlphaSpeed = -0.03
+        drift.particleScale = 0.045
+        drift.particleScaleRange = 0.025
+        drift.particleColor = SKColor(hex: arenaConfig.detailLineHex)  // pale glass
+        drift.particleColorBlendFactor = 1.0
+        drift.particleBlendMode = .alpha          // cold, not glowing
+        drift.zPosition = -5
+        drift.particleTexture = texture
+        worldNode.addChild(drift)
     }
 
     private func setupQuenchAsh(texture: SKTexture) {
@@ -2977,6 +3156,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.dynamoChoir)  // v1.8 Unit 5
             ProgressionManager.shared.choirKills += 1  // banked for Arena 4's gate
+            // v1.8 (Unit 11): felling the Choir opens The Mirrorwound
+            if ProgressionManager.shared.arenasUnlocked < 4 {
+                ProgressionManager.shared.arenasUnlocked = 4
+            }
             for _ in 0..<10 {
                 let offset = CGPoint(
                     x: CGFloat.random(in: -40...40),
