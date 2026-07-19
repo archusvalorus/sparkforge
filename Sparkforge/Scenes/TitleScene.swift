@@ -853,6 +853,19 @@ final class TitleScene: SKScene {
         restoreLabel.name = "restoreButton"
         addChild(restoreLabel)
 
+        // v1.9: Forgebound Labs cross-promo — a quiet "hallway" to a sibling
+        // title. Low-emphasis footer link, clear of Remove Ads (anti-mistap).
+        layoutY -= 32
+        let forgePlug = SKLabelNode(fontNamed: "Menlo-Bold")
+        forgePlug.text = "✦ More from the Forge ✦"
+        forgePlug.fontSize = 13 * s
+        forgePlug.fontColor = SKColor(hex: 0xC79A4E)  // muted forge-gold, tappable but soft
+        forgePlug.verticalAlignmentMode = .center
+        forgePlug.position = CGPoint(x: 0, y: layoutY)
+        forgePlug.zPosition = 10
+        forgePlug.name = "forgePromoButton"
+        addChild(forgePlug)
+
         // v1.8 Unit 10: a direct line to the devs at the very bottom — tap the
         // address to open Mail. Small studio, real humans.
         layoutY -= 34
@@ -1019,6 +1032,16 @@ final class TitleScene: SKScene {
             }
         }
 
+        // v1.9: Forgebound Labs cross-promo plug
+        if let plug = childNode(withName: "forgePromoButton") {
+            let plugFrame = CGRect(x: plug.position.x - 130, y: plug.position.y - 16,
+                                   width: 260, height: 32)
+            if plugFrame.contains(location) {
+                presentCrossPromo()
+                return
+            }
+        }
+
         // v1.8 Unit 10: tap the dev email to open Mail
         if let email = childNode(withName: "contactEmailButton") {
             let emailFrame = CGRect(x: email.position.x - 120, y: email.position.y - 16,
@@ -1103,6 +1126,23 @@ final class TitleScene: SKScene {
         codexPage?.dismiss()
         codexPage = nil
         presentCodexHub()  // back to the picker so you can browse another face
+    }
+
+    // MARK: - v1.9: Forgebound Labs cross-promo
+
+    /// Open a random live sibling's App Store card in-app (no Safari kick-out).
+    private func presentCrossPromo() {
+        guard let sibling = CrossPromo.randomSibling(),
+              let rootVC = view?.window?.rootViewController else { return }
+        AudioManager.shared.play(.cardSelect)
+
+        let storeVC = SKStoreProductViewController()
+        storeVC.delegate = self
+        let params = [SKStoreProductParameterITunesItemIdentifier: NSNumber(value: sibling.appStoreID)]
+        storeVC.loadProduct(withParameters: params) { [weak rootVC, weak storeVC] loaded, _ in
+            guard loaded, let rootVC = rootVC, let storeVC = storeVC else { return }
+            rootVC.present(storeVC, animated: true)
+        }
     }
 
     // MARK: - v1.9: Settings gear + shared Settings modal
@@ -2011,5 +2051,13 @@ final class TitleScene: SKScene {
                 label.fontColor = SKColor(hex: 0xFFAA33)
             }
         }
+    }
+}
+
+// MARK: - Cross-promo store card
+
+extension TitleScene: SKStoreProductViewControllerDelegate {
+    func productViewControllerDidFinish(_ viewController: SKStoreProductViewController) {
+        viewController.dismiss(animated: true)
     }
 }
