@@ -55,6 +55,16 @@ enum GameConfig {
         /// Invulnerability frames after taking damage (seconds)
         static let damageCooldown: TimeInterval = 0.5
     }
+
+    // MARK: - Level-Up Stats (v1.9 Unit 4)
+    /// Per-award stat increments for the level-up cadence: even levels let the
+    /// player CHOOSE one of these, odd levels auto-award a random one. Starting
+    /// values — balance-sensitive; tuned against the stable post-v1.8 baseline.
+    enum LevelUp {
+        static let hpBonus: Int = 10        // +max HP (also heals for the same)
+        static let attackBonus: Int = 2     // +base projectile damage
+        static let defenseBonus: Int = 1    // +flat damage reduction
+    }
     
     // MARK: - Enemy
     enum Enemy {

@@ -23,6 +23,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case paused    // v1.4: Pause menu
         case removeAdsPrompt  // v1.8 (E4): in-run value-prop modal is up
         case synergyReveal    // v1.8 (Unit 6): synergy-unlock modal is up
+        case statChoice       // v1.9 (Unit 4): even-level stat picker is up
     }
     
     private(set) var gameState: GameState = .playing
@@ -161,6 +162,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // after any synergy tiers. pendingCapstones collects during the pick.
     private var pendingCapstones: [CardMaxReveal] = []
     private var capstoneQueue: [CardMaxReveal] = []
+    // v1.9 Unit 4: even-level stat picker (precedes the skill card).
+    private var statChoiceNode: StatChoiceNode?
     
     // MARK: - Scene Lifecycle
     
@@ -1384,6 +1387,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         case .synergyReveal:
             advanceSynergy()
+
+        case .statChoice:
+            handleStatChoice(touch)
 
         case .dead:
             handleDeathScreenTap(touch)
@@ -4422,16 +4428,52 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Level Up
     
     private func triggerLevelUp() {
-        gameState = .levelUp
         AudioManager.shared.play(.levelUp)
         playerStats.triggerOverclock()  // v1.7: level-ups grant speed briefly
         xpBar.flashLevelUp()
         levelLabel.text = "LV \(player.currentLevel)"
-        
+
+        // v1.9 Unit 4: every level presents a skill card. EVEN levels present a
+        // stat CHOICE first (pick +HP/+ATK/+DEF); ODD levels auto-award a random
+        // stat alongside the card. Even flows stat-choice → skill card.
+        if player.currentLevel % 2 == 0 {
+            presentStatChoice()
+        } else {
+            let awarded = PlayerStats.StatKind.allCases.randomElement() ?? .hp
+            playerStats.applyStatBonus(awarded)
+            showBuildHint("\(awarded.emoji) +\(awarded.bonus) \(awarded.label)")
+            presentSkillCard()
+        }
+    }
+
+    // v1.9 Unit 4: the even-level stat picker, shown before the skill card.
+    private func presentStatChoice() {
+        gameState = .statChoice
+        let node = StatChoiceNode()
+        node.present(in: camera ?? self)
+        statChoiceNode = node
+    }
+
+    private func handleStatChoice(_ touch: UITouch) {
+        guard let node = statChoiceNode else { return }
+        let location = touch.location(in: node)
+        guard let kind = node.statAt(location) else { return }
+        AudioManager.shared.play(.cardSelect)
+        playerStats.applyStatBonus(kind)
+        node.animateSelection(kind) { [weak self] in
+            self?.statChoiceNode = nil
+            self?.presentSkillCard()
+        }
+    }
+
+    /// The skill-card step of a level-up (every level ends here).
+    private func presentSkillCard() {
+        gameState = .levelUp
+
         if let label = levelUpOverlay.childNode(withName: "levelUpLabel") as? SKLabelNode {
             label.text = "LEVEL \(player.currentLevel)"
         }
-        
+
         showCardSelection(upgradeManager.drawCards(count: 3))
         
         // Show/hide reroll + extra card + extra pick buttons
@@ -4818,6 +4860,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pendingSynergies = []
         pendingCapstones = []
         capstoneQueue = []
+        statChoiceNode?.removeFromParent()
+        statChoiceNode = nil
         bossDefeatedThisRun = false
         pendingForgeXP = 0
         

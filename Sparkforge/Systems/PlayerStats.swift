@@ -33,6 +33,35 @@ final class PlayerStats {
         return CGFloat(currentHP) / CGFloat(maxHP)
     }
     
+    // v1.9 Unit 4: the three level-up stat lanes.
+    enum StatKind: CaseIterable {
+        case hp, attack, defense
+        var label: String { self == .hp ? "MAX HP" : self == .attack ? "ATK" : "DEF" }
+        var emoji: String { self == .hp ? "❤️" : self == .attack ? "⚔️" : "🛡️" }
+        var colorHex: UInt32 { self == .hp ? 0xE05555 : self == .attack ? 0xFF8833 : 0x4C90D0 }
+        var bonus: Int {
+            switch self {
+            case .hp: return GameConfig.LevelUp.hpBonus
+            case .attack: return GameConfig.LevelUp.attackBonus
+            case .defense: return GameConfig.LevelUp.defenseBonus
+            }
+        }
+    }
+
+    /// v1.9 Unit 4: apply one level-up stat award (chosen or random).
+    /// HP raises the pool AND heals for the same, so it's felt immediately.
+    func applyStatBonus(_ kind: StatKind) {
+        switch kind {
+        case .hp:
+            maxHP += kind.bonus
+            currentHP = min(currentHP + kind.bonus, maxHP)
+        case .attack:
+            baseAttack += kind.bonus
+        case .defense:
+            defense += kind.bonus
+        }
+    }
+
     /// Take damage after DEF reduction. Returns true if player died (HP <= 0).
     @discardableResult
     func takeDamage(_ rawDamage: Int) -> Bool {
