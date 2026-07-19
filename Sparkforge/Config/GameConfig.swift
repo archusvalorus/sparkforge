@@ -98,6 +98,11 @@ enum GameConfig {
         static let colorHex: UInt32 = 0xFFCC44
         /// Max range before despawn (in points) — bumped for larger arena
         static let maxRange: CGFloat = 400
+        /// v1.9: multishot fan (3+ pellets). Total cone = spreadAngle × this,
+        /// held STATIC as pellets increase — more pellets pack denser into the
+        /// same fan, not wider. 1.5 = 25% narrower than the old count-scaled
+        /// 3-shot spread (which was spreadAngle × 2). 2 pellets stay parallel.
+        static let multishotFanWidthFactor: CGFloat = 1.5
     }
     
     // MARK: - Joystick

@@ -2244,9 +2244,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 let dir = CGPoint(x: cos(angle), y: sin(angle))
                 fireProjectile(direction: dir)
             }
-        } else {
-            // v1.7 fix (Brandon field report): extra projectiles fly as
-            // aligned parallel columns (:), not a V — all forward, offset
+        } else if shotCount == 2 {
+            // v1.7 fix (Brandon field report): TWO projectiles fly as aligned
+            // parallel columns (:), not a V — all forward, offset
             // perpendicular to the shot line
             let perp = CGPoint(x: -baseDirection.y, y: baseDirection.x)
             let spacing: CGFloat = 12
@@ -2255,6 +2255,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             for i in 0..<shotCount {
                 let offset = perp * (startOffset + spacing * CGFloat(i))
                 fireProjectile(direction: baseDirection, originOffset: offset)
+            }
+        } else {
+            // v1.9 (Brandon playtest): 3+ projectiles break into a V fan with a
+            // STATIC cone — adding pellets packs them denser into the same fan,
+            // it doesn't widen. 25% narrower than the old count-scaled spread.
+            // Refines the v1.7 parallel-columns call (now 2 pellets only).
+            let totalSpread = playerStats.spreadAngle * GameConfig.Projectile.multishotFanWidthFactor
+            let startAngle = atan2(baseDirection.y, baseDirection.x) - totalSpread / 2
+            let step = totalSpread / CGFloat(shotCount - 1)
+
+            for i in 0..<shotCount {
+                let angle = startAngle + step * CGFloat(i)
+                let dir = CGPoint(x: cos(angle), y: sin(angle))
+                fireProjectile(direction: dir)
             }
         }
     }

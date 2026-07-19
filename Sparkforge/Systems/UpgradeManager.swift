@@ -108,15 +108,12 @@ final class UpgradeManager {
         if let i = cards.firstIndex(where: { $0.id == "neutral_6" }) {
             cards[i].higherTiers = [
                 { stats in stats.extraProjectiles += 1 },
-                { stats in
-                    stats.extraProjectiles += 1
-                    stats.spreadAngle += 0.10
-                }
+                { stats in stats.extraProjectiles += 1 }
             ]
             cards[i].tierDescriptions = [
                 "+1 projectile (wider spread)",
                 "+1 more projectile",
-                "+1 more projectile, wider fan"
+                "+1 more projectile, denser fan"
             ]
         }
         #endif
