@@ -19,6 +19,14 @@ protocol CodexPage: SKNode {
     func scroll(by dy: CGFloat)
     func hitTestClose(at location: CGPoint) -> Bool
     func dismiss()
+    /// v1.9 Unit 2: a tap-up (not a drag) at `location` in this page's space.
+    /// Returns true if the page consumed it (e.g. opened/closed a card detail)
+    /// so the host skips its own close handling. Default: false (no-op).
+    func handleTapUp(at location: CGPoint) -> Bool
+}
+
+extension CodexPage {
+    func handleTapUp(at location: CGPoint) -> Bool { false }
 }
 
 final class SynergyCodexNode: SKNode, CodexPage {

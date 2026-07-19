@@ -23,6 +23,15 @@ final class CardDetailNode: SKNode {
         let reached: Bool
     }
 
+    /// v1.9 Unit 2: one rung of a card's own tier ladder.
+    struct CardTierLine {
+        let tier: Int
+        let effect: String
+        /// In-run: this tier has been reached (gets a ✓). Codex (no run):
+        /// false everywhere — the ladder renders as readable reference.
+        let reached: Bool
+    }
+
     struct Content {
         let name: String
         let tag: UpgradeManager.Tag
@@ -32,8 +41,12 @@ final class CardDetailNode: SKNode {
         /// (e.g. Neutral cards have no tree synergy).
         let tiers: [TierLine]
         /// v1.9: card-tier line for multi-tier cards (e.g. "TIER 2 / 3").
-        /// nil for 1-tier cards — nothing renders. Full ladder view is Unit 2.
+        /// nil for 1-tier cards — nothing renders.
         var cardTierLine: String? = nil
+        /// v1.9 Unit 2: the card's own tier ladder (rung per tier). When set
+        /// (multi-tier cards), the ladder replaces the single `effect` line —
+        /// rung 1 IS the base effect. nil/empty → 1-tier card, show `effect`.
+        var cardLadder: [CardTierLine]? = nil
     }
 
     // MARK: - Layout constants
@@ -103,17 +116,49 @@ final class CardDetailNode: SKNode {
             y -= 18
         }
 
-        // Effect — the card's own line, wrapped.
-        for line in Self.wrap(content.effect, maxChars: 34) {
-            let l = SKLabelNode(fontNamed: "Menlo")
-            l.text = line
-            l.fontSize = 12
-            l.fontColor = SKColor(hex: 0xDDDDDD)
-            l.verticalAlignmentMode = .top
-            l.horizontalAlignmentMode = .center
-            l.position = CGPoint(x: 0, y: y)
-            body.addChild(l)
-            y -= 16
+        if let ladder = content.cardLadder, !ladder.isEmpty {
+            // v1.9 Unit 2: multi-tier card — render the ladder (rung 1 is the
+            // base effect), left-aligned like the synergy tiers below it.
+            let left = -(Self.panelWidth / 2) + Self.padX
+            for rung in ladder {
+                let title = SKLabelNode(fontNamed: "Menlo-Bold")
+                title.text = "Lv\(rung.tier)\(rung.reached ? "   ✓" : "")"
+                title.fontSize = 11
+                title.fontColor = rung.reached ? UpgradeCardNode.brightColor(for: content.tag)
+                                               : SKColor(hex: colorHex, alpha: 0.85)
+                title.verticalAlignmentMode = .top
+                title.horizontalAlignmentMode = .left
+                title.position = CGPoint(x: left, y: y)
+                body.addChild(title)
+                y -= 14
+
+                for line in Self.wrap(rung.effect, maxChars: 38) {
+                    let l = SKLabelNode(fontNamed: "Menlo")
+                    l.text = line
+                    l.fontSize = 10
+                    l.fontColor = SKColor(hex: 0xCCCCCC)
+                    l.verticalAlignmentMode = .top
+                    l.horizontalAlignmentMode = .left
+                    l.position = CGPoint(x: left + 30, y: y)
+                    body.addChild(l)
+                    y -= 13
+                }
+                y -= 5
+            }
+            y -= 3
+        } else {
+            // Effect — the card's own line, wrapped (1-tier cards).
+            for line in Self.wrap(content.effect, maxChars: 34) {
+                let l = SKLabelNode(fontNamed: "Menlo")
+                l.text = line
+                l.fontSize = 12
+                l.fontColor = SKColor(hex: 0xDDDDDD)
+                l.verticalAlignmentMode = .top
+                l.horizontalAlignmentMode = .center
+                l.position = CGPoint(x: 0, y: y)
+                body.addChild(l)
+                y -= 16
+            }
         }
 
         // Synergy tiers for the tree (skipped for Neutral / no-synergy cards).

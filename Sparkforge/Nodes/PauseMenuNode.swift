@@ -34,8 +34,15 @@ final class PauseMenuNode: SKNode {
     /// v1.8: the card-detail modal opened by tapping a build chip. Any tap
     /// closes it. Held here so taps route to it before the pane buttons.
     private var detailNode: CardDetailNode?
-    /// v1.8 Unit 7/9: the open codex page (Synergies or Bestiary).
+    /// v1.8 Unit 7/9: the open codex page (Synergies / Cards / Bestiary).
     private var codexNode: CodexPage?
+    /// v1.9 Unit 2: the codex selector hub — one canonical route to all three
+    /// faces, shared with the title screen. The pause CODEX button opens it.
+    private var codexHub: CodexHubNode?
+    /// v1.9 Unit 2: true only when the current touch BEGAN on an open codex
+    /// page — stops the tap that opens a page (began on the hub) from bleeding
+    /// through into a card-detail tap. Mirrors TitleScene.
+    private var codexTouchBeganOnPage = false
     /// Captured on show() so a chip tap can resolve its card + tag counts.
     private weak var upgradeManager: UpgradeManager?
 
@@ -68,6 +75,7 @@ final class PauseMenuNode: SKNode {
         self.upgradeManager = upgradeManager
         dismissDetail()
         dismissCodex()
+        dismissCodexHub()
         rebuildBuildViewer(upgradeManager: upgradeManager)
         settingsPane.isHidden = true
         mainPane.isHidden = false
@@ -77,6 +85,7 @@ final class PauseMenuNode: SKNode {
     func hide() {
         dismissDetail()
         dismissCodex()
+        dismissCodexHub()
         run(SKAction.fadeOut(withDuration: 0.15))
     }
 
@@ -93,18 +102,13 @@ final class PauseMenuNode: SKNode {
         buildViewer.position = .zero
         mainPane.addChild(buildViewer)
 
-        // v1.8: codex access — SYNERGIES + BESTIARY side by side (amber), then
-        // the action stack. All white text for a consistent read.
-        mainPane.addChild(Self.button(name: "synergyCodexButton", text: "⬡ SYNERGIES",
-                                      size: CGSize(width: 116, height: 42),
-                                      position: CGPoint(x: -62, y: -70),
+        // v1.9 Unit 2: one canonical CODEX route — opens the shared hub (all
+        // three faces: Synergies / Cards / Bestiary), same as the title screen.
+        mainPane.addChild(Self.button(name: "codexButton", text: "📖 CODEX",
+                                      size: CGSize(width: 240, height: 42),
+                                      position: CGPoint(x: 0, y: -70),
                                       fillHex: 0x2A1A00, strokeHex: 0xFFAA33,
-                                      textHex: 0xFFFFFF, fontSize: 13, bold: true))
-        mainPane.addChild(Self.button(name: "bestiaryCodexButton", text: "☖ BESTIARY",
-                                      size: CGSize(width: 116, height: 42),
-                                      position: CGPoint(x: 62, y: -70),
-                                      fillHex: 0x2A1A00, strokeHex: 0xFFAA33,
-                                      textHex: 0xFFFFFF, fontSize: 13, bold: true))
+                                      textHex: 0xFFFFFF, fontSize: 14, bold: true))
         mainPane.addChild(Self.button(name: "resumeButton", text: "RESUME",
                                       size: CGSize(width: 240, height: 42),
                                       position: CGPoint(x: 0, y: -124),
@@ -304,6 +308,12 @@ final class PauseMenuNode: SKNode {
         if codexNode != nil {
             scrollLastY = location.y
             scrollMovement = 0
+            codexTouchBeganOnPage = true
+            return
+        }
+        codexTouchBeganOnPage = false
+        if let hub = codexHub {
+            handleHubAction(hub.action(at: location))   // may present a page
             return
         }
         handleTap(at: location)
@@ -319,9 +329,15 @@ final class PauseMenuNode: SKNode {
 
     func handleTouchEnded(at location: CGPoint) {
         guard let codex = codexNode else { return }
-        // A tap (not a drag) on the ✕ closes; taps elsewhere do nothing.
-        if scrollMovement < 8 && codex.hitTestClose(at: location) {
-            dismissCodex()
+        // Ignore the tap that opened this page (began on the hub) so it can't
+        // bleed through into a card-detail tap.
+        guard codexTouchBeganOnPage else { return }
+        guard scrollMovement < 8 else { return }   // a drag, not a tap
+        // The Card codex consumes taps to open/close a card detail.
+        if codex.handleTapUp(at: location) { return }
+        // A tap on the ✕ closes the page (back to the hub).
+        if codex.hitTestClose(at: location) {
+            dismissCodexPage()
         }
     }
 
@@ -345,10 +361,8 @@ final class PauseMenuNode: SKNode {
         switch hit.name {
         case "resumeButton":
             onResume?()
-        case "synergyCodexButton":
-            presentCodex { SynergyCodexNode(width: $0, height: $1, topInset: $2, bottomInset: $3) }
-        case "bestiaryCodexButton":
-            presentCodex { BestiaryCodexNode(width: $0, height: $1, topInset: $2, bottomInset: $3) }
+        case "codexButton":
+            presentCodexHub()
         case "settingsButton":
             mainPane.isHidden = true
             settingsPane.isHidden = false
@@ -396,15 +410,23 @@ final class PauseMenuNode: SKNode {
             CardDetailNode.TierLine(threshold: $0.threshold, title: $0.title,
                                     effect: $0.effect, reached: count >= $0.threshold)
         }
-        // v1.9: multi-tier cards show their current rung; the effect line is
-        // the copy for the tier the player has (not the base description).
+        // v1.9: multi-tier cards render their full ladder with the reached
+        // rungs marked; 1-tier cards keep the single effect line.
         let cardTier = manager.tier(of: card.id)
+        let ladder: [CardDetailNode.CardTierLine]? = card.maxTier > 1
+            ? (1...card.maxTier).map {
+                CardDetailNode.CardTierLine(tier: $0,
+                                            effect: card.description(forTier: $0),
+                                            reached: $0 <= cardTier)
+              }
+            : nil
         let content = CardDetailNode.Content(
             name: card.name, tag: card.tag,
             secondaryTag: card.secondaryTag,
-            effect: card.description(forTier: max(cardTier, 1)),
+            effect: card.description,
             tiers: tiers,
-            cardTierLine: card.maxTier > 1 ? "TIER \(cardTier) / \(card.maxTier)" : nil
+            cardTierLine: card.maxTier > 1 ? "TIER \(cardTier) / \(card.maxTier)" : nil,
+            cardLadder: ladder
         )
         let detail = CardDetailNode(content: content)
         detail.present(in: self)
@@ -417,7 +439,38 @@ final class PauseMenuNode: SKNode {
         detailNode = nil
     }
 
-    // MARK: - Synergy codex (Unit 7)
+    // MARK: - Codex hub + pages (v1.8 Unit 7/9; v1.9 Unit 2 unified route)
+
+    /// v1.9 Unit 2: open the shared selector hub (Synergies / Cards / Bestiary).
+    private func presentCodexHub() {
+        guard codexHub == nil, codexNode == nil else { return }
+        let hub = CodexHubNode()
+        hub.present(in: self)
+        codexHub = hub
+    }
+
+    private func handleHubAction(_ action: CodexHubNode.Action?) {
+        guard let action = action else { return }   // disabled / inside-panel tap
+        codexHub?.dismiss()
+        codexHub = nil
+        switch action {
+        case .close:
+            break
+        case .open(let face):
+            presentCodexPage(face)
+        }
+    }
+
+    private func presentCodexPage(_ face: CodexHubNode.Face) {
+        switch face {
+        case .synergies:
+            presentCodex { SynergyCodexNode(width: $0, height: $1, topInset: $2, bottomInset: $3) }
+        case .cards:
+            presentCodex { CardCodexNode(width: $0, height: $1, topInset: $2, bottomInset: $3) }
+        case .bestiary:
+            presentCodex { BestiaryCodexNode(width: $0, height: $1, topInset: $2, bottomInset: $3) }
+        }
+    }
 
     private func presentCodex(_ make: (CGFloat, CGFloat, CGFloat, CGFloat) -> CodexPage) {
         guard codexNode == nil else { return }
@@ -431,9 +484,21 @@ final class PauseMenuNode: SKNode {
         codexNode = page
     }
 
+    /// A page's ✕ returns to the hub so you can browse another face.
+    private func dismissCodexPage() {
+        codexNode?.dismiss()
+        codexNode = nil
+        presentCodexHub()
+    }
+
     private func dismissCodex() {
         codexNode?.dismiss()
         codexNode = nil
+    }
+
+    private func dismissCodexHub() {
+        codexHub?.dismiss()
+        codexHub = nil
     }
 
     // MARK: - Button helpers

@@ -17,11 +17,13 @@ final class CodexHubNode: SKNode {
     private static let panelH: CGFloat = 250
 
     private let synergiesFrame: CGRect
+    private let cardsFrame: CGRect
     private let bestiaryFrame: CGRect
 
     override init() {
         let bw: CGFloat = 240, bh: CGFloat = 44
         synergiesFrame = CGRect(x: -bw / 2, y: 45 - bh / 2, width: bw, height: bh)
+        cardsFrame = CGRect(x: -bw / 2, y: -10 - bh / 2, width: bw, height: bh)
         let bestiaryY: CGFloat = -65
         bestiaryFrame = CGRect(x: -bw / 2, y: bestiaryY - bh / 2, width: bw, height: bh)
 
@@ -46,8 +48,8 @@ final class CodexHubNode: SKNode {
 
         addChild(Self.button("⬡  SYNERGIES", center: CGPoint(x: 0, y: 45),
                              size: CGSize(width: 240, height: 44), enabled: true))
-        addChild(Self.button("◈  CARDS · soon", center: CGPoint(x: 0, y: -10),
-                             size: CGSize(width: 240, height: 44), enabled: false))
+        addChild(Self.button("◈  CARDS", center: CGPoint(x: 0, y: -10),
+                             size: CGSize(width: 240, height: 44), enabled: true))
         addChild(Self.button("☖  BESTIARY", center: CGPoint(x: 0, y: -65),
                              size: CGSize(width: 240, height: 44), enabled: true))
 
@@ -78,8 +80,8 @@ final class CodexHubNode: SKNode {
     /// Resolve a tap in this node's space to an action (nil = ignore).
     func action(at location: CGPoint) -> Action? {
         if synergiesFrame.contains(location) { return .open(.synergies) }
+        if cardsFrame.contains(location) { return .open(.cards) }
         if bestiaryFrame.contains(location) { return .open(.bestiary) }
-        // Cards is disabled — a tap on it does nothing.
         let panel = CGRect(x: -Self.panelW / 2, y: -Self.panelH / 2, width: Self.panelW, height: Self.panelH)
         if !panel.contains(location) { return .close }
         return nil

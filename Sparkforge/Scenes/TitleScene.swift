@@ -81,6 +81,10 @@ final class TitleScene: SKScene {
     private var codexPage: CodexPage?
     private var codexScrollLastY: CGFloat = 0
     private var codexScrollMovement: CGFloat = 0
+    /// v1.9 Unit 2: true only when the current touch BEGAN on an open codex
+    /// page. Stops the tap that opens a page (began on the hub) from bleeding
+    /// through into a card-detail tap on the freshly-presented page.
+    private var codexTouchBeganOnPage = false
     private var forgePathRowY: CGFloat = 0
 
     // v1.7: arena browser can show the next LOCKED arena (with its
@@ -877,10 +881,12 @@ final class TitleScene: SKScene {
         if codexPage != nil {
             codexScrollLastY = location.y
             codexScrollMovement = 0
+            codexTouchBeganOnPage = true
             return
         }
+        codexTouchBeganOnPage = false
         if let hub = codexHub {
-            handleHubAction(hub.action(at: location))
+            handleHubAction(hub.action(at: location))  // may present a page
             return
         }
 
@@ -1013,8 +1019,15 @@ final class TitleScene: SKScene {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first, let page = codexPage else { return }
-        // A tap (not a drag) on the ✕ closes the page (back to the hub).
-        if codexScrollMovement < 8 && page.hitTestClose(at: touch.location(in: self)) {
+        // Ignore the tap that opened this page (it began on the hub, not the
+        // page) so it can't bleed through into a card-detail tap.
+        guard codexTouchBeganOnPage else { return }
+        guard codexScrollMovement < 8 else { return }   // a drag, not a tap
+        let loc = touch.location(in: self)
+        // v1.9 Unit 2: the Card codex consumes taps to open/close a card detail.
+        if page.handleTapUp(at: loc) { return }
+        // A tap on the ✕ closes the page (back to the hub).
+        if page.hitTestClose(at: loc) {
             dismissCodexPage()
         }
     }
@@ -1051,7 +1064,7 @@ final class TitleScene: SKScene {
         case .bestiary:
             page = BestiaryCodexNode(width: w, height: h, topInset: insets.top, bottomInset: insets.bottom)
         case .cards:
-            return  // Card codex — Unit 8
+            page = CardCodexNode(width: w, height: h, topInset: insets.top, bottomInset: insets.bottom)
         }
         addChild(page)
         page.alpha = 0
