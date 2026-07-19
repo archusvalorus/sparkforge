@@ -27,7 +27,6 @@ final class PauseMenuNode: SKNode {
     // MARK: - Nodes
 
     private let mainPane = SKNode()
-    private let settingsPane = SKNode()
     /// Rebuilt on every show() from the run's picked cards
     private let buildViewer = SKNode()
 
@@ -43,6 +42,8 @@ final class PauseMenuNode: SKNode {
     /// page — stops the tap that opens a page (began on the hub) from bleeding
     /// through into a card-detail tap. Mirrors TitleScene.
     private var codexTouchBeganOnPage = false
+    /// v1.9: the shared Settings modal (SFX/BGM). No Erase button in pause.
+    private var settingsMenu: SettingsMenuNode?
     /// Captured on show() so a chip tap can resolve its card + tag counts.
     private weak var upgradeManager: UpgradeManager?
 
@@ -59,10 +60,7 @@ final class PauseMenuNode: SKNode {
         addChild(bg)
 
         setupMainPane()
-        setupSettingsPane()
         addChild(mainPane)
-        addChild(settingsPane)
-        settingsPane.isHidden = true
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -76,8 +74,8 @@ final class PauseMenuNode: SKNode {
         dismissDetail()
         dismissCodex()
         dismissCodexHub()
+        dismissSettingsMenu()
         rebuildBuildViewer(upgradeManager: upgradeManager)
-        settingsPane.isHidden = true
         mainPane.isHidden = false
         run(SKAction.fadeIn(withDuration: 0.15))
     }
@@ -86,6 +84,7 @@ final class PauseMenuNode: SKNode {
         dismissDetail()
         dismissCodex()
         dismissCodexHub()
+        dismissSettingsMenu()
         run(SKAction.fadeOut(withDuration: 0.15))
     }
 
@@ -257,44 +256,6 @@ final class PauseMenuNode: SKNode {
         return chip
     }
 
-    // MARK: - Settings pane
-
-    private func setupSettingsPane() {
-        let title = SKLabelNode(fontNamed: "Menlo-Bold")
-        title.text = "SETTINGS"
-        title.fontSize = 24
-        title.fontColor = SKColor(hex: 0xFFAA33)
-        title.position = CGPoint(x: 0, y: 80)
-        settingsPane.addChild(title)
-
-        settingsPane.addChild(Self.button(name: "sfxToggle", text: sfxText,
-                                          size: CGSize(width: 240, height: 42),
-                                          position: CGPoint(x: 0, y: 20),
-                                          fillHex: 0x2A2A2A, strokeHex: 0x777777,
-                                          textHex: 0xCCCCCC, fontSize: 15, bold: true))
-        settingsPane.addChild(Self.button(name: "bgmToggle", text: bgmText,
-                                          size: CGSize(width: 240, height: 42),
-                                          position: CGPoint(x: 0, y: -32),
-                                          fillHex: 0x2A2A2A, strokeHex: 0x777777,
-                                          textHex: 0xCCCCCC, fontSize: 15, bold: true))
-
-        let bgmNote = SKLabelNode(fontNamed: "Menlo")
-        bgmNote.text = "music coming soon"
-        bgmNote.fontSize = 10
-        bgmNote.fontColor = SKColor(hex: 0x666666)
-        bgmNote.position = CGPoint(x: 0, y: -56)
-        settingsPane.addChild(bgmNote)
-
-        settingsPane.addChild(Self.button(name: "settingsBackButton", text: "BACK",
-                                          size: CGSize(width: 240, height: 42),
-                                          position: CGPoint(x: 0, y: -104),
-                                          fillHex: 0x333333, strokeHex: 0x888888,
-                                          textHex: 0xE0E0E0, fontSize: 14, bold: false))
-    }
-
-    private var sfxText: String { SettingsManager.shared.sfxEnabled ? "SFX: ON" : "SFX: OFF" }
-    private var bgmText: String { SettingsManager.shared.bgmEnabled ? "BGM: ON" : "BGM: OFF" }
-
     // MARK: - Touch
 
     /// Location is in this node's coordinate space. Buttons carry their
@@ -312,6 +273,10 @@ final class PauseMenuNode: SKNode {
             return
         }
         codexTouchBeganOnPage = false
+        if let settings = settingsMenu {
+            handleSettingsAction(settings.action(at: location))
+            return
+        }
         if let hub = codexHub {
             handleHubAction(hub.action(at: location))   // may present a page
             return
@@ -348,15 +313,13 @@ final class PauseMenuNode: SKNode {
             return
         }
 
-        // Build-viewer chips (main pane only) open the card-detail modal.
-        if settingsPane.isHidden, let index = Self.chipHitIndex(in: buildViewer, at: location) {
+        // Build-viewer chips open the card-detail modal.
+        if let index = Self.chipHitIndex(in: buildViewer, at: location) {
             presentDetail(forCardAt: index)
             return
         }
 
-        let pane = settingsPane.isHidden ? mainPane : settingsPane
-
-        guard let hit = Self.buttonHit(in: pane, at: location) else { return }
+        guard let hit = Self.buttonHit(in: mainPane, at: location) else { return }
 
         switch hit.name {
         case "resumeButton":
@@ -364,21 +327,9 @@ final class PauseMenuNode: SKNode {
         case "codexButton":
             presentCodexHub()
         case "settingsButton":
-            mainPane.isHidden = true
-            settingsPane.isHidden = false
+            presentSettingsMenu()
         case "pauseMenuButton":
             onReturnToMenu?()
-        case "settingsBackButton":
-            settingsPane.isHidden = true
-            mainPane.isHidden = false
-        case "sfxToggle":
-            SettingsManager.shared.sfxEnabled.toggle()
-            Self.setButtonText(hit, sfxText)
-            AudioManager.shared.play(.cardSelect)
-        case "bgmToggle":
-            SettingsManager.shared.bgmEnabled.toggle()
-            Self.setButtonText(hit, bgmText)
-            AudioManager.shared.play(.cardSelect)
         default:
             break
         }
@@ -501,6 +452,30 @@ final class PauseMenuNode: SKNode {
         codexHub = nil
     }
 
+    // MARK: - Settings (shared modal; no Erase in pause)
+
+    private func presentSettingsMenu() {
+        guard settingsMenu == nil, codexNode == nil, codexHub == nil else { return }
+        let menu = SettingsMenuNode(showErase: false)
+        menu.present(in: self)
+        settingsMenu = menu
+    }
+
+    private func handleSettingsAction(_ action: SettingsMenuNode.Action?) {
+        guard let action = action else { return }   // toggle handled internally / inside-panel
+        switch action {
+        case .close:
+            dismissSettingsMenu()
+        case .erase:
+            break   // never surfaced in pause (showErase: false)
+        }
+    }
+
+    private func dismissSettingsMenu() {
+        settingsMenu?.dismiss()
+        settingsMenu = nil
+    }
+
     // MARK: - Button helpers
 
     private static func button(name: String, text: String, size: CGSize,
@@ -538,9 +513,5 @@ final class PauseMenuNode: SKNode {
             if frame.contains(location) { return child }
         }
         return nil
-    }
-
-    private static func setButtonText(_ button: SKNode, _ text: String) {
-        (button.childNode(withName: "label") as? SKLabelNode)?.text = text
     }
 }

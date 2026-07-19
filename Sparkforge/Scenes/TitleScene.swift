@@ -85,6 +85,12 @@ final class TitleScene: SKScene {
     /// page. Stops the tap that opens a page (began on the hub) from bleeding
     /// through into a card-detail tap on the freshly-presented page.
     private var codexTouchBeganOnPage = false
+    /// v1.9: the shared Settings modal (with Erase on the title surface) + the
+    /// multi-step erase confirmation flow it can launch.
+    private var settingsMenu: SettingsMenuNode?
+    private var eraseModal: SKNode?
+    private var eraseTextField: UITextField?
+    private weak var eraseConfirmButton: SKNode?
     private var forgePathRowY: CGFloat = 0
 
     // v1.7: arena browser can show the next LOCKED arena (with its
@@ -116,6 +122,7 @@ final class TitleScene: SKScene {
         setupDailyForge()
         setupTapPrompt()
         setupSettings()
+        setupSettingsGear(topInset: view.safeAreaInsets.top)
 
         // v1.7: warm up the blessing-choice ad while the forge is unclaimed
         if !DailyForgeManager.shared.hasClaimedToday && !IAPManager.shared.hasRemovedAds {
@@ -893,6 +900,17 @@ final class TitleScene: SKScene {
             return
         }
 
+        // v1.9: the erase flow is the most modal thing on screen — it captures
+        // every tap until dismissed. Settings sits behind it.
+        if eraseModal != nil {
+            handleEraseModalTap(at: location)
+            return
+        }
+        if let settings = settingsMenu {
+            handleSettingsAction(settings.action(at: location))
+            return
+        }
+
         // v1.7: choice + picker modals capture taps first
         if blessingChoiceModal != nil {
             handleBlessingChoiceTap(location)
@@ -980,6 +998,12 @@ final class TitleScene: SKScene {
                 presentCodexHub()
                 return
             }
+        }
+
+        // v1.9: Settings gear (top-right) → shared Settings modal
+        if settingsGearHit(location) {
+            presentSettingsMenu()
+            return
         }
 
         // Check restore purchases tap
@@ -1080,7 +1104,282 @@ final class TitleScene: SKScene {
         codexPage = nil
         presentCodexHub()  // back to the picker so you can browse another face
     }
-    
+
+    // MARK: - v1.9: Settings gear + shared Settings modal
+
+    private func setupSettingsGear(topInset: CGFloat) {
+        let gear = SKNode()
+        gear.name = "settingsGearButton"
+        gear.zPosition = 20
+        let top = max(topInset, 20)
+        gear.position = CGPoint(x: size.width / 2 - 34, y: size.height / 2 - top - 26)
+        let bg = SKShapeNode(circleOfRadius: 18)
+        bg.fillColor = SKColor(hex: 0x1A1420)
+        bg.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.5)
+        bg.lineWidth = 1.5
+        gear.addChild(bg)
+        let icon = SKLabelNode(text: "⚙︎")
+        icon.fontSize = 20
+        icon.verticalAlignmentMode = .center
+        icon.horizontalAlignmentMode = .center
+        gear.addChild(icon)
+        addChild(gear)
+    }
+
+    private func settingsGearHit(_ location: CGPoint) -> Bool {
+        guard let gear = childNode(withName: "settingsGearButton") else { return false }
+        return gear.calculateAccumulatedFrame().insetBy(dx: -10, dy: -10).contains(location)
+    }
+
+    private func presentSettingsMenu() {
+        guard settingsMenu == nil, codexHub == nil, codexPage == nil, eraseModal == nil else { return }
+        let menu = SettingsMenuNode(showErase: true)
+        menu.present(in: self)
+        settingsMenu = menu
+    }
+
+    private func dismissSettingsMenu() {
+        settingsMenu?.dismiss()
+        settingsMenu = nil
+    }
+
+    private func handleSettingsAction(_ action: SettingsMenuNode.Action?) {
+        guard let action = action else { return }
+        switch action {
+        case .close:
+            dismissSettingsMenu()
+        case .erase:
+            dismissSettingsMenu()
+            startEraseFlow()
+        }
+    }
+
+    // MARK: - v1.9: Erase-all-progress flow (title-only, three gates)
+
+    private func startEraseFlow() {
+        let msg = "Erasing all progress means you start at Arena 1 with no arenas unlocked, and Forge level progress resets. Purchased skins will remain, but earned skins will need to be re-earned. Continue?"
+        presentEraseModal(makeConfirmModal(
+            title: "⛔  ERASE PROGRESS", titleHex: 0xE74C3C, message: msg,
+            confirm: ("CONTINUE", "eraseContinue1", 0xC0392B), cancel: "eraseCancel"))
+    }
+
+    private func eraseStep2() {
+        presentEraseModal(makeConfirmModal(
+            title: "⚠︎  ARE YOU SURE?", titleHex: 0xE74C3C,
+            message: "Are you sure you want to reset progress? This cannot be undone.",
+            confirm: ("YES, RESET", "eraseContinue2", 0xC0392B), cancel: "eraseCancel"))
+    }
+
+    private func eraseStep3() {
+        let node = SKNode()
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.82)
+        dim.strokeColor = .clear
+        node.addChild(dim)
+
+        // Roomier than the two text confirms — it holds five stacked elements,
+        // so it needs real vertical space (was 250, felt cramped at the bottom).
+        let panelH: CGFloat = 290
+        let panel = SKShapeNode(rectOf: CGSize(width: 300, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x141018)
+        panel.strokeColor = SKColor(hex: 0xC0392B, alpha: 0.85)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 4
+        node.addChild(panel)
+
+        let title = UITheme.label("FINAL CONFIRMATION", size: UITheme.Size.heading,
+                                  color: SKColor(hex: 0xE74C3C), bold: true)
+        title.position = CGPoint(x: 0, y: 109)
+        node.addChild(title)
+
+        for (i, line) in ["Type ERASE below to", "permanently wipe your save."].enumerated() {
+            let l = UITheme.label(line, size: UITheme.Size.body, color: UITheme.Color.infoSoft)
+            l.position = CGPoint(x: 0, y: 77 - CGFloat(i) * 18)
+            node.addChild(l)
+        }
+
+        // The UITextField overlays this outline; both sit at scene y = 13 (see
+        // addEraseTextField), leaving the buttons a comfortable bottom margin.
+        let inputOutline = SKShapeNode(rectOf: CGSize(width: 184, height: 40), cornerRadius: 6)
+        inputOutline.fillColor = SKColor(hex: 0x000000, alpha: 0.35)
+        inputOutline.strokeColor = SKColor(hex: 0xC0392B, alpha: 0.5)
+        inputOutline.position = CGPoint(x: 0, y: 13)
+        node.addChild(inputOutline)
+
+        let eraseBtn = modalButton(name: "eraseFinal", text: "ERASE", y: -44,
+                                   fill: 0x3A2422, stroke: 0xC0392B, textHex: 0x886666)
+        node.addChild(eraseBtn)
+        eraseConfirmButton = eraseBtn
+
+        node.addChild(modalButton(name: "eraseCancel", text: "CANCEL", y: -98,
+                                  fill: 0x333333, stroke: 0x888888, textHex: 0xE0E0E0))
+
+        presentEraseModal(node)
+        addEraseTextField()
+    }
+
+    private func performErase() {
+        ProgressionManager.shared.eraseAllProgress()
+        dismissEraseFlow()
+        // Rebuild the whole title from the now-wiped save — every surface
+        // (arena lock, Forge level, stats, forge path) reflects the reset.
+        // Match the canonical presentation (GameViewController): view-sized,
+        // resizeFill, center origin — else the fresh scene lays out shifted.
+        if let view = view {
+            let fresh = TitleScene(size: view.bounds.size)
+            fresh.scaleMode = .resizeFill
+            fresh.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            view.presentScene(fresh, transition: .fade(with: .black, duration: 0.4))
+        }
+    }
+
+    // MARK: Erase-flow plumbing
+
+    private func presentEraseModal(_ node: SKNode) {
+        eraseModal?.removeFromParent()
+        removeEraseTextField()
+        node.zPosition = 490
+        addChild(node)
+        node.alpha = 0
+        node.run(SKAction.fadeIn(withDuration: 0.12))
+        eraseModal = node
+    }
+
+    private func dismissEraseFlow() {
+        eraseModal?.removeFromParent()
+        eraseModal = nil
+        eraseConfirmButton = nil
+        removeEraseTextField()
+    }
+
+    func handleEraseModalTap(at location: CGPoint) {
+        guard let modal = eraseModal else { return }
+        let hit = modal.children.first { node in
+            guard let w = node.userData?["w"] as? CGFloat,
+                  let h = node.userData?["h"] as? CGFloat else { return false }
+            return CGRect(x: node.position.x - w / 2, y: node.position.y - h / 2,
+                          width: w, height: h).contains(location)
+        }
+        switch hit?.name {
+        case "eraseCancel":
+            dismissEraseFlow()
+        case "eraseContinue1":
+            eraseStep2()
+        case "eraseContinue2":
+            eraseStep3()
+        case "eraseFinal":
+            if (eraseTextField?.text ?? "").uppercased() == "ERASE" { performErase() }
+        default:
+            break
+        }
+    }
+
+    private func makeConfirmModal(title: String, titleHex: UInt32, message: String,
+                                  confirm: (text: String, name: String, fill: UInt32),
+                                  cancel cancelName: String) -> SKNode {
+        let node = SKNode()
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.8)
+        dim.strokeColor = .clear
+        node.addChild(dim)
+
+        let lines = wrapPlain(message, maxChars: 30)
+        let panelH: CGFloat = 150 + CGFloat(lines.count) * 18
+        let panel = SKShapeNode(rectOf: CGSize(width: 300, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x141018)
+        panel.strokeColor = SKColor(hex: 0xC0392B, alpha: 0.75)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 4
+        node.addChild(panel)
+
+        let titleLabel = UITheme.label(title, size: UITheme.Size.heading, color: SKColor(hex: titleHex), bold: true)
+        titleLabel.position = CGPoint(x: 0, y: panelH / 2 - 30)
+        node.addChild(titleLabel)
+
+        var y = panelH / 2 - 58
+        for line in lines {
+            let l = UITheme.label(line, size: UITheme.Size.body, color: UITheme.Color.infoSoft)
+            l.position = CGPoint(x: 0, y: y)
+            node.addChild(l)
+            y -= 18
+        }
+
+        node.addChild(modalButton(name: confirm.name, text: confirm.text, y: -panelH / 2 + 78,
+                                  fill: confirm.fill, stroke: 0xE74C3C, textHex: 0xFFFFFF))
+        node.addChild(modalButton(name: cancelName, text: "CANCEL", y: -panelH / 2 + 30,
+                                  fill: 0x333333, stroke: 0x888888, textHex: 0xE0E0E0))
+        return node
+    }
+
+    private func modalButton(name: String, text: String, y: CGFloat,
+                             fill: UInt32, stroke: UInt32, textHex: UInt32) -> SKNode {
+        let size = CGSize(width: 240, height: 42)
+        let btn = SKNode()
+        btn.name = name
+        btn.position = CGPoint(x: 0, y: y)
+        btn.userData = NSMutableDictionary(dictionary: ["w": size.width, "h": size.height])
+        let bg = SKShapeNode(rectOf: size, cornerRadius: 6)
+        bg.fillColor = SKColor(hex: fill)
+        bg.strokeColor = SKColor(hex: stroke, alpha: 0.7)
+        bg.lineWidth = 1
+        btn.addChild(bg)
+        let label = UITheme.label(text, size: UITheme.Size.body, color: SKColor(hex: textHex), bold: true)
+        label.name = "label"
+        label.verticalAlignmentMode = .center
+        btn.addChild(label)
+        return btn
+    }
+
+    private func addEraseTextField() {
+        guard let view = view else { return }
+        // Center on the input outline at scene y = 13: view.midY - 13 (center),
+        // minus half the 36pt height for the frame origin.
+        let tf = UITextField(frame: CGRect(x: view.bounds.midX - 90, y: view.bounds.midY - 31,
+                                           width: 180, height: 36))
+        tf.backgroundColor = UIColor(white: 0.06, alpha: 1)
+        tf.textColor = .white
+        tf.tintColor = UIColor(red: 0.9, green: 0.3, blue: 0.24, alpha: 1)
+        tf.textAlignment = .center
+        tf.font = UIFont(name: "Menlo-Bold", size: 18)
+        tf.autocapitalizationType = .allCharacters
+        tf.autocorrectionType = .no
+        tf.attributedPlaceholder = NSAttributedString(
+            string: "type ERASE",
+            attributes: [.foregroundColor: UIColor(white: 0.4, alpha: 1)])
+        tf.layer.cornerRadius = 6
+        tf.addTarget(self, action: #selector(eraseTextChanged), for: .editingChanged)
+        view.addSubview(tf)
+        tf.becomeFirstResponder()
+        eraseTextField = tf
+    }
+
+    private func removeEraseTextField() {
+        eraseTextField?.resignFirstResponder()
+        eraseTextField?.removeFromSuperview()
+        eraseTextField = nil
+    }
+
+    @objc private func eraseTextChanged() {
+        let matches = (eraseTextField?.text ?? "").uppercased() == "ERASE"
+        guard let btn = eraseConfirmButton,
+              let bg = btn.children.compactMap({ $0 as? SKShapeNode }).first else { return }
+        bg.fillColor = SKColor(hex: matches ? 0xC0392B : 0x3A2422)
+        (btn.childNode(withName: "label") as? SKLabelNode)?.fontColor = SKColor(hex: matches ? 0xFFFFFF : 0x886666)
+    }
+
+    /// Char-count word wrap (matches the codex/detail wrap style).
+    private func wrapPlain(_ text: String, maxChars: Int) -> [String] {
+        var lines: [String] = []
+        var current = ""
+        for word in text.split(separator: " ") {
+            if current.isEmpty { current = String(word) }
+            else if current.count + 1 + word.count <= maxChars { current += " " + word }
+            else { lines.append(current); current = String(word) }
+        }
+        if !current.isEmpty { lines.append(current) }
+        return lines
+    }
+
     // MARK: - Daily Forge
     
     // v1.7: the forge tap opens a choice — free random stays whole,

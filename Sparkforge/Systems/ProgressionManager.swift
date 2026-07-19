@@ -331,10 +331,22 @@ final class ProgressionManager {
         defaults.removeObject(forKey: Keys.quenchKills)
         defaults.removeObject(forKey: Keys.wardenKills)
         defaults.removeObject(forKey: Keys.coilworksKills)
+        defaults.removeObject(forKey: Keys.choirKills)       // v1.9: was missing
         defaults.removeObject(forKey: Keys.mirrorwoundKills)
         defaults.removeObject(forKey: Keys.currentArena)
         defaults.removeObject(forKey: Keys.arenasUnlocked)
         ForgePathManager.shared.resetAll()
+    }
+
+    /// v1.9: the full "Erase all progress" wipe behind the Settings flow.
+    /// Clears every progress domain — progression, high scores, codex
+    /// discovery, daily blessing — while PRESERVING settings (SFX/BGM) and
+    /// StoreKit purchases (Remove Ads), which are not "progress".
+    func eraseAllProgress() {
+        resetAll()
+        HighScoreManager.shared.resetAll()
+        CodexManager.shared.resetAll()      // relocks card/synergy/bestiary discovery
+        DailyForgeManager.shared.resetAll()
     }
     
     private init() {
