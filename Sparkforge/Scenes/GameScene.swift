@@ -4453,7 +4453,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let x = startX + colSpacing * CGFloat(idxInRow)
             let y = topRowY - CGFloat(row) * rowSpacing
 
-            let cardNode = UpgradeCardNode(card: card)
+            // v1.9: owned cards render as a LEVEL UP offer for their next tier
+            let cardNode = UpgradeCardNode(card: card, currentTier: upgradeManager.tier(of: card.id))
             cardNode.position = CGPoint(x: x, y: y)
             cardNode.setScale(0.0)
             levelUpOverlay.addChild(cardNode)

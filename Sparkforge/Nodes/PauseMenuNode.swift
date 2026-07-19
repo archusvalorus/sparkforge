@@ -396,9 +396,16 @@ final class PauseMenuNode: SKNode {
             CardDetailNode.TierLine(threshold: $0.threshold, title: $0.title,
                                     effect: $0.effect, reached: count >= $0.threshold)
         }
-        let content = CardDetailNode.Content(name: card.name, tag: card.tag,
-                                             secondaryTag: card.secondaryTag,
-                                             effect: card.description, tiers: tiers)
+        // v1.9: multi-tier cards show their current rung; the effect line is
+        // the copy for the tier the player has (not the base description).
+        let cardTier = manager.tier(of: card.id)
+        let content = CardDetailNode.Content(
+            name: card.name, tag: card.tag,
+            secondaryTag: card.secondaryTag,
+            effect: card.description(forTier: max(cardTier, 1)),
+            tiers: tiers,
+            cardTierLine: card.maxTier > 1 ? "TIER \(cardTier) / \(card.maxTier)" : nil
+        )
         let detail = CardDetailNode(content: content)
         detail.present(in: self)
         detailNode = detail

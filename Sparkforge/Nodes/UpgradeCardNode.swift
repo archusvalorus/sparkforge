@@ -19,8 +19,11 @@ final class UpgradeCardNode: SKNode {
     static let cardHeight: CGFloat = 156
     
     // MARK: - State
-    
+
     let card: UpgradeManager.UpgradeCard
+    /// v1.9: the card's tier when this spread was drawn (0 = not owned).
+    /// Owned cards render as a LEVEL UP offer for tier `currentTier + 1`.
+    let currentTier: Int
     private let basePlate: SKShapeNode      // v1.6: dark plate keeps text readable
     private let backgroundNode: SKShapeNode // v1.6: translucent tag-color wash
     private let accentBar: SKShapeNode
@@ -72,8 +75,9 @@ final class UpgradeCardNode: SKNode {
     
     // MARK: - Init
     
-    init(card: UpgradeManager.UpgradeCard) {
+    init(card: UpgradeManager.UpgradeCard, currentTier: Int = 0) {
         self.card = card
+        self.currentTier = currentTier
         self.tagColorHex = UpgradeCardNode.color(for: card.tag)
 
         let w = UpgradeCardNode.cardWidth
@@ -161,9 +165,42 @@ final class UpgradeCardNode: SKNode {
 
         addChild(nameLabel)
 
+        // v1.9: an owned card is a LEVEL UP offer — a tier badge rides the
+        // accent bar and the copy below describes the NEXT rung.
+        if currentTier >= 1 {
+            let badgeLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+            badgeLabel.text = "▲ LEVEL UP \(currentTier)→\(currentTier + 1)"
+            badgeLabel.fontSize = 9
+            badgeLabel.fontColor = UpgradeCardNode.brightColor(for: card.tag)
+            badgeLabel.verticalAlignmentMode = .center
+            badgeLabel.horizontalAlignmentMode = .center
+
+            let badge = SKShapeNode(rectOf: CGSize(width: badgeLabel.frame.width + 14,
+                                                   height: 15),
+                                    cornerRadius: 7.5)
+            badge.fillColor = SKColor(hex: 0x161616)
+            badge.strokeColor = tagColor
+            badge.lineWidth = 1
+            badge.position = CGPoint(x: 0, y: h / 2 - 14)
+            badge.zPosition = 0.2  // above the accent bar + dual-tag half
+            badge.addChild(badgeLabel)
+            addChild(badge)
+
+            // Subtle breathe so owned cards read distinct at a glance
+            let pulse = SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.7, duration: 0.7),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.7)
+            ])
+            badge.run(SKAction.repeatForever(pulse))
+        }
+
         // Description (wrapped manually for small card)
         // v1.6 legibility: 8pt → 10pt, wider card fits 17 chars/line
-        let descLines = wrapText(card.description, maxChars: 17)
+        // v1.9: owned cards show the NEXT tier's copy
+        let descText = currentTier >= 1
+            ? card.description(forTier: currentTier + 1)
+            : card.description
+        let descLines = wrapText(descText, maxChars: 17)
         for (i, line) in descLines.enumerated() {
             let descLabel = SKLabelNode(fontNamed: "Menlo")
             descLabel.text = line

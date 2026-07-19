@@ -31,6 +31,9 @@ final class CardDetailNode: SKNode {
         /// Synergy tiers for the card's tree, in threshold order. May be empty
         /// (e.g. Neutral cards have no tree synergy).
         let tiers: [TierLine]
+        /// v1.9: card-tier line for multi-tier cards (e.g. "TIER 2 / 3").
+        /// nil for 1-tier cards — nothing renders. Full ladder view is Unit 2.
+        var cardTierLine: String? = nil
     }
 
     // MARK: - Layout constants
@@ -86,6 +89,19 @@ final class CardDetailNode: SKNode {
             chipX += chipW + gap
         }
         y -= chipH + 14
+
+        // v1.9: card tier for multi-tier cards ("TIER 2 / 3").
+        if let tierLine = content.cardTierLine {
+            let l = SKLabelNode(fontNamed: "Menlo-Bold")
+            l.text = tierLine
+            l.fontSize = 10
+            l.fontColor = SKColor(hex: colorHex, alpha: 0.9)
+            l.verticalAlignmentMode = .top
+            l.horizontalAlignmentMode = .center
+            l.position = CGPoint(x: 0, y: y)
+            body.addChild(l)
+            y -= 18
+        }
 
         // Effect — the card's own line, wrapped.
         for line in Self.wrap(content.effect, maxChars: 34) {

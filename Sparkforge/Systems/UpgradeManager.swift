@@ -12,6 +12,11 @@
 //   - Glass Engine: -30% max HP (was lose lethal save)
 //   - Unstable Core: 10 HP self-damage (was lose lethal save)
 // + Build identity hint detection
+//
+// v1.9: card-leveling engine — cards may carry a tier ladder
+// (`higherTiers`); picking an owned, non-maxed card levels it instead of
+// being excluded from draws. 1-tier cards (no ladder) behave exactly as
+// v1.8. Tier state is per-run only.
 
 import Foundation
 
@@ -39,13 +44,42 @@ final class UpgradeManager {
         /// no pick popup. Rare — bridges, not soup.
         var secondaryTag: Tag? = nil
         let description: String
+        /// Tier 1 effect — every card's original `apply`, unchanged.
         let apply: (PlayerStats) -> Void
+        /// v1.9: tiers 2..N. Each closure is the DELTA applied on that
+        /// level-up (PlayerStats is additive — rungs add, never re-set).
+        /// Empty → a 1-tier card: picked once, maxed, exactly v1.8 behavior.
+        var higherTiers: [(PlayerStats) -> Void] = []
+        /// v1.9: per-tier copy for the selection card / Codex. Index i is
+        /// tier i+1's line. nil → `description` serves every tier.
+        var tierDescriptions: [String]? = nil
+
+        var maxTier: Int { 1 + higherTiers.count }
+
+        /// Copy for a tier (1-based); falls back to `description`.
+        func description(forTier tier: Int) -> String {
+            guard let lines = tierDescriptions, tier >= 1, tier <= lines.count else {
+                return description
+            }
+            return lines[tier - 1]
+        }
     }
     
     // MARK: - State
     
-    /// Cards the player has picked this run (by ID)
+    /// Cards the player has picked this run (by ID), in FIRST-pick order —
+    /// leveling a card doesn't reorder it. Drives the build viewer,
+    /// analytics, and build hints.
     private(set) var pickedCardIDs: [String] = []
+
+    /// v1.9: id → current tier this run (absent = not owned). Per-run,
+    /// reset with everything else — no persistence, like pickedCardIDs.
+    private(set) var cardTiers: [String: Int] = [:]
+
+    /// v1.9: current tier of a card (0 = not owned this run).
+    func tier(of cardID: String) -> Int {
+        cardTiers[cardID] ?? 0
+    }
 
     /// v1.7: Picked cards in pick order, for the pause build viewer
     var pickedCards: [UpgradeCard] {
@@ -64,18 +98,44 @@ final class UpgradeManager {
     // MARK: - Init
     
     init() {
-        allCards = UpgradeManager.buildCardPool()
+        var cards = UpgradeManager.buildCardPool()
+
+        #if DEBUG
+        // ⚠️ v1.9 Unit 1 TEMP — engine proof ladder (docs/v1.9-unit1-plan.md,
+        // "Test strategy"). Scatter carries a throwaway 3-tier ladder so the
+        // engine can be validated end-to-end on device. Unit 3 REMOVES this
+        // and authors the real signature ladders. Release pool is untouched.
+        if let i = cards.firstIndex(where: { $0.id == "neutral_6" }) {
+            cards[i].higherTiers = [
+                { stats in stats.extraProjectiles += 1 },
+                { stats in
+                    stats.extraProjectiles += 1
+                    stats.spreadAngle += 0.10
+                }
+            ]
+            cards[i].tierDescriptions = [
+                "+1 projectile (wider spread)",
+                "+1 more projectile",
+                "+1 more projectile, wider fan"
+            ]
+        }
+        #endif
+
+        allCards = cards
     }
     
     // MARK: - Draw
     
-    /// Draw N random cards the player hasn't picked yet.
+    /// Draw N random cards the player can still advance.
     /// v1.6: draws are tag-diverse — each card comes from a different tree.
     /// Duplicate trees appear only when the remaining pool can't offer
     /// enough distinct ones (deep tag-devoted runs), never by bad luck.
+    /// v1.9: eligibility is "not maxed", not "never picked" — owned cards
+    /// with rungs left re-appear and level up. Owned non-maxed cards draw
+    /// with the same weight as new ones (locked Fork B).
     func drawCards(count: Int = 3) -> [UpgradeCard] {
         let available = allCards.filter { card in
-            !pickedCardIDs.contains(card.id)
+            tier(of: card.id) < card.maxTier
         }
 
         guard !available.isEmpty else { return [] }
@@ -102,6 +162,21 @@ final class UpgradeManager {
             }
         }
 
+        #if DEBUG
+        // ⚠️ v1.9 Unit 1 TEMP — deterministic engine test. Force the laddered
+        // test card into a draw slot every level-up until it's maxed, so the
+        // re-offer → level → max → exclude loop can be validated without
+        // fighting the (intentionally large) draw pool. Removed in Unit 3 with
+        // the temp ladder. Release pool is untouched (guarded by #if DEBUG).
+        let testID = "neutral_6"
+        if let test = allCards.first(where: { $0.id == testID }),
+           tier(of: testID) < test.maxTier,
+           !drawn.contains(where: { $0.id == testID }),
+           !drawn.isEmpty {
+            drawn[0] = test
+        }
+        #endif
+
         return drawn
     }
 
@@ -111,7 +186,7 @@ final class UpgradeManager {
         let displayedIDs = displayed.map { $0.id }
         let displayedTags = Set(displayed.map { $0.tag })
         let available = allCards.filter {
-            !pickedCardIDs.contains($0.id) && !displayedIDs.contains($0.id)
+            tier(of: $0.id) < $0.maxTier && !displayedIDs.contains($0.id)
         }
 
         if let freshTree = available.filter({ !displayedTags.contains($0.tag) }).randomElement() {
@@ -120,21 +195,36 @@ final class UpgradeManager {
         return available.randomElement()
     }
     
-    /// Player picks a card — apply its effects and track it
+    /// Player picks a card — first pick applies tier 1; a re-pick runs the
+    /// next ladder rung (v1.9).
+    ///
+    /// ORTHOGONALITY GUARANTEE (locked): tag counts advance on the FIRST
+    /// pick only. Leveling a card never feeds synergies — breadth (distinct
+    /// cards per tree) and depth (card tiers) stay separate axes.
     func pickCard(_ card: UpgradeCard, stats: PlayerStats) {
-        pickedCardIDs.append(card.id)
+        let current = tier(of: card.id)
 
-        // Track tag
-        if card.tag != .neutral {
-            tagCounts[card.tag, default: 0] += 1
-        }
-        // v1.7: dual-tag cards count toward BOTH totals
-        if let second = card.secondaryTag, second != .neutral {
-            tagCounts[second, default: 0] += 1
+        if current == 0 {
+            pickedCardIDs.append(card.id)
+
+            // Track tag
+            if card.tag != .neutral {
+                tagCounts[card.tag, default: 0] += 1
+            }
+            // v1.7: dual-tag cards count toward BOTH totals
+            if let second = card.secondaryTag, second != .neutral {
+                tagCounts[second, default: 0] += 1
+            }
+
+            // Apply card effect (tier 1)
+            card.apply(stats)
+        } else {
+            // Already maxed cards never reach a draw; guard anyway.
+            guard current - 1 < card.higherTiers.count else { return }
+            card.higherTiers[current - 1](stats)
         }
 
-        // Apply card effect
-        card.apply(stats)
+        cardTiers[card.id] = current + 1
     }
     
     /// A synergy tier that JUST fired — structured so the reveal modal can
@@ -228,6 +318,7 @@ final class UpgradeManager {
     
     func reset() {
         pickedCardIDs.removeAll()
+        cardTiers.removeAll()
         tagCounts.removeAll()
         appliedSynergies.removeAll()
         shownBuildHints.removeAll()
