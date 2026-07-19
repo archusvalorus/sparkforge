@@ -577,7 +577,10 @@ final class TitleScene: SKScene {
         if arena.id == 0 {
             let progress = pm.arena1Progress
 
-            let killText = "\(progress.currentKills)/\(progress.requiredKills) kills"
+            // Cap the display at the gate like arenas 2–4 — lifetime kills keep
+            // accumulating for stats, but the arena gate reads N/100, not 5007/100.
+            let shownKills = min(progress.currentKills, progress.requiredKills)
+            let killText = "\(shownKills)/\(progress.requiredKills) kills"
             killProgressLabel.text = progress.killProgress >= 1.0 ? "✓ \(killText)" : "○ \(killText)"
             killProgressLabel.fontColor = progress.killProgress >= 1.0
                 ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
