@@ -2231,45 +2231,45 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let baseDirection = (targetPosition - player.position).normalized
         let isSpreadShot = playerStats.recordShot()
         let shotCount = isSpreadShot ? playerStats.spreadShotCount : totalProjectiles
-        
-        if shotCount == 1 {
-            fireProjectile(direction: baseDirection)
-        } else if isSpreadShot {
-            // The spread-shot card's fan IS its identity — it keeps the V
-            let totalSpread = playerStats.spreadAngle * CGFloat(shotCount - 1)
-            let startAngle = atan2(baseDirection.y, baseDirection.x) - totalSpread / 2
 
-            for i in 0..<shotCount {
-                let angle = startAngle + playerStats.spreadAngle * CGFloat(i)
-                let dir = CGPoint(x: cos(angle), y: sin(angle))
-                fireProjectile(direction: dir)
-            }
-        } else if shotCount == 2 {
-            // v1.7 fix (Brandon field report): TWO projectiles fly as aligned
-            // parallel columns (:), not a V — all forward, offset
-            // perpendicular to the shot line
+        // v1.9: ONE true source for multishot/spread shape. Regular fire and
+        // the Storm Engine spread-shot differ only in pellet COUNT — shape is
+        // shared here so future spread content wires into one place instead of
+        // its own branch that would need separate tuning later.
+        fireShotSpread(count: shotCount, baseDirection: baseDirection)
+    }
+
+    /// The canonical multishot/spread pattern (v1.9). Shape scales by count,
+    /// not by which system asked for the shot:
+    /// - 1 pellet  → straight ahead.
+    /// - 2 pellets → parallel columns (:), the v1.7 field-report look.
+    /// - 3+ pellets → a V fan with a STATIC cone (spreadAngle × the GameConfig
+    ///   factor); adding pellets packs them denser into the same fan rather
+    ///   than widening it — so higher spread counts can't balloon the cone.
+    private func fireShotSpread(count: Int, baseDirection: CGPoint) {
+        guard count > 1 else {
+            fireProjectile(direction: baseDirection)
+            return
+        }
+
+        if count == 2 {
             let perp = CGPoint(x: -baseDirection.y, y: baseDirection.x)
             let spacing: CGFloat = 12
-            let startOffset = -spacing * CGFloat(shotCount - 1) / 2
-
-            for i in 0..<shotCount {
+            let startOffset = -spacing * CGFloat(count - 1) / 2
+            for i in 0..<count {
                 let offset = perp * (startOffset + spacing * CGFloat(i))
                 fireProjectile(direction: baseDirection, originOffset: offset)
             }
-        } else {
-            // v1.9 (Brandon playtest): 3+ projectiles break into a V fan with a
-            // STATIC cone — adding pellets packs them denser into the same fan,
-            // it doesn't widen. 25% narrower than the old count-scaled spread.
-            // Refines the v1.7 parallel-columns call (now 2 pellets only).
-            let totalSpread = playerStats.spreadAngle * GameConfig.Projectile.multishotFanWidthFactor
-            let startAngle = atan2(baseDirection.y, baseDirection.x) - totalSpread / 2
-            let step = totalSpread / CGFloat(shotCount - 1)
+            return
+        }
 
-            for i in 0..<shotCount {
-                let angle = startAngle + step * CGFloat(i)
-                let dir = CGPoint(x: cos(angle), y: sin(angle))
-                fireProjectile(direction: dir)
-            }
+        let totalSpread = playerStats.spreadAngle * GameConfig.Projectile.multishotFanWidthFactor
+        let startAngle = atan2(baseDirection.y, baseDirection.x) - totalSpread / 2
+        let step = totalSpread / CGFloat(count - 1)
+        for i in 0..<count {
+            let angle = startAngle + step * CGFloat(i)
+            let dir = CGPoint(x: cos(angle), y: sin(angle))
+            fireProjectile(direction: dir)
         }
     }
     
