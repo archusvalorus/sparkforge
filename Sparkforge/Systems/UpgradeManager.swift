@@ -53,6 +53,10 @@ final class UpgradeManager {
         /// v1.9: per-tier copy for the selection card / Codex. Index i is
         /// tier i+1's line. nil → `description` serves every tier.
         var tierDescriptions: [String]? = nil
+        /// v1.9 Unit 3: the one tier-5 capstone per tree. Reaching its max tier
+        /// fires the grand capstone reveal (vs a quiet flourish for signature
+        /// maxes). Capstone IDENTITIES are authored from Lyra's tier riff.
+        var isCapstone: Bool = false
 
         var maxTier: Int { 1 + higherTiers.count }
 
@@ -65,8 +69,24 @@ final class UpgradeManager {
         }
     }
     
+    // MARK: - Dev tools (DEBUG only)
+
+    #if DEBUG
+    /// PERMANENT dev force-slot. Set to a card id to guarantee it appears in
+    /// EVERY level-up draw until it maxes — the fast path for iterating on a new
+    /// skill / tree / capstone (level it, max it, watch the flourish/reveal).
+    /// Leave `nil` for natural draws so it never distorts a feel-test unless you
+    /// opt in. Change this one value to point at whatever you're building.
+    /// (Release builds never see this — `#if DEBUG`.)
+    ///
+    /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
+    /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
+    /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
+    static let debugForcedCardID: String? = nil
+    #endif
+
     // MARK: - State
-    
+
     /// Cards the player has picked this run (by ID), in FIRST-pick order —
     /// leveling a card doesn't reorder it. Drives the build viewer,
     /// analytics, and build hints.
@@ -98,27 +118,9 @@ final class UpgradeManager {
     // MARK: - Init
     
     init() {
-        var cards = UpgradeManager.buildCardPool()
-
-        #if DEBUG
-        // ⚠️ v1.9 Unit 1 TEMP — engine proof ladder (docs/v1.9-unit1-plan.md,
-        // "Test strategy"). Scatter carries a throwaway 3-tier ladder so the
-        // engine can be validated end-to-end on device. Unit 3 REMOVES this
-        // and authors the real signature ladders. Release pool is untouched.
-        if let i = cards.firstIndex(where: { $0.id == "neutral_6" }) {
-            cards[i].higherTiers = [
-                { stats in stats.extraProjectiles += 1 },
-                { stats in stats.extraProjectiles += 1 }
-            ]
-            cards[i].tierDescriptions = [
-                "+1 projectile (wider spread)",
-                "+1 more projectile",
-                "+1 more projectile, denser fan"
-            ]
-        }
-        #endif
-
-        allCards = cards
+        // v1.9 Unit 3: signature ladders now live in the release pool
+        // (buildCardPool); the Unit 1 DEBUG proof ladder is retired.
+        allCards = UpgradeManager.buildCardPool()
     }
     
     // MARK: - Draw
@@ -160,17 +162,15 @@ final class UpgradeManager {
         }
 
         #if DEBUG
-        // ⚠️ v1.9 Unit 1 TEMP — deterministic engine test. Force the laddered
-        // test card into a draw slot every level-up until it's maxed, so the
-        // re-offer → level → max → exclude loop can be validated without
-        // fighting the (intentionally large) draw pool. Removed in Unit 3 with
-        // the temp ladder. Release pool is untouched (guarded by #if DEBUG).
-        let testID = "neutral_6"
-        if let test = allCards.first(where: { $0.id == testID }),
-           tier(of: testID) < test.maxTier,
-           !drawn.contains(where: { $0.id == testID }),
-           !drawn.isEmpty {
-            drawn[0] = test
+        // Dev force-slot (see debugForcedCardID): keep the card-under-test in
+        // the spread until it maxes, so the tier/max/capstone loop is quick to
+        // exercise. Off (nil) by default; release builds never compile this.
+        if let forcedID = Self.debugForcedCardID,
+           let forced = allCards.first(where: { $0.id == forcedID }),
+           tier(of: forcedID) < forced.maxTier,
+           !drawn.isEmpty,
+           !drawn.contains(where: { $0.id == forcedID }) {
+            drawn[0] = forced
         }
         #endif
 
@@ -471,12 +471,21 @@ final class UpgradeManager {
             stats.burnDPS += 0.5
         })
         
+        // v1.9 Unit 3: signature damage ladder (3-tier).
         cards.append(UpgradeCard(
             id: "fire_2", name: "Forge Breath", tag: .fire,
-            description: "+15% damage"
-        ) { stats in
-            stats.damageMultiplier += 0.15
-        })
+            description: "+15% damage",
+            apply: { stats in stats.damageMultiplier += 0.15 },
+            higherTiers: [
+                { stats in stats.damageMultiplier += 0.15 },
+                { stats in stats.damageMultiplier += 0.20 }
+            ],
+            tierDescriptions: [
+                "+15% damage",
+                "+15% more damage",
+                "+20% more damage"
+            ]
+        ))
         
         cards.append(UpgradeCard(
             id: "fire_3", name: "Ember Burst", tag: .fire,
@@ -497,12 +506,22 @@ final class UpgradeManager {
         // ⚡ SHOCK
         // ═══════════════════════════════════
         
+        // v1.9 Unit 3: signature attack-speed ladder (3-tier). Lower interval
+        // = faster; each rung stacks another ×0.88.
         cards.append(UpgradeCard(
             id: "shock_1", name: "Static", tag: .shock,
-            description: "+12% attack speed"
-        ) { stats in
-            stats.fireRateMultiplier *= 0.88  // Lower interval = faster
-        })
+            description: "+12% attack speed",
+            apply: { stats in stats.fireRateMultiplier *= 0.88 },
+            higherTiers: [
+                { stats in stats.fireRateMultiplier *= 0.88 },
+                { stats in stats.fireRateMultiplier *= 0.88 }
+            ],
+            tierDescriptions: [
+                "+12% attack speed",
+                "+12% more attack speed",
+                "+12% more attack speed"
+            ]
+        ))
         
         cards.append(UpgradeCard(
             id: "shock_2", name: "Arc", tag: .shock,
@@ -531,12 +550,19 @@ final class UpgradeManager {
         // 🩸 BLEED
         // ═══════════════════════════════════
         
+        // v1.9 Unit 3: signature crit ladder (2-tier).
         cards.append(UpgradeCard(
             id: "bleed_1", name: "Nick", tag: .bleed,
-            description: "+8% critical hit chance"
-        ) { stats in
-            stats.critChance += 0.08
-        })
+            description: "+8% critical hit chance",
+            apply: { stats in stats.critChance += 0.08 },
+            higherTiers: [
+                { stats in stats.critChance += 0.08 }
+            ],
+            tierDescriptions: [
+                "+8% critical hit chance",
+                "+8% more crit chance"
+            ]
+        ))
         
         cards.append(UpgradeCard(
             id: "bleed_2", name: "Hemorrhage", tag: .bleed,
@@ -586,12 +612,19 @@ final class UpgradeManager {
             stats.collisionShrink *= 0.80
         })
         
+        // v1.9 Unit 3: signature slow ladder (2-tier).
         cards.append(UpgradeCard(
             id: "guard_4", name: "Fortify", tag: .guardT,
-            description: "All enemies slowed 8%"
-        ) { stats in
-            stats.globalEnemySlow += 0.08
-        })
+            description: "All enemies slowed 8%",
+            apply: { stats in stats.globalEnemySlow += 0.08 },
+            higherTiers: [
+                { stats in stats.globalEnemySlow += 0.08 }
+            ],
+            tierDescriptions: [
+                "All enemies slowed 8%",
+                "Enemies slowed a further 8%"
+            ]
+        ))
         
         // ═══════════════════════════════════
         // 🕳️ VOID
@@ -611,13 +644,25 @@ final class UpgradeManager {
             stats.gravityWellOnExpire = true
         })
         
+        // v1.9 Unit 3: signature reach/pierce ladder (2-tier).
         cards.append(UpgradeCard(
             id: "void_3", name: "Phase", tag: .voidT,
-            description: "+25% range, projectiles pierce 1 enemy"
-        ) { stats in
-            stats.projectileRangeMultiplier += 0.25
-            stats.pierceCount += 1
-        })
+            description: "+25% range, projectiles pierce 1 enemy",
+            apply: { stats in
+                stats.projectileRangeMultiplier += 0.25
+                stats.pierceCount += 1
+            },
+            higherTiers: [
+                { stats in
+                    stats.projectileRangeMultiplier += 0.20
+                    stats.pierceCount += 1
+                }
+            ],
+            tierDescriptions: [
+                "+25% range, pierce 1 enemy",
+                "+20% range, pierce 1 more enemy"
+            ]
+        ))
         
         cards.append(UpgradeCard(
             id: "void_4", name: "Devour", tag: .voidT,
@@ -630,12 +675,19 @@ final class UpgradeManager {
         // ❄️ CHILL
         // ═══════════════════════════════════
         
+        // v1.9 Unit 3: signature chill ladder (2-tier).
         cards.append(UpgradeCard(
             id: "chill_1", name: "Frost Touch", tag: .chill,
-            description: "Projectiles slow enemies 10% for 2s"
-        ) { stats in
-            stats.slowAmount += 0.10
-        })
+            description: "Projectiles slow enemies 10% for 2s",
+            apply: { stats in stats.slowAmount += 0.10 },
+            higherTiers: [
+                { stats in stats.slowAmount += 0.10 }
+            ],
+            tierDescriptions: [
+                "Projectiles slow enemies 10%",
+                "Slow enemies a further 10%"
+            ]
+        ))
         
         cards.append(UpgradeCard(
             id: "chill_2", name: "Ice Shard", tag: .chill,
@@ -698,13 +750,26 @@ final class UpgradeManager {
             stats.xpMultiplier += 0.25
         })
         
+        // v1.9 Unit 3: the canonical multishot ladder (3-tier). Each rung adds
+        // a pellet; 2 fire as parallel columns, 3+ break into the static-cone
+        // fan (see GameConfig.Projectile.multishotFanWidthFactor).
         cards.append(UpgradeCard(
             id: "neutral_6", name: "Scatter", tag: .neutral,
-            description: "+1 projectile (wider spread)"
-        ) { stats in
-            stats.extraProjectiles += 1
-            stats.spreadAngle += 0.15
-        })
+            description: "+1 projectile (wider spread)",
+            apply: { stats in
+                stats.extraProjectiles += 1
+                stats.spreadAngle += 0.15
+            },
+            higherTiers: [
+                { stats in stats.extraProjectiles += 1 },
+                { stats in stats.extraProjectiles += 1 }
+            ],
+            tierDescriptions: [
+                "+1 projectile (wider spread)",
+                "+1 more projectile (fans out)",
+                "+1 more projectile (denser fan)"
+            ]
+        ))
         
         // ═══════════════════════════════════
         // 🔥 v1.3 — LYRA'S CARDS

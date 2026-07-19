@@ -157,6 +157,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // one card-style modal at a time, holding the game between taps.
     private var synergyQueue: [UpgradeManager.SynergyUnlock] = []
     private var synergyModal: SynergyUnlockNode?
+    // v1.9 Unit 3: card capstone reveals ride the same reveal sequence, shown
+    // after any synergy tiers. pendingCapstones collects during the pick.
+    private var pendingCapstones: [CardMaxReveal] = []
+    private var capstoneQueue: [CardMaxReveal] = []
     
     // MARK: - Scene Lifecycle
     
@@ -1703,7 +1707,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func selectCard(_ selectedNode: UpgradeCardNode) {
         AudioManager.shared.play(.cardSelect)
-        upgradeManager.pickCard(selectedNode.card, stats: playerStats)
+        let card = selectedNode.card
+        let tierBefore = upgradeManager.tier(of: card.id)
+        upgradeManager.pickCard(card, stats: playerStats)
+
+        // v1.9 Unit 3: this pick just maxed a laddered card. Capstones get the
+        // grand reveal (after synergies); other maxed ladders a quiet flourish.
+        if card.maxTier > 1, tierBefore < card.maxTier,
+           upgradeManager.tier(of: card.id) >= card.maxTier {
+            if card.isCapstone {
+                pendingCapstones.append(CardMaxReveal(
+                    tag: card.tag, cardName: card.name,
+                    effect: card.description(forTier: card.maxTier), isCapstone: true))
+            } else {
+                showBuildHint("★ \(card.name) maxed")
+            }
+        }
+
         pendingSynergies.append(contentsOf: upgradeManager.checkSynergies(stats: playerStats))
         player.updateCollisionRadius()
 
@@ -1879,15 +1899,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             playerStats.silverSkinArmed = true
         }
 
-        // v1.8 Unit 6: earned tiers reveal one card-style modal at a time
-        // (holds the game). Empty → resume straight away.
+        // v1.8 Unit 6 / v1.9 Unit 3: earned synergy tiers then card capstones
+        // reveal one card-style modal at a time (holds the game). Both empty →
+        // resume straight away.
         levelUpOverlay.run(SKAction.fadeOut(withDuration: 0.15))
-        if synergies.isEmpty {
+        synergyQueue = synergies
+        capstoneQueue = pendingCapstones
+        pendingCapstones = []
+        if synergyQueue.isEmpty && capstoneQueue.isEmpty {
             completeLevelUp()
         } else {
-            synergyQueue = synergies
             gameState = .synergyReveal
-            presentNextSynergy()
+            presentNextReveal()
         }
     }
 
@@ -1903,30 +1926,36 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameState = .playing
     }
 
-    // MARK: - v1.8 Unit 6: Synergy unlock reveal (queued)
+    // MARK: - v1.8 Unit 6 / v1.9 Unit 3: reveal sequence (synergies → capstones)
 
-    private func presentNextSynergy() {
-        guard let next = synergyQueue.first else {
-            completeLevelUp()  // queue drained
+    /// Present the next reveal — synergy tiers first, then card capstones.
+    /// When both queues are drained, resume play.
+    private func presentNextReveal() {
+        if let next = synergyQueue.first {
+            synergyQueue.removeFirst()
+            AudioManager.shared.play(.buildHint)
+            let modal = SynergyUnlockNode(unlock: next)
+            modal.present(in: camera ?? self)
+            synergyModal = modal
             return
         }
-        synergyQueue.removeFirst()
-        AudioManager.shared.play(.buildHint)
-        let modal = SynergyUnlockNode(unlock: next)
-        modal.present(in: camera ?? self)
-        synergyModal = modal
+        if let cap = capstoneQueue.first {
+            capstoneQueue.removeFirst()
+            AudioManager.shared.play(.buildHint)
+            let modal = SynergyUnlockNode(capstone: cap)
+            modal.present(in: camera ?? self)
+            synergyModal = modal
+            return
+        }
+        completeLevelUp()  // both drained
     }
 
-    /// Called on a tap while a synergy modal is up — dismiss it and advance.
+    /// Called on a tap while a reveal modal is up — dismiss it and advance.
     private func advanceSynergy() {
         guard let modal = synergyModal else { return }
         modal.dismiss()
         synergyModal = nil
-        if synergyQueue.isEmpty {
-            completeLevelUp()
-        } else {
-            presentNextSynergy()
-        }
+        presentNextReveal()  // presents the next, or resumes if both drained
     }
     
     // MARK: - Game Loop
@@ -4787,6 +4816,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         extraPickUsedThisRun = false
         extraPicksRemaining = 0
         pendingSynergies = []
+        pendingCapstones = []
+        capstoneQueue = []
         bossDefeatedThisRun = false
         pendingForgeXP = 0
         

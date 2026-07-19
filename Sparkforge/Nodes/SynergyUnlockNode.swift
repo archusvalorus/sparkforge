@@ -12,6 +12,17 @@
 
 import SpriteKit
 
+/// v1.9 Unit 3: a card reaching its max tier — reuses the reveal modal with
+/// distinct framing so a capstone never reads as a synergy tier.
+struct CardMaxReveal {
+    let tag: UpgradeManager.Tag
+    let cardName: String
+    let effect: String
+    /// The one tier-5 capstone per tree gets the grand "CAPSTONE" framing;
+    /// other maxed ladders (if ever routed here) get "CARD MASTERED".
+    let isCapstone: Bool
+}
+
 final class SynergyUnlockNode: SKNode {
 
     private static let panelWidth: CGFloat = 300
@@ -21,12 +32,27 @@ final class SynergyUnlockNode: SKNode {
 
     private let panel: SKShapeNode
 
-    init(unlock: UpgradeManager.SynergyUnlock) {
+    convenience init(unlock: UpgradeManager.SynergyUnlock) {
+        self.init(header: "SYNERGY UNLOCKED", tag: unlock.tag,
+                  subline: "\(unlock.tag.rawValue.uppercased()) · TIER \(unlock.tier)",
+                  title: unlock.title, effect: unlock.effect)
+    }
+
+    /// v1.9 Unit 3: card capstone / max-tier reveal.
+    convenience init(capstone: CardMaxReveal) {
+        self.init(header: capstone.isCapstone ? "CAPSTONE UNLOCKED" : "CARD MASTERED",
+                  tag: capstone.tag,
+                  subline: capstone.isCapstone ? "TREE CAPSTONE" : "MAX TIER",
+                  title: capstone.cardName, effect: capstone.effect)
+    }
+
+    private init(header headerText: String, tag: UpgradeManager.Tag,
+                 subline: String, title titleText: String, effect: String) {
         panel = SKShapeNode()
         super.init()
         zPosition = 400
 
-        let colorHex = UpgradeCardNode.color(for: unlock.tag)
+        let colorHex = UpgradeCardNode.color(for: tag)
 
         let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.72)
@@ -37,7 +63,7 @@ final class SynergyUnlockNode: SKNode {
         var y: CGFloat = 0
 
         let header = SKLabelNode(fontNamed: "Menlo-Bold")
-        header.text = "SYNERGY UNLOCKED"
+        header.text = headerText
         header.fontSize = UITheme.Size.label            // v1.8: theme, ≥10pt
         header.fontColor = UpgradeCardNode.brightColor(hex: colorHex)  // info, not dimmed
         header.verticalAlignmentMode = .top
@@ -46,7 +72,7 @@ final class SynergyUnlockNode: SKNode {
         body.addChild(header)
         y -= 26
 
-        let emoji = SKLabelNode(text: UpgradeCardNode.emoji(for: unlock.tag))
+        let emoji = SKLabelNode(text: UpgradeCardNode.emoji(for: tag))
         emoji.fontSize = 34
         emoji.verticalAlignmentMode = .top
         emoji.horizontalAlignmentMode = .center
@@ -55,7 +81,7 @@ final class SynergyUnlockNode: SKNode {
         y -= 46
 
         let sub = SKLabelNode(fontNamed: "Menlo-Bold")
-        sub.text = "\(unlock.tag.rawValue.uppercased()) · TIER \(unlock.tier)"
+        sub.text = subline
         sub.fontSize = UITheme.Size.label               // v1.8: theme, ≥10pt
         sub.fontColor = UpgradeCardNode.brightColor(hex: colorHex)  // info, not dimmed
         sub.verticalAlignmentMode = .top
@@ -65,16 +91,16 @@ final class SynergyUnlockNode: SKNode {
         y -= 24
 
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
-        title.text = unlock.title
+        title.text = titleText
         title.fontSize = 22
-        title.fontColor = UpgradeCardNode.brightColor(for: unlock.tag)
+        title.fontColor = UpgradeCardNode.brightColor(for: tag)
         title.verticalAlignmentMode = .top
         title.horizontalAlignmentMode = .center
         title.position = CGPoint(x: 0, y: y)
         body.addChild(title)
         y -= 34
 
-        for line in Self.wrap(unlock.effect, maxChars: 34) {
+        for line in Self.wrap(effect, maxChars: 34) {
             let l = SKLabelNode(fontNamed: "Menlo")
             l.text = line
             l.fontSize = UITheme.Size.body              // v1.8: theme (13pt)
