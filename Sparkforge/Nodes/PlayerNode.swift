@@ -440,6 +440,10 @@ final class PlayerNode: SKNode {
     }
 
     func reset() {
+        // Cancel any in-flight animation (notably die()'s fade-to-0) — else a
+        // quick RESTART lets the leftover fade complete AFTER reset and hide the
+        // spark. removeAllActions must precede the alpha/visual restore below.
+        removeAllActions()
         isDead = false
         currentLevel = 1
         currentXP = 0

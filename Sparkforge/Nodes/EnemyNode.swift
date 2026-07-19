@@ -15,6 +15,10 @@ class EnemyNode: SKNode {
     private(set) var maxHealth: Int
     private(set) var moveSpeed: CGFloat
     private(set) var xpValue: Int
+    /// v1.9: true once onDeath() has run — the node self-removes after a short
+    /// death animation, so a dying enemy must be pruned from GameScene's
+    /// `enemies` array to avoid becoming a phantom auto-aim target.
+    private(set) var isDying = false
     /// v1.6: Mini-bosses deal their configured contact damage instead of generic melee
     var isMiniBoss: Bool = false
     
@@ -374,8 +378,9 @@ class EnemyNode: SKNode {
     // MARK: - Death
     
     private func onDeath() {
+        isDying = true
         physicsBody?.categoryBitMask = 0
-        
+
         // Eyes flare out, body shrinks
         let deathAnim = SKAction.group([
             SKAction.scale(to: 0.0, duration: 0.2),

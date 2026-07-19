@@ -1972,7 +1972,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = currentTime
         
         guard gameState == .playing else { return }
-        
+
+        // v1.9 fix: prune enemies that have died (their nodes self-remove via a
+        // short death animation) so the auto-aim never locks onto a phantom
+        // position. Some AoE death paths — Inferno Crown DOT, Unstable Core —
+        // discard the death result and don't prune themselves, which used to
+        // leave dead entries in `enemies` that pellets chased over the boss.
+        // A kill is a kill: award its XP orb here (players shouldn't be robbed),
+        // matching the burst-kill helpers — XP only, no on-kill cascade.
+        enemies.removeAll { enemy in
+            guard enemy.isDying else { return false }
+            spawnXPOrb(at: enemy.position, value: enemy.xpValue)
+            return true
+        }
+
         // Invulnerability timer
         if invulnerableTimer > 0 {
             invulnerableTimer -= dt
@@ -2314,7 +2327,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var closestPosition: CGPoint?
         var closestDist: CGFloat = .greatestFiniteMagnitude
 
-        for enemy in enemies {
+        for enemy in enemies where !enemy.isDying {
             let dist = player.position.distance(to: enemy.position)
             if dist < range && dist < closestDist {
                 closestDist = dist
@@ -4846,6 +4859,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         player.stats = playerStats
         playerStats.reset()
         upgradeManager.reset()
+        // Purge the on-field run UI — the synergy/tag chips are data-driven but
+        // only refresh on a pick, so restart must clear them explicitly.
+        buffTracker.update(tagCounts: upgradeManager.tagCounts)
         waveManager.reset()
         adReviveManager.reset()
         timeSinceLastShot = 0
