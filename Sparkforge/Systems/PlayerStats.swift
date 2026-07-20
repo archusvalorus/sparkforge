@@ -37,6 +37,32 @@ final class PlayerStats {
     var everglowPulseGrowth: CGFloat = 0       // accumulated +% pulse (capped)
     var everglowAtkGrowth: CGFloat = 0         // accumulated +% ATK (capped)
 
+    // MARK: - Iron Maiden (Guard capstone, v1.9). Per-run; reset each run.
+    var ironMaidenTier: Int = 0               // 0 = inactive; 1..5
+    var ironSkinDefToDmg: CGFloat = 0         // DEF→damage conversion (see IronMaiden note)
+    var ironThorns: Int = 0                   // flat damage to enemies on damaging contact
+    var ironRetaliate: CGFloat = 0            // fraction of pre-mitigation incoming countered (T3)
+    var ironKineticActive = false             // T4: damaging hits build Kinetic stacks
+    var ironKineticStacks: Int = 0
+    var ironMaidenProjectile = false          // T5: timed compressed projectile
+
+    /// Iron Maiden Kinetic burst / projectile payload: 200% of current DEF.
+    var ironKineticBurstDamage: Int {
+        max(1, Int(CGFloat(defense) * GameConfig.IronMaiden.kineticBurstDefMult))
+    }
+
+    /// Add a Kinetic stack on a damaging hit (T4+). Returns true when the reserve
+    /// hits its threshold and releases — the caller fires the radial burst.
+    func addKineticStack() -> Bool {
+        guard ironKineticActive else { return false }
+        ironKineticStacks += 1
+        if ironKineticStacks >= GameConfig.IronMaiden.kineticThreshold {
+            ironKineticStacks = 0
+            return true
+        }
+        return false
+    }
+
     /// Damage of one Everglow pulse: effective ATK × base mult × (1 + rage).
     /// (effectiveDamageMultiplier already folds in everglowAtkGrowth.)
     var everglowPulseDamage: Int {
@@ -623,7 +649,24 @@ final class PlayerStats {
         if defAsDamageMult > 0 {
             total += CGFloat(defense) * defAsDamageMult
         }
+        // v1.9 Iron Skin (Guard capstone): DEF fuels damage — "weaponize defense".
+        if ironSkinDefToDmg > 0 {
+            total += CGFloat(defense) * ironSkinDefToDmg
+        }
         // v1.9 Everglow Living Furnace: damage taken permanently grows ATK.
+        total += everglowAtkGrowth
+        return total
+    }
+
+    /// Multiplier for the HUD's "effective ATK" readout: the persistent build
+    /// multiplier PLUS the permanent DEF-fueled conversions (Unbroken Core, Iron
+    /// Skin) and per-run ATK growth. Excludes volatile combat buffs
+    /// (overcharge/bloodlust/blood price) so the number reflects build power and
+    /// updates the moment DEF changes — without flickering frame to frame.
+    var displayDamageMultiplier: CGFloat {
+        var total = damageMultiplier
+        if defAsDamageMult > 0 { total += CGFloat(defense) * defAsDamageMult }
+        if ironSkinDefToDmg > 0 { total += CGFloat(defense) * ironSkinDefToDmg }
         total += everglowAtkGrowth
         return total
     }
@@ -744,6 +787,13 @@ final class PlayerStats {
         everglowEruption = false
         everglowPulseGrowth = 0
         everglowAtkGrowth = 0
+        ironMaidenTier = 0
+        ironSkinDefToDmg = 0
+        ironThorns = 0
+        ironRetaliate = 0
+        ironKineticActive = false
+        ironKineticStacks = 0
+        ironMaidenProjectile = false
 
         damageMultiplier = 1.0
         critChance = 0.0

@@ -82,7 +82,7 @@ final class UpgradeManager {
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
     /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
-    static let debugForcedCardID: String? = "cap_fire_everglow"
+    static let debugForcedCardID: String? = "cap_guard_ironmaiden"
     #endif
 
     // MARK: - State
@@ -1105,7 +1105,47 @@ final class UpgradeManager {
                 "Burning Reach: pulse radius doubled",
                 "Ragekindled: damage taken grows the pulse (to +100%)",
                 "Living Furnace: pulse doubled; hits also grow ATK",
-                "Everglow: erupt for 1000% ATK arena-wide every 15s"
+                "Everglow: erupt for 500% ATK arena-wide every 15s"
+            ],
+            isCapstone: true
+        ))
+
+        // 🛡️ Iron Maiden — incoming force becomes stored retaliation.
+        cards.append(UpgradeCard(
+            id: "cap_guard_ironmaiden", name: "Iron Maiden", tag: .guardT,
+            description: "Turn every impact into stored punishment.",
+            apply: { stats in                       // T1 Iron Skin
+                stats.ironMaidenTier = 1
+                stats.ironSkinDefToDmg = GameConfig.IronMaiden.defToDmgT1
+                stats.defense += max(1, Int(CGFloat(stats.defense) * GameConfig.IronMaiden.defBonusT1))
+                stats.ironThorns = GameConfig.IronMaiden.thornsT1
+            },
+            higherTiers: [
+                { stats in                           // T2 Barbed Armor
+                    stats.ironMaidenTier = 2
+                    stats.ironThorns = GameConfig.IronMaiden.thornsT2
+                    stats.ironSkinDefToDmg = GameConfig.IronMaiden.defToDmgT2
+                },
+                { stats in                           // T3 Retaliate
+                    stats.ironMaidenTier = 3
+                    stats.ironRetaliate = GameConfig.IronMaiden.retaliateMult
+                },
+                { stats in                           // T4 Kinetic Reserve
+                    stats.ironMaidenTier = 4
+                    stats.ironKineticActive = true
+                },
+                { stats in                           // T5 Iron Maiden
+                    stats.ironMaidenTier = 5
+                    stats.ironMaidenProjectile = true
+                    stats.defense += max(1, Int(CGFloat(stats.defense) * GameConfig.IronMaiden.defBonusT5))
+                }
+            ],
+            tierDescriptions: [
+                "Iron Skin: DEF fuels damage; +5% DEF; Thorns bite touchers",
+                "Barbed Armor: Thorns +250%; more DEF→damage",
+                "Retaliate: counter attackers for 150% of the hit",
+                "Kinetic Reserve: hits store energy; release a 200% DEF burst at 5",
+                "Iron Maiden: +15% DEF; every 20s fire stored energy at a priority foe"
             ],
             isCapstone: true
         ))

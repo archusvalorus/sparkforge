@@ -72,6 +72,32 @@ enum GameConfig {
         static let eruptionTelegraph: TimeInterval = 0.8
     }
 
+    /// v1.9 Iron Maiden (Guard capstone) — incoming force → stored punishment.
+    enum IronMaiden {
+        // T1 Iron Skin. NOTE: the packet says "convert DEF into bonus ATK," but
+        // in this engine projectile damage is driven by the damage MULTIPLIER,
+        // not baseAttack (baseAttack only feeds the HUD + ATK%-scaled capstone
+        // abilities). To make "weaponize defense" actually bite, Iron Skin routes
+        // DEF→offense through the same multiplier lever Unbroken Core uses
+        // (defAsDamageMult). Flagged for Brandon's balance pass.
+        static let defToDmgT1: CGFloat = 0.0125    // +1.25% damage per DEF (~+25% at 20 DEF)
+        static let defBonusT1: CGFloat = 0.05      // +5% DEF, one-time at pickup
+        static let thornsT1: Int = 5               // flat damage to touchers
+        // T2 Barbed Armor
+        static let defToDmgT2: CGFloat = 0.025     // +2.5% damage per DEF (~+50% at 20 DEF)
+        static let thornsT2: Int = 17              // Thorns +250% → 5 × 3.5 ≈ 17
+        // T3 Retaliate
+        static let retaliateMult: CGFloat = 1.5    // 150% of pre-mitigation incoming
+        static let retaliateCooldown: TimeInterval = 1.0  // global, not per-enemy
+        // T4 Kinetic Reserve
+        static let kineticThreshold: Int = 4       // stacks before a burst releases
+        static let kineticBurstDefMult: CGFloat = 2.0     // 200% DEF radial burst
+        static var kineticBurstRadius: CGFloat { 130 * DeviceScale.gameplay }
+        // T5 Iron Maiden
+        static let defBonusT5: CGFloat = 0.15      // +15% DEF, one-time at pickup
+        static let projectileInterval: TimeInterval = 20.0
+    }
+
     // MARK: - Level-Up Stats (v1.9 Unit 4)
     /// Per-award stat increments for the level-up cadence: even levels let the
     /// player CHOOSE one of these, odd levels auto-award a random one. Starting

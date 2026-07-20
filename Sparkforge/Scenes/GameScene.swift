@@ -74,6 +74,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v1.9: Everglow capstone — close-range heat pulse + periodic arena eruption.
     private var everglowPulseTimer: TimeInterval = 0
     private var everglowEruptionTimer: TimeInterval = 0
+    // v1.9: Iron Maiden capstone — retaliation cooldown + timed punishment projectile.
+    private var ironRetaliateCooldown: TimeInterval = 0
+    private var ironMaidenProjectileTimer: TimeInterval = 0
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -116,6 +119,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let xpBar = XPBarNode(width: 210)  // v1.7 legibility pass
     private let buffTracker = BuffTrackerNode()
     private let statHUD = StatHUDNode()  // v1.9 Unit 5: right-side combat modifiers
+    private let kineticGauge = StackGaugeNode()  // v1.9: Iron Maiden reserve meter (reusable)
     private let deathOverlay = SKNode()
     private let levelUpOverlay = SKNode()
     private let synergyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
@@ -752,6 +756,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         statHUD.zPosition = 200
         camera.addChild(statHUD)
         statHUD.update(from: playerStats)
+
+        // v1.9 Iron Maiden: Kinetic reserve gauge — centered just below the HP
+        // bar, like a rage meter. Hidden until Kinetic Reserve (T4) is active.
+        kineticGauge.position = CGPoint(x: 0, y: safeTop - 86)
+        kineticGauge.zPosition = 101
+        camera.addChild(kineticGauge)
+        refreshKineticGauge()
+    }
+
+    /// Sync the Kinetic gauge to current stats — shown/hidden with Kinetic
+    /// Reserve, filled to the live stack count. Call after picks + on restart.
+    private func refreshKineticGauge() {
+        if playerStats.ironKineticActive {
+            // Per-capstone gauge color — the defense (Iron Maiden) reserve is neon blue.
+            kineticGauge.configure(capacity: GameConfig.IronMaiden.kineticThreshold,
+                                   filledColor: 0x1FB6FF)
+            kineticGauge.setFilled(playerStats.ironKineticStacks)
+        } else {
+            kineticGauge.configure(capacity: 0, filledColor: 0x1FB6FF)
+        }
     }
     
     private func setupDeathOverlay() {
@@ -1801,6 +1825,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let tierBefore = upgradeManager.tier(of: card.id)
         upgradeManager.pickCard(card, stats: playerStats)
 
+        // Refresh the stat HUD + Kinetic gauge immediately — a DEF/ATK card
+        // should move the readout on pick, not wait for the next hit.
+        statHUD.update(from: playerStats)
+        refreshKineticGauge()
+
         // v1.9 Unit 3: this pick just maxed a laddered card. Capstones get the
         // grand reveal (after synergies); other maxed ladders a quiet flourish.
         if card.maxTier > 1, tierBefore < card.maxTier,
@@ -2611,6 +2640,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.9: Everglow (Fire capstone) — the player becomes a heat source.
         updateEverglow(dt)
 
+        // v1.9: Iron Maiden (Guard capstone) — retaliation cooldown + T5 projectile.
+        updateIronMaiden(dt)
+
         // v1.6: Hoarfrost + Cauterize regen
         let regen = playerStats.updateRegen(dt)
         if regen > 0 {
@@ -2713,6 +2745,116 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ]),
             SKAction.removeFromParent()
         ]))
+    }
+
+    // MARK: - Iron Maiden (Guard capstone)
+
+    private func updateIronMaiden(_ dt: TimeInterval) {
+        if ironRetaliateCooldown > 0 { ironRetaliateCooldown -= dt }
+        guard playerStats.ironMaidenProjectile else { return }
+
+        // T5 : release stored Kinetic energy at a priority foe on a fixed cadence.
+        ironMaidenProjectileTimer += dt
+        if ironMaidenProjectileTimer >= GameConfig.IronMaiden.projectileInterval {
+            ironMaidenProjectileTimer = 0
+            fireIronMaidenProjectile()
+        }
+    }
+
+    /// T4 radial burst around the player: 200% DEF, consuming the Kinetic reserve.
+    private func fireKineticBurst() {
+        let dmg = playerStats.ironKineticBurstDamage
+        damageEnemiesInRadius(GameConfig.IronMaiden.kineticBurstRadius,
+                              around: player.position,
+                              damage: dmg)
+        showRingPulse(at: player.position,
+                      radius: GameConfig.IronMaiden.kineticBurstRadius,
+                      colorHex: 0x1FB6FF)
+        worldNode.shake(intensity: 5, duration: 0.18)
+    }
+
+    /// A single Iron-Maiden target, resolved by priority (boss > miniboss > nearest).
+    private enum IronMaidenTarget {
+        case boss(any ArenaBossNode)
+        case enemy(EnemyNode)
+        var position: CGPoint {
+            switch self {
+            case .boss(let b): return b.position
+            case .enemy(let e): return e.position
+            }
+        }
+    }
+
+    private func findIronMaidenTarget() -> IronMaidenTarget? {
+        if let boss = boss, !boss.isDead { return .boss(boss) }
+        var miniboss: EnemyNode?
+        var nearest: EnemyNode?
+        var nearestDist = CGFloat.greatestFiniteMagnitude
+        for enemy in enemies where !enemy.isDying {
+            if enemy.isMiniBoss, miniboss == nil { miniboss = enemy }
+            let dist = player.position.distance(to: enemy.position)
+            if dist < nearestDist { nearestDist = dist; nearest = enemy }
+        }
+        if let mb = miniboss { return .enemy(mb) }
+        if let n = nearest { return .enemy(n) }
+        return nil
+    }
+
+    private func fireIronMaidenProjectile() {
+        guard let target = findIronMaidenTarget() else { return }
+        // Release all stored Kinetic energy: the burst value if any is stored,
+        // plus current Thorns. With nothing stored, the shot still carries Thorns.
+        let kinetic = playerStats.ironKineticStacks > 0 ? playerStats.ironKineticBurstDamage : 0
+        if playerStats.ironKineticStacks > 0 { kineticGauge.flashRelease() }
+        playerStats.ironKineticStacks = 0
+        let dmg = kinetic + playerStats.ironThorns
+        guard dmg > 0 else { return }
+
+        // Cannot miss, ignores collision: apply the payload directly, animate a tracer.
+        switch target {
+        case .boss(let b): b.takeDamage(dmg)
+        case .enemy(let e): dealDirectDamage(dmg, toEnemy: e)
+        }
+        showIronMaidenTracer(from: player.position, to: target.position)
+    }
+
+    private func showIronMaidenTracer(from: CGPoint, to: CGPoint) {
+        let orb = SKShapeNode(circleOfRadius: 8)
+        orb.fillColor = SKColor(hex: 0x1FB6FF, alpha: 0.9)
+        orb.strokeColor = SKColor(hex: 0xEDEFF2, alpha: 1.0)
+        orb.lineWidth = 2
+        orb.glowWidth = 6
+        orb.position = from
+        orb.zPosition = 9
+        worldNode.addChild(orb)
+        orb.run(SKAction.sequence([
+            SKAction.move(to: to, duration: 0.12),
+            SKAction.run { [weak self] in self?.showRingPulse(at: to, radius: 40, colorHex: 0x1FB6FF) },
+            SKAction.removeFromParent()
+        ]))
+        worldNode.shake(intensity: 4, duration: 0.12)
+    }
+
+    /// Deal flat damage to whatever an enemy body is (boss or normal), with kill
+    /// bookkeeping. Mirrors the Iron Bloom / Thornwall retaliation pattern.
+    private func dealRetaliationDamage(_ amount: Int, to enemyBody: SKPhysicsBody) {
+        guard amount > 0 else { return }
+        if let bossNode = enemyBody.node as? (any ArenaBossNode) {
+            bossNode.takeDamage(amount)
+        } else if let enemy = enemyBody.node as? EnemyNode {
+            dealDirectDamage(amount, toEnemy: enemy)
+        }
+    }
+
+    /// Deal flat damage to a specific normal enemy, handling kill bookkeeping.
+    private func dealDirectDamage(_ amount: Int, toEnemy enemy: EnemyNode) {
+        guard amount > 0 else { return }
+        if enemy.takeDamage(amount) {
+            if let index = enemies.firstIndex(where: { $0 === enemy }) {
+                enemies.remove(at: index)
+            }
+            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+        }
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -4290,18 +4432,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // back to whatever touched you (mirrors the Iron Bloom thorns pattern).
         if playerStats.thornsContactReflect > 0 {
             let reflect = max(1, Int(CGFloat(damage) * playerStats.thornsContactReflect))
-            if let bossNode = enemyBody.node as? (any ArenaBossNode) {
-                bossNode.takeDamage(reflect)
-            } else if let enemy = enemyBody.node as? EnemyNode {
-                if enemy.takeDamage(reflect) {
-                    if let index = enemies.firstIndex(where: { $0 === enemy }) {
-                        enemies.remove(at: index)
-                    }
-                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
-                }
+            dealRetaliationDamage(reflect, to: enemyBody)
+        }
+
+        // v1.9 Iron Maiden (Guard capstone): incoming force → stored punishment.
+        if playerStats.ironMaidenTier >= 1 {
+            // Thorns — flat bite to the toucher (T1+).
+            dealRetaliationDamage(playerStats.ironThorns, to: enemyBody)
+            // Retaliate — counter for a fraction of pre-mitigation damage (T3+),
+            // on a global (not per-enemy) cooldown.
+            if playerStats.ironRetaliate > 0 && ironRetaliateCooldown <= 0 {
+                dealRetaliationDamage(Int(CGFloat(damage) * playerStats.ironRetaliate), to: enemyBody)
+                ironRetaliateCooldown = GameConfig.IronMaiden.retaliateCooldown
+            }
+            // Kinetic — build a stack; release the radial burst at threshold (T4+).
+            if playerStats.addKineticStack() {
+                fireKineticBurst()
+                kineticGauge.flashRelease()
+            } else {
+                kineticGauge.setFilled(playerStats.ironKineticStacks)
             }
         }
-        
+
         if died {
             if player.tryLethalSave() {
                 for enemy in enemies {
@@ -4363,7 +4515,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: 4, duration: 0.15)
-        
+
+        // v1.9 Iron Maiden: a ranged hit is still a damaging hit — build a stack.
+        // (Thorns/Retaliate are contact-only; the source enemy may be gone here.)
+        if playerStats.addKineticStack() {
+            fireKineticBurst()
+            kineticGauge.flashRelease()
+        } else {
+            kineticGauge.setFilled(playerStats.ironKineticStacks)
+        }
+
         if died {
             if player.tryLethalSave() {
                 for enemy in enemies {
@@ -5131,6 +5292,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         passiveDOTAccumulator = 0
         everglowPulseTimer = 0
         everglowEruptionTimer = 0
+        ironRetaliateCooldown = 0
+        ironMaidenProjectileTimer = 0
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false
@@ -5161,11 +5324,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         DailyForgeManager.shared.applyBlessingIfActive(to: playerStats)
         
         xpBar.updateFill(0)
-        
+        statHUD.update(from: playerStats)
+        refreshKineticGauge()  // hide the gauge again for a fresh run
+
         deathOverlay.run(SKAction.fadeOut(withDuration: 0.2))
         levelUpOverlay.alpha = 0
         camera?.position = .zero
-        
+
         gameState = .playing
     }
 }
