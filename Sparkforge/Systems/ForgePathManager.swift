@@ -117,6 +117,14 @@ final class ForgePathManager {
         save()
     }
 
+    /// v1.9 Unit 7: free, unlimited respec — clear all spent picks so every
+    /// earned mastery point becomes available to re-spend. Key unchanged
+    /// (live data); applyPathBonuses just replays the (now empty) list.
+    func respec() {
+        picks = []
+        save()
+    }
+
     // MARK: - Apply
 
     /// Replay every pick through its branch cycle onto run stats
