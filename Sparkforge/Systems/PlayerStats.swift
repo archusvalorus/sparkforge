@@ -34,7 +34,7 @@ final class PlayerStats {
     }
     
     // v1.9 Unit 4: the three level-up stat lanes.
-    enum StatKind: CaseIterable {
+    enum StatKind: String, CaseIterable {
         case hp, attack, defense
         var label: String { self == .hp ? "MAX HP" : self == .attack ? "ATK" : "DEF" }
         var emoji: String { self == .hp ? "❤️" : self == .attack ? "⚔️" : "🛡️" }

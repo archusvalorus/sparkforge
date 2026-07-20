@@ -23,7 +23,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case paused    // v1.4: Pause menu
         case removeAdsPrompt  // v1.8 (E4): in-run value-prop modal is up
         case synergyReveal    // v1.8 (Unit 6): synergy-unlock modal is up
-        case statChoice       // v1.9 (Unit 4): even-level stat picker is up
     }
     
     private(set) var gameState: GameState = .playing
@@ -113,6 +112,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let levelLabel = SKLabelNode(fontNamed: "Menlo-Bold")
     private let xpBar = XPBarNode(width: 210)  // v1.7 legibility pass
     private let buffTracker = BuffTrackerNode()
+    private let statHUD = StatHUDNode()  // v1.9 Unit 5: right-side combat modifiers
     private let deathOverlay = SKNode()
     private let levelUpOverlay = SKNode()
     private let synergyLabel = SKLabelNode(fontNamed: "Menlo-Bold")
@@ -162,8 +162,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // after any synergy tiers. pendingCapstones collects during the pick.
     private var pendingCapstones: [CardMaxReveal] = []
     private var capstoneQueue: [CardMaxReveal] = []
-    // v1.9 Unit 4: even-level stat picker (precedes the skill card).
-    private var statChoiceNode: StatChoiceNode?
+    // v1.9 Unit 4b: combined level-up screen — a stat pick and a skill card on
+    // ONE screen (even levels), chosen in either order, auto-committing once
+    // both are selected. levelNeedsStat is false on odd levels (random stat is
+    // auto-awarded and shown as a badge; only the card is picked).
+    private var levelStatPick: PlayerStats.StatKind?
+    private var levelNeedsStat = false
+    private var pendingLevelCard: UpgradeCardNode?
     
     // MARK: - Scene Lifecycle
     
@@ -735,6 +740,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pauseButton.zPosition = 101
         pauseButton.name = "pauseButton"
         camera.addChild(pauseButton)
+
+        // v1.9 Unit 5: playfield stat HUD — right edge, clearly BELOW the
+        // centered XP/HP bars (which end at safeTop-64) so nothing collides.
+        // z above the level-up/stat-choice dim (190/192) so it stays legible
+        // while the player is choosing a stat or card.
+        statHUD.position = CGPoint(x: safeRight + 8, y: safeTop - 92)
+        statHUD.zPosition = 200
+        camera.addChild(statHUD)
+        statHUD.update(from: playerStats)
     }
     
     private func setupDeathOverlay() {
@@ -912,7 +926,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         label.fontColor = SKColor(hex: 0xFFAA33)
         label.text = "LEVEL UP"
         label.name = "levelUpLabel"
-        label.position = CGPoint(x: 0, y: 90)  // v1.6: cleared for taller cards
+        label.position = CGPoint(x: 0, y: 188)  // v1.9 4b: raised for the stat cards
         levelUpOverlay.addChild(label)
 
         // v1.8: match the title CTA convention — bold, bright neon-white
@@ -921,7 +935,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hint.fontSize = 18
         hint.fontColor = SKColor(hex: 0xF2FBFF)
         hint.text = "choose an upgrade"
-        hint.position = CGPoint(x: 0, y: 64)
+        hint.position = CGPoint(x: 0, y: 12)  // v1.9 4b: below the stat cards
         levelUpOverlay.addChild(hint)
         
         // v1.6: Reroll + Extra Card sit side by side below the cards.
@@ -1388,9 +1402,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .synergyReveal:
             advanceSynergy()
 
-        case .statChoice:
-            handleStatChoice(touch)
-
         case .dead:
             handleDeathScreenTap(touch)
             
@@ -1693,6 +1704,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
+        // v1.9 4b: stat chips (even levels) — tapping one selects it. Chip
+        // frames are computed in overlay space (statRow offset + chip offset).
+        if levelNeedsStat, let statRow = levelUpOverlay.childNode(withName: "statRow") {
+            for kind in PlayerStats.StatKind.allCases {
+                guard let chip = statRow.childNode(withName: "statChip_\(kind.rawValue)") else { continue }
+                let cx = statRow.position.x + chip.position.x
+                let cy = statRow.position.y + chip.position.y
+                let f = CGRect(x: cx - Self.statCardSize.width / 2 - 4,
+                               y: cy - Self.statCardSize.height / 2 - 4,
+                               width: Self.statCardSize.width + 8,
+                               height: Self.statCardSize.height + 8)
+                if f.contains(location) {
+                    selectStat(kind)
+                    return
+                }
+            }
+        }
+
         // Check card taps (frames scale down when 4 cards are shown)
         for cardNode in displayedCards {
             let w = UpgradeCardNode.cardWidth * cardNode.xScale
@@ -1705,13 +1734,65 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             )
 
             if cardFrame.contains(location) {
-                selectCard(cardNode)
+                selectLevelCard(cardNode)
                 return
             }
         }
     }
-    
-    private func selectCard(_ selectedNode: UpgradeCardNode) {
+
+    // MARK: - v1.9 4b: combined stat + card selection (either order, auto-commit)
+
+    /// A stat chip was tapped — select it (highlight), then try to commit.
+    private func selectStat(_ kind: PlayerStats.StatKind) {
+        AudioManager.shared.play(.cardSelect)
+        levelStatPick = kind
+        highlightSelectedChip(kind)
+        tryCommitLevelUp()
+    }
+
+    /// A card was tapped — mark it pending (highlight), then try to commit.
+    private func selectLevelCard(_ node: UpgradeCardNode) {
+        if pendingLevelCard !== node {
+            pendingLevelCard?.setScale(node.xScale)   // reset the previous pick
+            pendingLevelCard = node
+            node.run(SKAction.scale(to: node.xScale * 1.08, duration: 0.1))
+            AudioManager.shared.play(.cardSelect)
+        }
+        tryCommitLevelUp()
+    }
+
+    /// Commit once both picks are in — the stat (even) is applied, then the
+    /// card is selected. Odd levels need only a card (stat already awarded).
+    private func tryCommitLevelUp() {
+        guard let card = pendingLevelCard else { return }
+        if levelNeedsStat, levelStatPick == nil { return }
+
+        if let stat = levelStatPick {
+            playerStats.applyStatBonus(stat)
+            statHUD.update(from: playerStats)
+            levelStatPick = nil
+            levelNeedsStat = false   // a 2nd (extra-pick) card won't re-require a stat
+        }
+        levelUpOverlay.childNode(withName: "statRow")?.run(SKAction.fadeOut(withDuration: 0.15))
+        pendingLevelCard = nil
+        commitCard(card)
+    }
+
+    /// Highlight the chosen stat chip; dim the others.
+    private func highlightSelectedChip(_ kind: PlayerStats.StatKind) {
+        guard let statRow = levelUpOverlay.childNode(withName: "statRow") else { return }
+        for k in PlayerStats.StatKind.allCases {
+            guard let chip = statRow.childNode(withName: "statChip_\(k.rawValue)"),
+                  let plate = chip.childNode(withName: "chipPlate") as? SKShapeNode else { continue }
+            let selected = (k == kind)
+            plate.fillColor = SKColor(hex: k.colorHex, alpha: selected ? 0.5 : 0.20)
+            plate.lineWidth = selected ? 2.5 : 1.5
+            plate.glowWidth = selected ? 6 : 2
+            chip.setScale(selected ? 1.08 : 1.0)
+        }
+    }
+
+    private func commitCard(_ selectedNode: UpgradeCardNode) {
         AudioManager.shared.play(.cardSelect)
         let card = selectedNode.card
         let tierBefore = upgradeManager.tier(of: card.id)
@@ -3956,7 +4037,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hpBar.updateFill(playerStats.hpPercent,
                          currentHP: playerStats.currentHP,
                          maxHP: playerStats.maxHP)
-        
+        statHUD.update(from: playerStats)  // v1.9 Unit 5: live combat modifiers
+
         levelLabel.text = "LV \(player.currentLevel)"
         xpBar.updateFill(player.xpProgress,
                          currentXP: player.currentXP,
@@ -4440,56 +4522,53 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - Level Up
     
+    /// y of the stat card row within the level-up overlay (above the skill
+    /// cards). Card-sized rows crowd the screen — accepted (Brandon).
+    private let statRowY: CGFloat = 92
+
     private func triggerLevelUp() {
         AudioManager.shared.play(.levelUp)
         playerStats.triggerOverclock()  // v1.7: level-ups grant speed briefly
         xpBar.flashLevelUp()
         levelLabel.text = "LV \(player.currentLevel)"
 
-        // v1.9 Unit 4: every level presents a skill card. EVEN levels present a
-        // stat CHOICE first (pick +HP/+ATK/+DEF); ODD levels auto-award a random
-        // stat alongside the card. Even flows stat-choice → skill card.
-        if player.currentLevel % 2 == 0 {
-            presentStatChoice()
-        } else {
-            let awarded = PlayerStats.StatKind.allCases.randomElement() ?? .hp
-            playerStats.applyStatBonus(awarded)
-            showBuildHint("\(awarded.emoji) +\(awarded.bonus) \(awarded.label)")
-            presentSkillCard()
+        // v1.9 Unit 4b: ONE combined level-up screen. EVEN levels show a stat
+        // picker alongside the cards (pick either order, auto-commit once both
+        // are chosen); ODD levels auto-award a random stat (shown as a badge)
+        // and just pick a card.
+        levelStatPick = nil
+        pendingLevelCard = nil
+        levelNeedsStat = (player.currentLevel % 2 == 0)
+
+        var awarded: PlayerStats.StatKind? = nil
+        if !levelNeedsStat {
+            let stat = PlayerStats.StatKind.allCases.randomElement() ?? .hp
+            playerStats.applyStatBonus(stat)
+            statHUD.update(from: playerStats)
+            awarded = stat
         }
-    }
 
-    // v1.9 Unit 4: the even-level stat picker, shown before the skill card.
-    private func presentStatChoice() {
-        gameState = .statChoice
-        let node = StatChoiceNode()
-        node.present(in: camera ?? self)
-        statChoiceNode = node
-    }
-
-    private func handleStatChoice(_ touch: UITouch) {
-        guard let node = statChoiceNode else { return }
-        let location = touch.location(in: node)
-        guard let kind = node.statAt(location) else { return }
-        AudioManager.shared.play(.cardSelect)
-        playerStats.applyStatBonus(kind)
-        node.animateSelection(kind) { [weak self] in
-            self?.statChoiceNode = nil
-            self?.presentSkillCard()
-        }
-    }
-
-    /// The skill-card step of a level-up (every level ends here).
-    private func presentSkillCard() {
         gameState = .levelUp
-
         if let label = levelUpOverlay.childNode(withName: "levelUpLabel") as? SKLabelNode {
             label.text = "LEVEL \(player.currentLevel)"
         }
-
+        presentStatRow(needsPick: levelNeedsStat, awarded: awarded)
         showCardSelection(upgradeManager.drawCards(count: 3))
-        
-        // Show/hide reroll + extra card + extra pick buttons
+        refreshLevelUpButtons()
+
+        levelUpOverlay.alpha = 0
+        levelUpOverlay.run(SKAction.fadeIn(withDuration: 0.2))
+
+        // Brief screen flash on level up
+        let flash = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
+        flash.fillColor = SKColor(hex: 0xFFAA33, alpha: 0.15)
+        flash.strokeColor = .clear
+        flash.zPosition = 180
+        camera?.addChild(flash) ?? addChild(flash)
+        flash.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.3), SKAction.removeFromParent()]))
+    }
+
+    private func refreshLevelUpButtons() {
         if let rerollBtn = levelUpOverlay.childNode(withName: "rerollButton") {
             rerollBtn.alpha = rerollUsedThisRun ? 0.0 : 1.0
         }
@@ -4498,7 +4577,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         if let pickBtn = levelUpOverlay.childNode(withName: "extraPickButton") {
             pickBtn.alpha = extraPickUsedThisRun ? 0.0 : 1.0
-            // Restore the button's face — the overlay outlives runs
             if !extraPickUsedThisRun {
                 if let label = pickBtn.childNode(withName: "extraPickLabel") as? SKLabelNode {
                     label.text = "★ +1 PICK"
@@ -4509,17 +4587,91 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 }
             }
         }
-        
-        levelUpOverlay.alpha = 0
-        levelUpOverlay.run(SKAction.fadeIn(withDuration: 0.2))
-        
-        // Brief screen flash on level up
-        let flash = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
-        flash.fillColor = SKColor(hex: 0xFFAA33, alpha: 0.15)
-        flash.strokeColor = .clear
-        flash.zPosition = 180
-        camera?.addChild(flash) ?? addChild(flash)
-        flash.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.3), SKAction.removeFromParent()]))
+    }
+
+    /// v1.9 Unit 4b: build the stat row atop the cards — three selectable chips
+    /// (even) or a single awarded badge (odd). Chips are named "statChip_<key>".
+    private func presentStatRow(needsPick: Bool, awarded: PlayerStats.StatKind?) {
+        levelUpOverlay.childNode(withName: "statRow")?.removeFromParent()
+        let row = SKNode()
+        row.name = "statRow"
+        row.position = CGPoint(x: 0, y: statRowY)
+        levelUpOverlay.addChild(row)
+
+        if needsPick {
+            let title = SKLabelNode(fontNamed: "Menlo-Bold")
+            title.text = "CHOOSE A STAT"
+            title.fontSize = 12
+            title.fontColor = SKColor(hex: 0xCCCCCC)
+            title.verticalAlignmentMode = .center
+            title.position = CGPoint(x: 0, y: 72)
+            row.addChild(title)
+
+            let kinds = PlayerStats.StatKind.allCases
+            let spacing: CGFloat = 108
+            let startX = -spacing * CGFloat(kinds.count - 1) / 2
+            for (i, kind) in kinds.enumerated() {
+                let chip = Self.statCard(for: kind)
+                chip.position = CGPoint(x: startX + spacing * CGFloat(i), y: 0)
+                chip.name = "statChip_\(kind.rawValue)"
+                row.addChild(chip)
+            }
+        } else if let awarded = awarded {
+            let badge = SKLabelNode(fontNamed: "Menlo-Bold")
+            badge.text = "\(awarded.emoji)  +\(awarded.bonus) \(awarded.label) awarded"
+            badge.fontSize = 13
+            badge.fontColor = UpgradeCardNode.brightColor(hex: awarded.colorHex)
+            badge.verticalAlignmentMode = .center
+            badge.position = .zero
+            row.addChild(badge)
+        }
+    }
+
+    /// A stat card that mirrors the skill-card language (dark plate, tinted
+    /// wash + stroke, emoji, value, label) so both selections read as the same
+    /// kind of button — just a different result. Named plate = "chipPlate".
+    static let statCardSize = CGSize(width: 96, height: 116)
+    private static func statCard(for kind: PlayerStats.StatKind) -> SKNode {
+        let node = SKNode()
+        let tag = SKColor(hex: kind.colorHex)
+        let h = statCardSize.height
+
+        let plate = SKShapeNode(rectOf: statCardSize, cornerRadius: 8)
+        plate.fillColor = SKColor(hex: 0x161616)
+        plate.strokeColor = .clear
+        node.addChild(plate)
+
+        let wash = SKShapeNode(rectOf: statCardSize, cornerRadius: 8)
+        wash.fillColor = SKColor(hex: kind.colorHex, alpha: 0.20)
+        wash.strokeColor = tag
+        wash.lineWidth = 1.5
+        wash.glowWidth = 2
+        wash.name = "chipPlate"
+        node.addChild(wash)
+
+        let emoji = SKLabelNode(text: kind.emoji)
+        emoji.fontSize = 26
+        emoji.verticalAlignmentMode = .center
+        emoji.position = CGPoint(x: 0, y: h / 2 - 28)
+        node.addChild(emoji)
+
+        let value = SKLabelNode(fontNamed: "Menlo-Bold")
+        value.text = "+\(kind.bonus)"
+        value.fontSize = 24
+        value.fontColor = UpgradeCardNode.brightColor(hex: kind.colorHex)
+        value.verticalAlignmentMode = .center
+        value.position = CGPoint(x: 0, y: -2)
+        node.addChild(value)
+
+        let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        label.text = kind.label
+        label.fontSize = 11
+        label.fontColor = SKColor(hex: 0xFFFFFF)
+        label.verticalAlignmentMode = .center
+        label.position = CGPoint(x: 0, y: -h / 2 + 18)
+        node.addChild(label)
+
+        return node
     }
     
     private func showCardSelection(_ cards: [UpgradeManager.UpgradeCard]) {
@@ -4534,7 +4686,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let cardScale: CGFloat = twoRow ? 0.74 : 1.0
         let colSpacing: CGFloat = twoRow ? 108 : 124
         let rowSpacing: CGFloat = 126
-        let topRowY: CGFloat = twoRow ? 0 : -40  // v1.4: single row sits lower
+        // v1.9 4b: dropped to clear the stat card row above.
+        let topRowY: CGFloat = twoRow ? -60 : -86
 
         // Drop the ad buttons down when cards take two rows.
         repositionLevelUpButtons(twoRow: twoRow)
@@ -4568,8 +4721,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v1.8: the reroll / +1 card / +1 pick buttons drop lower when the card
     /// spread uses two rows, so they clear the taller layout.
     private func repositionLevelUpButtons(twoRow: Bool) {
-        let pairY: CGFloat = twoRow ? -210 : -144
-        let pickY: CGFloat = twoRow ? -246 : -182
+        // v1.9 4b: dropped to follow the lower card rows.
+        let pairY: CGFloat = twoRow ? -250 : -188
+        let pickY: CGFloat = twoRow ? -284 : -224
         levelUpOverlay.childNode(withName: "rerollButton")?.position.y = pairY
         levelUpOverlay.childNode(withName: "extraCardButton")?.position.y = pairY
         levelUpOverlay.childNode(withName: "extraPickButton")?.position.y = pickY
@@ -4876,8 +5030,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pendingSynergies = []
         pendingCapstones = []
         capstoneQueue = []
-        statChoiceNode?.removeFromParent()
-        statChoiceNode = nil
+        levelStatPick = nil
+        pendingLevelCard = nil
+        levelNeedsStat = false
+        levelUpOverlay.childNode(withName: "statRow")?.removeFromParent()
         bossDefeatedThisRun = false
         pendingForgeXP = 0
         
