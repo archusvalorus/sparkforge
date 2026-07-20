@@ -4734,7 +4734,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func playerDied() {
         guard gameState == .playing else { return }
         gameState = .dead
-        
+
+        // v1.9: the killing blow zeroed currentHP, but updateHUD only runs while
+        // .playing — so push the bar to 0 here or it freezes on its last value.
+        hpBar.updateFill(playerStats.hpPercent,
+                         currentHP: playerStats.currentHP,
+                         maxHP: playerStats.maxHP)
+
         player.die()
         
         // Big screen shake on death

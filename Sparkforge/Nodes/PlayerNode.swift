@@ -38,6 +38,7 @@ final class PlayerNode: SKNode {
     private let eyesNode = SKNode()
     private let leftEye: SKShapeNode
     private let rightEye: SKShapeNode
+    private let eyeR: CGFloat   // v1.9: cached to rebuild the eye shapes (hit face)
     private var eyeOffset: CGPoint = .zero   // current directional slide (smoothed)
 
     // MARK: - Init
@@ -64,7 +65,7 @@ final class PlayerNode: SKNode {
 
         // v1.8: two small black eyes, above the white-hot core so they read
         // clearly. They ride an eyesNode container that slides toward travel.
-        let eyeR = config.visualRadius * GameConfig.Spark.eyeRadiusFactor
+        eyeR = config.visualRadius * GameConfig.Spark.eyeRadiusFactor
         leftEye = SKShapeNode(circleOfRadius: eyeR)
         rightEye = SKShapeNode(circleOfRadius: eyeR)
         for eye in [leftEye, rightEye] {
@@ -370,6 +371,50 @@ final class PlayerNode: SKNode {
 
     /// Apply damage to player via stats. Returns true if player should die.
     /// Phase Skin and lethal saves are handled by GameScene before calling this.
+    /// v1.9: the ">_<" squint — the eyes flick to ">" and "<" for a beat when
+    /// hit, then round back out. Pure personality.
+    private func showHitFace() {
+        guard !isDead else { return }
+        let e = eyeR * 1.6
+        let eyeColor = SKColor(hex: GameConfig.Spark.eyeColorHex)
+
+        let leftPath = CGMutablePath()   // ">"
+        leftPath.move(to: CGPoint(x: -e, y: e))
+        leftPath.addLine(to: CGPoint(x: e, y: 0))
+        leftPath.addLine(to: CGPoint(x: -e, y: -e))
+
+        let rightPath = CGMutablePath()  // "<"
+        rightPath.move(to: CGPoint(x: e, y: e))
+        rightPath.addLine(to: CGPoint(x: -e, y: 0))
+        rightPath.addLine(to: CGPoint(x: e, y: -e))
+
+        for (eye, path) in [(leftEye, leftPath), (rightEye, rightPath)] {
+            eye.path = path
+            eye.fillColor = .clear
+            eye.strokeColor = eyeColor
+            eye.lineWidth = max(1.5, eyeR)
+            eye.lineCap = .round
+            eye.lineJoin = .round
+        }
+        removeAction(forKey: "hitFace")
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: 0.4),
+            SKAction.run { [weak self] in self?.restoreEyes() }
+        ]), withKey: "hitFace")
+    }
+
+    /// Round eyes back out (also called on reset).
+    func restoreEyes() {
+        let circle = CGPath(ellipseIn: CGRect(x: -eyeR, y: -eyeR, width: eyeR * 2, height: eyeR * 2),
+                            transform: nil)
+        for eye in [leftEye, rightEye] {
+            eye.path = circle
+            eye.fillColor = SKColor(hex: GameConfig.Spark.eyeColorHex)
+            eye.strokeColor = .clear
+            eye.lineWidth = 0
+        }
+    }
+
     func applyDamage(_ rawDamage: Int) -> Bool {
         guard let stats = stats else { return true }
         let died = stats.takeDamage(rawDamage)
@@ -398,6 +443,8 @@ final class PlayerNode: SKNode {
             SKAction.fadeAlpha(to: 1.0, duration: 0.12)
         ])
         glowNode.run(flicker, withKey: "damageFlicker")
+
+        showHitFace()   // v1.9: a little ">_<" personality on every hit
 
         return died
     }
@@ -456,6 +503,7 @@ final class PlayerNode: SKNode {
         trailEmitter.particleBirthRate = 0
         eyeOffset = .zero
         eyesNode.position = CGPoint(x: 0, y: GameConfig.Player.visualRadius * GameConfig.Spark.eyeBaseYFactor)
+        restoreEyes()   // clear any ">_<" hit face left from the prior run
         applyLevelVisuals()
         physicsBody?.categoryBitMask = GameConfig.Physics.player
         setupPhysics()  // Reset collision radius to base

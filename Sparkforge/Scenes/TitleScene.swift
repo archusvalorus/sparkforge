@@ -310,10 +310,13 @@ final class TitleScene: SKScene {
         let fpm = ForgePathManager.shared
         guard fpm.picksAvailable > 0 || !fpm.summary.isEmpty else { return }
 
-        layoutY -= 24
+        // v1.9: the full-size (312×42) picks-ready button needs more clearance
+        // from the Forge XP bar above than the quiet one-line summary does.
+        let hasButton = fpm.picksAvailable > 0
+        layoutY -= hasButton ? 36 : 24
         forgePathRowY = layoutY
         drawForgePathRow()
-        layoutY -= 10
+        layoutY -= hasButton ? 16 : 10
     }
 
     /// Draws (or redraws after spending picks) the path row at its slot
@@ -324,7 +327,8 @@ final class TitleScene: SKScene {
         let fpm = ForgePathManager.shared
 
         if fpm.picksAvailable > 0 {
-            let bg = SKShapeNode(rectOf: CGSize(width: 220, height: 32), cornerRadius: 8)
+            // v1.9: match the standard title button footprint (312×42).
+            let bg = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
             bg.fillColor = SKColor(hex: 0x2A1A00)
             bg.strokeColor = SKColor(hex: 0xFFCC66, alpha: 0.7)
             bg.lineWidth = 1.5
@@ -336,7 +340,7 @@ final class TitleScene: SKScene {
             let label = SKLabelNode(fontNamed: "Menlo-Bold")
             let n = fpm.picksAvailable
             label.text = "⚒ FORGE PATH — \(n) PICK\(n == 1 ? "" : "S") READY"
-            label.fontSize = 13
+            label.fontSize = 15
             label.fontColor = SKColor(hex: 0xFFCC66)
             label.verticalAlignmentMode = .center
             label.position = CGPoint(x: 0, y: forgePathRowY)
@@ -982,8 +986,8 @@ final class TitleScene: SKScene {
         
         // v1.7: Forge Path picks button
         if let pathBtn = childNode(withName: "forgePathButton") {
-            let frame = CGRect(x: pathBtn.position.x - 110, y: pathBtn.position.y - 16,
-                               width: 220, height: 32)
+            let frame = CGRect(x: pathBtn.position.x - 156, y: pathBtn.position.y - 21,
+                               width: 312, height: 42)
             if frame.contains(location) {
                 showForgePathModal()
                 return
