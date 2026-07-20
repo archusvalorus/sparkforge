@@ -128,6 +128,11 @@ enum GameConfig {
     enum BossClass {
         static let debuffScale: CGFloat = 0.5   // stat-reduction effects at 50%
         static let damageScale: CGFloat = 0.5   // capstone ability damage at 50%
+        /// Boss-class (miniboss + boss) can be EXECUTED by a capstone finisher
+        /// (e.g. Apex's pounce) only at/below this HP fraction — a rare "holy
+        /// shit" finish, never a shortcut. Normal enemies use each capstone's
+        /// own (higher) execute threshold.
+        static let executeThreshold: CGFloat = 0.10
 
         /// Scale a multiplicative debuff (e.g. vulnerability 1.35) for boss-class:
         /// halves the bonus above 1.0. Non-boss returns the base unchanged.
@@ -144,6 +149,39 @@ enum GameConfig {
         static func scaledDamage(_ base: Int, isBossClass: Bool) -> Int {
             isBossClass ? max(1, Int((CGFloat(base) * damageScale).rounded())) : base
         }
+    }
+
+    /// v1.9 Apex (Bleed capstone) — feed the familiar, become the hunt.
+    /// NOTE: the packet's per-capstone boss caveats (+100% bat dmg on boss,
+    /// 1125% boss pounce) are SUPERSEDED by the global BossClass rule — bosses
+    /// take capstone damage at 50% and can't be executed. So no boss damage
+    /// bonuses here; the global factor handles boss-class.
+    enum Apex {
+        // T1 Blood Familiar
+        static let familiarAttackInterval: TimeInterval = 1.5
+        static let familiarBaseFrac: CGFloat = 0.10     // 10% ATK
+        static let familiarMaxFrac: CGFloat = 0.50      // up to 50% ATK
+        static let familiarFracPerStep: CGFloat = 0.01  // +1% ...
+        static let familiarKillsPerStep: Int = 5        // ... per 5 familiar kills
+        static var familiarRange: CGFloat { 0.6 * Arena.radius }
+        static var familiarHomeOffset: CGFloat { 46 * DeviceScale.gameplay }
+        // T2 Bloodfed
+        static let bloodfedKills: Int = 10              // every 10 kills…
+        static let bloodfedHP: Int = 5                  // …+5 max & current HP
+        static let bloodfedMaxHPCap: Int = 100          // per-run cap
+        static let hpToAtkFrac: CGFloat = 0.01          // 1% of max HP → bonus ATK
+        // T3 Bloodhound
+        static let executeThreshold: CGFloat = 0.20     // normals <20% HP executed on bite
+        // T4 Marked
+        static let markLifetime: TimeInterval = 10.0    // alive 10s → Marked
+        static let markVulnerability: CGFloat = 1.35    // +35% from all sources
+        // T5 The Hunter — the pounce gauge (reuses StackGaugeNode). Attacking
+        // INJURED foes charges it; when full the bat leaps to a weakened enemy
+        // and executes it. The bat keeps its normal bites at EVERY tier.
+        static let pounceExecuteThreshold: CGFloat = 0.50  // normals executable below this
+        static let pounceGaugeCapacity: Int = 4            // attacks to charge the gauge
+        static let pounceStackCooldown: TimeInterval = 0.2 // rate-limit the gauge fill
+        static let pounceCooldown: TimeInterval = 2.0      // min time between pounces (paces it)
     }
 
     // MARK: - Level-Up Stats (v1.9 Unit 4)

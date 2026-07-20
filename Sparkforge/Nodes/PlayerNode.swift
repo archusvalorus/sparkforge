@@ -40,6 +40,8 @@ final class PlayerNode: SKNode {
     private let rightEye: SKShapeNode
     private let eyeR: CGFloat   // v1.9: cached to rebuild the eye shapes (hit face)
     private var eyeOffset: CGPoint = .zero   // current directional slide (smoothed)
+    private var apexFeatures: SKNode?        // v1.9 Apex (The Hunter): fixed horns + wings
+    private var apexFangs: SKNode?           // v1.9 Apex: fangs — ride the eyesNode so they travel
 
     // MARK: - Init
 
@@ -486,11 +488,87 @@ final class PlayerNode: SKNode {
         run(flash)
     }
 
+    /// v1.9 Apex (The Hunter): Spark sprouts tiny black horns, white fangs, and
+    /// flapping wings — beginning to resemble the familiar (they don't fuse).
+    /// Toggled on at T5. Reusable creature-morph vector for future sets.
+    func setApexFeatures(_ on: Bool) {
+        if !on {
+            apexFeatures?.removeFromParent(); apexFeatures = nil
+            apexFangs?.removeFromParent(); apexFangs = nil
+            return
+        }
+        guard apexFeatures == nil else { return }
+        let R = GameConfig.Player.visualRadius
+        let container = SKNode()
+
+        // Black horns — two small triangles up top (fixed on the head).
+        for side in [CGFloat(-1), 1] {
+            let horn = SKShapeNode()
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: side * R * 0.28, y: R * 0.5))
+            p.addLine(to: CGPoint(x: side * R * 0.52, y: R * 1.02))
+            p.addLine(to: CGPoint(x: side * R * 0.54, y: R * 0.48))
+            p.closeSubpath()
+            horn.path = p
+            horn.fillColor = SKColor(hex: 0x140A10, alpha: 1.0)
+            horn.strokeColor = SKColor(hex: 0x000000, alpha: 0.85)
+            horn.lineWidth = 1
+            horn.zPosition = 14
+            container.addChild(horn)
+        }
+
+        // Flapping wings — dark membranes behind the ember body on each side (fixed).
+        for side in [CGFloat(-1), 1] {
+            let wing = SKShapeNode()
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: side * R * 0.65, y: R * 0.15))
+            p.addLine(to: CGPoint(x: side * R * 1.7, y: R * 0.55))
+            p.addLine(to: CGPoint(x: side * R * 1.5, y: -R * 0.45))
+            p.closeSubpath()
+            wing.path = p
+            wing.fillColor = SKColor(hex: 0x3A1520, alpha: 0.92)
+            wing.strokeColor = SKColor(hex: 0x1A0810, alpha: 0.9)
+            wing.lineWidth = 1
+            wing.zPosition = 9.5   // behind the ember body (10), in front of the glow (9)
+            let up = SKAction.scaleY(to: 0.4, duration: 0.16)
+            let down = SKAction.scaleY(to: 1.0, duration: 0.16)
+            up.timingMode = .easeInEaseOut
+            down.timingMode = .easeInEaseOut
+            wing.run(SKAction.repeatForever(SKAction.sequence([up, down])))
+            container.addChild(wing)
+        }
+
+        addChild(container)
+        apexFeatures = container
+
+        // Black fangs — added to eyesNode so they slide with the eyes on travel.
+        // (Positions are LOCAL to eyesNode, which sits just above center; fangs go
+        // just below the eyes, at the mouth.)
+        let fangs = SKNode()
+        for side in [CGFloat(-1), 1] {
+            let fang = SKShapeNode()
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: side * R * 0.08, y: -R * 0.28))
+            p.addLine(to: CGPoint(x: side * R * 0.24, y: -R * 0.28))
+            p.addLine(to: CGPoint(x: side * R * 0.15, y: -R * 0.56))
+            p.closeSubpath()
+            fang.path = p
+            fang.fillColor = SKColor(hex: 0x0A0A0A, alpha: 1.0)   // black — contrasts the ember body
+            fang.strokeColor = SKColor(hex: 0x000000, alpha: 0.9)
+            fang.lineWidth = 0.5
+            fang.zPosition = 1
+            fangs.addChild(fang)
+        }
+        eyesNode.addChild(fangs)
+        apexFangs = fangs
+    }
+
     func reset() {
         // Cancel any in-flight animation (notably die()'s fade-to-0) — else a
         // quick RESTART lets the leftover fade complete AFTER reset and hide the
         // spark. removeAllActions must precede the alpha/visual restore below.
         removeAllActions()
+        setApexFeatures(false)
         isDead = false
         currentLevel = 1
         currentXP = 0

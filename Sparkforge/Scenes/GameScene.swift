@@ -85,6 +85,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private weak var calledEnemy: EnemyNode?
     private weak var calledBoss: (any ArenaBossNode)?
     private var lassoLine: SKShapeNode?
+    // v1.9: Apex capstone — the Blood Familiar + T5 pounce-gauge state.
+    private var apexFamiliar: FamiliarNode?
+    private var apexAttackTimer: TimeInterval = 0
+    private var apexOrbitPhase: CGFloat = 0
+    private var apexBloodfedKills: Int = 0
+    private var apexPounceStacks: Int = 0
+    private var apexStackTimer: TimeInterval = 0
+    private var apexPounceCooldown: TimeInterval = 0
+    private let apexGauge = StackGaugeNode()  // T5 pounce charge (reuses the rage meter)
+    private var apexTargetMarker: SKShapeNode?
+    private var apexFamiliarTier: Int = 0     // last-applied tier (drives bat growth + Spark's features)
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -771,6 +782,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         kineticGauge.zPosition = 101
         camera.addChild(kineticGauge)
         refreshKineticGauge()
+
+        // v1.9 Apex: pounce charge gauge — same slot (only one capstone gauge
+        // is normally active at once).
+        apexGauge.position = CGPoint(x: 0, y: safeTop - 86)
+        apexGauge.zPosition = 101
+        camera.addChild(apexGauge)
+        refreshApexGauge()
     }
 
     /// Sync the Kinetic gauge to current stats — shown/hidden with Kinetic
@@ -1833,10 +1851,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let tierBefore = upgradeManager.tier(of: card.id)
         upgradeManager.pickCard(card, stats: playerStats)
 
-        // Refresh the stat HUD + Kinetic gauge immediately — a DEF/ATK card
+        // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
         statHUD.update(from: playerStats)
         refreshKineticGauge()
+        refreshApexGauge()
 
         // v1.9 Unit 3: this pick just maxed a laddered card. Capstones get the
         // grand reveal (after synergies); other maxed ladders a quiet flourish.
@@ -2663,6 +2682,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.9: Skybeam (Shock capstone) — lasso the prey, call the strike.
         updateSkybeam(dt)
 
+        // v1.9: Apex (Bleed capstone) — the Blood Familiar hunts.
+        updateApex(dt)
+
         // v1.6: Hoarfrost + Cauterize regen
         let regen = playerStats.updateRegen(dt)
         if regen > 0 {
@@ -3222,6 +3244,335 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         calledEnemy = nil
         calledBoss?.vulnerabilityMultiplier = 1.0
         calledBoss = nil
+    }
+
+    // MARK: - Apex (Bleed capstone)
+
+    private func updateApex(_ dt: TimeInterval) {
+        guard playerStats.apexFamiliarActive else {
+            apexFamiliar?.removeFromParent(); apexFamiliar = nil
+            apexTargetMarker?.removeFromParent(); apexTargetMarker = nil
+            player.setApexFeatures(false)
+            apexFamiliarTier = 0
+            return
+        }
+        // Summon the familiar on first activation.
+        if apexFamiliar == nil {
+            let fam = FamiliarNode()
+            fam.position = player.position
+            worldNode.addChild(fam)
+            apexFamiliar = fam
+        }
+        // On each tier-up: the bat grows, and at T5 Spark sprouts bat features.
+        if apexFamiliarTier != playerStats.apexTier {
+            apexFamiliarTier = playerStats.apexTier
+            apexFamiliar?.setBodyScale(1.0 + CGFloat(max(0, playerStats.apexTier - 1)) * 0.12)
+            player.setApexFeatures(playerStats.apexHunter)
+        }
+        // Orbit a home point near the player.
+        apexOrbitPhase += CGFloat(dt) * 1.2
+        let off = GameConfig.Apex.familiarHomeOffset
+        let home = CGPoint(x: player.position.x + cos(apexOrbitPhase) * off,
+                           y: player.position.y + sin(apexOrbitPhase) * off + off * 0.4)
+        apexFamiliar?.follow(to: home, dt: dt)
+
+        // T4 Marked: lingering enemies (and the boss) become vulnerable — boss-class
+        // at reduced strength via the global factor. Persists until death.
+        if playerStats.apexMarked {
+            for e in enemies where !e.isDying {
+                if e.timeAlive >= GameConfig.Apex.markLifetime && e.vulnerabilityMultiplier == 1.0 {
+                    e.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
+                        GameConfig.Apex.markVulnerability, isBossClass: e.isMiniBoss)
+                    showRingPulse(at: e.position, radius: 26, colorHex: 0x99304D)
+                }
+            }
+            if let b = boss, !b.isDead, b.vulnerabilityMultiplier == 1.0 {
+                b.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
+                    GameConfig.Apex.markVulnerability, isBossClass: true)
+            }
+        }
+
+        // The bat hunts + bites at EVERY tier — mark the current target, then bite.
+        let target = findBatTarget()
+        updateApexTargetMarker(target)
+        apexAttackTimer += dt
+        if apexAttackTimer >= GameConfig.Apex.familiarAttackInterval {
+            if let target = target {
+                apexAttackTimer = 0
+                batBite(target)
+            } else {
+                apexAttackTimer = GameConfig.Apex.familiarAttackInterval  // stay primed
+            }
+        }
+
+        // T5 The Hunter: charge the pounce gauge; when full AND off cooldown, leap
+        // + execute. The gauge can sit full through the cooldown — the CD paces
+        // the pounces even when the bar fills fast.
+        if playerStats.apexHunter {
+            if apexStackTimer > 0 { apexStackTimer -= dt }
+            if apexPounceCooldown > 0 { apexPounceCooldown -= dt }
+            if apexPounceStacks >= GameConfig.Apex.pounceGaugeCapacity && apexPounceCooldown <= 0 {
+                apexTryPounceExecute()
+            }
+        }
+    }
+
+    /// Prey selection: T3 Bloodhound favours the nearest bleeding foe; otherwise
+    /// the nearest enemy (then the boss) within the familiar's reach.
+    private func findBatTarget() -> CombatTarget? {
+        let range = GameConfig.Apex.familiarRange
+        var nearest: EnemyNode?; var nearestD = CGFloat.greatestFiniteMagnitude
+        var nearestBleed: EnemyNode?; var nearestBleedD = CGFloat.greatestFiniteMagnitude
+        for e in enemies where !e.isDying {
+            let d = player.position.distance(to: e.position)
+            guard d <= range else { continue }
+            if d < nearestD { nearestD = d; nearest = e }
+            if e.isBleeding && d < nearestBleedD { nearestBleedD = d; nearestBleed = e }
+        }
+        if playerStats.apexBloodhound, let b = nearestBleed { return .enemy(b) }
+        if let n = nearest { return .enemy(n) }
+        if let boss = boss, !boss.isDead, player.position.distance(to: boss.position) <= range {
+            return .boss(boss)
+        }
+        return nil
+    }
+
+    private func batBite(_ target: CombatTarget) {
+        apexFamiliar?.lunge(at: target.position)
+        let base = max(1, Int(playerStats.effectiveAttack * playerStats.apexFamiliarDamageFrac))
+        switch target {
+        case .enemy(let e):
+            let bossClass = e.isMiniBoss
+            // T3 execute: weak NORMAL enemies die outright on a bite (never boss-class).
+            if playerStats.apexBloodhound && !bossClass
+                && e.healthPercent < GameConfig.Apex.executeThreshold {
+                executeMob(e)
+            } else if e.takeDamage(GameConfig.BossClass.scaledDamage(base, isBossClass: bossClass)) {
+                recordBatKill(e)
+            }
+        case .boss(let b):
+            b.takeDamage(GameConfig.BossClass.scaledDamage(base, isBossClass: true))
+        }
+        apexRegisterAttack()   // T5: every bite charges the pounce gauge
+        showBiteSpark(at: target.position)
+    }
+
+    /// A familiar kill: remove + bookkeeping, and feed the bat's damage growth.
+    private func recordBatKill(_ e: EnemyNode) {
+        if let i = enemies.firstIndex(where: { $0 === e }) { enemies.remove(at: i) }
+        playerStats.apexFamiliarKills += 1
+        onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e)
+    }
+
+    /// Execute a normal enemy outright — lethal hit + a pixelated blood-mist
+    /// flourish. Only the familiar's execute paths (Bloodhound bite, pounce
+    /// finisher) use this, so the mist reads as "the hunter finished it."
+    private func executeMob(_ e: EnemyNode) {
+        let pos = e.position
+        if e.takeDamage(e.health) {
+            showBloodMist(at: pos)
+            recordBatKill(e)
+        }
+    }
+
+    /// A pixelated blood-mist burst — a bright pop, a soft haze, and a spray of
+    /// crimson squares (with a few big chunks). Over-the-top on purpose.
+    private func showBloodMist(at pos: CGPoint) {
+        // Bright pop flash.
+        let pop = SKShapeNode(circleOfRadius: 14)
+        pop.fillColor = SKColor(hex: 0xFF3050, alpha: 0.8)
+        pop.strokeColor = .clear
+        pop.glowWidth = 8
+        pop.position = pos
+        pop.zPosition = 9
+        worldNode.addChild(pop)
+        pop.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 2.4, duration: 0.12), SKAction.fadeOut(withDuration: 0.16)]),
+            SKAction.removeFromParent()
+        ]))
+        // Soft haze.
+        let haze = SKShapeNode(circleOfRadius: 14)
+        haze.fillColor = SKColor(hex: 0x8B0018, alpha: 0.5)
+        haze.strokeColor = .clear
+        haze.position = pos
+        haze.zPosition = 8
+        worldNode.addChild(haze)
+        haze.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 4.0, duration: 0.3), SKAction.fadeOut(withDuration: 0.36)]),
+            SKAction.removeFromParent()
+        ]))
+        // Pixel spray — more, bigger, with occasional chunks.
+        let s = DeviceScale.gameplay
+        let colors: [UInt32] = [0xC01030, 0xE0304D, 0x8B0018, 0xFF5070, 0x600018, 0xFF7090]
+        for i in 0..<20 {
+            let big = i % 5 == 0
+            let size = (big ? CGFloat.random(in: 7...10) : CGFloat.random(in: 3...6)) * s
+            let px = SKShapeNode(rectOf: CGSize(width: size, height: size))
+            px.fillColor = SKColor(hex: colors[i % colors.count], alpha: 1.0)
+            px.strokeColor = .clear
+            px.position = pos
+            px.zPosition = 9
+            px.zRotation = CGFloat.random(in: 0..<(.pi / 2))
+            worldNode.addChild(px)
+            let ang = CGFloat.random(in: 0..<(2 * .pi))
+            let dist = CGFloat.random(in: 24...72) * s
+            let dest = CGPoint(x: pos.x + cos(ang) * dist, y: pos.y + sin(ang) * dist)
+            let fly = SKAction.move(to: dest, duration: Double.random(in: 0.24...0.42))
+            fly.timingMode = .easeOut
+            px.run(SKAction.sequence([
+                SKAction.group([fly,
+                                SKAction.fadeOut(withDuration: 0.4),
+                                SKAction.scale(to: 0.2, duration: 0.4)]),
+                SKAction.removeFromParent()
+            ]))
+        }
+        worldNode.shake(intensity: 3, duration: 0.1)
+    }
+
+    /// T5: EVERY attack charges the pounce gauge (rate-limited). Called from the
+    /// bat's bites and the player's projectiles.
+    private func apexRegisterAttack() {
+        guard playerStats.apexHunter, apexStackTimer <= 0,
+              apexPounceStacks < GameConfig.Apex.pounceGaugeCapacity else { return }
+        apexPounceStacks += 1
+        apexStackTimer = GameConfig.Apex.pounceStackCooldown
+        apexGauge.setFilled(apexPounceStacks)
+    }
+
+    /// Gauge full: the bat leaps to the nearest weakened enemy and executes it.
+    /// Normals below the execute threshold; boss-class only below the 10% floor.
+    /// If nothing is executable yet, the full charge is held until something is.
+    private func apexTryPounceExecute() {
+        var best: CombatTarget?
+        var bestD = CGFloat.greatestFiniteMagnitude
+        for e in enemies where !e.isDying {
+            let executable = e.isMiniBoss
+                ? e.healthPercent <= GameConfig.BossClass.executeThreshold
+                : e.healthPercent < GameConfig.Apex.pounceExecuteThreshold
+            guard executable else { continue }
+            let d = player.position.distance(to: e.position)
+            if d < bestD { bestD = d; best = .enemy(e) }
+        }
+        if let b = boss, !b.isDead, b.healthPercent <= GameConfig.BossClass.executeThreshold {
+            let d = player.position.distance(to: b.position)
+            if d < bestD { bestD = d; best = .boss(b) }
+        }
+        guard let target = best else { return }   // hold the charge until a target is weak enough
+
+        apexPounceStacks = 0
+        apexGauge.flashRelease()
+        apexPounceCooldown = GameConfig.Apex.pounceCooldown
+        apexFamiliar?.pounce(at: target.position)
+        showPounceImpact(at: target.position)
+        switch target {
+        case .enemy(let e):
+            executeMob(e)                          // instant kill + blood mist
+        case .boss(let b):
+            showBossExecuteEvent(at: b.position)   // screen-wide finish
+            b.takeDamage(b.health)
+        }
+    }
+
+    /// A pulsing colored ring under the mob the bat is currently hunting.
+    private func updateApexTargetMarker(_ target: CombatTarget?) {
+        if apexTargetMarker == nil {
+            let m = SKShapeNode(circleOfRadius: 16 * DeviceScale.gameplay)
+            m.strokeColor = SKColor(hex: 0xE0304D, alpha: 0.9)
+            m.fillColor = SKColor(hex: 0xE0304D, alpha: 0.14)
+            m.lineWidth = 2
+            m.glowWidth = 3
+            m.zPosition = 4
+            m.alpha = 0
+            worldNode.addChild(m)
+            m.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.scale(to: 1.18, duration: 0.5),
+                SKAction.scale(to: 1.0, duration: 0.5)
+            ])))
+            apexTargetMarker = m
+        }
+        if let t = target {
+            apexTargetMarker?.position = t.position
+            apexTargetMarker?.alpha = 1
+        } else {
+            apexTargetMarker?.alpha = 0
+        }
+    }
+
+    /// Show/hide + sync the pounce gauge with T5 state.
+    private func refreshApexGauge() {
+        if playerStats.apexHunter {
+            apexGauge.configure(capacity: GameConfig.Apex.pounceGaugeCapacity, filledColor: 0xE0304D)
+            apexGauge.setFilled(apexPounceStacks)
+        } else {
+            apexGauge.configure(capacity: 0, filledColor: 0xE0304D)
+        }
+    }
+
+    /// A screen-wide finish when the pounce executes a boss at ≤10% HP — LOUD.
+    private func showBossExecuteEvent(at pos: CGPoint) {
+        AudioManager.shared.play(.bossExecute)
+        flashScreen(colorHex: 0xE01030, alpha: 0.55, duration: 0.4)
+        worldNode.shake(intensity: 22, duration: 0.6)
+        showBloodMist(at: pos)
+        showBloodMist(at: pos)   // double gore
+        for r in [CGFloat(140), 210, 290] {
+            showRingPulse(at: pos, radius: r, colorHex: 0xE0304D)
+        }
+        let core = SKShapeNode(circleOfRadius: 24)
+        core.fillColor = SKColor(hex: 0xFF2040, alpha: 0.95)
+        core.strokeColor = SKColor(hex: 0xFFFFFF, alpha: 0.95)
+        core.glowWidth = 26
+        core.position = pos
+        core.zPosition = 10
+        worldNode.addChild(core)
+        core.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 9, duration: 0.4), SKAction.fadeOut(withDuration: 0.5)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    private func showBiteSpark(at pos: CGPoint) {
+        let spark = SKShapeNode(circleOfRadius: 6)
+        spark.fillColor = SKColor(hex: 0xE03050, alpha: 0.7)
+        spark.strokeColor = SKColor(hex: 0xFF6080, alpha: 0.9)
+        spark.glowWidth = 4
+        spark.position = pos
+        spark.zPosition = 8
+        worldNode.addChild(spark)
+        spark.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.8, duration: 0.14), SKAction.fadeOut(withDuration: 0.16)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    private func showPounceImpact(at pos: CGPoint) {
+        worldNode.shake(intensity: 8, duration: 0.22)
+        let core = SKShapeNode(circleOfRadius: 10)
+        core.fillColor = SKColor(hex: 0xE01030, alpha: 0.85)
+        core.strokeColor = SKColor(hex: 0xFF7090, alpha: 1.0)
+        core.glowWidth = 10
+        core.position = pos
+        core.zPosition = 9
+        worldNode.addChild(core)
+        core.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 3.2, duration: 0.2), SKAction.fadeOut(withDuration: 0.25)]),
+            SKAction.removeFromParent()
+        ]))
+        showRingPulse(at: pos, radius: 70, colorHex: 0xE0304D)
+        // Two crossing fang slashes.
+        for a in [CGFloat(-0.5), 0.5] {
+            let slash = SKShapeNode()
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: pos.x - 20, y: pos.y + a * 18))
+            p.addLine(to: CGPoint(x: pos.x + 20, y: pos.y - a * 18))
+            slash.path = p
+            slash.strokeColor = SKColor(hex: 0xFFAABB, alpha: 0.9)
+            slash.lineWidth = 3
+            slash.glowWidth = 4
+            slash.zPosition = 9
+            worldNode.addChild(slash)
+            slash.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.2), SKAction.removeFromParent()]))
+        }
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -4456,6 +4807,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil) {
         killCount += 1
 
+        // v1.9 Apex Bloodfed (T2): every N kills, grow max HP (capped) + heal.
+        if playerStats.apexTier >= 2 {
+            apexBloodfedKills += 1
+            if apexBloodfedKills >= GameConfig.Apex.bloodfedKills {
+                apexBloodfedKills = 0
+                if playerStats.apexBloodfedBonusHP < GameConfig.Apex.bloodfedMaxHPCap {
+                    playerStats.apexBloodfedBonusHP += GameConfig.Apex.bloodfedHP
+                    playerStats.maxHP += GameConfig.Apex.bloodfedHP
+                    playerStats.heal(GameConfig.Apex.bloodfedHP)
+                    hpBar.updateFill(playerStats.hpPercent,
+                                     currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
+                    statHUD.update(from: playerStats)
+                }
+            }
+        }
+
         // v1.6: kills made in The Quench feed the Warden's gate
         if arenaConfig.id == 1 {
             ProgressionManager.shared.quenchKills += 1
@@ -5046,7 +5413,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode)
         }
-        
+        apexRegisterAttack()   // T5 Apex: every player hit charges the pounce gauge
+
         if playerStats.chainTargets > 0 && !killed {
             chainLightning(from: enemyNode.position,
                           damage: max(1, Int(CGFloat(damage) * playerStats.chainDamageMultiplier)),
@@ -5670,6 +6038,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ironMaidenProjectileTimer = 0
         skybeamStrikeCooldown = 0
         clearLasso()
+        apexFamiliar?.removeFromParent(); apexFamiliar = nil
+        apexTargetMarker?.removeFromParent(); apexTargetMarker = nil
+        apexAttackTimer = 0
+        apexOrbitPhase = 0
+        apexBloodfedKills = 0
+        apexPounceStacks = 0
+        apexStackTimer = 0
+        apexPounceCooldown = 0
+        apexFamiliarTier = 0
+        refreshApexGauge()
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false

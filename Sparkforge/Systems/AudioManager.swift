@@ -20,6 +20,7 @@ final class AudioManager {
         case levelUp
         case buildHint
         case skyStrike
+        case bossExecute
     }
 
     private let engine = AVAudioEngine()
@@ -160,6 +161,19 @@ final class AudioManager {
                 let boom = sin(2 * .pi * 58 * t) * 0.45
                 let body = (rumble + boom) * envelope(t, duration: d, attack: 0.004)
                 return (crack + body) * 0.55
+            }
+
+        case .bossExecute:
+            // A deep, loud explosive boom + gore crunch — the boss-finish payoff.
+            let d = 0.6
+            return synthStateful(duration: d) { t, state in
+                state.seed = state.seed &* 1_664_525 &+ 1_013_904_223
+                let white = Double(state.seed >> 8) / Double(1 << 24) * 2 - 1
+                state.lowpass += 0.05 * (white - state.lowpass)
+                let boom = sin(sweepPhase(f0: 130, f1: 40, duration: d, t: t)) * 0.8
+                let crunch = t < 0.12 ? white * envelope(t, duration: 0.12, attack: 0.001) * 0.7 : 0
+                let rumble = state.lowpass * 2.2
+                return (boom + crunch + rumble) * envelope(t, duration: d, attack: 0.003) * 0.62
             }
         }
     }

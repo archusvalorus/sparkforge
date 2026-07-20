@@ -48,6 +48,8 @@ final class StackGaugeNode: SKNode {
 
     /// Light exactly `count` pips (clamped). Newly-lit pips pop.
     func setFilled(_ count: Int) {
+        // Cancel any pending release-dim so a quick refill isn't clobbered by it.
+        removeAction(forKey: "release")
         let clamped = max(0, min(count, pips.count))
         for (i, pip) in pips.enumerated() {
             if i < clamped {
@@ -76,7 +78,7 @@ final class StackGaugeNode: SKNode {
         run(SKAction.sequence([
             SKAction.wait(forDuration: 0.14),
             SKAction.run { [weak self] in self?.pips.forEach { self?.dimPip($0) } }
-        ]))
+        ]), withKey: "release")
     }
 
     // MARK: - Pip states

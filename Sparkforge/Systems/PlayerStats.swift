@@ -59,9 +59,39 @@ final class PlayerStats {
     var skybeamCalled = false                 // T4: continuous lasso → vulnerability
     var skybeamStrike = false                 // T5: repeating sky-strikes
 
+    // MARK: - Apex (Bleed capstone, v1.9). Per-run; reset each run.
+    var apexTier: Int = 0                     // 0 = inactive; 1..5
+    var apexFamiliarActive = false            // T1: bat summoned
+    var apexBloodhound = false                // T3: prioritize bleeding + execute low normals
+    var apexHpToAtkActive = false             // T2: 1% max HP → bonus ATK
+    var apexMarked = false                    // T4: lingering enemies become vulnerable
+    var apexHunter = false                    // T5: fused — pounce replaces bites
+    var apexFamiliarKills: Int = 0            // drives the bat's damage growth
+    var apexBloodfedBonusHP: Int = 0          // Bloodfed accumulated max-HP (capped)
+
+    /// The familiar's current damage as a fraction of ATK: 10% → 50%, +1% per 5 kills.
+    var apexFamiliarDamageFrac: CGFloat {
+        let steps = CGFloat(apexFamiliarKills / GameConfig.Apex.familiarKillsPerStep)
+        let frac = GameConfig.Apex.familiarBaseFrac + steps * GameConfig.Apex.familiarFracPerStep
+        return min(frac, GameConfig.Apex.familiarMaxFrac)
+    }
+
+    /// T2: bonus flat ATK from 1% of max HP. Feeds ATK-scaled Apex abilities (bat,
+    /// pounce) — projectiles use the multiplier, not baseAttack, so this stays a
+    /// familiar/pounce buff (thematically "your vitality feeds the hunt").
+    var apexBonusAttackFromHP: CGFloat {
+        apexHpToAtkActive ? CGFloat(maxHP) * GameConfig.Apex.hpToAtkFrac : 0
+    }
+
     /// Effective per-hit ATK (base × all damage multipliers) — the scale for
-    /// "%ATK" capstone abilities (Skybeam ticks/strikes, etc.).
-    var effectiveAttack: CGFloat { CGFloat(baseAttack) * effectiveDamageMultiplier }
+    /// "%ATK" capstone abilities (Skybeam ticks/strikes, Apex bat/pounce, etc.).
+    var effectiveAttack: CGFloat { (CGFloat(baseAttack) + apexBonusAttackFromHP) * effectiveDamageMultiplier }
+
+    /// The "effective ATK" figure for the HUD: (base + HP-fed ATK) × the stable
+    /// build multiplier (excludes volatile combat buffs so it doesn't flicker).
+    var displayAttack: Int {
+        max(0, Int(((CGFloat(baseAttack) + apexBonusAttackFromHP) * displayDamageMultiplier).rounded()))
+    }
 
     /// Add a Kinetic stack on a damaging hit (T4+). Returns true when the reserve
     /// hits its threshold and releases — the caller fires the radial burst.
@@ -812,6 +842,14 @@ final class PlayerStats {
         skybeamHoming = false
         skybeamCalled = false
         skybeamStrike = false
+        apexTier = 0
+        apexFamiliarActive = false
+        apexBloodhound = false
+        apexHpToAtkActive = false
+        apexMarked = false
+        apexHunter = false
+        apexFamiliarKills = 0
+        apexBloodfedBonusHP = 0
 
         damageMultiplier = 1.0
         critChance = 0.0

@@ -297,7 +297,11 @@ class EnemyNode: SKNode {
     
     // MARK: - Status Effect Update
     
+    /// v1.9: seconds this enemy has been alive in the arena (Apex "Marked" uses it).
+    private(set) var timeAlive: TimeInterval = 0
+
     func updateStatusEffects(deltaTime: TimeInterval) -> Bool {
+        timeAlive += deltaTime
         var totalDOT: CGFloat = 0
 
         // v1.6: stun timer ticks here so ALL enemy types respect it

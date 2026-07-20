@@ -82,7 +82,7 @@ final class UpgradeManager {
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
     /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
-    static let debugForcedCardID: String? = "cap_shock_skybeam"
+    static let debugForcedCardID: String? = "cap_bleed_apex"
     #endif
 
     // MARK: - State
@@ -1184,6 +1184,42 @@ final class UpgradeManager {
                 "Homing Beacon: your fire prioritizes the lassoed prey",
                 "Heaven's Call: 2s lassoed → prey takes +35% from all sources",
                 "Skybeam: 2s lassoed → 200% ATK strike from above, every 3s"
+            ],
+            isCapstone: true
+        ))
+
+        // 🩸 Apex — feed the familiar; become the hunt.
+        cards.append(UpgradeCard(
+            id: "cap_bleed_apex", name: "Apex", tag: .bleed,
+            description: "Feed the familiar. Become the hunt.",
+            apply: { stats in                       // T1 Blood Familiar
+                stats.apexTier = 1
+                stats.apexFamiliarActive = true
+            },
+            higherTiers: [
+                { stats in                           // T2 Bloodfed
+                    stats.apexTier = 2
+                    stats.apexHpToAtkActive = true
+                },
+                { stats in                           // T3 Bloodhound
+                    stats.apexTier = 3
+                    stats.apexBloodhound = true
+                },
+                { stats in                           // T4 Marked for Death
+                    stats.apexTier = 4
+                    stats.apexMarked = true
+                },
+                { stats in                           // T5 The Hunter
+                    stats.apexTier = 5
+                    stats.apexHunter = true
+                }
+            ],
+            tierDescriptions: [
+                "Blood Familiar: an invulnerable bat hunts; kills grow its bite",
+                "Bloodfed: every 10 kills +5 max HP; 1% of max HP → ATK",
+                "Bloodhound: bat favors bleeders; executes weak normals",
+                "Marked: enemies alive 10s take +35% from all sources",
+                "The Hunter: hits on injured foes charge a gauge; full → the bat executes a weakened enemy"
             ],
             isCapstone: true
         ))
