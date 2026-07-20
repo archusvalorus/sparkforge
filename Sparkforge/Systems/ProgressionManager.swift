@@ -109,9 +109,11 @@ final class ProgressionManager {
         set { defaults.set(newValue, forKey: Keys.forgeLevel) }
     }
     
-    /// XP needed for next forge level. Starts at 100, scales 1.5× per level.
+    /// XP needed for next forge level. Starts at 100, scales 1.35× per level.
+    /// v1.9 Unit 6: 1.5 → 1.35 — a gentler high-level curve so a high-volume
+    /// player's Forge Level tracks their play (Forge Level stays uncapped).
     func xpForLevel(_ level: Int) -> Int {
-        return Int(100.0 * pow(1.5, Double(level)))
+        return Int(100.0 * pow(1.35, Double(level)))
     }
     
     /// XP progress toward next level as 0.0–1.0
@@ -122,16 +124,22 @@ final class ProgressionManager {
     }
     
     /// Add forge XP from a completed run. Returns true if leveled up.
+    /// v1.9 Unit 6: `if` → `while` — a run now grants ALL the levels its XP
+    /// earned, not just one (latent correctness bug; it self-corrected on the
+    /// next run before, but was wrong). xpForLevel is always > 0, so the loop
+    /// terminates.
     @discardableResult
     func addForgeXP(_ amount: Int) -> Bool {
         forgeXP += amount
-        let needed = xpForLevel(forgeLevel)
-        if forgeXP >= needed {
+        var leveled = false
+        var needed = xpForLevel(forgeLevel)
+        while forgeXP >= needed {
             forgeXP -= needed
             forgeLevel += 1
-            return true
+            leveled = true
+            needed = xpForLevel(forgeLevel)
         }
-        return false
+        return leveled
     }
     
     /// Apply forge bonuses to PlayerStats at run start.
