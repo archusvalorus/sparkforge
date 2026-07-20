@@ -51,6 +51,18 @@ final class PlayerStats {
         max(1, Int(CGFloat(defense) * GameConfig.IronMaiden.kineticBurstDefMult))
     }
 
+    // MARK: - Skybeam (Shock capstone, v1.9). Per-run; reset each run.
+    var skybeamTier: Int = 0                  // 0 = inactive; 1..5
+    var skybeamTickMult: CGFloat = 0          // fraction of ATK per lasso tick
+    var skybeamAcquireRange: CGFloat = 0      // lasso acquisition radius
+    var skybeamHoming = false                 // T3: auto-aim prefers the lassoed prey
+    var skybeamCalled = false                 // T4: continuous lasso → vulnerability
+    var skybeamStrike = false                 // T5: repeating sky-strikes
+
+    /// Effective per-hit ATK (base × all damage multipliers) — the scale for
+    /// "%ATK" capstone abilities (Skybeam ticks/strikes, etc.).
+    var effectiveAttack: CGFloat { CGFloat(baseAttack) * effectiveDamageMultiplier }
+
     /// Add a Kinetic stack on a damaging hit (T4+). Returns true when the reserve
     /// hits its threshold and releases — the caller fires the radial burst.
     func addKineticStack() -> Bool {
@@ -794,6 +806,12 @@ final class PlayerStats {
         ironKineticActive = false
         ironKineticStacks = 0
         ironMaidenProjectile = false
+        skybeamTier = 0
+        skybeamTickMult = 0
+        skybeamAcquireRange = 0
+        skybeamHoming = false
+        skybeamCalled = false
+        skybeamStrike = false
 
         damageMultiplier = 1.0
         critChance = 0.0

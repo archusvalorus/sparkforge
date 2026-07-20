@@ -82,7 +82,7 @@ final class UpgradeManager {
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
     /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
-    static let debugForcedCardID: String? = "cap_guard_ironmaiden"
+    static let debugForcedCardID: String? = "cap_shock_skybeam"
     #endif
 
     // MARK: - State
@@ -1146,6 +1146,44 @@ final class UpgradeManager {
                 "Retaliate: counter attackers for 150% of the hit",
                 "Kinetic Reserve: hits store energy; release a 200% DEF burst at 5",
                 "Iron Maiden: +15% DEF; every 20s fire stored energy at a priority foe"
+            ],
+            isCapstone: true
+        ))
+
+        // ⚡ Skybeam — designate prey; call judgment from above.
+        cards.append(UpgradeCard(
+            id: "cap_shock_skybeam", name: "Skybeam", tag: .shock,
+            description: "Lasso your prey. Call judgment from above.",
+            apply: { stats in                       // T1 Lightning Lasso
+                stats.skybeamTier = 1
+                stats.skybeamTickMult = GameConfig.Skybeam.tickMultT1
+                stats.skybeamAcquireRange = GameConfig.Skybeam.acquireRangeT1
+            },
+            higherTiers: [
+                { stats in                           // T2 Extended Circuit
+                    stats.skybeamTier = 2
+                    stats.skybeamTickMult = GameConfig.Skybeam.tickMultT2
+                    stats.skybeamAcquireRange = GameConfig.Skybeam.acquireRangeT2
+                },
+                { stats in                           // T3 Homing Beacon
+                    stats.skybeamTier = 3
+                    stats.skybeamHoming = true
+                },
+                { stats in                           // T4 Heaven's Call
+                    stats.skybeamTier = 4
+                    stats.skybeamCalled = true
+                },
+                { stats in                           // T5 Skybeam
+                    stats.skybeamTier = 5
+                    stats.skybeamStrike = true
+                }
+            ],
+            tierDescriptions: [
+                "Lightning Lasso: tether the nearest foe for 15% ATK Shock/s",
+                "Extended Circuit: lasso damage doubled; range doubled",
+                "Homing Beacon: your fire prioritizes the lassoed prey",
+                "Heaven's Call: 2s lassoed → prey takes +35% from all sources",
+                "Skybeam: 2s lassoed → 200% ATK strike from above, every 3s"
             ],
             isCapstone: true
         ))

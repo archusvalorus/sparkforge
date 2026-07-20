@@ -98,6 +98,54 @@ enum GameConfig {
         static let projectileInterval: TimeInterval = 20.0
     }
 
+    /// v1.9 Skybeam (Shock capstone) — designate prey; call judgment from above.
+    enum Skybeam {
+        static let tickInterval: TimeInterval = 1.0
+        static let tickMultT1: CGFloat = 0.15      // 15% ATK Shock per second
+        static let tickMultT2: CGFloat = 0.30      // doubled at T2
+        // Lasso reach as a fraction of the arena radius so it scales with the
+        // playfield. T2 (max, doubled) stays under half the arena's width — no
+        // grabbing mobs across the whole arena.
+        static let acquireFracT1: CGFloat = 0.35
+        static let acquireFracT2: CGFloat = 0.70
+        static var acquireRangeT1: CGFloat { acquireFracT1 * Arena.radius }
+        static var acquireRangeT2: CGFloat { acquireFracT2 * Arena.radius }
+        static let retentionFactor: CGFloat = 1.4  // lasso holds a bit past acquire range
+        static let calledThreshold: TimeInterval = 2.0    // continuous secs → Called + first bolt
+        static let calledVulnerability: CGFloat = 1.35    // Called: +35% damage taken
+        static let strikeMult: CGFloat = 2.00      // 200% ATK sky-strike
+        static let strikeCooldown: TimeInterval = 3.0     // then a bolt every 3s while lassoed
+        static let strikeWindup: TimeInterval = 1.0       // channel/telegraph before the bolt lands
+    }
+
+    /// v1.9 canon (Brandon, Jul 20): capstone abilities are LESS effective on
+    /// boss-class (miniboss + arena boss) than on normal/elite mobs — strong vs
+    /// the horde, fair vs the big targets. Unifies the packet's scattered
+    /// per-capstone boss caveats into two independent 50% levers:
+    ///   • debuffScale — stat-reduction effects (vulnerability, slow, freeze…)
+    ///   • damageScale — capstone ability DAMAGE (Skybeam bolt/tick, etc.)
+    /// Reused by Skybeam (Called + bolt), later Apex / Polar Vortex.
+    enum BossClass {
+        static let debuffScale: CGFloat = 0.5   // stat-reduction effects at 50%
+        static let damageScale: CGFloat = 0.5   // capstone ability damage at 50%
+
+        /// Scale a multiplicative debuff (e.g. vulnerability 1.35) for boss-class:
+        /// halves the bonus above 1.0. Non-boss returns the base unchanged.
+        static func scaledDebuff(_ base: CGFloat, isBossClass: Bool) -> CGFloat {
+            isBossClass ? 1.0 + (base - 1.0) * debuffScale : base
+        }
+
+        /// Scale an additive-magnitude debuff (e.g. a 0.4 slow) for boss-class.
+        static func scaledMagnitude(_ base: CGFloat, isBossClass: Bool) -> CGFloat {
+            isBossClass ? base * debuffScale : base
+        }
+
+        /// Scale capstone ability DAMAGE for boss-class targets.
+        static func scaledDamage(_ base: Int, isBossClass: Bool) -> Int {
+            isBossClass ? max(1, Int((CGFloat(base) * damageScale).rounded())) : base
+        }
+    }
+
     // MARK: - Level-Up Stats (v1.9 Unit 4)
     /// Per-award stat increments for the level-up cadence: even levels let the
     /// player CHOOSE one of these, odd levels auto-award a random one. Starting

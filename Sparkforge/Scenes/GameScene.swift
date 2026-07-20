@@ -77,6 +77,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v1.9: Iron Maiden capstone — retaliation cooldown + timed punishment projectile.
     private var ironRetaliateCooldown: TimeInterval = 0
     private var ironMaidenProjectileTimer: TimeInterval = 0
+    // v1.9: Skybeam capstone — persistent lasso tether + continuous-attachment state.
+    private var skybeamTickTimer: TimeInterval = 0
+    private var skybeamAttachTime: TimeInterval = 0
+    private var skybeamStrikeCooldown: TimeInterval = 0
+    private weak var lassoTargetNode: SKNode?
+    private weak var calledEnemy: EnemyNode?
+    private weak var calledBoss: (any ArenaBossNode)?
+    private var lassoLine: SKShapeNode?
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -2437,6 +2445,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v1.6: Auto-aim considers regular enemies AND the boss.
     private func findNearestTargetPosition() -> CGPoint? {
         let range = playerStats.effectiveProjectileRange
+
+        // v1.9 Skybeam Homing Beacon (T3): your fire prioritizes the lassoed prey.
+        // The lasso target is the reusable priority hook other target-selecting
+        // effects can read (lassoTargetNode) too.
+        if playerStats.skybeamHoming, let node = lassoTargetNode,
+           player.position.distance(to: node.position) <= range {
+            return node.position
+        }
+
         var closestPosition: CGPoint?
         var closestDist: CGFloat = .greatestFiniteMagnitude
 
@@ -2643,6 +2660,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.9: Iron Maiden (Guard capstone) — retaliation cooldown + T5 projectile.
         updateIronMaiden(dt)
 
+        // v1.9: Skybeam (Shock capstone) — lasso the prey, call the strike.
+        updateSkybeam(dt)
+
         // v1.6: Hoarfrost + Cauterize regen
         let regen = playerStats.updateRegen(dt)
         if regen > 0 {
@@ -2664,7 +2684,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if dmg > 0 {
                 damageEnemiesInRadius(playerStats.everglowPulseRadius,
                                       around: player.position,
-                                      damage: dmg)
+                                      damage: dmg, bossClassScaled: true)
                 showRingPulse(at: player.position,
                               radius: playerStats.everglowPulseRadius,
                               colorHex: 0xFF6633)
@@ -2710,9 +2730,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let dmg = playerStats.everglowEruptionDamage
         guard dmg > 0 else { return }
 
+        // Capstone damage: full vs the horde, halved on boss-class (BossClass canon).
         var killed: [EnemyNode] = []
         for enemy in enemies where !enemy.isDying {
-            if enemy.takeDamage(dmg) {
+            if enemy.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: enemy.isMiniBoss)) {
                 killed.append(enemy)
             }
         }
@@ -2725,7 +2746,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // Boss death flow (XP, bossKills, shake) runs via the boss's onDeath callback.
         if let bossNode = boss, !bossNode.isDead {
-            bossNode.takeDamage(dmg)
+            bossNode.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: true))
         }
 
         // Big eruption visual — a bright expanding blast covering the arena.
@@ -2766,15 +2787,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let dmg = playerStats.ironKineticBurstDamage
         damageEnemiesInRadius(GameConfig.IronMaiden.kineticBurstRadius,
                               around: player.position,
-                              damage: dmg)
+                              damage: dmg, bossClassScaled: true)
         showRingPulse(at: player.position,
                       radius: GameConfig.IronMaiden.kineticBurstRadius,
                       colorHex: 0x1FB6FF)
         worldNode.shake(intensity: 5, duration: 0.18)
     }
 
-    /// A single Iron-Maiden target, resolved by priority (boss > miniboss > nearest).
-    private enum IronMaidenTarget {
+    /// A single combat target — a normal enemy or the arena boss. Shared by the
+    /// capstones that acquire/track one specific foe (Iron Maiden priority strike,
+    /// Skybeam lasso, later Apex prey). Reusable target abstraction.
+    enum CombatTarget {
         case boss(any ArenaBossNode)
         case enemy(EnemyNode)
         var position: CGPoint {
@@ -2783,9 +2806,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             case .enemy(let e): return e.position
             }
         }
+        /// Underlying node — for identity comparison across frames.
+        var node: SKNode {
+            switch self {
+            case .boss(let b): return b
+            case .enemy(let e): return e
+            }
+        }
     }
 
-    private func findIronMaidenTarget() -> IronMaidenTarget? {
+    private func findIronMaidenTarget() -> CombatTarget? {
         if let boss = boss, !boss.isDead { return .boss(boss) }
         var miniboss: EnemyNode?
         var nearest: EnemyNode?
@@ -2810,10 +2840,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let dmg = kinetic + playerStats.ironThorns
         guard dmg > 0 else { return }
 
-        // Cannot miss, ignores collision: apply the payload directly, animate a tracer.
+        // Cannot miss, ignores collision: apply the payload directly, animate a
+        // tracer. Capstone damage is halved on boss-class (BossClass canon).
         switch target {
-        case .boss(let b): b.takeDamage(dmg)
-        case .enemy(let e): dealDirectDamage(dmg, toEnemy: e)
+        case .boss(let b):
+            b.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: true))
+        case .enemy(let e):
+            dealDirectDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: e.isMiniBoss), toEnemy: e)
         }
         showIronMaidenTracer(from: player.position, to: target.position)
     }
@@ -2855,6 +2888,340 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
         }
+    }
+
+    // MARK: - Skybeam (Shock capstone)
+
+    private func updateSkybeam(_ dt: TimeInterval) {
+        guard playerStats.skybeamTier >= 1 else { return }
+        if skybeamStrikeCooldown > 0 { skybeamStrikeCooldown -= dt }
+
+        // Resolve/maintain the lasso target — retargets when it dies or leaves range.
+        guard let target = currentLassoTarget() else { clearLasso(); return }
+
+        // Continuous-attachment timer: same target accumulates; a change resets it
+        // (and drops Called from the previous prey).
+        if target.node === lassoTargetNode {
+            skybeamAttachTime += dt
+        } else {
+            clearCalled()
+            lassoTargetNode = target.node
+            skybeamAttachTime = 0
+            skybeamTickTimer = 0
+        }
+
+        // T1/T2 : Shock tick every second. If it kills the prey, drop the lasso.
+        skybeamTickTimer += dt
+        if skybeamTickTimer >= GameConfig.Skybeam.tickInterval {
+            skybeamTickTimer -= GameConfig.Skybeam.tickInterval
+            let dmg = max(1, Int(playerStats.effectiveAttack * playerStats.skybeamTickMult))
+            if strikeCombatTarget(target, damage: dmg) { clearLasso(); return }
+        }
+
+        // T4 : Heaven's Call — the prey takes +35% from all sources after 2s.
+        // Boss-class (miniboss + boss) gets it at reduced strength via the global
+        // debuff factor (Called +35% → +17.5% on boss-class).
+        if playerStats.skybeamCalled, skybeamAttachTime >= GameConfig.Skybeam.calledThreshold {
+            switch target {
+            case .enemy(let e):
+                e.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
+                    GameConfig.Skybeam.calledVulnerability, isBossClass: e.isMiniBoss)
+                calledEnemy = e
+            case .boss(let b):
+                b.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
+                    GameConfig.Skybeam.calledVulnerability, isBossClass: true)
+                calledBoss = b
+            }
+        }
+
+        // T5 : Skybeam — strike from above after 2s continuous, repeating on cooldown.
+        if playerStats.skybeamStrike, skybeamAttachTime >= GameConfig.Skybeam.calledThreshold,
+           skybeamStrikeCooldown <= 0 {
+            beginSkyStrike(at: target)
+            skybeamStrikeCooldown = GameConfig.Skybeam.strikeCooldown
+        }
+
+        drawLasso(to: target.position)
+    }
+
+    /// The current lasso target: keep the existing one while it's alive and within
+    /// retention range, otherwise acquire the nearest valid foe within reach.
+    private func currentLassoTarget() -> CombatTarget? {
+        let acquire = playerStats.skybeamAcquireRange
+        let retention = acquire * GameConfig.Skybeam.retentionFactor
+
+        // 1) Hold the existing target if still valid and within retention range.
+        if let node = lassoTargetNode {
+            if let e = node as? EnemyNode, !e.isDying, enemies.contains(where: { $0 === e }),
+               player.position.distance(to: e.position) <= retention {
+                return .enemy(e)
+            }
+            if let boss = boss, !boss.isDead, node === (boss as SKNode),
+               player.position.distance(to: boss.position) <= retention {
+                return .boss(boss)
+            }
+        }
+
+        // 2) Acquire the nearest valid target within acquisition range.
+        var nearest: CombatTarget?
+        var nearestDist = CGFloat.greatestFiniteMagnitude
+        for enemy in enemies where !enemy.isDying {
+            let d = player.position.distance(to: enemy.position)
+            if d <= acquire && d < nearestDist { nearestDist = d; nearest = .enemy(enemy) }
+        }
+        if let boss = boss, !boss.isDead {
+            let d = player.position.distance(to: boss.position)
+            if d <= acquire && d < nearestDist { nearestDist = d; nearest = .boss(boss) }
+        }
+        return nearest
+    }
+
+    /// Deal capstone ability damage to a combat target (boss or enemy) with kill
+    /// bookkeeping. Damage is halved on boss-class (miniboss + boss) via the
+    /// global BossClass factor — capstones stay strong vs the horde, fair vs the
+    /// big targets. Returns true if the hit killed a normal enemy.
+    @discardableResult
+    private func strikeCombatTarget(_ target: CombatTarget, damage: Int) -> Bool {
+        switch target {
+        case .boss(let b):
+            b.takeDamage(GameConfig.BossClass.scaledDamage(damage, isBossClass: true))
+            return false
+        case .enemy(let e):
+            let dmg = GameConfig.BossClass.scaledDamage(damage, isBossClass: e.isMiniBoss)
+            let killed = e.takeDamage(dmg)
+            if killed {
+                if let index = enemies.firstIndex(where: { $0 === e }) { enemies.remove(at: index) }
+                onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e)
+            }
+            return killed
+        }
+    }
+
+    /// Begin a sky-strike: a ~1s channel/telegraph, then the thunderbolt lands.
+    private func beginSkyStrike(at target: CombatTarget) {
+        let pos = target.position
+        let windup = GameConfig.Skybeam.strikeWindup
+        showSkyStrikeWindup(at: pos, duration: windup)
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: windup),
+            SKAction.run { [weak self] in self?.doSkyStrike(windupPos: pos, target: target) }
+        ]))
+    }
+
+    /// The channel: a contracting warning ring, a charge descending from the sky,
+    /// crackling arcs, and a bright "tell" flash near the end.
+    private func showSkyStrikeWindup(at pos: CGPoint, duration: TimeInterval) {
+        // Contracting warning ring — the "incoming" telegraph. Bold and bright.
+        let warn = SKShapeNode(circleOfRadius: 85)
+        warn.strokeColor = SKColor(hex: 0x88EEFF, alpha: 1.0)
+        warn.fillColor = SKColor(hex: 0x66DDFF, alpha: 0.10)
+        warn.lineWidth = 4
+        warn.glowWidth = 7
+        warn.position = pos
+        warn.zPosition = 6
+        worldNode.addChild(warn)
+        warn.run(SKAction.sequence([
+            SKAction.scale(to: 0.25, duration: duration * 0.85),
+            SKAction.removeFromParent()
+        ]))
+
+        // Charge point descending from high above, swelling as it nears.
+        let charge = SKShapeNode(circleOfRadius: 6)
+        charge.fillColor = SKColor(hex: 0xCFF3FF, alpha: 0.9)
+        charge.strokeColor = SKColor(hex: 0x66DDFF, alpha: 1.0)
+        charge.glowWidth = 8
+        charge.position = CGPoint(x: pos.x, y: pos.y + 260)
+        charge.zPosition = 8
+        worldNode.addChild(charge)
+        charge.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.moveTo(y: pos.y + 40, duration: duration * 0.85),
+                SKAction.scale(to: 2.2, duration: duration * 0.85)
+            ]),
+            SKAction.removeFromParent()
+        ]))
+
+        // Crackle arcs flickering above the target during the channel.
+        let crackle = SKAction.run { [weak self] in
+            guard let self = self else { return }
+            let top = CGPoint(x: pos.x + CGFloat.random(in: -30...30),
+                              y: pos.y + CGFloat.random(in: 90...200))
+            let arc = SKShapeNode(path: self.jaggedBoltPath(from: top,
+                                                            to: CGPoint(x: pos.x, y: pos.y + 30),
+                                                            jitter: 12, segments: 4))
+            arc.strokeColor = SKColor(hex: 0x99EEFF, alpha: 0.8)
+            arc.lineWidth = 1.5
+            arc.glowWidth = 3
+            arc.zPosition = 7
+            self.worldNode.addChild(arc)
+            arc.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.12), SKAction.removeFromParent()]))
+        }
+        let flickers = max(1, Int(duration / 0.09))
+        run(SKAction.repeat(SKAction.sequence([crackle, SKAction.wait(forDuration: 0.09)]),
+                            count: flickers))
+
+        // The "tell": a loud double-ring flash + bright flare + screen flash near
+        // the end of the channel — unmistakably "it's coming."
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: duration * 0.8),
+            SKAction.run { [weak self] in
+                guard let self = self else { return }
+                self.showRingPulse(at: pos, radius: 75, colorHex: 0xFFFFFF)
+                self.showRingPulse(at: pos, radius: 55, colorHex: 0x66DDFF)
+                self.flashScreen(colorHex: 0x88DDFF, alpha: 0.22, duration: 0.16)
+                let flare = SKShapeNode(circleOfRadius: 10)
+                flare.fillColor = SKColor(hex: 0xFFFFFF, alpha: 0.9)
+                flare.strokeColor = .clear
+                flare.glowWidth = 10
+                flare.position = pos
+                flare.zPosition = 8
+                self.worldNode.addChild(flare)
+                flare.run(SKAction.sequence([
+                    SKAction.group([SKAction.scale(to: 2.2, duration: 0.18),
+                                    SKAction.fadeOut(withDuration: 0.2)]),
+                    SKAction.removeFromParent()
+                ]))
+            }
+        ]))
+    }
+
+    /// The payoff: a thick multi-bolt thunderclap, screen flash, shockwaves, and
+    /// heavy shake — then the damage lands on the (still-lassoed) prey.
+    private func doSkyStrike(windupPos: CGPoint, target: CombatTarget) {
+        guard gameState == .playing else { return }
+        let alive = isTargetAlive(target)
+        let pos = alive ? target.position : windupPos
+
+        // Thick multi-bolt slamming from the top of the view onto the target.
+        for k in 0..<4 {
+            let spread = CGFloat(k) * 5 - 7
+            let top = CGPoint(x: pos.x + spread, y: pos.y + 900)
+            let bolt = SKShapeNode(path: jaggedBoltPath(from: top, to: pos, jitter: 22))
+            bolt.strokeColor = SKColor(hex: k == 0 ? 0xFFFFFF : 0x66DDFF, alpha: 1.0)
+            bolt.lineWidth = k == 0 ? 5 : 3
+            bolt.glowWidth = k == 0 ? 14 : 8
+            bolt.zPosition = 9
+            worldNode.addChild(bolt)
+            bolt.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.28), SKAction.removeFromParent()]))
+        }
+
+        // Blinding core burst at the impact.
+        let core = SKShapeNode(circleOfRadius: 12)
+        core.fillColor = SKColor(hex: 0xFFFFFF, alpha: 0.95)
+        core.strokeColor = .clear
+        core.glowWidth = 12
+        core.position = pos
+        core.zPosition = 9
+        worldNode.addChild(core)
+        core.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 3, duration: 0.2), SKAction.fadeOut(withDuration: 0.25)]),
+            SKAction.removeFromParent()
+        ]))
+
+        // Double shockwave.
+        for delay in [0.0, 0.09] {
+            run(SKAction.sequence([
+                SKAction.wait(forDuration: delay),
+                SKAction.run { [weak self] in self?.showRingPulse(at: pos, radius: 90, colorHex: 0x66DDFF) }
+            ]))
+        }
+
+        // Radiating ground arcs jumping outward from the impact.
+        for _ in 0..<6 {
+            let ang = CGFloat.random(in: 0..<(2 * .pi))
+            let end = CGPoint(x: pos.x + cos(ang) * CGFloat.random(in: 40...80),
+                              y: pos.y + sin(ang) * CGFloat.random(in: 40...80))
+            let node = SKShapeNode(path: jaggedBoltPath(from: pos, to: end, jitter: 10, segments: 4))
+            node.strokeColor = SKColor(hex: 0x99EEFF, alpha: 0.9)
+            node.lineWidth = 2
+            node.glowWidth = 4
+            node.zPosition = 8
+            worldNode.addChild(node)
+            node.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.22), SKAction.removeFromParent()]))
+        }
+
+        // Screen flash + heavy shake + the thunderclap.
+        flashScreen(colorHex: 0x88DDFF, alpha: 0.35, duration: 0.22)
+        worldNode.shake(intensity: 14, duration: 0.35)
+        AudioManager.shared.play(.skyStrike)
+
+        if alive {
+            let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Skybeam.strikeMult))
+            strikeCombatTarget(target, damage: dmg)
+        }
+    }
+
+    /// Is a captured target still a live, valid strike target?
+    private func isTargetAlive(_ target: CombatTarget) -> Bool {
+        switch target {
+        case .boss(let b): return !b.isDead
+        case .enemy(let e): return !e.isDying && enemies.contains(where: { $0 === e })
+        }
+    }
+
+    /// A jagged lightning path between two points (x-jitter per segment).
+    private func jaggedBoltPath(from: CGPoint, to: CGPoint, jitter: CGFloat, segments: Int = 6) -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: from)
+        for i in 1...segments {
+            let t = CGFloat(i) / CGFloat(segments)
+            let base = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+            let off = (i == segments) ? 0 : CGFloat.random(in: -jitter...jitter)
+            path.addLine(to: CGPoint(x: base.x + off, y: base.y))
+        }
+        return path
+    }
+
+    /// A brief additive full-screen flash (camera-anchored). Reusable juice.
+    private func flashScreen(colorHex: UInt32, alpha: CGFloat, duration: TimeInterval) {
+        guard let camera = camera else { return }
+        let flash = SKSpriteNode(color: SKColor(hex: colorHex, alpha: alpha),
+                                 size: CGSize(width: size.width * 1.6, height: size.height * 1.6))
+        flash.blendMode = .add
+        flash.zPosition = 300
+        camera.addChild(flash)
+        flash.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: duration),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// The persistent lightning tether from the player to the lassoed prey.
+    private func drawLasso(to targetPos: CGPoint) {
+        let mid = CGPoint(x: (player.position.x + targetPos.x) / 2 + CGFloat.random(in: -8...8),
+                          y: (player.position.y + targetPos.y) / 2 + CGFloat.random(in: -8...8))
+        let path = CGMutablePath()
+        path.move(to: player.position)
+        path.addLine(to: mid)
+        path.addLine(to: targetPos)
+        if lassoLine == nil {
+            let line = SKShapeNode()
+            line.strokeColor = SKColor(hex: 0x66DDFF, alpha: 0.8)
+            line.lineWidth = 2
+            line.glowWidth = 4
+            line.zPosition = 7
+            worldNode.addChild(line)
+            lassoLine = line
+        }
+        lassoLine?.path = path
+    }
+
+    /// Drop the tether and all attachment state (target left range / died / capstone off).
+    private func clearLasso() {
+        lassoLine?.removeFromParent()
+        lassoLine = nil
+        lassoTargetNode = nil
+        skybeamAttachTime = 0
+        skybeamTickTimer = 0
+        clearCalled()
+    }
+
+    /// Remove the Called vulnerability from the previously-marked prey.
+    private func clearCalled() {
+        calledEnemy?.vulnerabilityMultiplier = 1.0
+        calledEnemy = nil
+        calledBoss?.vulnerabilityMultiplier = 1.0
+        calledBoss = nil
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -2952,10 +3319,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Damage all enemies within radius of a point. Kills spawn XP orbs
     /// directly (Ember Burst precedent — burst kills don't re-trigger bursts).
-    private func damageEnemiesInRadius(_ radius: CGFloat, around position: CGPoint, damage: Int) {
+    /// `bossClassScaled` halves damage on miniboss targets via the BossClass canon
+    /// — set it for capstone AoEs (Everglow pulse, Iron Maiden burst), leave it
+    /// off for non-capstone pulses (Aegis, Static Crown, etc.).
+    private func damageEnemiesInRadius(_ radius: CGFloat, around position: CGPoint,
+                                       damage: Int, bossClassScaled: Bool = false) {
         var killed: [EnemyNode] = []
         for enemy in enemies where enemy.position.distance(to: position) < radius {
-            if enemy.takeDamage(damage) {
+            let dmg = bossClassScaled
+                ? GameConfig.BossClass.scaledDamage(damage, isBossClass: enemy.isMiniBoss)
+                : damage
+            if enemy.takeDamage(dmg) {
                 killed.append(enemy)
             }
         }
@@ -5294,6 +5668,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         everglowEruptionTimer = 0
         ironRetaliateCooldown = 0
         ironMaidenProjectileTimer = 0
+        skybeamStrikeCooldown = 0
+        clearLasso()
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false

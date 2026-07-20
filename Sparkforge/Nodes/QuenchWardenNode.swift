@@ -51,6 +51,7 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
     // MARK: - State
 
     private(set) var health: Int
+    var vulnerabilityMultiplier: CGFloat = 1.0   // v1.9: capstone-debuff vulnerability
     private(set) var maxHealth: Int
     private(set) var isDead: Bool = false
 
@@ -557,7 +558,10 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
         guard !isDead else { return false }
-        health -= amount
+        let scaled = vulnerabilityMultiplier == 1.0
+            ? amount
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+        health -= scaled
 
         let flash = SKAction.sequence([
             SKAction.run { [weak self] in

@@ -33,6 +33,11 @@ class EnemyNode: SKNode {
     /// v1.8 (Unit 14): situational bleed scaling set by GameScene each frame —
     /// Glass Blood (vs chilled/slowed) and Red Smile (player low HP). 1.0 = none.
     var bleedDamageMultiplier: CGFloat = 1.0
+    /// v1.9: general vulnerability — scales ALL incoming damage (every source
+    /// routes through takeDamage). 1.0 = none. Reusable temporary-vulnerability
+    /// primitive: Skybeam "Called", later Apex "Marked", Polar Vortex "Frostbitten".
+    var vulnerabilityMultiplier: CGFloat = 1.0
+    var isVulnerable: Bool { vulnerabilityMultiplier > 1.0 }
     private var stunTimer: TimeInterval = 0
     private var dotAccumulator: CGFloat = 0.0
     
@@ -342,8 +347,12 @@ class EnemyNode: SKNode {
     
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
-        health -= amount
-        
+        // v1.9: general vulnerability scales every incoming hit (1.0 = no change).
+        let scaled = vulnerabilityMultiplier == 1.0
+            ? amount
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+        health -= scaled
+
         if health <= 0 {
             onDeath()
             return true

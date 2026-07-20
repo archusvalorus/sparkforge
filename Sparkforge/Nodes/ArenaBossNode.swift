@@ -15,6 +15,10 @@ protocol ArenaBossNode: SKNode {
     var healthPercent: CGFloat { get }
     /// Damage dealt to the player on body contact
     var contactDamage: Int { get }
+    /// v1.9: general vulnerability — scales incoming damage (1.0 = none). The
+    /// boss-side twin of EnemyNode.vulnerabilityMultiplier, so capstone debuffs
+    /// (Skybeam Called, later Apex/Polar Vortex) can mark boss-class targets.
+    var vulnerabilityMultiplier: CGFloat { get set }
 
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool

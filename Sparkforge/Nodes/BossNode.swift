@@ -61,6 +61,7 @@ final class BossNode: SKNode {
     private(set) var health: Int
     private(set) var maxHealth: Int
     private(set) var isDead: Bool = false
+    var vulnerabilityMultiplier: CGFloat = 1.0   // v1.9: capstone-debuff vulnerability
     
     var healthPercent: CGFloat {
         guard maxHealth > 0 else { return 0 }
@@ -459,7 +460,11 @@ final class BossNode: SKNode {
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
         guard !isDead else { return false }
-        health -= amount
+        // v1.9: vulnerability scales every incoming hit (1.0 = no change).
+        let scaled = vulnerabilityMultiplier == 1.0
+            ? amount
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+        health -= scaled
         
         // Hit flash
         let flash = SKAction.sequence([

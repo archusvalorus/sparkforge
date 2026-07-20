@@ -19,6 +19,7 @@ final class AudioManager {
         case playerDamage
         case levelUp
         case buildHint
+        case skyStrike
     }
 
     private let engine = AVAudioEngine()
@@ -141,6 +142,24 @@ final class AudioManager {
                 let env = envelope(t, duration: d, attack: 0.03)
                 let s = sin(2 * .pi * 660 * t) + 0.3 * sin(2 * .pi * 1056 * t)
                 return s * env * 0.18
+            }
+
+        case .skyStrike:
+            // Thunderbolt: a bright cracking transient over a rolling low rumble.
+            // Loud and a little obnoxious on purpose — the Skybeam payoff.
+            let d = 0.7
+            return synthStateful(duration: d) { t, state in
+                state.seed = state.seed &* 1_664_525 &+ 1_013_904_223
+                let white = Double(state.seed >> 8) / Double(1 << 24) * 2 - 1
+                // Heavy lowpass → deep rumble that lingers under the crack.
+                state.lowpass += 0.04 * (white - state.lowpass)
+                let rumble = state.lowpass * 2.4
+                // Sharp broadband CRACK in the first ~70ms.
+                let crack = t < 0.07 ? white * envelope(t, duration: 0.07, attack: 0.0008) * 0.85 : 0
+                // Sub-bass boom under it.
+                let boom = sin(2 * .pi * 58 * t) * 0.45
+                let body = (rumble + boom) * envelope(t, duration: d, attack: 0.004)
+                return (crack + body) * 0.55
             }
         }
     }

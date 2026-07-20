@@ -67,6 +67,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
     // MARK: - State
 
     private(set) var health: Int
+    var vulnerabilityMultiplier: CGFloat = 1.0   // v1.9: capstone-debuff vulnerability
     private(set) var maxHealth: Int
     private(set) var isDead: Bool = false
 
@@ -684,7 +685,10 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
         guard !isDead else { return false }
-        health -= amount
+        let scaled = vulnerabilityMultiplier == 1.0
+            ? amount
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+        health -= scaled
 
         // Damage reads as a pale crack flash — never red/orange (Lyra).
         let flash = SKAction.sequence([
