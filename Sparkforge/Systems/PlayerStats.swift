@@ -26,6 +26,30 @@ final class PlayerStats {
     var baseAttack: Int = GameConfig.Player.baseAttack
     /// Flat damage reduction per hit
     var defense: Int = GameConfig.Player.baseDefense
+
+    // MARK: - Everglow (Fire capstone, v1.9). Per-run; reset each run.
+    var everglowTier: Int = 0                 // 0 = inactive; 1..5
+    var everglowBasePulseMult: CGFloat = 0     // fraction of ATK per pulse
+    var everglowPulseRadius: CGFloat = 0
+    var everglowRageScaling = false            // T3: hits grow pulse damage
+    var everglowFurnaceScaling = false         // T4: hits also grow ATK
+    var everglowEruption = false               // T5: periodic arena eruption
+    var everglowPulseGrowth: CGFloat = 0       // accumulated +% pulse (capped)
+    var everglowAtkGrowth: CGFloat = 0         // accumulated +% ATK (capped)
+
+    /// Damage of one Everglow pulse: effective ATK × base mult × (1 + rage).
+    /// (effectiveDamageMultiplier already folds in everglowAtkGrowth.)
+    var everglowPulseDamage: Int {
+        guard everglowTier >= 1 else { return 0 }
+        let atk = CGFloat(baseAttack) * effectiveDamageMultiplier
+        return max(1, Int(atk * everglowBasePulseMult * (1 + everglowPulseGrowth)))
+    }
+
+    /// Damage of one Everglow eruption: effective ATK × eruption multiplier.
+    var everglowEruptionDamage: Int {
+        let atk = CGFloat(baseAttack) * effectiveDamageMultiplier
+        return max(1, Int(atk * GameConfig.Everglow.eruptionMult))
+    }
     
     /// HP as 0.0–1.0 fraction for HUD bar
     var hpPercent: CGFloat {
@@ -73,6 +97,18 @@ final class PlayerStats {
         let reduced = max(1, rawDamage - effectiveDefense)
         currentHP -= reduced
         if currentHP < 0 { currentHP = 0 }
+
+        // v1.9 Everglow: rage — taking damage permanently grows the pulse (T3)
+        // and ATK (T4), each capped per run.
+        if everglowRageScaling {
+            everglowPulseGrowth = min(everglowPulseGrowth + GameConfig.Everglow.rageGainPerHit,
+                                      GameConfig.Everglow.pulseGrowthCap)
+        }
+        if everglowFurnaceScaling {
+            everglowAtkGrowth = min(everglowAtkGrowth + GameConfig.Everglow.furnaceAtkGainPerHit,
+                                    GameConfig.Everglow.atkGrowthCap)
+        }
+
         return currentHP <= 0
     }
     
@@ -587,6 +623,8 @@ final class PlayerStats {
         if defAsDamageMult > 0 {
             total += CGFloat(defense) * defAsDamageMult
         }
+        // v1.9 Everglow Living Furnace: damage taken permanently grows ATK.
+        total += everglowAtkGrowth
         return total
     }
 
@@ -696,7 +734,17 @@ final class PlayerStats {
         currentHP = GameConfig.Player.baseMaxHP
         baseAttack = GameConfig.Player.baseAttack
         defense = GameConfig.Player.baseDefense
-        
+
+        // v1.9 Everglow (Fire capstone) — per-run state
+        everglowTier = 0
+        everglowBasePulseMult = 0
+        everglowPulseRadius = 0
+        everglowRageScaling = false
+        everglowFurnaceScaling = false
+        everglowEruption = false
+        everglowPulseGrowth = 0
+        everglowAtkGrowth = 0
+
         damageMultiplier = 1.0
         critChance = 0.0
         critMultiplier = 2.0

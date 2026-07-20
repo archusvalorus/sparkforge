@@ -82,7 +82,7 @@ final class UpgradeManager {
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
     /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
-    static let debugForcedCardID: String? = nil
+    static let debugForcedCardID: String? = "cap_fire_everglow"
     #endif
 
     // MARK: - State
@@ -1066,6 +1066,49 @@ final class UpgradeManager {
         ) { stats in
             stats.falseOpeningActive = true
         })
+
+        // ═══════════════════════════════════
+        // v1.9 CAPSTONES (Brandon + Lyra) — one tier-5 capstone per tree.
+        // Design: docs/capstones-v1.9-design-packet.md.
+        // ═══════════════════════════════════
+
+        // 🔥 Everglow — the player becomes a volcano.
+        cards.append(UpgradeCard(
+            id: "cap_fire_everglow", name: "Everglow", tag: .fire,
+            description: "Become the fire at the center of the arena.",
+            apply: { stats in                       // T1 Inner Heat
+                stats.everglowTier = 1
+                stats.everglowBasePulseMult = GameConfig.Everglow.basePulseMult
+                stats.everglowPulseRadius = GameConfig.Everglow.baseRadius
+            },
+            higherTiers: [
+                { stats in                           // T2 Burning Reach
+                    stats.everglowTier = 2
+                    stats.everglowPulseRadius *= 2
+                },
+                { stats in                           // T3 Ragekindled
+                    stats.everglowTier = 3
+                    stats.everglowRageScaling = true
+                },
+                { stats in                           // T4 Living Furnace
+                    stats.everglowTier = 4
+                    stats.everglowBasePulseMult *= 2
+                    stats.everglowFurnaceScaling = true
+                },
+                { stats in                           // T5 Everglow
+                    stats.everglowTier = 5
+                    stats.everglowEruption = true
+                }
+            ],
+            tierDescriptions: [
+                "Inner Heat: pulse every 2s for 50% ATK nearby",
+                "Burning Reach: pulse radius doubled",
+                "Ragekindled: damage taken grows the pulse (to +100%)",
+                "Living Furnace: pulse doubled; hits also grow ATK",
+                "Everglow: erupt for 1000% ATK arena-wide every 15s"
+            ],
+            isCapstone: true
+        ))
 
         return cards
     }

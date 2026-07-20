@@ -56,6 +56,22 @@ enum GameConfig {
         static let damageCooldown: TimeInterval = 0.5
     }
 
+    // MARK: - Everglow (v1.9 Fire capstone)
+    /// The player becomes a persistent close-range heat source whose rage
+    /// escalates through damage taken, culminating in periodic eruptions.
+    enum Everglow {
+        static let pulseInterval: TimeInterval = 2.0
+        static var baseRadius: CGFloat { 70 * DeviceScale.gameplay }   // short; ×2 at T2
+        static let basePulseMult: CGFloat = 0.5        // 50% ATK per pulse (×2 at T4)
+        static let rageGainPerHit: CGFloat = 0.01      // +1% pulse dmg per hit taken
+        static let pulseGrowthCap: CGFloat = 1.0       // +100% pulse (T3 cap)
+        static let furnaceAtkGainPerHit: CGFloat = 0.005  // +0.5% ATK per hit (T4)
+        static let atkGrowthCap: CGFloat = 0.5         // +50% ATK (T4 cap)
+        static let eruptionInterval: TimeInterval = 15.0
+        static let eruptionMult: CGFloat = 5.0         // 500% ATK, arena-wide (T5)
+        static let eruptionTelegraph: TimeInterval = 0.8
+    }
+
     // MARK: - Level-Up Stats (v1.9 Unit 4)
     /// Per-award stat increments for the level-up cadence: even levels let the
     /// player CHOOSE one of these, odd levels auto-award a random one. Starting

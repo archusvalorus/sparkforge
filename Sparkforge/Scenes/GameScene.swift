@@ -71,6 +71,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private var gravityWells: [GravityWellNode] = []
     private var singularityTimer: TimeInterval = 0
+    // v1.9: Everglow capstone — close-range heat pulse + periodic arena eruption.
+    private var everglowPulseTimer: TimeInterval = 0
+    private var everglowEruptionTimer: TimeInterval = 0
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -2605,12 +2608,111 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                           colorHex: 0xCCC8AA)
         }
 
+        // v1.9: Everglow (Fire capstone) — the player becomes a heat source.
+        updateEverglow(dt)
+
         // v1.6: Hoarfrost + Cauterize regen
         let regen = playerStats.updateRegen(dt)
         if regen > 0 {
             playerStats.heal(regen)
             hpBar.flashHeal()
         }
+    }
+
+    // MARK: - Everglow (Fire capstone)
+
+    private func updateEverglow(_ dt: TimeInterval) {
+        guard playerStats.everglowTier >= 1 else { return }
+
+        // T1+ : close-range damage pulse on a fixed cadence.
+        everglowPulseTimer += dt
+        if everglowPulseTimer >= GameConfig.Everglow.pulseInterval {
+            everglowPulseTimer -= GameConfig.Everglow.pulseInterval
+            let dmg = playerStats.everglowPulseDamage
+            if dmg > 0 {
+                damageEnemiesInRadius(playerStats.everglowPulseRadius,
+                                      around: player.position,
+                                      damage: dmg)
+                showRingPulse(at: player.position,
+                              radius: playerStats.everglowPulseRadius,
+                              colorHex: 0xFF6633)
+            }
+        }
+
+        // T5 : periodic arena-wide eruption with a brief telegraph.
+        if playerStats.everglowEruption {
+            everglowEruptionTimer += dt
+            if everglowEruptionTimer >= GameConfig.Everglow.eruptionInterval {
+                everglowEruptionTimer -= GameConfig.Everglow.eruptionInterval
+                triggerEverglowEruption()
+            }
+        }
+    }
+
+    /// Telegraph a swelling core at the player, then detonate arena-wide.
+    private func triggerEverglowEruption() {
+        let telegraph = SKShapeNode(circleOfRadius: 40)
+        telegraph.strokeColor = SKColor(hex: 0xFF3300, alpha: 0.85)
+        telegraph.fillColor = SKColor(hex: 0xFF6600, alpha: 0.15)
+        telegraph.lineWidth = 4
+        telegraph.glowWidth = 8
+        telegraph.position = player.position
+        telegraph.zPosition = 6
+        worldNode.addChild(telegraph)
+        let swell = SKAction.group([
+            SKAction.scale(to: 6, duration: GameConfig.Everglow.eruptionTelegraph),
+            SKAction.fadeAlpha(to: 0.4, duration: GameConfig.Everglow.eruptionTelegraph)
+        ])
+        swell.timingMode = .easeIn
+        telegraph.run(SKAction.sequence([swell, SKAction.removeFromParent()]))
+
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.Everglow.eruptionTelegraph),
+            SKAction.run { [weak self] in self?.everglowEruptionDetonate() }
+        ]))
+    }
+
+    /// Arena-wide burst: every enemy + the boss takes the eruption damage.
+    private func everglowEruptionDetonate() {
+        guard gameState == .playing else { return }
+        let dmg = playerStats.everglowEruptionDamage
+        guard dmg > 0 else { return }
+
+        var killed: [EnemyNode] = []
+        for enemy in enemies where !enemy.isDying {
+            if enemy.takeDamage(dmg) {
+                killed.append(enemy)
+            }
+        }
+        for enemy in killed {
+            if let index = enemies.firstIndex(where: { $0 === enemy }) {
+                spawnXPOrb(at: enemy.position, value: enemy.xpValue)
+                enemies.remove(at: index)
+            }
+        }
+
+        // Boss death flow (XP, bossKills, shake) runs via the boss's onDeath callback.
+        if let bossNode = boss, !bossNode.isDead {
+            bossNode.takeDamage(dmg)
+        }
+
+        // Big eruption visual — a bright expanding blast covering the arena.
+        worldNode.shake(intensity: 10, duration: 0.3)
+        let blast = SKShapeNode(circleOfRadius: 1)
+        blast.fillColor = SKColor(hex: 0xFF6633, alpha: 0.45)
+        blast.strokeColor = SKColor(hex: 0xFFCC33, alpha: 0.9)
+        blast.lineWidth = 6
+        blast.glowWidth = 20
+        blast.position = player.position
+        blast.zPosition = 7
+        worldNode.addChild(blast)
+        blast.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: GameConfig.Arena.radius * 1.2, duration: 0.4),
+                SKAction.fadeOut(withDuration: 0.5)
+            ]),
+            SKAction.removeFromParent()
+        ]))
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -5027,6 +5129,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         timeSinceLastShot = 0
         lastUpdateTime = 0
         passiveDOTAccumulator = 0
+        everglowPulseTimer = 0
+        everglowEruptionTimer = 0
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false
