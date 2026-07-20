@@ -30,8 +30,9 @@ final class ProjectileNode: SKNode {
          pierces: Int = 0,
          damageMultiplier: CGFloat = 1.0,
          isCrit: Bool = false,
-         spawnsGravityWell: Bool = false) {
-        
+         spawnsGravityWell: Bool = false,
+         voidStyle: Bool = false) {
+
         self.direction = direction.normalized
         self.projectileSpeed = speed
         self.maxRange = range
@@ -39,17 +40,28 @@ final class ProjectileNode: SKNode {
         self.damageMultiplier = damageMultiplier
         self.isCrit = isCrit
         self.spawnsGravityWell = spawnsGravityWell
-        
+
         let config = GameConfig.Projectile.self
         let radius = isCrit ? config.radius * 1.5 : config.radius
-        
-        bulletNode = SKShapeNode(circleOfRadius: radius)
-        bulletNode.fillColor = isCrit ? SKColor(hex: 0xFF4444) : SKColor(hex: config.colorHex)
-        bulletNode.strokeColor = .clear
-        bulletNode.glowWidth = isCrit ? 5 : 3
-        
+
+        if voidStyle {
+            // v1.9 Erasure Void-Touched (T2): an empowered, elongated purple bolt
+            // oriented along travel — reads as "these shots pierce reality."
+            bulletNode = SKShapeNode(ellipseOf: CGSize(width: radius * 3.6, height: radius * 1.4))
+            bulletNode.fillColor = isCrit ? SKColor(hex: 0xE060FF) : SKColor(hex: 0xB565D8)
+            bulletNode.strokeColor = SKColor(hex: 0x6C3483, alpha: 0.9)
+            bulletNode.lineWidth = 1
+            bulletNode.glowWidth = isCrit ? 7 : 5
+            bulletNode.zRotation = atan2(direction.y, direction.x)
+        } else {
+            bulletNode = SKShapeNode(circleOfRadius: radius)
+            bulletNode.fillColor = isCrit ? SKColor(hex: 0xFF4444) : SKColor(hex: config.colorHex)
+            bulletNode.strokeColor = .clear
+            bulletNode.glowWidth = isCrit ? 5 : 3
+        }
+
         super.init()
-        
+
         addChild(bulletNode)
         setupPhysics()
     }

@@ -59,6 +59,53 @@ enum GameConfig {
     // MARK: - Everglow (v1.9 Fire capstone)
     /// The player becomes a persistent close-range heat source whose rage
     /// escalates through damage taken, culminating in periodic eruptions.
+    /// v1.9 Erasure (Void capstone) — destabilize reality, accept the final cost.
+    enum Erasure {
+        // T1 Unstable — EVERY player hit (any target) charges a global meter;
+        // at capacity + off an internal CD, one random effect from the 7-entry
+        // table fires at the nearest foe. Reuses StackGaugeNode.
+        static let unstableGaugeCapacity: Int = 4         // hits to charge the meter
+        static let unstableStackCooldown: TimeInterval = 0.15  // rate-limit the fill
+        static let unstableTriggerCooldown: TimeInterval = 2.0 // internal CD between events
+        static let unstableTriggerCooldownT2: TimeInterval = 1.2  // faster chaos at T2
+        static var effectRadius: CGFloat { 110 * DeviceScale.gameplay }  // shared AoE reach
+        static let implosionPull: CGFloat = 55           // Implosion gather force
+        static let riftBurstMult: CGFloat = 1.0          // Rift Burst: 100% ATK void burst
+        static let phaseLockDuration: TimeInterval = 1.0 // immobilize normals
+        static let phaseLockBossSlow: CGFloat = 0.5      // slow boss-class instead
+        static let damageEchoFraction: CGFloat = 0.6     // Damage Echo: repeat 60% of the hit
+        static let damageEchoDelay: TimeInterval = 0.35
+        static let displacementDistance: CGFloat = 85    // Displacement: shove the target
+        static let fractureVulnerability: CGFloat = 1.4  // Fracture: +40% damage taken (brief)
+        static let fractureDuration: TimeInterval = 3.0
+        static let backwashCount: Int = 6                // Backwash void-shard burst
+        static let backwashMult: CGFloat = 0.3
+        // T3 Rift Cannon — every Nth activation, an arena rift fires a beam.
+        static let riftCannonEveryN: Int = 3
+        static let riftCannonMult: CGFloat = 3.0         // 300% ATK along the beam
+        static var riftCannonWidth: CGFloat { 46 * DeviceScale.gameplay }
+        // T4 Echo — Void-Touched projectiles echo from an alternate position.
+        static let echoDelay: TimeInterval = 1.5
+        static let echoFraction: CGFloat = 0.5
+        // T5 Event Horizon — timer starts at ACQUISITION. Base (full) values;
+        // scaled by arena via eventHorizonScale (earlier/shorter-run arenas get
+        // tighter timers so the mechanic stays usable).
+        static let eventHorizonEraseTime: TimeInterval = 75.0   // erase the arena
+        static let eventHorizonEndTime: TimeInterval = 105.0    // +30s → the player is erased
+        static let eventHorizonPeaceDuration: TimeInterval = 3.5  // breather after the wipe, then spawns resume
+
+        /// Arena-scaled Event Horizon timer factor (Brandon, Jul 20). Preplanning
+        /// for future arenas — currently only ~1-4 exist, so runs use 0.5×.
+        static func eventHorizonScale(arena: Int) -> CGFloat {
+            switch arena {
+            case ...10:   return 0.5    // halved
+            case 11...20: return 0.65   // 35% reduced
+            case 21...30: return 0.8    // 20% reduced
+            default:      return 1.0    // full timer (arena 31+)
+            }
+        }
+    }
+
     enum Everglow {
         static let pulseInterval: TimeInterval = 2.0
         static var baseRadius: CGFloat { 70 * DeviceScale.gameplay }   // short; ×2 at T2

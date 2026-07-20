@@ -96,6 +96,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let apexGauge = StackGaugeNode()  // T5 pounce charge (reuses the rage meter)
     private var apexTargetMarker: SKShapeNode?
     private var apexFamiliarTier: Int = 0     // last-applied tier (drives bat growth + Spark's features)
+    // v1.9: Erasure capstone — the global Unstable charge meter.
+    private var erasureStacks: Int = 0
+    private var erasureStackTimer: TimeInterval = 0
+    private var erasureTriggerCooldown: TimeInterval = 0
+    private let erasureGauge = StackGaugeNode()  // Unstable charge (reuses the rage meter)
+    // v1.9: Event Horizon (Erasure T5) — one-per-run scripted run-ender.
+    private var eventHorizonErased = false        // arena wiped
+    private var eventHorizonEnded = false         // player erased
+    private var eventHorizonVoided = false        // spawning halted (silent arena)
+    private var eventHorizonCountdown: SKNode?    // "VOID COLLAPSE" doom timer
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -789,6 +799,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         apexGauge.zPosition = 101
         camera.addChild(apexGauge)
         refreshApexGauge()
+
+        // v1.9 Erasure: Unstable charge meter — same slot as the other capstone gauges.
+        erasureGauge.position = CGPoint(x: 0, y: safeTop - 86)
+        erasureGauge.zPosition = 101
+        camera.addChild(erasureGauge)
+        refreshErasureGauge()
     }
 
     /// Sync the Kinetic gauge to current stats — shown/hidden with Kinetic
@@ -1856,6 +1872,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         statHUD.update(from: playerStats)
         refreshKineticGauge()
         refreshApexGauge()
+        refreshErasureGauge()
 
         // v1.9 Unit 3: this pick just maxed a laddered card. Capstones get the
         // grand reveal (after synergies); other maxed ladders a quiet flourish.
@@ -2108,9 +2125,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
-        let dt = currentTime - lastUpdateTime
+        // Clamp dt so a pause, app-background, or frame hitch can't leap the
+        // game-clock forward in a single frame — that used to jump every
+        // dt-driven timer at once (Event Horizon, spawns, the boss bell).
+        let dt = min(currentTime - lastUpdateTime, 0.1)
         lastUpdateTime = currentTime
-        
+
         guard gameState == .playing else { return }
 
         // v1.9 fix: prune enemies that have died (their nodes self-remove via a
@@ -2162,6 +2182,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.6 tuning: wave spawns pause while a boss holds the arena —
         // the stage belongs to him. Boss-summoned minions (Titan's spawn
         // pattern) still arrive; waves resume the moment he falls.
+        // v1.9 Erasure Event Horizon: the void has halted all spawning.
+        if !eventHorizonVoided {
         if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
         if spawnEvent.shouldSpawnMiniBoss {
             // v1.4: Spawn real boss if gate is met, otherwise mini-boss
@@ -2178,6 +2200,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 spawnMiniBoss()
             }
         }
+        }  // end Event Horizon spawn guard
 
         // v1.4: Update boss AI
         boss?.update(deltaTime: dt, playerPosition: player.position)
@@ -2506,7 +2529,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             pierces: playerStats.pierceCount,
             damageMultiplier: playerStats.effectiveDamageMultiplier * damageScale,
             isCrit: isCrit,
-            spawnsGravityWell: playerStats.gravityWellOnExpire
+            spawnsGravityWell: playerStats.gravityWellOnExpire,
+            voidStyle: playerStats.erasureVoidTouched
         )
         projectile.position = player.position + originOffset
         projectile.zPosition = 8
@@ -2516,6 +2540,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Modifiers fire only from primary shots — fragments/echoes don't
         // themselves split or echo (no runaway multiplication).
         guard allowModifiers else { return }
+
+        // v1.9 Erasure Echo (T4): a real shot re-fires 1.5s later from a random
+        // arena-edge position, same heading, at reduced damage (no re-echo).
+        if playerStats.erasureEcho {
+            let echoDir = direction
+            run(SKAction.sequence([
+                SKAction.wait(forDuration: GameConfig.Erasure.echoDelay),
+                SKAction.run { [weak self] in
+                    guard let self = self, self.gameState == .playing else { return }
+                    let ang = CGFloat.random(in: 0..<(2 * .pi))
+                    let edge = CGPoint(x: cos(ang), y: sin(ang)) * (GameConfig.Arena.radius * 0.85)
+                    self.fireProjectile(direction: echoDir,
+                                        originOffset: edge - self.player.position,
+                                        damageScale: GameConfig.Erasure.echoFraction,
+                                        allowModifiers: false)
+                }
+            ]))
+        }
 
         // Fracture Shot (Neutral): each shot launches split fragments at
         // reduced damage, angled off the main line.
@@ -2684,6 +2726,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.9: Apex (Bleed capstone) — the Blood Familiar hunts.
         updateApex(dt)
+
+        // v1.9: Erasure (Void capstone) — the Unstable meter lurches reality.
+        updateErasure(dt)
 
         // v1.6: Hoarfrost + Cauterize regen
         let regen = playerStats.updateRegen(dt)
@@ -3573,6 +3618,346 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             worldNode.addChild(slash)
             slash.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.2), SKAction.removeFromParent()]))
         }
+    }
+
+    // MARK: - Erasure (Void capstone) — the Unstable chaos table
+
+    /// The Unstable meter is full + off cooldown: charge a hit toward it.
+    private func erasureRegisterHit() {
+        guard playerStats.erasureActive, erasureStackTimer <= 0,
+              erasureStacks < GameConfig.Erasure.unstableGaugeCapacity else { return }
+        erasureStacks += 1
+        erasureStackTimer = GameConfig.Erasure.unstableStackCooldown
+        erasureGauge.setFilled(erasureStacks)
+    }
+
+    /// Per-frame: tick the meter timers; when full + off the internal CD, fire one
+    /// random effect at the nearest foe (holds the full charge if the arena's empty).
+    private func updateErasure(_ dt: TimeInterval) {
+        guard playerStats.erasureActive else { return }
+        if erasureStackTimer > 0 { erasureStackTimer -= dt }
+        if erasureTriggerCooldown > 0 { erasureTriggerCooldown -= dt }
+
+        if erasureStacks >= GameConfig.Erasure.unstableGaugeCapacity, erasureTriggerCooldown <= 0,
+           let target = nearestEnemyToPlayer() {
+            erasureStacks = 0
+            erasureGauge.flashRelease()
+            erasureTriggerCooldown = playerStats.erasureTriggerCD
+            triggerUnstable(on: target)
+        }
+
+        // T5: the run-ending void.
+        if playerStats.erasureEventHorizon { updateEventHorizon() }
+    }
+
+    /// T5 Event Horizon — a one-per-run scripted countdown from ACQUISITION,
+    /// arena-scaled: at the erase time the arena is wiped + spawning halts; at the
+    /// end time the player is erased, bypassing all death-prevention.
+    private func updateEventHorizon() {
+        // Stamp the acquisition time on the first frame after T5 is taken.
+        if playerStats.erasureEventHorizonAcquireTime < 0 {
+            playerStats.erasureEventHorizonAcquireTime = waveManager.elapsedTime
+            showBuildHint("⌛ EVENT HORIZON — the void awakens")
+        }
+        let scale = TimeInterval(GameConfig.Erasure.eventHorizonScale(arena: arenaConfig.id))
+        let since = waveManager.elapsedTime - playerStats.erasureEventHorizonAcquireTime
+
+        if since >= GameConfig.Erasure.eventHorizonEraseTime * scale && !eventHorizonErased {
+            eventHorizonErased = true
+            eraseArena()
+        }
+        if since >= GameConfig.Erasure.eventHorizonEndTime * scale && !eventHorizonEnded {
+            eventHorizonEnded = true
+            forcePlayerErased()
+        }
+
+        // Once the arena's erased (point of no return), count down your own doom.
+        if eventHorizonErased && !eventHorizonEnded {
+            updateEventHorizonCountdown(remaining: GameConfig.Erasure.eventHorizonEndTime * scale - since)
+        }
+    }
+
+    /// The "VOID COLLAPSE" doom timer — Void-purple, pulses each tick, intensifies
+    /// in the final 5s. Impending, self-chosen dread.
+    private func updateEventHorizonCountdown(remaining: TimeInterval) {
+        if eventHorizonCountdown == nil {
+            guard let camera = camera else { return }
+            let container = SKNode()
+            container.position = CGPoint(x: 0, y: 74)
+            container.zPosition = 250
+            let title = SKLabelNode(fontNamed: "Menlo-Bold")
+            title.text = "VOID COLLAPSE"
+            title.fontSize = 15
+            title.fontColor = SKColor(hex: 0xC060FF)
+            title.position = CGPoint(x: 0, y: 44)
+            title.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.4, duration: 0.6),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.6)
+            ])))
+            container.addChild(title)
+            let num = SKLabelNode(fontNamed: "Menlo-Bold")
+            num.name = "ehNum"
+            num.fontSize = 60
+            num.fontColor = SKColor(hex: 0xB565D8)
+            num.verticalAlignmentMode = .center
+            container.addChild(num)
+            camera.addChild(container)
+            eventHorizonCountdown = container
+        }
+        guard let num = eventHorizonCountdown?.childNode(withName: "ehNum") as? SKLabelNode else { return }
+        let secs = max(0, Int(ceil(remaining)))
+        if num.text != "\(secs)" {
+            num.text = "\(secs)"
+            let finalStretch = secs <= 5
+            num.fontColor = SKColor(hex: finalStretch ? 0xE85CFF : 0xB565D8)
+            num.removeAllActions()
+            num.setScale(finalStretch ? 1.6 : 1.25)
+            num.run(SKAction.scale(to: 1.0, duration: 0.35))
+            if finalStretch { worldNode.shake(intensity: 2, duration: 0.1) }
+        }
+    }
+
+    private func hideEventHorizonCountdown() {
+        eventHorizonCountdown?.removeFromParent()
+        eventHorizonCountdown = nil
+    }
+
+    /// Phase 1: erase every enemy, the boss (normal mode: outright), hostile
+    /// projectiles + gravity wells, and halt spawning — the arena goes silent.
+    private func eraseArena() {
+        for e in enemies {
+            showUnstablePop(at: e.position)
+            e.removeFromParent()
+        }
+        enemies.removeAll()
+        // Normal mode: the boss is erased outright. (Boss Mode's catastrophic-
+        // damage variant is v2.0 — see the Event-Horizon spec memory.)
+        if let b = boss, !b.isDead { b.takeDamage(b.health) }
+        for p in enemyProjectiles { p.removeFromParent() }
+        enemyProjectiles.removeAll()
+        for well in gravityWells { well.removeFromParent() }
+        gravityWells.removeAll()
+
+        // Halt spawns for a brief breather, then let the arena refill — the void
+        // gives a clear board + a breath, then takes it back while the clock ticks.
+        eventHorizonVoided = true
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.Erasure.eventHorizonPeaceDuration),
+            SKAction.run { [weak self] in self?.eventHorizonVoided = false }
+        ]), withKey: "eventHorizonPeace")
+        flashScreen(colorHex: 0x6C3483, alpha: 0.55, duration: 0.6)
+        worldNode.shake(intensity: 16, duration: 0.6)
+        showBuildHint("the arena is erased")
+    }
+
+    /// Phase 2: the player is erased. A scripted run-end that bypasses ALL
+    /// death-prevention — called directly, so lethal-save / ad-revive never run.
+    private func forcePlayerErased() {
+        hideEventHorizonCountdown()
+        flashScreen(colorHex: 0x3A1050, alpha: 0.7, duration: 0.6)
+        worldNode.shake(intensity: 20, duration: 0.7)
+        showRingPulse(at: player.position, radius: 220, colorHex: 0x6C3483)
+        let collapse = SKShapeNode(circleOfRadius: 30)
+        collapse.fillColor = SKColor(hex: 0x1A0028, alpha: 0.9)
+        collapse.strokeColor = SKColor(hex: 0xC060FF, alpha: 0.95)
+        collapse.glowWidth = 22
+        collapse.position = player.position
+        collapse.zPosition = 20
+        worldNode.addChild(collapse)
+        collapse.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 8, duration: 0.5), SKAction.fadeOut(withDuration: 0.6)]),
+            SKAction.removeFromParent()
+        ]))
+        playerDied()   // direct — bypasses tryLethalSave / ad-revive
+    }
+
+    private func nearestEnemyToPlayer() -> EnemyNode? {
+        var nearest: EnemyNode?
+        var best = CGFloat.greatestFiniteMagnitude
+        for e in enemies where !e.isDying {
+            let d = player.position.distance(to: e.position)
+            if d < best { best = d; nearest = e }
+        }
+        return nearest
+    }
+
+    /// Show/hide + sync the Unstable meter with T1 state.
+    private func refreshErasureGauge() {
+        if playerStats.erasureActive {
+            erasureGauge.configure(capacity: GameConfig.Erasure.unstableGaugeCapacity, filledColor: 0x9B59B6)
+            erasureGauge.setFilled(erasureStacks)
+        } else {
+            erasureGauge.configure(capacity: 0, filledColor: 0x9B59B6)
+        }
+    }
+
+    /// Fire one random effect from the 7-entry table at a foe (uniform for now;
+    /// weights are tunable). Counts the activation (drives the T3 rift cannon).
+    private func triggerUnstable(on enemy: EnemyNode) {
+        playerStats.erasureActivations += 1
+        let pos = enemy.position
+        showUnstablePop(at: pos)
+        switch Int.random(in: 0..<7) {
+        case 0: erasureImplosion(at: pos)
+        case 1: erasureRiftBurst(at: pos)
+        case 2: erasurePhaseLock(at: pos)
+        case 3: erasureDamageEcho(on: enemy)
+        case 4: erasureDisplacement(enemy)
+        case 5: erasureFracture(enemy)
+        default: erasureBackwash(at: pos)
+        }
+
+        // T3 Rift Cannon — every Nth activation, a rift fires a beam across the arena.
+        if playerStats.erasureRiftCannon
+            && playerStats.erasureActivations % GameConfig.Erasure.riftCannonEveryN == 0 {
+            fireRiftCannon()
+        }
+    }
+
+    /// T3: a rift opens at a random arena point and fires a beam along a random
+    /// vector, hitting every enemy (and the boss) within the beam's width.
+    private func fireRiftCannon() {
+        let arenaR = GameConfig.Arena.radius
+        let oAng = CGFloat.random(in: 0..<(2 * .pi))
+        let origin = CGPoint(x: cos(oAng), y: sin(oAng)) * CGFloat.random(in: 0...(arenaR * 0.6))
+        let vAng = CGFloat.random(in: 0..<(2 * .pi))
+        let dir = CGPoint(x: cos(vAng), y: sin(vAng))
+        let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.riftCannonMult))
+        let width = GameConfig.Erasure.riftCannonWidth
+
+        var killed: [EnemyNode] = []
+        for e in enemies where !e.isDying {
+            let rel = e.position - origin
+            if abs(rel.x * dir.y - rel.y * dir.x) < width {   // perpendicular distance to the beam line
+                if e.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: e.isMiniBoss)) {
+                    killed.append(e)
+                }
+            }
+        }
+        for e in killed {
+            if let i = enemies.firstIndex(where: { $0 === e }) { enemies.remove(at: i) }
+            onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e)
+        }
+        if let b = boss, !b.isDead {
+            let rel = b.position - origin
+            if abs(rel.x * dir.y - rel.y * dir.x) < width {
+                b.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: true))
+            }
+        }
+        showRiftBeam(origin: origin, dir: dir)
+    }
+
+    private func showRiftBeam(origin: CGPoint, dir: CGPoint) {
+        let span = GameConfig.Arena.radius * 2.2
+        let path = CGMutablePath()
+        path.move(to: origin - dir * span)
+        path.addLine(to: origin + dir * span)
+        let beam = SKShapeNode(path: path)
+        beam.strokeColor = SKColor(hex: 0xC060FF, alpha: 0.95)
+        beam.lineWidth = 5
+        beam.glowWidth = 14
+        beam.zPosition = 9
+        worldNode.addChild(beam)
+        beam.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.35), SKAction.removeFromParent()]))
+        showRingPulse(at: origin, radius: 52, colorHex: 0x9B59B6)
+        worldNode.shake(intensity: 6, duration: 0.2)
+    }
+
+    /// 1. Implosion — pull nearby enemies toward the point.
+    private func erasureImplosion(at pos: CGPoint) {
+        let r = GameConfig.Erasure.effectRadius
+        for e in enemies where e.position.distance(to: pos) < r {
+            let dir = (pos - e.position).normalized
+            e.position += dir * GameConfig.Erasure.implosionPull
+        }
+        showRingPulse(at: pos, radius: r, colorHex: 0x9B59B6)
+    }
+
+    /// 2. Rift Burst — Void damage in a small radius.
+    private func erasureRiftBurst(at pos: CGPoint) {
+        let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.riftBurstMult))
+        damageEnemiesInRadius(GameConfig.Erasure.effectRadius, around: pos,
+                              damage: dmg, bossClassScaled: true)
+        showRingPulse(at: pos, radius: GameConfig.Erasure.effectRadius, colorHex: 0x8E44AD)
+    }
+
+    /// 3. Phase Lock — immobilize normals, slow boss-class, in a radius.
+    private func erasurePhaseLock(at pos: CGPoint) {
+        let r = GameConfig.Erasure.effectRadius
+        for e in enemies where e.position.distance(to: pos) < r {
+            if e.isMiniBoss {
+                e.applySlow(GameConfig.BossClass.scaledMagnitude(GameConfig.Erasure.phaseLockBossSlow, isBossClass: true),
+                            duration: GameConfig.Erasure.phaseLockDuration)
+            } else {
+                e.applyStun(GameConfig.Erasure.phaseLockDuration)
+            }
+        }
+        showRingPulse(at: pos, radius: r, colorHex: 0x6C3483)
+    }
+
+    /// 4. Damage Echo — a delayed Void detonation on the target (ATK-scaled).
+    private func erasureDamageEcho(on enemy: EnemyNode) {
+        let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.damageEchoFraction))
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.Erasure.damageEchoDelay),
+            SKAction.run { [weak self, weak enemy] in
+                guard let self = self, let enemy = enemy, !enemy.isDying,
+                      self.enemies.contains(where: { $0 === enemy }) else { return }
+                self.showRingPulse(at: enemy.position, radius: 28, colorHex: 0x8E44AD)
+                if enemy.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: enemy.isMiniBoss)) {
+                    if let i = self.enemies.firstIndex(where: { $0 === enemy }) { self.enemies.remove(at: i) }
+                    self.onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                }
+            }
+        ]))
+    }
+
+    /// 5. Displacement — shove the target a random short distance.
+    private func erasureDisplacement(_ enemy: EnemyNode) {
+        let ang = CGFloat.random(in: 0..<(2 * .pi))
+        enemy.position += CGPoint(x: cos(ang), y: sin(ang)) * GameConfig.Erasure.displacementDistance
+        showRingPulse(at: enemy.position, radius: 24, colorHex: 0x9B59B6)
+    }
+
+    /// 6. Fracture — the target briefly takes more damage (timed vulnerability).
+    private func erasureFracture(_ enemy: EnemyNode) {
+        enemy.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
+            GameConfig.Erasure.fractureVulnerability, isBossClass: enemy.isMiniBoss)
+        enemy.run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.Erasure.fractureDuration),
+            SKAction.run { [weak enemy] in enemy?.vulnerabilityMultiplier = 1.0 }
+        ]), withKey: "erasureFracture")
+        showRingPulse(at: enemy.position, radius: 26, colorHex: 0xC39BD3)
+    }
+
+    /// 7. Backwash — a Void-shard burst radiates from the target (reuses the
+    /// player projectile system, at reduced damage, no further modifiers).
+    private func erasureBackwash(at pos: CGPoint) {
+        let n = GameConfig.Erasure.backwashCount
+        let offset = pos - player.position
+        for i in 0..<n {
+            let ang = CGFloat(i) / CGFloat(n) * 2 * .pi
+            fireProjectile(direction: CGPoint(x: cos(ang), y: sin(ang)),
+                           originOffset: offset,
+                           damageScale: GameConfig.Erasure.backwashMult,
+                           allowModifiers: false)
+        }
+    }
+
+    /// The Void implosion pop at an Unstable trigger.
+    private func showUnstablePop(at pos: CGPoint) {
+        showRingPulse(at: pos, radius: 42, colorHex: 0x9B59B6)
+        let core = SKShapeNode(circleOfRadius: 8)
+        core.fillColor = SKColor(hex: 0x6C3483, alpha: 0.8)
+        core.strokeColor = SKColor(hex: 0xC39BD3, alpha: 0.9)
+        core.glowWidth = 8
+        core.position = pos
+        core.zPosition = 8
+        worldNode.addChild(core)
+        core.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 2.4, duration: 0.18), SKAction.fadeOut(withDuration: 0.2)]),
+            SKAction.removeFromParent()
+        ]))
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -5353,8 +5738,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
         }
 
-        // v1.6: shield reduction applies after all bonuses — flanking doubles output
-        if braceguardShielded {
+        // v1.6: shield reduction applies after all bonuses — flanking doubles output.
+        // v1.9 Erasure Void-Touched (T2): shots pierce the shield entirely.
+        if braceguardShielded && !playerStats.erasureVoidTouched {
             damage = max(1, Int(CGFloat(damage) * BraceguardNode.shieldDamageMultiplier))
         }
 
@@ -5415,6 +5801,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         apexRegisterAttack()   // T5 Apex: every player hit charges the pounce gauge
 
+        erasureRegisterHit()   // T1 Erasure: every player hit charges the Unstable meter
+
         if playerStats.chainTargets > 0 && !killed {
             chainLightning(from: enemyNode.position,
                           damage: max(1, Int(CGFloat(damage) * playerStats.chainDamageMultiplier)),
@@ -5459,6 +5847,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // Death flow (XP shower, bossKills, shake) runs via the boss's onDeath callback
         bossNode.takeDamage(damage)
+        erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too
     }
 
     // MARK: - Chain Lightning
@@ -6048,6 +6437,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         apexPounceCooldown = 0
         apexFamiliarTier = 0
         refreshApexGauge()
+        erasureStacks = 0
+        erasureStackTimer = 0
+        erasureTriggerCooldown = 0
+        eventHorizonErased = false
+        eventHorizonEnded = false
+        eventHorizonVoided = false
+        removeAction(forKey: "eventHorizonPeace")
+        hideEventHorizonCountdown()
+        refreshErasureGauge()
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false

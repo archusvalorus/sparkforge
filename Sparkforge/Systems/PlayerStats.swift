@@ -93,6 +93,17 @@ final class PlayerStats {
         max(0, Int(((CGFloat(baseAttack) + apexBonusAttackFromHP) * displayDamageMultiplier).rounded()))
     }
 
+    // MARK: - Erasure (Void capstone, v1.9). Per-run; reset each run.
+    var erasureTier: Int = 0                  // 0 = inactive; 1..5
+    var erasureActive = false                 // T1: hits stack Unstable
+    var erasureVoidTouched = false            // T2: armor bypass + 2-stack trigger
+    var erasureRiftCannon = false             // T3: rift cannon every Nth activation
+    var erasureEcho = false                   // T4: projectiles echo from elsewhere
+    var erasureEventHorizon = false           // T5: the run-ending void
+    var erasureTriggerCD: TimeInterval = GameConfig.Erasure.unstableTriggerCooldown
+    var erasureActivations: Int = 0           // counts triggers (drives the rift cannon)
+    var erasureEventHorizonAcquireTime: TimeInterval = -1  // elapsed time when T5 was taken
+
     /// Add a Kinetic stack on a damaging hit (T4+). Returns true when the reserve
     /// hits its threshold and releases — the caller fires the radial burst.
     func addKineticStack() -> Bool {
@@ -850,6 +861,15 @@ final class PlayerStats {
         apexHunter = false
         apexFamiliarKills = 0
         apexBloodfedBonusHP = 0
+        erasureTier = 0
+        erasureActive = false
+        erasureVoidTouched = false
+        erasureRiftCannon = false
+        erasureEcho = false
+        erasureEventHorizon = false
+        erasureTriggerCD = GameConfig.Erasure.unstableTriggerCooldown
+        erasureActivations = 0
+        erasureEventHorizonAcquireTime = -1
 
         damageMultiplier = 1.0
         critChance = 0.0

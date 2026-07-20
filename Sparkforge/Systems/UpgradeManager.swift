@@ -82,7 +82,7 @@ final class UpgradeManager {
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
     /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
-    static let debugForcedCardID: String? = "cap_bleed_apex"
+    static let debugForcedCardID: String? = "cap_void_erasure"
     #endif
 
     // MARK: - State
@@ -1220,6 +1220,44 @@ final class UpgradeManager {
                 "Bloodhound: bat favors bleeders; executes weak normals",
                 "Marked: enemies alive 10s take +35% from all sources",
                 "The Hunter: hits on injured foes charge a gauge; full → the bat executes a weakened enemy"
+            ],
+            isCapstone: true
+        ))
+
+        // 🕳️ Erasure — destabilize reality; accept the final cost.
+        cards.append(UpgradeCard(
+            id: "cap_void_erasure", name: "Erasure", tag: .voidT,
+            description: "Destabilize reality. Accept the final cost.",
+            apply: { stats in                       // T1 Unstable
+                stats.erasureTier = 1
+                stats.erasureActive = true
+                stats.erasureTriggerCD = GameConfig.Erasure.unstableTriggerCooldown
+            },
+            higherTiers: [
+                { stats in                           // T2 Void-Touched
+                    stats.erasureTier = 2
+                    stats.erasureVoidTouched = true
+                    stats.erasureTriggerCD = GameConfig.Erasure.unstableTriggerCooldownT2
+                },
+                { stats in                           // T3 Rift Cannon
+                    stats.erasureTier = 3
+                    stats.erasureRiftCannon = true
+                },
+                { stats in                           // T4 Echo
+                    stats.erasureTier = 4
+                    stats.erasureEcho = true
+                },
+                { stats in                           // T5 Event Horizon
+                    stats.erasureTier = 5
+                    stats.erasureEventHorizon = true
+                }
+            ],
+            tierDescriptions: [
+                "Unstable: your hits charge the void; full meter → reality lurches",
+                "Void-Touched: shots pierce armor; the void charges faster",
+                "Rift Cannon: every 3rd lurch, an arena rift fires a 300% ATK beam",
+                "Echo: your shots echo 1.5s later from elsewhere (50% damage)",
+                "Event Horizon: at 75s the arena is erased; at 105s, so are you"
             ],
             isCapstone: true
         ))
