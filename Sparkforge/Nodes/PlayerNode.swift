@@ -42,6 +42,8 @@ final class PlayerNode: SKNode {
     private var eyeOffset: CGPoint = .zero   // current directional slide (smoothed)
     private var apexFeatures: SKNode?        // v1.9 Apex (The Hunter): fixed horns + wings
     private var apexFangs: SKNode?           // v1.9 Apex: fangs — ride the eyesNode so they travel
+    private var polarFeatures: SKNode?       // v1.9 Polar Vortex (T5): santa hat (fixed on head)
+    private var polarBeard: SKNode?          // v1.9 Polar Vortex: beard — rides eyesNode, seated low
 
     // MARK: - Init
 
@@ -563,12 +565,75 @@ final class PlayerNode: SKNode {
         apexFangs = fangs
     }
 
+    /// v1.9 Polar Vortex (T5): Spark dons a floppy santa hat + white beard —
+    /// escalating the horns/fangs/wings precedent into full seasonal absurdity.
+    func setPolarVortexFeatures(_ on: Bool) {
+        if !on {
+            polarFeatures?.removeFromParent(); polarFeatures = nil
+            polarBeard?.removeFromParent(); polarBeard = nil
+            return
+        }
+        guard polarFeatures == nil else { return }
+        let R = GameConfig.Player.visualRadius
+        let container = SKNode()
+
+        // White beard — its OWN piece, added to eyesNode (like the Apex fangs) so
+        // it rides the face; seated low, hanging below the mouth. Coords are LOCAL
+        // to eyesNode (which sits just above center).
+        let beard = SKShapeNode()
+        let bp = CGMutablePath()
+        bp.move(to: CGPoint(x: -R * 0.5, y: -R * 0.28))
+        bp.addQuadCurve(to: CGPoint(x: R * 0.5, y: -R * 0.28), control: CGPoint(x: 0, y: -R * 1.25))
+        bp.closeSubpath()
+        beard.path = bp
+        beard.fillColor = SKColor(hex: 0xF2F2F2)
+        beard.strokeColor = SKColor(hex: 0xCCCCCC, alpha: 0.8)
+        beard.lineWidth = 0.5
+        beard.zPosition = 1
+        eyesNode.addChild(beard)
+        polarBeard = beard
+
+        // Santa hat — a red cone flopping to one side.
+        let hat = SKShapeNode()
+        let hp = CGMutablePath()
+        hp.move(to: CGPoint(x: -R * 0.6, y: R * 0.55))
+        hp.addLine(to: CGPoint(x: R * 0.5, y: R * 0.55))
+        hp.addLine(to: CGPoint(x: R * 1.15, y: R * 1.5))   // tip flops sideways
+        hp.closeSubpath()
+        hat.path = hp
+        hat.fillColor = SKColor(hex: 0xD22030)
+        hat.strokeColor = SKColor(hex: 0x8B1018, alpha: 0.8)
+        hat.lineWidth = 0.5
+        hat.zPosition = 15
+        container.addChild(hat)
+
+        // White trim band.
+        let trim = SKShapeNode(rectOf: CGSize(width: R * 1.35, height: R * 0.32), cornerRadius: R * 0.16)
+        trim.fillColor = .white
+        trim.strokeColor = .clear
+        trim.position = CGPoint(x: -R * 0.05, y: R * 0.55)
+        trim.zPosition = 16
+        container.addChild(trim)
+
+        // Pompom on the flopped tip.
+        let pom = SKShapeNode(circleOfRadius: R * 0.22)
+        pom.fillColor = .white
+        pom.strokeColor = .clear
+        pom.position = CGPoint(x: R * 1.15, y: R * 1.5)
+        pom.zPosition = 16
+        container.addChild(pom)
+
+        addChild(container)
+        polarFeatures = container
+    }
+
     func reset() {
         // Cancel any in-flight animation (notably die()'s fade-to-0) — else a
         // quick RESTART lets the leftover fade complete AFTER reset and hide the
         // spark. removeAllActions must precede the alpha/visual restore below.
         removeAllActions()
         setApexFeatures(false)
+        setPolarVortexFeatures(false)
         isDead = false
         currentLevel = 1
         currentXP = 0

@@ -104,6 +104,17 @@ final class PlayerStats {
     var erasureActivations: Int = 0           // counts triggers (drives the rift cannon)
     var erasureEventHorizonAcquireTime: TimeInterval = -1  // elapsed time when T5 was taken
 
+    // MARK: - Polar Vortex (Chill capstone, v1.9). Per-run; reset each run.
+    var polarVortexTier: Int = 0              // 0 = inactive; 1..5
+    var iceburstActive = false                // T1: frozen deaths burst into shards
+    var iceburstShards: Int = GameConfig.PolarVortex.iceburstShardsT1
+    var brittleCold = false                   // T2: +damage vs impaired
+    var windchillActive = false               // T3: cold storm stacks Chill
+    var windchillRadius: CGFloat = 0
+    var glacialActive = false                 // T4: shots condense into icicles
+    var polarVortexFreeze = false             // T5: Chill → freeze → frostbite
+    var glacialShotCounter: Int = 0           // T4 condensation counter
+
     /// Add a Kinetic stack on a damaging hit (T4+). Returns true when the reserve
     /// hits its threshold and releases — the caller fires the radial burst.
     func addKineticStack() -> Bool {
@@ -870,6 +881,15 @@ final class PlayerStats {
         erasureTriggerCD = GameConfig.Erasure.unstableTriggerCooldown
         erasureActivations = 0
         erasureEventHorizonAcquireTime = -1
+        polarVortexTier = 0
+        iceburstActive = false
+        iceburstShards = GameConfig.PolarVortex.iceburstShardsT1
+        brittleCold = false
+        windchillActive = false
+        windchillRadius = 0
+        glacialActive = false
+        polarVortexFreeze = false
+        glacialShotCounter = 0
 
         damageMultiplier = 1.0
         critChance = 0.0

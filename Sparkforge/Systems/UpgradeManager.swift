@@ -82,7 +82,7 @@ final class UpgradeManager {
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
     /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
-    static let debugForcedCardID: String? = "cap_void_erasure"
+    static let debugForcedCardID: String? = "cap_chill_polarvortex"
     #endif
 
     // MARK: - State
@@ -132,12 +132,32 @@ final class UpgradeManager {
     /// v1.9: eligibility is "not maxed", not "never picked" — owned cards
     /// with rungs left re-appear and level up. Owned non-maxed cards draw
     /// with the same weight as new ones (locked Fork B).
-    func drawCards(count: Int = 3) -> [UpgradeCard] {
+    func drawCards(count: Int = 3, level: Int = 0) -> [UpgradeCard] {
+        // v1.9 capstone offering rules (Brandon, Jul 20) — "focus & finish":
+        //  • A committed-but-unmaxed capstone is the ONLY capstone offered, and
+        //    only via the guarantee below — no OTHER capstone appears until it
+        //    maxes (rule 1), so the draft stays focused enough to complete a build.
+        //  • That capstone is guaranteed one slot every OTHER level (rule 2) so
+        //    climbing 1→5 is deterministic, not a coin flip. Reroll can't remove
+        //    it (level parity is stable across a reroll of the same level).
+        //  • If two capstones are committed (both taken via the once-per-run +1
+        //    pick before either locked the other out), both get the guarantee on
+        //    offset parities. When NO capstone is in progress, capstones appear in
+        //    the random pool normally (so you can start one, or see two at once).
+        let inProgress = allCards.filter {
+            $0.isCapstone && tier(of: $0.id) > 0 && tier(of: $0.id) < $0.maxTier
+        }
+        let hasInProgress = !inProgress.isEmpty
+
         let available = allCards.filter { card in
-            tier(of: card.id) < card.maxTier
+            guard tier(of: card.id) < card.maxTier else { return false }
+            // Capstones never come from the random pool once one is in progress —
+            // the in-progress one(s) are injected by parity; others are locked out.
+            if card.isCapstone && hasInProgress { return false }
+            return true
         }
 
-        guard !available.isEmpty else { return [] }
+        guard !available.isEmpty || hasInProgress else { return [] }
 
         let pool = available.shuffled()
         var drawn: [UpgradeCard] = []
@@ -159,6 +179,16 @@ final class UpgradeManager {
                     drawn.append(card)
                 }
             }
+        }
+
+        // Guarantee: inject each in-progress capstone whose parity matches this
+        // level (offset per capstone so two never crowd the same level), taking
+        // one slot each from the back and leaving the rest as normal cards.
+        var forcedSlot = drawn.count - 1
+        for (i, cap) in inProgress.enumerated() where (level + i) % 2 == 0 {
+            if drawn.contains(where: { $0.id == cap.id }) { continue }
+            if forcedSlot >= 0 { drawn[forcedSlot] = cap; forcedSlot -= 1 }
+            else { drawn.append(cap) }
         }
 
         #if DEBUG
@@ -1258,6 +1288,48 @@ final class UpgradeManager {
                 "Rift Cannon: every 3rd lurch, an arena rift fires a 300% ATK beam",
                 "Echo: your shots echo 1.5s later from elsewhere (50% damage)",
                 "Event Horizon: at 75s the arena is erased; at 105s, so are you"
+            ],
+            isCapstone: true
+        ))
+
+        // ❄️ Polar Vortex — carry the storm; freeze enemies to the soul.
+        cards.append(UpgradeCard(
+            id: "cap_chill_polarvortex", name: "Polar Vortex", tag: .chill,
+            description: "Carry the storm. Freeze enemies to the soul.",
+            apply: { stats in                       // T1 Iceburst
+                stats.polarVortexTier = 1
+                stats.iceburstActive = true
+                stats.iceburstShards = GameConfig.PolarVortex.iceburstShardsT1
+            },
+            higherTiers: [
+                { stats in                           // T2 Brittle Cold
+                    stats.polarVortexTier = 2
+                    stats.iceburstShards = GameConfig.PolarVortex.iceburstShardsT2
+                    stats.brittleCold = true
+                },
+                { stats in                           // T3 Windchill
+                    stats.polarVortexTier = 3
+                    stats.windchillActive = true
+                    stats.windchillRadius = GameConfig.PolarVortex.windchillRadius
+                },
+                { stats in                           // T4 Glacial Condensation
+                    stats.polarVortexTier = 4
+                    stats.glacialActive = true
+                },
+                { stats in                           // T5 Polar Vortex
+                    stats.polarVortexTier = 5
+                    stats.polarVortexFreeze = true
+                    stats.iceburstShards = GameConfig.PolarVortex.iceburstShardsT5
+                    stats.windchillRadius = GameConfig.PolarVortex.windchillRadius
+                        * GameConfig.PolarVortex.windchillRadiusT5Mult
+                }
+            ],
+            tierDescriptions: [
+                "Iceburst: chilled foes that die burst into 3 ice shards",
+                "Brittle Cold: 5 shards; +40% damage to chilled/frozen foes",
+                "Windchill: a cold storm follows you, stacking Chill",
+                "Glacial Condensation: every 3 shots fire one shattering icicle",
+                "Polar Vortex: storm ×3; 5 Chill → freeze → Frostbite (+100% dmg)"
             ],
             isCapstone: true
         ))

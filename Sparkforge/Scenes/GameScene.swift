@@ -106,6 +106,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var eventHorizonEnded = false         // player erased
     private var eventHorizonVoided = false        // spawning halted (silent arena)
     private var eventHorizonCountdown: SKNode?    // "VOID COLLAPSE" doom timer
+    // v1.9: Polar Vortex capstone — the Windchill storm.
+    private var windchillTimer: TimeInterval = 0
+    private var windchillWispTimer: TimeInterval = 0
+    private var windchillStorm: SKShapeNode?
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -1967,7 +1971,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Draw new cards after brief delay
         run(SKAction.wait(forDuration: 0.25)) { [weak self] in
             guard let self = self else { return }
-            let newCards = self.upgradeManager.drawCards(count: spreadSize)
+            let newCards = self.upgradeManager.drawCards(count: spreadSize, level: self.player.currentLevel)
             self.showCardSelection(newCards)
         }
     }
@@ -2520,6 +2524,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero,
                                 damageScale: CGFloat = 1.0, allowModifiers: Bool = true) {
+        // v1.9 Polar Vortex Glacial Condensation (T4): primary shots don't fire
+        // immediately — every Nth condenses into one icicle; the rest are absorbed.
+        if playerStats.glacialActive && allowModifiers {
+            playerStats.glacialShotCounter += 1
+            if playerStats.glacialShotCounter % GameConfig.PolarVortex.glacialEveryN == 0 {
+                fireIcicle(direction: direction, originOffset: originOffset)
+            }
+            return
+        }
+
         let isCrit = CGFloat.random(in: 0...1) < playerStats.critChance
 
         let projectile = ProjectileNode(
@@ -2530,7 +2544,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damageMultiplier: playerStats.effectiveDamageMultiplier * damageScale,
             isCrit: isCrit,
             spawnsGravityWell: playerStats.gravityWellOnExpire,
-            voidStyle: playerStats.erasureVoidTouched
+            voidStyle: playerStats.erasureVoidTouched,
+            frostStyle: playerStats.polarVortexTier >= 1
         )
         projectile.position = player.position + originOffset
         projectile.zPosition = 8
@@ -2729,6 +2744,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.9: Erasure (Void capstone) — the Unstable meter lurches reality.
         updateErasure(dt)
+
+        // v1.9: Polar Vortex (Chill capstone) — the cold storm stacks Chill.
+        if playerStats.windchillActive { updateWindchill(dt) }
 
         // v1.6: Hoarfrost + Cauterize regen
         let regen = playerStats.updateRegen(dt)
@@ -3958,6 +3976,143 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.group([SKAction.scale(to: 2.4, duration: 0.18), SKAction.fadeOut(withDuration: 0.2)]),
             SKAction.removeFromParent()
         ]))
+    }
+
+    // MARK: - Polar Vortex (Chill capstone)
+
+    /// T4: fire one condensed icicle (200% ATK) that shatters into shards on impact.
+    private func fireIcicle(direction: CGPoint, originOffset: CGPoint) {
+        let icicle = ProjectileNode(
+            direction: direction,
+            speed: playerStats.effectiveProjectileSpeed,
+            range: playerStats.effectiveProjectileRange,
+            pierces: 0,
+            damageMultiplier: playerStats.effectiveDamageMultiplier * GameConfig.PolarVortex.icicleMult,
+            isCrit: false,
+            spawnsGravityWell: false,
+            voidStyle: false,
+            isIcicle: true
+        )
+        icicle.position = player.position + originOffset
+        icicle.zPosition = 8
+        projectiles.append(icicle)
+        worldNode.addChild(icicle)
+    }
+
+    /// T1: a burst of ice shards from a chilled foe's death (reuses the projectile
+    /// system at reduced damage, no further modifiers).
+    private func iceburst(at pos: CGPoint) {
+        let n = playerStats.iceburstShards
+        let offset = pos - player.position
+        for i in 0..<n {
+            let ang = CGFloat(i) / CGFloat(n) * 2 * .pi + CGFloat.random(in: -0.3...0.3)
+            fireProjectile(direction: CGPoint(x: cos(ang), y: sin(ang)),
+                           originOffset: offset,
+                           damageScale: GameConfig.PolarVortex.shardMult,
+                           allowModifiers: false)
+        }
+        showRingPulse(at: pos, radius: 28, colorHex: 0x99E6FF)
+    }
+
+    /// T4: an icicle shatters on impact into shards (double a normal shard).
+    private func iceShatter(at pos: CGPoint) {
+        let n = GameConfig.PolarVortex.icicleShards
+        let offset = pos - player.position
+        for i in 0..<n {
+            let ang = CGFloat(i) / CGFloat(n) * 2 * .pi
+            fireProjectile(direction: CGPoint(x: cos(ang), y: sin(ang)),
+                           originOffset: offset,
+                           damageScale: GameConfig.PolarVortex.icicleShardMult,
+                           allowModifiers: false)
+        }
+        showRingPulse(at: pos, radius: 34, colorHex: 0xCCF2FF)
+    }
+
+    /// T3/T5: the cold storm follows the player, stacking Chill each interval; at
+    /// T5, foes at the freeze threshold freeze, then become Frostbitten.
+    private func updateWindchill(_ dt: TimeInterval) {
+        let r = playerStats.windchillRadius
+        if windchillStorm == nil {
+            let storm = SKShapeNode()
+            storm.strokeColor = SKColor(hex: 0x99E6FF, alpha: 0.35)
+            storm.fillColor = SKColor(hex: 0x66CCFF, alpha: 0.06)
+            storm.lineWidth = 2
+            storm.zPosition = 3
+            worldNode.addChild(storm)
+            windchillStorm = storm
+        }
+        windchillStorm?.path = CGPath(ellipseIn: CGRect(x: -r, y: -r, width: 2 * r, height: 2 * r), transform: nil)
+        windchillStorm?.position = player.position
+
+        // Wispy arctic air swirling inside the vortex.
+        windchillWispTimer += dt
+        if windchillWispTimer >= 0.11 {
+            windchillWispTimer = 0
+            spawnFrostWisp(radius: r)
+        }
+
+        // T5: Spark dons the seasonal aesthetic. 🎅
+        player.setPolarVortexFeatures(playerStats.polarVortexFreeze)
+
+        windchillTimer += dt
+        if windchillTimer >= GameConfig.PolarVortex.windchillInterval {
+            windchillTimer -= GameConfig.PolarVortex.windchillInterval
+            for e in enemies where !e.isDying && player.position.distance(to: e.position) < r {
+                e.chillStacks += 1
+                if playerStats.polarVortexFreeze
+                    && e.chillStacks >= GameConfig.PolarVortex.freezeStacks && !e.isFrozen {
+                    freezeEnemy(e)
+                }
+            }
+        }
+    }
+
+    /// A drifting frost wisp inside the storm — arctic air swirling on the wind.
+    private func spawnFrostWisp(radius r: CGFloat) {
+        let ang = CGFloat.random(in: 0..<(2 * .pi))
+        let dist = CGFloat.random(in: 0...r)
+        let wisp = SKShapeNode(ellipseOf: CGSize(width: CGFloat.random(in: 10...20) * DeviceScale.gameplay,
+                                                 height: 2.5 * DeviceScale.gameplay))
+        wisp.fillColor = SKColor(hex: 0xCCF2FF, alpha: 0.5)
+        wisp.strokeColor = .clear
+        wisp.position = player.position + CGPoint(x: cos(ang) * dist, y: sin(ang) * dist)
+        wisp.zRotation = ang + .pi / 2   // aligned tangentially — reads as swirl
+        wisp.zPosition = 4
+        wisp.alpha = 0
+        worldNode.addChild(wisp)
+        let tangent = CGPoint(x: -sin(ang), y: cos(ang)) * CGFloat.random(in: 28...52)
+        wisp.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.sequence([SKAction.fadeAlpha(to: 0.5, duration: 0.3),
+                                   SKAction.fadeOut(withDuration: 0.7)]),
+                SKAction.move(by: CGVector(dx: tangent.x, dy: tangent.y), duration: 1.0)
+            ]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// T5: freeze a foe (boss-class → heavy slow instead), then Frostbite it —
+    /// +100% damage taken (boss-class reduced), reusing the vulnerability primitive.
+    private func freezeEnemy(_ e: EnemyNode) {
+        let bossClass = e.isMiniBoss
+        let freezeDur = bossClass
+            ? GameConfig.PolarVortex.freezeDuration * TimeInterval(GameConfig.BossClass.debuffScale)
+            : GameConfig.PolarVortex.freezeDuration
+        if bossClass {
+            e.applySlow(0.85, duration: freezeDur)   // boss-class: heavy slow, not a full lock
+        } else {
+            e.applyFreeze(freezeDur)
+        }
+        e.chillStacks = 0
+        showRingPulse(at: e.position, radius: 30, colorHex: 0x99E6FF)
+
+        let vuln = GameConfig.BossClass.scaledDebuff(GameConfig.PolarVortex.frostbiteVuln, isBossClass: bossClass)
+        e.run(SKAction.sequence([
+            SKAction.wait(forDuration: freezeDur),
+            SKAction.run { [weak e] in e?.vulnerabilityMultiplier = vuln },
+            SKAction.wait(forDuration: GameConfig.PolarVortex.frostbiteDuration),
+            SKAction.run { [weak e] in e?.vulnerabilityMultiplier = 1.0 }
+        ]), withKey: "frostbite")
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -5192,6 +5347,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil) {
         killCount += 1
 
+        // v1.9 Polar Vortex Iceburst (T1): a chilled foe's death bursts into shards.
+        if playerStats.iceburstActive, let e = enemy, e.isFrozen || e.isSlowed {
+            iceburst(at: position)
+        }
+
         // v1.9 Apex Bloodfed (T2): every N kills, grow max HP (capped) + heal.
         if playerStats.apexTier >= 2 {
             apexBloodfedKills += 1
@@ -5729,6 +5889,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.slowedDamageBonus))
         }
 
+        // v1.9 Polar Vortex Brittle Cold (T2): +40% vs chilled/frozen/stunned foes.
+        if playerStats.brittleCold && (enemyNode.isSlowed || enemyNode.isFrozen || enemyNode.isStunned) {
+            damage = Int(CGFloat(damage) * GameConfig.PolarVortex.brittleColdVuln)
+        }
+
         // v1.8 Open Wounds (Bleed 3): bleeding enemies take more damage
         if playerStats.bleedingEnemyDamageTaken > 0 && enemyNode.isBleeding {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
@@ -5802,6 +5967,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         apexRegisterAttack()   // T5 Apex: every player hit charges the pounce gauge
 
         erasureRegisterHit()   // T1 Erasure: every player hit charges the Unstable meter
+
+        // v1.9 Polar Vortex (T4): the icicle shatters into shards on first impact.
+        if projectileNode.isIcicle { iceShatter(at: enemyNode.position) }
 
         if playerStats.chainTargets > 0 && !killed {
             chainLightning(from: enemyNode.position,
@@ -5947,7 +6115,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.text = "LEVEL \(player.currentLevel)"
         }
         presentStatRow(needsPick: levelNeedsStat, awarded: awarded)
-        showCardSelection(upgradeManager.drawCards(count: 3))
+        showCardSelection(upgradeManager.drawCards(count: 3, level: player.currentLevel))
         refreshLevelUpButtons()
 
         levelUpOverlay.alpha = 0
@@ -6446,6 +6614,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         removeAction(forKey: "eventHorizonPeace")
         hideEventHorizonCountdown()
         refreshErasureGauge()
+        windchillStorm?.removeFromParent(); windchillStorm = nil
+        windchillTimer = 0
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false

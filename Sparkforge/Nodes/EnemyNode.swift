@@ -38,6 +38,11 @@ class EnemyNode: SKNode {
     /// primitive: Skybeam "Called", later Apex "Marked", Polar Vortex "Frostbitten".
     var vulnerabilityMultiplier: CGFloat = 1.0
     var isVulnerable: Bool { vulnerabilityMultiplier > 1.0 }
+    /// v1.9 Polar Vortex — Windchill accumulates Chill; at the freeze threshold
+    /// the enemy freezes (locked in place), then becomes Frostbitten.
+    var chillStacks: Int = 0
+    private var freezeTimer: TimeInterval = 0
+    var isFrozen: Bool { freezeTimer > 0 }
     private var stunTimer: TimeInterval = 0
     private var dotAccumulator: CGFloat = 0.0
     
@@ -259,7 +264,8 @@ class EnemyNode: SKNode {
     
     func chase(target: CGPoint, deltaTime: TimeInterval, globalSlow: CGFloat = 0) {
         // v1.6: stun ticks in updateStatusEffects (so ranged enemies respect it too)
-        guard !isStunned else { return }
+        // v1.9: a frozen enemy is locked in place too.
+        guard !isStunned && !isFrozen else { return }
         
         let effectiveSlow = min(currentSlow + globalSlow, 0.8)
         let effectiveSpeed = moveSpeed * (1.0 - effectiveSlow)
@@ -294,6 +300,12 @@ class EnemyNode: SKNode {
     func applyStun(_ duration: TimeInterval) {
         stunTimer = max(stunTimer, duration)
     }
+
+    /// v1.9 Polar Vortex: freeze the enemy in place with an icy tint.
+    func applyFreeze(_ duration: TimeInterval) {
+        freezeTimer = max(freezeTimer, duration)
+        bodyNode.fillColor = SKColor(hex: 0x66CCFF)
+    }
     
     // MARK: - Status Effect Update
     
@@ -307,6 +319,15 @@ class EnemyNode: SKNode {
         // v1.6: stun timer ticks here so ALL enemy types respect it
         if stunTimer > 0 {
             stunTimer -= deltaTime
+        }
+
+        // v1.9 Polar Vortex: freeze ticks here too; on thaw, clear Chill + tint.
+        if freezeTimer > 0 {
+            freezeTimer -= deltaTime
+            if freezeTimer <= 0 {
+                chillStacks = 0
+                bodyNode.fillColor = SKColor(hex: 0x1A1A1A)
+            }
         }
 
         if burnTimer > 0 {

@@ -59,6 +59,31 @@ enum GameConfig {
     // MARK: - Everglow (v1.9 Fire capstone)
     /// The player becomes a persistent close-range heat source whose rage
     /// escalates through damage taken, culminating in periodic eruptions.
+    /// v1.9 Polar Vortex (Chill capstone) — carry the storm, freeze to the soul.
+    enum PolarVortex {
+        // T1 Iceburst — frozen enemies that die burst into ice shards.
+        static let iceburstShardsT1: Int = 3
+        static let iceburstShardsT2: Int = 5
+        static let iceburstShardsT5: Int = 7   // shots slow at T4, so the spread widens
+        static let shardMult: CGFloat = 0.15       // 15% ATK per shard
+        // T2 Brittle Cold
+        static let brittleColdVuln: CGFloat = 1.4  // +40% damage vs slowed/frozen/stunned
+        // T3 Windchill — a cold storm follows the player, stacking Chill.
+        static let windchillInterval: TimeInterval = 1.0   // 1 Chill stack/s
+        static var windchillRadius: CGFloat { 130 * DeviceScale.gameplay }
+        static let windchillRadiusT5Mult: CGFloat = 2.1    // storm ×2.1 at T5 (broad, not full-arena)
+        // T4 Glacial Condensation — every 3 shots condense into one icicle.
+        static let glacialEveryN: Int = 3
+        static let icicleMult: CGFloat = 2.0       // 200% ATK
+        static let icicleShards: Int = 3
+        static let icicleShardMult: CGFloat = 0.30 // double a normal Iceburst shard
+        // T5 Polar Vortex — Chill → freeze → frostbite.
+        static let freezeStacks: Int = 5
+        static let freezeDuration: TimeInterval = 3.0
+        static let frostbiteDuration: TimeInterval = 4.0
+        static let frostbiteVuln: CGFloat = 2.0    // +100% damage taken (boss-class reduced)
+    }
+
     /// v1.9 Erasure (Void capstone) — destabilize reality, accept the final cost.
     enum Erasure {
         // T1 Unstable — EVERY player hit (any target) charges a global meter;

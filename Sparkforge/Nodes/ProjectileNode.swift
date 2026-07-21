@@ -23,7 +23,9 @@ final class ProjectileNode: SKNode {
     let isCrit: Bool
     /// Whether to spawn gravity well on expire
     let spawnsGravityWell: Bool
-    
+    /// v1.9 Polar Vortex (T4): a condensed icicle that shatters into shards on hit
+    let isIcicle: Bool
+
     init(direction: CGPoint,
          speed: CGFloat = GameConfig.Projectile.speed,
          range: CGFloat = GameConfig.Projectile.maxRange,
@@ -31,7 +33,10 @@ final class ProjectileNode: SKNode {
          damageMultiplier: CGFloat = 1.0,
          isCrit: Bool = false,
          spawnsGravityWell: Bool = false,
-         voidStyle: Bool = false) {
+         voidStyle: Bool = false,
+         isIcicle: Bool = false,
+         frostStyle: Bool = false) {
+        self.isIcicle = isIcicle
 
         self.direction = direction.normalized
         self.projectileSpeed = speed
@@ -44,7 +49,15 @@ final class ProjectileNode: SKNode {
         let config = GameConfig.Projectile.self
         let radius = isCrit ? config.radius * 1.5 : config.radius
 
-        if voidStyle {
+        if isIcicle {
+            // v1.9 Polar Vortex (T4): a big icy shard oriented along travel.
+            bulletNode = SKShapeNode(ellipseOf: CGSize(width: radius * 5.0, height: radius * 2.2))
+            bulletNode.fillColor = SKColor(hex: 0xCCF2FF)
+            bulletNode.strokeColor = SKColor(hex: 0x66CCFF, alpha: 0.95)
+            bulletNode.lineWidth = 1.5
+            bulletNode.glowWidth = 7
+            bulletNode.zRotation = atan2(direction.y, direction.x)
+        } else if voidStyle {
             // v1.9 Erasure Void-Touched (T2): an empowered, elongated purple bolt
             // oriented along travel — reads as "these shots pierce reality."
             bulletNode = SKShapeNode(ellipseOf: CGSize(width: radius * 3.6, height: radius * 1.4))
@@ -53,6 +66,13 @@ final class ProjectileNode: SKNode {
             bulletNode.lineWidth = 1
             bulletNode.glowWidth = isCrit ? 7 : 5
             bulletNode.zRotation = atan2(direction.y, direction.x)
+        } else if frostStyle {
+            // v1.9 Polar Vortex (T1+): the storm chills your shots frost-blue.
+            bulletNode = SKShapeNode(circleOfRadius: radius)
+            bulletNode.fillColor = isCrit ? SKColor(hex: 0xAEE9FF) : SKColor(hex: 0x66CCFF)
+            bulletNode.strokeColor = SKColor(hex: 0x2E9BD6, alpha: 0.8)
+            bulletNode.lineWidth = 0.5
+            bulletNode.glowWidth = isCrit ? 5 : 3
         } else {
             bulletNode = SKShapeNode(circleOfRadius: radius)
             bulletNode.fillColor = isCrit ? SKColor(hex: 0xFF4444) : SKColor(hex: config.colorHex)
