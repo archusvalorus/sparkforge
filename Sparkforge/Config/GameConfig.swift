@@ -256,6 +256,36 @@ enum GameConfig {
         static let pounceCooldown: TimeInterval = 2.0      // min time between pounces (paces it)
     }
 
+    /// v1.9 Forge Path behavioral nodes (rework Unit 2). All configurable.
+    enum ForgePath {
+        // Damage-reduction bucket (Vitality) — defined order, effective cap.
+        static let drCap: CGFloat = 0.6                 // max stacked DR
+        static let vitalSurplusDR: CGFloat = 0.05       // above 75% HP
+        static let vitalSurplusThreshold: CGFloat = 0.75
+        static let lastStandDR: CGFloat = 0.10          // below 35% HP
+        static let lastStandThreshold: CGFloat = 0.35
+        static let holdLineDR: CGFloat = 0.08           // 5+ enemies near
+        static let holdLineEnemies: Int = 5
+        static var holdLineRadius: CGFloat { 150 * DeviceScale.gameplay }
+        static let giantkillerDR: CGFloat = 0.10        // vs boss-class
+        static let bracedReduction: CGFloat = 0.25      // first hit every 12s
+        static let bracedCooldown: TimeInterval = 12.0
+        // Emergency nodes (once every 45s).
+        static let emergencyCooldown: TimeInterval = 45.0
+        static let secondBreathThreshold: CGFloat = 0.25
+        static let secondBreathFraction: CGFloat = 0.10 // restore 10% max HP
+        static let unyieldingThreshold: CGFloat = 0.20  // hit > 20% max HP
+        static let unyieldingReduction: CGFloat = 0.5
+        // Recovery.
+        static let restorationBonus: CGFloat = 0.05     // +5% healing received
+        static let defiantBonus: CGFloat = 0.10         // +10% healing for 4s after a hit
+        static let defiantDuration: TimeInterval = 4.0
+        static let regeneratorInterval: TimeInterval = 8.0
+        static let regeneratorHeal: Int = 1
+        static let steadyPulseDelay: TimeInterval = 10.0
+        static let steadyPulseHeal: Int = 2
+    }
+
     // MARK: - Level-Up Stats (v1.9 Unit 4)
     /// Per-award stat increments for the level-up cadence: even levels let the
     /// player CHOOSE one of these, odd levels auto-award a random one. Starting

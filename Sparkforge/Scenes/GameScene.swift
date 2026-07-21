@@ -110,6 +110,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var windchillTimer: TimeInterval = 0
     private var windchillWispTimer: TimeInterval = 0
     private var windchillStorm: SKShapeNode?
+    // v1.9: Forge Path — Vitality survival timers (rework Unit 2a).
+    private var forgeBracedCooldown: TimeInterval = 0
+    private var forgeSecondBreathCooldown: TimeInterval = 0
+    private var forgeUnyieldingCooldown: TimeInterval = 0
+    private var forgeRegenTimer: TimeInterval = 0
+    private var forgeTimeSinceDamage: TimeInterval = 0
+    private var forgeDefiantTimer: TimeInterval = 0
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -2758,6 +2765,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.9: Polar Vortex (Chill capstone) — the cold storm stacks Chill.
         if playerStats.windchillActive { updateWindchill(dt) }
 
+        // v1.9: Forge Path (Unit 2a) — Vitality survival timers + regen.
+        updateForgePathSurvival(dt)
+
         // v1.6: Hoarfrost + Cauterize regen
         let regen = playerStats.updateRegen(dt)
         if regen > 0 {
@@ -2972,6 +2982,100 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         } else if let enemy = enemyBody.node as? EnemyNode {
             dealDirectDamage(amount, toEnemy: enemy)
         }
+    }
+
+    /// v1.9 Forge Path (Unit 2a): route ALL player damage through here so the
+    /// Vitality survival nodes apply — the damage-reduction bucket (defined order,
+    /// capped) + the emergency nodes (Second Breath / Unyielding). Returns died.
+    @discardableResult
+    private func applyPlayerDamage(_ raw: Int, fromBossClass: Bool) -> Bool {
+        var dmg = CGFloat(raw)
+
+        // Unyielding (20B): once/CD, halve a hit that exceeds 20% of Max HP.
+        if playerStats.forgeUnyielding, forgeUnyieldingCooldown <= 0,
+           CGFloat(raw) > CGFloat(playerStats.maxHP) * GameConfig.ForgePath.unyieldingThreshold {
+            dmg *= GameConfig.ForgePath.unyieldingReduction
+            forgeUnyieldingCooldown = GameConfig.ForgePath.emergencyCooldown
+        }
+
+        // Damage-reduction bucket — sum active sources, then cap.
+        var dr: CGFloat = 0
+        let hpFrac = playerStats.hpPercent
+        if playerStats.forgeVitalSurplusDR > 0, hpFrac > GameConfig.ForgePath.vitalSurplusThreshold {
+            dr += playerStats.forgeVitalSurplusDR
+        }
+        if playerStats.forgeLastStandDR > 0, hpFrac < GameConfig.ForgePath.lastStandThreshold {
+            dr += playerStats.forgeLastStandDR
+        }
+        if playerStats.forgeHoldLineDR > 0,
+           nearbyEnemyCount(GameConfig.ForgePath.holdLineRadius) >= GameConfig.ForgePath.holdLineEnemies {
+            dr += playerStats.forgeHoldLineDR
+        }
+        if playerStats.forgeGiantkillerDR > 0, fromBossClass {
+            dr += playerStats.forgeGiantkillerDR
+        }
+        if playerStats.forgeBracedImpact, forgeBracedCooldown <= 0 {
+            dr += GameConfig.ForgePath.bracedReduction
+            forgeBracedCooldown = GameConfig.ForgePath.bracedCooldown
+        }
+        dr = min(dr, GameConfig.ForgePath.drCap)
+        if dr > 0 { dmg *= (1 - dr) }
+
+        // A hit resets the undamaged clock (Steady Pulse) + opens Defiant Recovery.
+        forgeTimeSinceDamage = 0
+        if playerStats.forgeDefiant {
+            forgeDefiantTimer = GameConfig.ForgePath.defiantDuration
+            playerStats.forgeDefiantActive = true
+        }
+
+        let died = player.applyDamage(max(1, Int(dmg)))
+
+        // Second Breath (20A): once/CD, dropping below 25% HP restores 10% Max HP.
+        if !died, playerStats.forgeSecondBreath, forgeSecondBreathCooldown <= 0,
+           playerStats.hpPercent < GameConfig.ForgePath.secondBreathThreshold {
+            playerStats.heal(Int(CGFloat(playerStats.maxHP) * GameConfig.ForgePath.secondBreathFraction))
+            forgeSecondBreathCooldown = GameConfig.ForgePath.emergencyCooldown
+            hpBar.flashHeal()
+            hpBar.updateFill(playerStats.hpPercent, currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
+        }
+        return died
+    }
+
+    private func nearbyEnemyCount(_ radius: CGFloat) -> Int {
+        enemies.reduce(0) { $0 + (player.position.distance(to: $1.position) < radius ? 1 : 0) }
+    }
+
+    /// v1.9 Forge Path (Unit 2a): tick the Vitality survival cooldowns + regen.
+    private func updateForgePathSurvival(_ dt: TimeInterval) {
+        if forgeBracedCooldown > 0 { forgeBracedCooldown -= dt }
+        if forgeSecondBreathCooldown > 0 { forgeSecondBreathCooldown -= dt }
+        if forgeUnyieldingCooldown > 0 { forgeUnyieldingCooldown -= dt }
+        if forgeDefiantTimer > 0 {
+            forgeDefiantTimer -= dt
+            if forgeDefiantTimer <= 0 { playerStats.forgeDefiantActive = false }
+        }
+        forgeTimeSinceDamage += dt
+
+        // Regenerator (5A): heal 1 HP every 8s.
+        if playerStats.forgeRegenerator {
+            forgeRegenTimer += dt
+            if forgeRegenTimer >= GameConfig.ForgePath.regeneratorInterval {
+                forgeRegenTimer -= GameConfig.ForgePath.regeneratorInterval
+                forgeHeal(GameConfig.ForgePath.regeneratorHeal)
+            }
+        }
+        // Steady Pulse (14): after 10s undamaged, recover 2 HP (repeats each 10s).
+        if playerStats.forgeSteadyPulse, forgeTimeSinceDamage >= GameConfig.ForgePath.steadyPulseDelay {
+            forgeHeal(GameConfig.ForgePath.steadyPulseHeal)
+            forgeTimeSinceDamage = 0
+        }
+    }
+
+    private func forgeHeal(_ amount: Int) {
+        guard playerStats.currentHP < playerStats.maxHP else { return }
+        playerStats.heal(amount)
+        hpBar.flashHeal()
+        hpBar.updateFill(playerStats.hpPercent, currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
     }
 
     /// Deal flat damage to a specific normal enemy, handling kill bookkeeping.
@@ -4855,7 +4959,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             if self.player.position.distance(to: pos) < radius {
                 guard self.damageCooldownTimer <= 0 else { return }
-                let died = self.player.applyDamage(damage)
+                let died = self.applyPlayerDamage(damage, fromBossClass: true)  // boss slam
                 self.damageCooldownTimer = GameConfig.Player.damageCooldown
                 self.hpBar.flashDamage()
                 AudioManager.shared.play(.playerDamage)
@@ -5215,7 +5319,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         playerStats.resetOvercharge()
-        let died = player.applyDamage(damage)
+        let died = applyPlayerDamage(damage, fromBossClass: true)  // boss hazard
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
@@ -5710,15 +5814,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let elapsed = waveManager.elapsedTime
         let scalingTicks = Int(elapsed / 30)
         let damage: Int
+        let fromBossClass: Bool
         if let bossNode = enemyBody.node as? (any ArenaBossNode) {
             damage = bossNode.contactDamage
+            fromBossClass = true
         } else if let enemy = enemyBody.node as? EnemyNode, enemy.isMiniBoss {
             damage = GameConfig.Enemy.baseMiniBossDamage + (scalingTicks * GameConfig.Enemy.miniBossDamageScaling)
+            fromBossClass = true
         } else {
             damage = GameConfig.Enemy.baseMeleeDamage + (scalingTicks * GameConfig.Enemy.meleeDamageScaling)
+            fromBossClass = false
         }
 
-        let died = player.applyDamage(damage)
+        let died = applyPlayerDamage(damage, fromBossClass: fromBossClass)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
@@ -5806,7 +5914,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         playerStats.resetOvercharge()
         
         // v1.4: Use projectile's damage value instead of instant kill
-        let died = player.applyDamage(projNode.damage)
+        let died = applyPlayerDamage(projNode.damage, fromBossClass: false)  // enemy projectile
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
@@ -6626,6 +6734,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         refreshErasureGauge()
         windchillStorm?.removeFromParent(); windchillStorm = nil
         windchillTimer = 0
+        forgeBracedCooldown = 0
+        forgeSecondBreathCooldown = 0
+        forgeUnyieldingCooldown = 0
+        forgeRegenTimer = 0
+        forgeTimeSinceDamage = 0
+        forgeDefiantTimer = 0
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false

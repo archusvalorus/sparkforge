@@ -202,9 +202,25 @@ final class PlayerStats {
         return currentHP <= 0
     }
     
-    /// Heal HP, clamped to maxHP
+    // MARK: - Forge Path — Vitality survival nodes (rework Unit 2a)
+    var forgeVitalSurplusDR: CGFloat = 0     // 10A: above 75% HP
+    var forgeLastStandDR: CGFloat = 0        // 10B: below 35% HP
+    var forgeHoldLineDR: CGFloat = 0         // 15A: while crowded
+    var forgeGiantkillerDR: CGFloat = 0      // 15B: vs boss-class
+    var forgeBracedImpact = false            // 5B: first hit every 12s -25%
+    var forgeSecondBreath = false            // 20A
+    var forgeUnyielding = false              // 20B
+    var forgeRegenerator = false             // 5A
+    var forgeSteadyPulse = false             // 14
+    var forgeRestorationBonus: CGFloat = 0   // 13: +5% healing received
+    var forgeDefiant = false                 // 18: node owned
+    var forgeDefiantActive = false           // 18: temp window (set by GameScene)
+
+    /// Heal HP, clamped to maxHP — scaled by Forge Path healing-received bonuses
+    /// (Restoration + Defiant Recovery's temp window).
     func heal(_ amount: Int) {
-        currentHP = min(currentHP + amount, maxHP)
+        let mult = 1.0 + forgeRestorationBonus + (forgeDefiantActive ? GameConfig.ForgePath.defiantBonus : 0)
+        currentHP = min(currentHP + Int(CGFloat(amount) * mult), maxHP)
     }
     
     // MARK: - Damage
@@ -890,6 +906,18 @@ final class PlayerStats {
         glacialActive = false
         polarVortexFreeze = false
         glacialShotCounter = 0
+        forgeVitalSurplusDR = 0
+        forgeLastStandDR = 0
+        forgeHoldLineDR = 0
+        forgeGiantkillerDR = 0
+        forgeBracedImpact = false
+        forgeSecondBreath = false
+        forgeUnyielding = false
+        forgeRegenerator = false
+        forgeSteadyPulse = false
+        forgeRestorationBonus = 0
+        forgeDefiant = false
+        forgeDefiantActive = false
 
         damageMultiplier = 1.0
         critChance = 0.0
