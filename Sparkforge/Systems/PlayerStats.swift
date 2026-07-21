@@ -216,6 +216,21 @@ final class PlayerStats {
     var forgeDefiant = false                 // 18: node owned
     var forgeDefiantActive = false           // 18: temp window (set by GameScene)
 
+    // MARK: - Forge Path — Ferocity offensive + Opportunist (rework Unit 2b)
+    var forgeBerserker = false               // Fer 5A: <50% HP +5% dmg
+    var forgeHeadsman = false                // Fer 10B: +10% vs boss-class
+    var forgeCleaver = false                 // Fer 10A: 4+ enemies +8% dmg
+    var forgeOpeningBlow = false             // Fer 14: +10% vs enemies >90% HP
+    var forgeOpportunist = false             // Cun 13: +5% vs impaired foes
+    var forgeRisingHeat = false              // Fer 13: kill → +1% dmg 3s (stacks 5)
+    var forgeBloodrush = false               // Fer 15A: kill → +5% atk speed 4s (stacks 3)
+    var forgeColdFury = false                // Fer 15B: 8s no kill → +10% next hit
+    var forgeKillingStroke = false           // Fer 20B: every 12s next attack +75%
+    var forgeWarpath = false                 // Fer 20A: 6s continuous damage → +10%
+    var forgeRelentless = false              // Fer 18: same-target +1%/stack to +5%
+    var forgeOverkill = false                // Fer 19: excess damage bursts to nearby
+    var forgeBloodrushBonus: CGFloat = 0     // current Bloodrush atk-speed bonus (set by GameScene)
+
     /// Heal HP, clamped to maxHP — scaled by Forge Path healing-received bonuses
     /// (Restoration + Defiant Recovery's temp window).
     func heal(_ amount: Int) {
@@ -610,7 +625,9 @@ final class PlayerStats {
     
     /// Effective fire interval after multipliers
     var effectiveFireInterval: TimeInterval {
+        // Forge Path Bloodrush (Fer 15A): temp attack-speed bonus shortens it.
         return GameConfig.Projectile.fireInterval * TimeInterval(fireRateMultiplier)
+            / TimeInterval(1 + forgeBloodrushBonus)
     }
     
     /// Effective move speed
@@ -918,6 +935,19 @@ final class PlayerStats {
         forgeRestorationBonus = 0
         forgeDefiant = false
         forgeDefiantActive = false
+        forgeBerserker = false
+        forgeHeadsman = false
+        forgeCleaver = false
+        forgeOpeningBlow = false
+        forgeOpportunist = false
+        forgeRisingHeat = false
+        forgeBloodrush = false
+        forgeColdFury = false
+        forgeKillingStroke = false
+        forgeWarpath = false
+        forgeRelentless = false
+        forgeOverkill = false
+        forgeBloodrushBonus = 0
 
         damageMultiplier = 1.0
         critChance = 0.0

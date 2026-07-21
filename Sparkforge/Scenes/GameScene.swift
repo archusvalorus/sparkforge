@@ -117,6 +117,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var forgeRegenTimer: TimeInterval = 0
     private var forgeTimeSinceDamage: TimeInterval = 0
     private var forgeDefiantTimer: TimeInterval = 0
+    // v1.9: Forge Path — Ferocity offensive state (rework Unit 2b).
+    private var forgeRisingHeatStacks = 0
+    private var forgeRisingHeatTimer: TimeInterval = 0
+    private var forgeBloodrushStacks = 0
+    private var forgeBloodrushTimer: TimeInterval = 0
+    private var forgeTimeSinceKill: TimeInterval = 0
+    private var forgeColdFuryArmed = false
+    private var forgeKillingStrokeCooldown: TimeInterval = 0
+    private var forgeKillingStrokeArmed = false
+    private var forgeWarpathDamageTime: TimeInterval = 0
+    private var forgeWarpathIdleTime: TimeInterval = 0
+    private weak var forgeRelentlessTarget: EnemyNode?
+    private var forgeRelentlessStacks = 0
+    private var forgeRelentlessTimer: TimeInterval = 0
+    private var forgeRelentlessStackCD: TimeInterval = 0
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -3069,6 +3084,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             forgeHeal(GameConfig.ForgePath.steadyPulseHeal)
             forgeTimeSinceDamage = 0
         }
+
+        // --- Ferocity offensive timers (Unit 2b) ---
+        forgeTimeSinceKill += dt
+        forgeWarpathIdleTime += dt
+        if forgeWarpathIdleTime >= 2.0 { forgeWarpathDamageTime = 0 } else { forgeWarpathDamageTime += dt }
+        if forgeRisingHeatTimer > 0 {
+            forgeRisingHeatTimer -= dt
+            if forgeRisingHeatTimer <= 0 { forgeRisingHeatStacks = 0 }
+        }
+        if forgeBloodrushTimer > 0 {
+            forgeBloodrushTimer -= dt
+            if forgeBloodrushTimer <= 0 { forgeBloodrushStacks = 0; playerStats.forgeBloodrushBonus = 0 }
+        }
+        if forgeRelentlessStackCD > 0 { forgeRelentlessStackCD -= dt }
+        if forgeRelentlessTimer > 0 {
+            forgeRelentlessTimer -= dt
+            if forgeRelentlessTimer <= 0 { forgeRelentlessStacks = 0; forgeRelentlessTarget = nil }
+        }
+        // Cold Fury (15B): arm after 8s without a kill.
+        if playerStats.forgeColdFury, forgeTimeSinceKill >= 8.0 { forgeColdFuryArmed = true }
+        // Killing Stroke (20B): arm every 12s.
+        if forgeKillingStrokeCooldown > 0 { forgeKillingStrokeCooldown -= dt }
+        else if playerStats.forgeKillingStroke, !forgeKillingStrokeArmed { forgeKillingStrokeArmed = true }
     }
 
     private func forgeHeal(_ amount: Int) {
@@ -3076,6 +3114,43 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         playerStats.heal(amount)
         hpBar.flashHeal()
         hpBar.updateFill(playerStats.hpPercent, currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
+    }
+
+    /// v1.9 Forge Path (Unit 2b): apply the Ferocity offensive + Opportunist
+    /// damage modifiers (conditional mults, Rising Heat / Warpath / Relentless
+    /// stacks) and consume the Cold Fury / Killing Stroke charges.
+    private func applyForgeOffense(_ base: Int, healthPercent: CGFloat, bossClass: Bool,
+                                   impaired: Bool, relentlessTarget: EnemyNode?) -> Int {
+        var mult: CGFloat = 1.0
+        if playerStats.forgeBerserker, playerStats.hpPercent < 0.5 { mult += 0.05 }
+        if playerStats.forgeHeadsman, bossClass { mult += 0.10 }
+        if playerStats.forgeCleaver, nearbyEnemyCount(GameConfig.ForgePath.holdLineRadius) >= 4 { mult += 0.08 }
+        if playerStats.forgeOpeningBlow, healthPercent > 0.9 { mult += 0.10 }
+        if playerStats.forgeOpportunist, impaired { mult += 0.05 }
+        if playerStats.forgeRisingHeat, forgeRisingHeatStacks > 0 { mult += CGFloat(forgeRisingHeatStacks) * 0.01 }
+        if playerStats.forgeWarpath, forgeWarpathDamageTime >= 6.0 { mult += 0.10 }
+        if playerStats.forgeRelentless, let t = relentlessTarget {
+            if forgeRelentlessTarget === t {
+                mult += CGFloat(forgeRelentlessStacks) * 0.01
+                if forgeRelentlessStackCD <= 0 {
+                    forgeRelentlessStacks = min(forgeRelentlessStacks + 1, 5)
+                    forgeRelentlessStackCD = 0.5
+                }
+            } else {
+                forgeRelentlessTarget = t
+                forgeRelentlessStacks = 0
+            }
+            forgeRelentlessTimer = 2.0
+        }
+        var dmg = Int(CGFloat(base) * mult)
+        if playerStats.forgeColdFury, forgeColdFuryArmed {
+            dmg = Int(CGFloat(dmg) * 1.10); forgeColdFuryArmed = false; forgeTimeSinceKill = 0
+        }
+        if playerStats.forgeKillingStroke, forgeKillingStrokeArmed {
+            dmg = Int(CGFloat(dmg) * 1.75); forgeKillingStrokeArmed = false; forgeKillingStrokeCooldown = 12.0
+        }
+        forgeWarpathIdleTime = 0   // this hit counts toward Warpath's continuous window
+        return dmg
     }
 
     /// Deal flat damage to a specific normal enemy, handling kill bookkeeping.
@@ -5466,6 +5541,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             iceburst(at: position)
         }
 
+        // v1.9 Forge Path kill triggers (Unit 2b).
+        forgeTimeSinceKill = 0
+        forgeColdFuryArmed = false   // a kill resets Cold Fury's "no-kill" clock
+        if playerStats.forgeRisingHeat {
+            forgeRisingHeatStacks = min(forgeRisingHeatStacks + 1, 5)
+            forgeRisingHeatTimer = 3.0
+        }
+        if playerStats.forgeBloodrush {
+            forgeBloodrushStacks = min(forgeBloodrushStacks + 1, 3)
+            forgeBloodrushTimer = 4.0
+            playerStats.forgeBloodrushBonus = CGFloat(forgeBloodrushStacks) * 0.05
+        }
+
         // v1.9 Apex Bloodfed (T2): every N kills, grow max HP (capped) + heal.
         if playerStats.apexTier >= 2 {
             apexBloodfedKills += 1
@@ -6021,6 +6109,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
         }
 
+        // v1.9 Forge Path (Unit 2b) — Ferocity offensive + Opportunist.
+        damage = applyForgeOffense(damage,
+                                   healthPercent: enemyNode.healthPercent,
+                                   bossClass: enemyNode.isMiniBoss,
+                                   impaired: enemyNode.isSlowed || enemyNode.isFrozen || enemyNode.isStunned,
+                                   relentlessTarget: enemyNode)
+
         // v1.6: shield reduction applies after all bonuses — flanking doubles output.
         // v1.9 Erasure Void-Touched (T2): shots pierce the shield entirely.
         if braceguardShielded && !playerStats.erasureVoidTouched {
@@ -6072,8 +6167,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             projectileNode.removeFromParent()
         }
         
+        let hpBefore = enemyNode.health
         let killed = enemyNode.takeDamage(damage)
-        
+
+        // v1.9 Forge Path Overkill (Fer 19): excess damage bursts to nearby foes
+        // (capped relative to ATK so executions/big hits don't chain-explode).
+        if killed, playerStats.forgeOverkill {
+            let excess = damage - max(0, hpBefore)
+            if excess > 0 {
+                let transfer = min(Int(CGFloat(excess) * 0.25), Int(playerStats.effectiveAttack * 2))
+                if transfer > 0 {
+                    damageEnemiesInRadius(GameConfig.ForgePath.holdLineRadius, around: enemyNode.position,
+                                          damage: transfer, bossClassScaled: true)
+                }
+            }
+        }
+
         if killed {
             let deathPos = enemyNode.position
             let xpValue = enemyNode.xpValue
@@ -6122,6 +6231,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.isBloodlustActive(atTime: waveManager.elapsedTime) {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
         }
+
+        // v1.9 Forge Path (Unit 2b): offense applies to the boss too (Headsman,
+        // Berserker, charges, etc.) — no Relentless target-tracking on the boss.
+        damage = applyForgeOffense(damage,
+                                   healthPercent: bossNode.healthPercent,
+                                   bossClass: true, impaired: false, relentlessTarget: nil)
 
         let consumed = projectileNode.onHitEnemy()
         if consumed {
@@ -6740,6 +6855,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         forgeRegenTimer = 0
         forgeTimeSinceDamage = 0
         forgeDefiantTimer = 0
+        forgeRisingHeatStacks = 0; forgeRisingHeatTimer = 0
+        forgeBloodrushStacks = 0; forgeBloodrushTimer = 0
+        forgeTimeSinceKill = 0; forgeColdFuryArmed = false
+        forgeKillingStrokeCooldown = 0; forgeKillingStrokeArmed = false
+        forgeWarpathDamageTime = 0; forgeWarpathIdleTime = 0
+        forgeRelentlessTarget = nil; forgeRelentlessStacks = 0
+        forgeRelentlessTimer = 0; forgeRelentlessStackCD = 0
         invulnerableTimer = 0
         killCount = 0
         rerollUsedThisRun = false
