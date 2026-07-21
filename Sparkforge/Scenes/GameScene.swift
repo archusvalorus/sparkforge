@@ -132,6 +132,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var forgeRelentlessStacks = 0
     private var forgeRelentlessTimer: TimeInterval = 0
     private var forgeRelentlessStackCD: TimeInterval = 0
+    // v1.9: Forge Path — Cunning utility state (rework Unit 2c).
+    private var forgeCalcStrikeCount = 0
+    private var forgeMoveBuffTimer: TimeInterval = 0
+    private var forgeSlipstreamReady = true
     private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
     private var chillTrailDropTimer: TimeInterval = 0
 
@@ -206,7 +210,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - Reroll
 
-    private var rerollUsedThisRun: Bool = false
+    private var rerollsUsedThisRun: Int = 0
+    /// v1.9 Forge Path Foresight (Cun 20A): +1 reroll per run.
+    private var forgeRerollLimit: Int { 1 + (playerStats.forgeForesight ? 1 : 0) }
 
     // MARK: - v1.6: Extra Card (ad reward)
 
@@ -1967,8 +1973,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Reroll
     
     private func performReroll() {
-        guard !rerollUsedThisRun else { return }
-        
+        guard rerollsUsedThisRun < forgeRerollLimit else { return }
+
         if IAPManager.shared.hasRemovedAds {
             executeReroll()
             return
@@ -1982,7 +1988,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     private func executeReroll() {
-        rerollUsedThisRun = true
+        rerollsUsedThisRun += 1
 
         // v1.7 fix: a reforge preserves the spread SIZE — if +1 Card
         // already bought a fourth card, rerolling keeps four (the chain
@@ -2235,6 +2241,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             } else {
                 spawnMiniBoss()
             }
+            // v1.9 Forge Path Read the Room (Cun 18): an elite/boss appearance
+            // grants a brief burst of move speed.
+            if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
         }
         }  // end Event Horizon spawn guard
 
@@ -2566,7 +2575,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        let isCrit = CGFloat.random(in: 0...1) < playerStats.critChance
+        var isCrit = CGFloat.random(in: 0...1) < playerStats.critChance
+        // v1.9 Forge Path Calculated Strike (Cun 15A): every 5th direct attack crits.
+        if playerStats.forgeCalculatedStrike && allowModifiers {
+            forgeCalcStrikeCount += 1
+            if forgeCalcStrikeCount % 5 == 0 { isCrit = true }
+        }
 
         let projectile = ProjectileNode(
             direction: direction,
@@ -3036,8 +3050,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         dr = min(dr, GameConfig.ForgePath.drCap)
         if dr > 0 { dmg *= (1 - dr) }
 
-        // A hit resets the undamaged clock (Steady Pulse) + opens Defiant Recovery.
+        // A hit resets the undamaged clock (Steady Pulse / Slipstream) + Defiant.
         forgeTimeSinceDamage = 0
+        forgeSlipstreamReady = true
         if playerStats.forgeDefiant {
             forgeDefiantTimer = GameConfig.ForgePath.defiantDuration
             playerStats.forgeDefiantActive = true
@@ -3107,6 +3122,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Killing Stroke (20B): arm every 12s.
         if forgeKillingStrokeCooldown > 0 { forgeKillingStrokeCooldown -= dt }
         else if playerStats.forgeKillingStroke, !forgeKillingStrokeArmed { forgeKillingStrokeArmed = true }
+
+        // --- Cunning utility (Unit 2c) ---
+        if forgeMoveBuffTimer > 0 {
+            forgeMoveBuffTimer -= dt
+            if forgeMoveBuffTimer <= 0 { playerStats.forgeMoveBonus = 0 }
+        }
+        // Slipstream (10B, fallback): after 6s undamaged with enemies near, +8% move 2s.
+        if playerStats.forgeSlipstream, forgeSlipstreamReady,
+           forgeTimeSinceDamage >= 6.0, !enemies.isEmpty {
+            forgeGrantMoveBuff(2.0)
+            forgeSlipstreamReady = false
+        }
+    }
+
+    /// v1.9 Forge Path (Unit 2c): a temporary +8% move-speed buff
+    /// (Read the Room / Slipstream), tracked by a single timer.
+    private func forgeGrantMoveBuff(_ duration: TimeInterval) {
+        playerStats.forgeMoveBonus = 0.08
+        forgeMoveBuffTimer = max(forgeMoveBuffTimer, duration)
     }
 
     private func forgeHeal(_ amount: Int) {
@@ -6080,6 +6114,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if projectileNode.isCrit {
             damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
+            // v1.9 Forge Path Lucky Break (Cun 15B): a crit may deal +50% more.
+            if playerStats.forgeLuckyBreak && CGFloat.random(in: 0...1) < 0.10 {
+                damage = Int(CGFloat(damage) * 1.5)
+            }
         }
 
         if playerStats.executionThreshold > 0 && enemyNode.healthPercent < playerStats.executionThreshold {
@@ -6218,6 +6256,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if projectileNode.isCrit {
             damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
+            if playerStats.forgeLuckyBreak && CGFloat.random(in: 0...1) < 0.10 {
+                damage = Int(CGFloat(damage) * 1.5)   // Lucky Break
+            }
         }
 
         if playerStats.executionThreshold > 0 && bossNode.healthPercent < playerStats.executionThreshold {
@@ -6365,7 +6406,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func refreshLevelUpButtons() {
         if let rerollBtn = levelUpOverlay.childNode(withName: "rerollButton") {
-            rerollBtn.alpha = rerollUsedThisRun ? 0.0 : 1.0
+            rerollBtn.alpha = (rerollsUsedThisRun >= forgeRerollLimit) ? 0.0 : 1.0
         }
         if let extraBtn = levelUpOverlay.childNode(withName: "extraCardButton") {
             extraBtn.alpha = extraCardUsedThisRun ? 0.0 : 1.0
@@ -6862,9 +6903,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         forgeWarpathDamageTime = 0; forgeWarpathIdleTime = 0
         forgeRelentlessTarget = nil; forgeRelentlessStacks = 0
         forgeRelentlessTimer = 0; forgeRelentlessStackCD = 0
+        forgeCalcStrikeCount = 0; forgeMoveBuffTimer = 0; forgeSlipstreamReady = true
         invulnerableTimer = 0
         killCount = 0
-        rerollUsedThisRun = false
+        rerollsUsedThisRun = 0
         extraCardUsedThisRun = false
         extraPickUsedThisRun = false
         extraPicksRemaining = 0

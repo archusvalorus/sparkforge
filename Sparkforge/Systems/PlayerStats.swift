@@ -231,6 +231,16 @@ final class PlayerStats {
     var forgeOverkill = false                // Fer 19: excess damage bursts to nearby
     var forgeBloodrushBonus: CGFloat = 0     // current Bloodrush atk-speed bonus (set by GameScene)
 
+    // MARK: - Forge Path — Cunning utility (rework Unit 2c)
+    var forgeCalculatedStrike = false        // Cun 15A: every 5th attack a guaranteed crit
+    var forgeLuckyBreak = false              // Cun 15B: crit → 10% chance +50% crit dmg
+    var forgeReadRoom = false                // Cun 18: elite/boss enters → +8% move 4s
+    var forgeSlipstream = false              // Cun 10B: evasive → +8% move 2s (fallback rule)
+    var forgeForesight = false               // Cun 20A: +1 reroll per run
+    var forgeSalvager = false                // Cun 19: coin attraction (no coin-magnet system yet)
+    var forgeSecondLook = false              // Cun 20B: pass-offer free re-draw (needs UI)
+    var forgeMoveBonus: CGFloat = 0          // temp move-speed buff (Read the Room / Slipstream)
+
     /// Heal HP, clamped to maxHP — scaled by Forge Path healing-received bonuses
     /// (Restoration + Defiant Recovery's temp window).
     func heal(_ amount: Int) {
@@ -630,9 +640,9 @@ final class PlayerStats {
             / TimeInterval(1 + forgeBloodrushBonus)
     }
     
-    /// Effective move speed
+    /// Effective move speed (+ Forge Path temp buffs: Read the Room / Slipstream)
     var effectiveMoveSpeed: CGFloat {
-        return GameConfig.Player.speed * moveSpeedMultiplier
+        return GameConfig.Player.speed * (moveSpeedMultiplier + forgeMoveBonus)
     }
     
     /// Effective projectile speed
@@ -948,6 +958,14 @@ final class PlayerStats {
         forgeRelentless = false
         forgeOverkill = false
         forgeBloodrushBonus = 0
+        forgeCalculatedStrike = false
+        forgeLuckyBreak = false
+        forgeReadRoom = false
+        forgeSlipstream = false
+        forgeForesight = false
+        forgeSalvager = false
+        forgeSecondLook = false
+        forgeMoveBonus = 0
 
         damageMultiplier = 1.0
         critChance = 0.0
