@@ -1,6 +1,6 @@
 # Sparkforge — Claude Code Rules
 
-Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store at **v1.5** (bundle `com.brandon.Sparkforge`, App Store ID 6760272178). This file governs every Claude Code session in this repo.
+Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store; latest is **v1.9 "The Deepening"** (live Jul 2026 — six capstone abilities + the Forge Path rework). Bundle `com.brandon.Sparkforge`, App Store ID 6760272178. This file governs every Claude Code session in this repo.
 
 ## Workflow (non-negotiable)
 
