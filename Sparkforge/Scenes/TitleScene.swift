@@ -75,6 +75,10 @@ final class TitleScene: SKScene {
     // v1.7: Forge Paths
     private var forgePathModal: SKNode?
     private var respecConfirmModal: SKNode?  // v1.9 Unit 7: respec confirmation
+    // v1.9 Unit 3: two-level nav state. detailBranch == nil → hub (3 chips);
+    // non-nil → that branch's zoomed ladder. forkPending → A/B picker overlay.
+    private var forgePathDetailBranch: ForgePathManager.Branch?
+    private var forgePathForkPending: ForgePathManager.Branch?  // fork picker open for this branch
     private var removeAdsValueModal: RemoveAdsModalNode?  // v1.8 (E3): value-prop before purchase
 
     // v1.8 Unit 10: the CODEX hub + the scrollable page it opens.
@@ -1329,8 +1333,8 @@ final class TitleScene: SKScene {
         node.addChild(dim)
 
         let lines = wrapPlain(message, maxChars: 30)
-        let panelH: CGFloat = 150 + CGFloat(lines.count) * 18
-        let panel = SKShapeNode(rectOf: CGSize(width: 300, height: panelH), cornerRadius: 14)
+        let panelH: CGFloat = 190 + CGFloat(lines.count) * 20
+        let panel = SKShapeNode(rectOf: CGSize(width: 316, height: panelH), cornerRadius: 14)
         panel.fillColor = SKColor(hex: 0x141018)
         panel.strokeColor = SKColor(hex: 0xC0392B, alpha: 0.75)
         panel.lineWidth = 1.5
@@ -1338,20 +1342,20 @@ final class TitleScene: SKScene {
         node.addChild(panel)
 
         let titleLabel = UITheme.label(title, size: UITheme.Size.heading, color: SKColor(hex: titleHex), bold: true)
-        titleLabel.position = CGPoint(x: 0, y: panelH / 2 - 30)
+        titleLabel.position = CGPoint(x: 0, y: panelH / 2 - 34)
         node.addChild(titleLabel)
 
-        var y = panelH / 2 - 58
+        var y = panelH / 2 - 68
         for line in lines {
             let l = UITheme.label(line, size: UITheme.Size.body, color: UITheme.Color.infoSoft)
             l.position = CGPoint(x: 0, y: y)
             node.addChild(l)
-            y -= 18
+            y -= 20
         }
 
-        node.addChild(modalButton(name: confirm.name, text: confirm.text, y: -panelH / 2 + 78,
+        node.addChild(modalButton(name: confirm.name, text: confirm.text, y: -panelH / 2 + 94,
                                   fill: confirm.fill, stroke: 0xE74C3C, textHex: 0xFFFFFF))
-        node.addChild(modalButton(name: cancelName, text: "CANCEL", y: -panelH / 2 + 30,
+        node.addChild(modalButton(name: cancelName, text: "CANCEL", y: -panelH / 2 + 38,
                                   fill: 0x333333, stroke: 0x888888, textHex: 0xE0E0E0))
         return node
     }
@@ -1650,119 +1654,135 @@ final class TitleScene: SKScene {
 
     // MARK: - v1.7: Forge Path Modal
 
-    // v1.9 Unit 7: fixed slots so show + tap hit-testing stay in sync.
-    private static let forgePathRowYs: [CGFloat] = [82, 20, -42]
-    private static let forgePathRespecY: CGFloat = -106
-    private static let forgePathPanelH: CGFloat = 366
+    // v1.9 Unit 3: two-level nav layout.
+    // Hub — three stacked mastery chips.
+    private static let forgeHubPanelW: CGFloat = 322
+    private static let forgeHubPanelH: CGFloat = 476
+    private static let forgeHubChipYs: [CGFloat] = [108, 8, -92]
+    private static let forgeHubChipW: CGFloat = 288
+    private static let forgeHubChipH: CGFloat = 92
+    private static let forgeHubRespecY: CGFloat = -186
+    // Detail — one branch's zoomed ladder of node-chips.
+    private static let forgeDetailPanelW: CGFloat = 344
+    private static let forgeDetailPanelH: CGFloat = 566
+    private static let forgeDetailRowTop: CGFloat = 208
+    private static let forgeDetailRowStep: CGFloat = 24
+    private static let forgeDetailChipW: CGFloat = 300
+    private static let forgeDetailChipH: CGFloat = 21
+    private static let forgeDetailChipCX: CGFloat = 14        // chip center x
+    private static let forgeDetailRailX: CGFloat = -150       // pip rail / trunk x
+    private static let forgeDetailBackY: CGFloat = 250
 
-    /// v1.9 Unit 7: the Forge Path management screen — reviewable ANY time
-    /// (not just when mastery points are ready). Shows each branch's current
-    /// count + next node, spends a point when available, and offers a free
-    /// respec. Called fresh (re-rendered) after each spend/respec.
-    private func showForgePathModal() {
+    private func forgeDetailRowY(_ level: Int) -> CGFloat {
+        Self.forgeDetailRowTop - CGFloat(level - 1) * Self.forgeDetailRowStep
+    }
+
+    /// A compact "accumulated stats" string for a branch's owned nodes.
+    private func forgeBranchAccrued(_ branch: ForgePathManager.Branch) -> String {
         let fpm = ForgePathManager.shared
-        dismissForgePathModal(animated: false)   // never stack on refresh
+        let count = fpm.countInBranch(branch)
+        guard count > 0 else { return "no nodes yet — tap ＋ to invest" }
+        var parts: [String] = []
+        for lvl in 1...count {
+            guard let node = fpm.ladderNode(branch, level: lvl) else { continue }
+            if let fork = node.fork {
+                parts.append((fpm.forkChoiceIsB(branch, level: lvl) ? fork.b : fork.a).effectText)
+            } else {
+                parts.append(node.effectText)
+            }
+        }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    // MARK: Forge Path — entry + render dispatch
+
+    /// Entry point (from the title row): always opens fresh at the hub.
+    private func showForgePathModal() {
+        forgePathDetailBranch = nil
+        forgePathForkPending = nil
+        renderForgePath(animateIn: true)
+    }
+
+    /// Re-render the current view (hub or detail). animateIn only on first open —
+    /// internal refreshes skip the pop so taps don't glitch.
+    private func renderForgePath(animateIn: Bool) {
+        dismissForgePathModal(animated: false)
 
         let modal = SKNode()
         modal.zPosition = 300
 
         let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
-        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.78)
         dim.strokeColor = .clear
         modal.addChild(dim)
 
-        let panelH = Self.forgePathPanelH
-        let panel = SKShapeNode(rectOf: CGSize(width: 300, height: panelH), cornerRadius: 14)
-        panel.fillColor = SKColor(hex: 0x1A1208)
+        let panel: SKShapeNode = forgePathDetailBranch == nil
+            ? buildForgeHub(into: modal)
+            : buildForgeDetail(forgePathDetailBranch!, into: modal)
+
+        // Fork picker overlay sits above whichever view is showing.
+        if let branch = forgePathForkPending,
+           let node = ForgePathManager.shared.nextNode(for: branch), node.fork != nil {
+            renderForkPicker(branch, node: node, into: modal)
+        }
+
+        addChild(modal)
+        forgePathModal = modal
+
+        if animateIn {
+            modal.alpha = 0
+            panel.setScale(0.9)
+            modal.run(SKAction.fadeIn(withDuration: 0.2))
+            let pop = SKAction.scale(to: 1.0, duration: 0.2)
+            pop.timingMode = .easeOut
+            panel.run(pop)
+        }
+    }
+
+    // MARK: Forge Path — hub (3 stacked mastery chips)
+
+    private func buildForgeHub(into modal: SKNode) -> SKShapeNode {
+        let fpm = ForgePathManager.shared
+        let panelW = Self.forgeHubPanelW, panelH = Self.forgeHubPanelH
+        let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x140E06)
         panel.strokeColor = SKColor(hex: 0xFFCC66, alpha: 0.7)
         panel.lineWidth = 1.5
         panel.glowWidth = 5
         modal.addChild(panel)
 
         let top = panelH / 2
+        let n = fpm.picksAvailable
 
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
         title.text = "⚒ FORGE PATH"
         title.fontSize = 18
         title.fontColor = SKColor(hex: 0xFFCC66)
         title.verticalAlignmentMode = .center
-        title.position = CGPoint(x: 0, y: top - 26)
+        title.position = CGPoint(x: 0, y: top - 24)
         modal.addChild(title)
 
-        let n = fpm.picksAvailable
         let subtitle = SKLabelNode(fontNamed: "Menlo")
         subtitle.text = n > 0 ? "\(n) mastery point\(n == 1 ? "" : "s") to spend"
                               : "earn mastery points by leveling the Forge"
-        subtitle.fontSize = 12
+        subtitle.fontSize = 11
         subtitle.fontColor = n > 0 ? SKColor(hex: 0xFFCC66) : SKColor(hex: 0x999999)
         subtitle.verticalAlignmentMode = .center
-        subtitle.position = CGPoint(x: 0, y: top - 48)
+        subtitle.position = CGPoint(x: 0, y: top - 44)
         modal.addChild(subtitle)
 
         for (i, branch) in ForgePathManager.Branch.allCases.enumerated() {
-            let y = Self.forgePathRowYs[i]
-            let color = SKColor(hex: branch.colorHex)
-            let count = fpm.countInBranch(branch)
-            let spendable = n > 0
-
-            let row = SKShapeNode(rectOf: CGSize(width: 264, height: 54), cornerRadius: 8)
-            row.fillColor = SKColor(hex: 0x161616)
-            row.strokeColor = SKColor(hex: branch.colorHex, alpha: spendable ? 0.85 : 0.45)
-            row.lineWidth = 1.5
-            row.position = CGPoint(x: 0, y: y)
-            modal.addChild(row)
-
-            let wash = SKShapeNode(rectOf: CGSize(width: 264, height: 54), cornerRadius: 8)
-            wash.fillColor = SKColor(hex: branch.colorHex, alpha: spendable ? 0.14 : 0.08)
-            wash.strokeColor = .clear
-            wash.position = CGPoint(x: 0, y: y)
-            modal.addChild(wash)
-
-            let icon = SKLabelNode(text: branch.icon)
-            icon.fontSize = 20
-            icon.verticalAlignmentMode = .center
-            icon.position = CGPoint(x: -112, y: y)
-            modal.addChild(icon)
-
-            let branchName = SKLabelNode(fontNamed: "Menlo-Bold")
-            branchName.text = "\(branch.rawValue.uppercased())   ×\(count)"
-            branchName.fontSize = 13
-            branchName.fontColor = color
-            branchName.verticalAlignmentMode = .center
-            branchName.horizontalAlignmentMode = .left
-            branchName.position = CGPoint(x: -90, y: y + 12)
-            modal.addChild(branchName)
-
-            if let node = fpm.nextNode(for: branch) {
-                let nodeLabel = SKLabelNode(fontNamed: "Menlo")
-                nodeLabel.text = "next: \(node.name) — \(node.effectText)"
-                nodeLabel.fontSize = 10.5
-                nodeLabel.fontColor = SKColor(hex: 0xDDDDDD)
-                nodeLabel.verticalAlignmentMode = .center
-                nodeLabel.horizontalAlignmentMode = .left
-                nodeLabel.position = CGPoint(x: -90, y: y - 11)
-                modal.addChild(nodeLabel)
-            }
-
-            if spendable {
-                let plus = SKLabelNode(fontNamed: "Menlo-Bold")
-                plus.text = "＋"
-                plus.fontSize = 22
-                plus.fontColor = color
-                plus.verticalAlignmentMode = .center
-                plus.position = CGPoint(x: 116, y: y)
-                modal.addChild(plus)
-            }
+            buildForgeHubChip(branch, y: Self.forgeHubChipYs[i], spendable: n > 0, into: modal)
         }
 
-        // Free respec — only when there are spent points to refund.
+        // Free respec.
         if !fpm.picks.isEmpty {
             let count = fpm.picks.count
-            let respec = SKShapeNode(rectOf: CGSize(width: 264, height: 40), cornerRadius: 8)
+            let respec = SKShapeNode(rectOf: CGSize(width: 288, height: 36), cornerRadius: 8)
             respec.fillColor = SKColor(hex: 0x3A2018)
             respec.strokeColor = SKColor(hex: 0xE0884C, alpha: 0.8)
             respec.lineWidth = 1.5
-            respec.position = CGPoint(x: 0, y: Self.forgePathRespecY)
+            respec.position = CGPoint(x: 0, y: Self.forgeHubRespecY)
             respec.name = "respecButton"
             modal.addChild(respec)
 
@@ -1771,35 +1791,355 @@ final class TitleScene: SKScene {
             respecLabel.fontSize = 12
             respecLabel.fontColor = SKColor(hex: 0xF0B080)
             respecLabel.verticalAlignmentMode = .center
-            respecLabel.position = CGPoint(x: 0, y: Self.forgePathRespecY)
+            respecLabel.position = CGPoint(x: 0, y: Self.forgeHubRespecY)
             modal.addChild(respecLabel)
         }
 
         let hint = SKLabelNode(fontNamed: "Menlo")
-        hint.text = "tap outside to close"
-        hint.fontSize = 11
+        hint.text = "tap a mastery to expand  ·  tap outside to close"
+        hint.fontSize = 9.5
         hint.fontColor = SKColor(hex: 0x666666)
         hint.verticalAlignmentMode = .center
-        hint.position = CGPoint(x: 0, y: -top + 22)
+        hint.position = CGPoint(x: 0, y: -top + 16)
         modal.addChild(hint)
 
-        addChild(modal)
-        forgePathModal = modal
-
-        modal.alpha = 0
-        panel.setScale(0.85)
-        modal.run(SKAction.fadeIn(withDuration: 0.2))
-        let pop = SKAction.scale(to: 1.0, duration: 0.2)
-        pop.timingMode = .easeOut
-        panel.run(pop)
+        return panel
     }
+
+    private func buildForgeHubChip(_ branch: ForgePathManager.Branch, y: CGFloat,
+                                   spendable: Bool, into modal: SKNode) {
+        let fpm = ForgePathManager.shared
+        let color = SKColor(hex: branch.colorHex)
+        let count = fpm.countInBranch(branch)
+        let maxed = count >= ForgePathManager.ladderLength
+        let w = Self.forgeHubChipW, h = Self.forgeHubChipH
+
+        let chip = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 10)
+        chip.fillColor = SKColor(hex: 0x161616)
+        chip.strokeColor = color.withAlphaComponent(0.7)
+        chip.lineWidth = 1.5
+        chip.position = CGPoint(x: 0, y: y)
+        modal.addChild(chip)
+
+        let wash = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 10)
+        wash.fillColor = color.withAlphaComponent(0.10)
+        wash.strokeColor = .clear
+        wash.position = CGPoint(x: 0, y: y)
+        modal.addChild(wash)
+
+        let icon = SKLabelNode(text: branch.icon)
+        icon.fontSize = 24
+        icon.verticalAlignmentMode = .center
+        icon.position = CGPoint(x: -w / 2 + 26, y: y + 18)
+        modal.addChild(icon)
+
+        let name = SKLabelNode(fontNamed: "Menlo-Bold")
+        name.text = "\(branch.rawValue.uppercased())   ×\(count)"
+        name.fontSize = 14
+        name.fontColor = color
+        name.verticalAlignmentMode = .center
+        name.horizontalAlignmentMode = .left
+        name.position = CGPoint(x: -w / 2 + 50, y: y + 26)
+        modal.addChild(name)
+
+        // Accumulated stats — wraps to a couple lines inside the chip.
+        let accrued = SKLabelNode(fontNamed: "Menlo")
+        accrued.text = forgeBranchAccrued(branch)
+        accrued.fontSize = 9
+        accrued.fontColor = SKColor(hex: 0xBBBBBB)
+        accrued.horizontalAlignmentMode = .left
+        accrued.verticalAlignmentMode = .top
+        accrued.numberOfLines = 3
+        accrued.lineBreakMode = .byTruncatingTail
+        accrued.preferredMaxLayoutWidth = w - 74
+        accrued.position = CGPoint(x: -w / 2 + 14, y: y + 12)
+        modal.addChild(accrued)
+
+        // ＋ add-points button (quick invest without leaving the hub).
+        if spendable && !maxed {
+            let plusBg = SKShapeNode(circleOfRadius: 15)
+            plusBg.fillColor = color.withAlphaComponent(0.18)
+            plusBg.strokeColor = color
+            plusBg.lineWidth = 1.5
+            plusBg.position = CGPoint(x: w / 2 - 24, y: y)
+            plusBg.name = "hubPlus_\(branch.rawValue)"
+            modal.addChild(plusBg)
+            let plus = SKLabelNode(fontNamed: "Menlo-Bold")
+            plus.text = "＋"
+            plus.fontSize = 18
+            plus.fontColor = color
+            plus.verticalAlignmentMode = .center
+            plus.position = CGPoint(x: w / 2 - 24, y: y)
+            modal.addChild(plus)
+        } else if maxed {
+            let done = SKLabelNode(fontNamed: "Menlo-Bold")
+            done.text = "MAX"
+            done.fontSize = 10
+            done.fontColor = color
+            done.verticalAlignmentMode = .center
+            done.position = CGPoint(x: w / 2 - 26, y: y)
+            modal.addChild(done)
+        }
+    }
+
+    // MARK: Forge Path — detail (one branch, zoomed ladder of node-chips)
+
+    private func buildForgeDetail(_ branch: ForgePathManager.Branch, into modal: SKNode) -> SKShapeNode {
+        let fpm = ForgePathManager.shared
+        let color = SKColor(hex: branch.colorHex)
+        let count = fpm.countInBranch(branch)
+        let nextLevel = count + 1
+        let n = fpm.picksAvailable
+        let panelW = Self.forgeDetailPanelW, panelH = Self.forgeDetailPanelH
+
+        let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x120C05)
+        panel.strokeColor = color.withAlphaComponent(0.75)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        modal.addChild(panel)
+
+        let top = panelH / 2
+
+        // Back button.
+        let back = SKLabelNode(fontNamed: "Menlo-Bold")
+        back.text = "‹ BACK"
+        back.fontSize = 13
+        back.fontColor = SKColor(hex: 0xFFCC66)
+        back.horizontalAlignmentMode = .left
+        back.verticalAlignmentMode = .center
+        back.position = CGPoint(x: -panelW / 2 + 18, y: Self.forgeDetailBackY)
+        back.name = "forgeBack"
+        modal.addChild(back)
+
+        let icon = SKLabelNode(text: branch.icon)
+        icon.fontSize = 18
+        icon.verticalAlignmentMode = .center
+        icon.position = CGPoint(x: -18, y: top - 24)
+        modal.addChild(icon)
+        let hdr = SKLabelNode(fontNamed: "Menlo-Bold")
+        hdr.text = "\(branch.rawValue.uppercased())  ×\(count)"
+        hdr.fontSize = 15
+        hdr.fontColor = color
+        hdr.horizontalAlignmentMode = .left
+        hdr.verticalAlignmentMode = .center
+        hdr.position = CGPoint(x: 0, y: top - 24)
+        modal.addChild(hdr)
+
+        let sub = SKLabelNode(fontNamed: "Menlo")
+        sub.text = n > 0 ? "\(n) point\(n == 1 ? "" : "s") available — tap the next node to invest"
+                         : "no points to spend"
+        sub.fontSize = 9.5
+        sub.fontColor = n > 0 ? color : SKColor(hex: 0x888888)
+        sub.verticalAlignmentMode = .center
+        sub.position = CGPoint(x: 0, y: top - 44)
+        modal.addChild(sub)
+
+        // Trunk line behind the chips.
+        let trunk = SKShapeNode()
+        let tp = CGMutablePath()
+        tp.move(to: CGPoint(x: Self.forgeDetailRailX, y: forgeDetailRowY(1)))
+        tp.addLine(to: CGPoint(x: Self.forgeDetailRailX, y: forgeDetailRowY(ForgePathManager.ladderLength)))
+        trunk.path = tp
+        trunk.strokeColor = color.withAlphaComponent(0.3)
+        trunk.lineWidth = 2
+        modal.addChild(trunk)
+
+        for level in 1...ForgePathManager.ladderLength {
+            buildForgeDetailRow(branch, level: level, owned: level <= count,
+                                isNext: level == nextLevel, spendable: n > 0, into: modal)
+        }
+
+        return panel
+    }
+
+    private func buildForgeDetailRow(_ branch: ForgePathManager.Branch, level: Int, owned: Bool,
+                                     isNext: Bool, spendable: Bool, into modal: SKNode) {
+        let fpm = ForgePathManager.shared
+        let color = SKColor(hex: branch.colorHex)
+        guard let node = fpm.ladderNode(branch, level: level) else { return }
+        let ry = forgeDetailRowY(level)
+        let railX = Self.forgeDetailRailX
+
+        // Rail pip.
+        let pip = SKShapeNode(circleOfRadius: 4)
+        pip.position = CGPoint(x: railX, y: ry)
+        if owned {
+            pip.fillColor = color; pip.strokeColor = color; pip.glowWidth = 2
+        } else {
+            pip.fillColor = SKColor(hex: 0x0A0A0A); pip.strokeColor = color.withAlphaComponent(0.4); pip.lineWidth = 1
+        }
+        modal.addChild(pip)
+        if isNext {
+            let ring = SKShapeNode(circleOfRadius: 7)
+            ring.strokeColor = color; ring.fillColor = .clear; ring.lineWidth = 1.5; ring.glowWidth = 3
+            ring.position = CGPoint(x: railX, y: ry)
+            ring.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.scale(to: 1.3, duration: 0.6), SKAction.scale(to: 1.0, duration: 0.6)])))
+            modal.addChild(ring)
+        }
+
+        // Node chip.
+        let w = Self.forgeDetailChipW, h = Self.forgeDetailChipH, cx = Self.forgeDetailChipCX
+        let isFork = node.fork != nil
+        let chip = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 6)
+        chip.position = CGPoint(x: cx, y: ry)
+        chip.fillColor = owned ? color.withAlphaComponent(0.16)
+                               : (isNext ? SKColor(hex: 0x1C1508) : SKColor(hex: 0x111111))
+        chip.strokeColor = owned ? color.withAlphaComponent(0.8)
+                                 : (isNext ? color : color.withAlphaComponent(0.22))
+        chip.lineWidth = isNext ? 1.5 : 1
+        chip.name = "forgeRow_\(branch.rawValue)_\(level)"
+        modal.addChild(chip)
+
+        // Content: forks show the chosen option + a swap tag; normal nodes show name+effect.
+        let displayName: String
+        let displayEffect: String
+        if let fork = node.fork {
+            let chosen = fpm.forkChoiceIsB(branch, level: level) ? fork.b : fork.a
+            displayName = "⑂ \(chosen.name)"
+            displayEffect = owned ? chosen.effectText : "choose A / B"
+        } else {
+            displayName = node.name
+            displayEffect = node.effectText
+        }
+
+        let lvlTag = SKLabelNode(fontNamed: "Menlo-Bold")
+        lvlTag.text = "\(level)"
+        lvlTag.fontSize = 8.5
+        lvlTag.fontColor = owned ? color : color.withAlphaComponent(0.5)
+        lvlTag.horizontalAlignmentMode = .left
+        lvlTag.verticalAlignmentMode = .center
+        lvlTag.position = CGPoint(x: cx - w / 2 + 7, y: ry)
+        modal.addChild(lvlTag)
+
+        let nameLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        nameLabel.text = displayName
+        nameLabel.fontSize = 9.5
+        nameLabel.fontColor = owned ? SKColor(hex: 0xFFFFFF) : (isFork ? color : SKColor(hex: 0xCCCCCC))
+        nameLabel.horizontalAlignmentMode = .left
+        nameLabel.verticalAlignmentMode = .center
+        nameLabel.position = CGPoint(x: cx - w / 2 + 24, y: ry)
+        modal.addChild(nameLabel)
+
+        let effLabel = SKLabelNode(fontNamed: "Menlo")
+        effLabel.text = displayEffect
+        effLabel.fontSize = 8.5
+        effLabel.fontColor = SKColor(hex: owned ? 0xCCCCCC : 0x888888)
+        effLabel.horizontalAlignmentMode = .right
+        effLabel.verticalAlignmentMode = .center
+        effLabel.position = CGPoint(x: cx + w / 2 - 8, y: ry)
+        modal.addChild(effLabel)
+
+        if isNext && spendable {
+            let plus = SKLabelNode(fontNamed: "Menlo-Bold")
+            plus.text = "＋"
+            plus.fontSize = 14
+            plus.fontColor = color
+            plus.verticalAlignmentMode = .center
+            plus.horizontalAlignmentMode = .center
+            plus.position = CGPoint(x: cx + w / 2 - 8, y: ry)
+            effLabel.horizontalAlignmentMode = .right
+            effLabel.position = CGPoint(x: cx + w / 2 - 22, y: ry)
+            modal.addChild(plus)
+        }
+    }
+
+    /// The A/B fork picker overlay (shown when a spend reaches a fork).
+    private func renderForkPicker(_ branch: ForgePathManager.Branch, node: ForgePathManager.Node,
+                                  into modal: SKNode) {
+        guard let fork = node.fork else { return }
+        let color = SKColor(hex: branch.colorHex)
+        let bg = SKShapeNode(rectOf: CGSize(width: 306, height: 168), cornerRadius: 12)
+        bg.fillColor = SKColor(hex: 0x0C0C0C, alpha: 0.98)
+        bg.strokeColor = color
+        bg.lineWidth = 2
+        bg.glowWidth = 6
+        bg.position = CGPoint(x: 0, y: 20)
+        bg.zPosition = 10
+        modal.addChild(bg)
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "\(branch.icon) \(node.name) — choose one"
+        title.fontSize = 12
+        title.fontColor = color
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: 86)
+        title.zPosition = 11
+        modal.addChild(title)
+
+        for (idx, opt) in [(0, fork.a), (1, fork.b)].enumerated() {
+            let oy: CGFloat = idx == 0 ? 40 : -20
+            let btn = SKShapeNode(rectOf: CGSize(width: 286, height: 50), cornerRadius: 8)
+            btn.fillColor = SKColor(hex: 0x161616)
+            btn.strokeColor = color.withAlphaComponent(0.8)
+            btn.lineWidth = 1.5
+            btn.position = CGPoint(x: 0, y: oy)
+            btn.zPosition = 11
+            btn.name = idx == 0 ? "forkA" : "forkB"
+            modal.addChild(btn)
+            let name = SKLabelNode(fontNamed: "Menlo-Bold")
+            name.text = "\(idx == 0 ? "A" : "B") · \(opt.1.name)"
+            name.fontSize = 12
+            name.fontColor = color
+            name.verticalAlignmentMode = .center
+            name.horizontalAlignmentMode = .left
+            name.position = CGPoint(x: -131, y: oy + 11)
+            name.zPosition = 11
+            modal.addChild(name)
+            let eff = SKLabelNode(fontNamed: "Menlo")
+            eff.text = opt.1.effectText
+            eff.fontSize = 9.5
+            eff.fontColor = SKColor(hex: 0xCCCCCC)
+            eff.verticalAlignmentMode = .center
+            eff.horizontalAlignmentMode = .left
+            eff.numberOfLines = 2
+            eff.lineBreakMode = .byTruncatingTail
+            eff.preferredMaxLayoutWidth = 258
+            eff.position = CGPoint(x: -131, y: oy - 9)
+            eff.zPosition = 11
+            modal.addChild(eff)
+        }
+    }
+
+    // MARK: Forge Path — tap routing
 
     private func handleForgePathModalTap(_ location: CGPoint) {
         let fpm = ForgePathManager.shared
 
-        // Respec button (free) — behind a confirm.
+        // 1) Fork picker open — resolve A/B first (overlay wins).
+        if let branch = forgePathForkPending {
+            let aFrame = CGRect(x: -143, y: 40 - 25, width: 286, height: 50)
+            let bFrame = CGRect(x: -143, y: -20 - 25, width: 286, height: 50)
+            if aFrame.contains(location) || bFrame.contains(location) {
+                fpm.choose(branch)   // advance onto the fork (defaults A)
+                let level = fpm.countInBranch(branch)
+                fpm.setForkChoice(branch, level: level, chooseB: bFrame.contains(location))
+                forgePathForkPending = nil
+                AudioManager.shared.play(.cardSelect)
+                statHUDNeedsRefresh()
+                renderForgePath(animateIn: false)
+            } else {
+                forgePathForkPending = nil   // tap elsewhere cancels the picker
+                renderForgePath(animateIn: false)
+            }
+            return
+        }
+
+        // 2) Detail view vs hub view.
+        if let branch = forgePathDetailBranch {
+            handleForgeDetailTap(location, branch: branch)
+        } else {
+            handleForgeHubTap(location)
+        }
+    }
+
+    private func handleForgeHubTap(_ location: CGPoint) {
+        let fpm = ForgePathManager.shared
+
+        // Respec (free) — behind a confirm.
         if !fpm.picks.isEmpty {
-            let f = CGRect(x: -132, y: Self.forgePathRespecY - 20, width: 264, height: 40)
+            let f = CGRect(x: -144, y: Self.forgeHubRespecY - 18, width: 288, height: 36)
             if f.contains(location) {
                 AudioManager.shared.play(.cardSelect)
                 presentRespecConfirm()
@@ -1807,26 +2147,96 @@ final class TitleScene: SKScene {
             }
         }
 
-        // Branch rows — spend a mastery point when one is available.
+        let w = Self.forgeHubChipW, h = Self.forgeHubChipH
+        for (i, branch) in ForgePathManager.Branch.allCases.enumerated() {
+            let y = Self.forgeHubChipYs[i]
+            // ＋ add-points button (right edge).
+            if fpm.picksAvailable > 0 && fpm.countInBranch(branch) < ForgePathManager.ladderLength {
+                let plusF = CGRect(x: w / 2 - 24 - 18, y: y - 18, width: 36, height: 36)
+                if plusF.contains(location) {
+                    spendForgePoint(on: branch)
+                    return
+                }
+            }
+            // Chip body → drill into the detail view.
+            let chipF = CGRect(x: -w / 2, y: y - h / 2, width: w, height: h)
+            if chipF.contains(location) {
+                forgePathDetailBranch = branch
+                AudioManager.shared.play(.cardSelect)
+                renderForgePath(animateIn: true)
+                return
+            }
+        }
+
+        // Tap outside the panel closes.
+        let panelFrame = CGRect(x: -Self.forgeHubPanelW / 2, y: -Self.forgeHubPanelH / 2,
+                                width: Self.forgeHubPanelW, height: Self.forgeHubPanelH)
+        if !panelFrame.contains(location) {
+            forgePathDetailBranch = nil
+            forgePathForkPending = nil
+            dismissForgePathModal(animated: true)
+            drawForgePathRow()
+        }
+    }
+
+    private func handleForgeDetailTap(_ location: CGPoint, branch: ForgePathManager.Branch) {
+        let fpm = ForgePathManager.shared
+
+        // Back → hub.
+        let backF = CGRect(x: -Self.forgeDetailPanelW / 2 + 6, y: Self.forgeDetailBackY - 16, width: 84, height: 32)
+        if backF.contains(location) {
+            forgePathDetailBranch = nil
+            AudioManager.shared.play(.cardSelect)
+            renderForgePath(animateIn: true)
+            return
+        }
+
+        // Tap the next node's chip to invest.
         if fpm.picksAvailable > 0 {
-            for (i, branch) in ForgePathManager.Branch.allCases.enumerated() {
-                let f = CGRect(x: -132, y: Self.forgePathRowYs[i] - 27, width: 264, height: 54)
-                if f.contains(location) {
-                    fpm.choose(branch)
-                    AudioManager.shared.play(.cardSelect)
-                    showForgePathModal()   // refresh: new counts + next nodes
+            let count = fpm.countInBranch(branch)
+            if count < ForgePathManager.ladderLength {
+                let nextLevel = count + 1
+                let ry = forgeDetailRowY(nextLevel)
+                let w = Self.forgeDetailChipW, h = Self.forgeDetailChipH, cx = Self.forgeDetailChipCX
+                let rowF = CGRect(x: cx - w / 2, y: ry - h / 2 - 2, width: w, height: h + 4)
+                if rowF.contains(location) {
+                    spendForgePoint(on: branch)
                     return
                 }
             }
         }
 
-        // Tap outside the panel closes; inside taps (non-interactive) do nothing.
-        let panelFrame = CGRect(x: -150, y: -Self.forgePathPanelH / 2, width: 300, height: Self.forgePathPanelH)
+        // Tap outside the panel closes.
+        let panelFrame = CGRect(x: -Self.forgeDetailPanelW / 2, y: -Self.forgeDetailPanelH / 2,
+                                width: Self.forgeDetailPanelW, height: Self.forgeDetailPanelH)
         if !panelFrame.contains(location) {
+            forgePathDetailBranch = nil
+            forgePathForkPending = nil
             dismissForgePathModal(animated: true)
             drawForgePathRow()
         }
     }
+
+    /// Spend one mastery point on a branch — opens the fork picker if the next
+    /// node is a fork, otherwise commits immediately. Stays in the current view.
+    private func spendForgePoint(on branch: ForgePathManager.Branch) {
+        let fpm = ForgePathManager.shared
+        guard fpm.picksAvailable > 0, fpm.countInBranch(branch) < ForgePathManager.ladderLength else { return }
+        if let next = fpm.nextNode(for: branch), next.fork != nil {
+            forgePathForkPending = branch
+            AudioManager.shared.play(.cardSelect)
+            renderForgePath(animateIn: false)
+        } else {
+            fpm.choose(branch)
+            AudioManager.shared.play(.cardSelect)
+            statHUDNeedsRefresh()
+            renderForgePath(animateIn: false)
+        }
+    }
+
+    /// Forge picks alter persisted stats; nudge any live stat readout. No-op hook
+    /// on the title screen (kept for parity with the in-run HUD path).
+    private func statHUDNeedsRefresh() {}
 
     // v1.9 Unit 7: free respec, behind a confirm (reuses the confirm modal).
     private func presentRespecConfirm() {

@@ -225,6 +225,9 @@ final class ForgePathManager {
         return ladder[level - 1]
     }
 
+    /// Public accessor for the ladder viz (Unit 3).
+    func ladderNode(_ branch: Branch, level: Int) -> Node? { node(branch, level: level) }
+
     /// The node the next pick in this branch would grant (nil if the ladder's maxed).
     func nextNode(for branch: Branch) -> Node? {
         node(branch, level: countInBranch(branch) + 1)
