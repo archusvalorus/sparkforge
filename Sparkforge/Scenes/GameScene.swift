@@ -243,7 +243,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         setupLevelUpOverlay()
         setupPauseOverlay()
         setupEmberParticles()
-        
+
+        // v1.9 FIX: forge bonuses were only applied in restartGame(), so the
+        // FIRST run of a session started Spark at BASE stats — Forge Path picks
+        // and Forge Level bonuses never nudged him until a restart. Apply them
+        // here too so the first run matches every subsequent one.
+        ProgressionManager.shared.applyForgeBonuses(to: playerStats)
+        DailyForgeManager.shared.applyBlessingIfActive(to: playerStats)
+        hpBar.updateFill(playerStats.hpPercent,
+                         currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
+        statHUD.update(from: playerStats)
+
         // Preload rewarded ad
         adReviveManager.preloadAd()
         

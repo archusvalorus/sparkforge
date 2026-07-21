@@ -1,16 +1,19 @@
 // ForgePathManager.swift
 // Sparkforge
 //
-// v1.7 Forge Paths: Forge Levels now earn PICKS instead of flat
-// bonuses — one pick per two levels, spent on permanent nodes across
-// three branches (Vitality / Ferocity / Cunning). Each node is worth
-// roughly two old flat levels, so the power budget matches the system
-// it replaces; specialization is the new upside.
+// v1.9 Forge Path rework (Unit 1 — data model): the infinite 2-node cycle is
+// replaced with AUTHORED vertical ladders per branch (nodes 1–20), with a 1-of-2
+// FORK at every 5th level (5/10/15/20). Content spec:
+// docs/forge-path-ladders-v1.9.md. Kickoff: docs/forge-path-rework-kickoff.md.
 //
-// Migration is implicit: picks earned are a pure function of forge
-// level, so existing players arrive with their whole history banked —
-// (level + 1) / 2 picks, rounded generously. Nobody loses progress.
-// Respec is a v1.8+ question.
+// Persistence is backward-compatible: `sf_forge_path_picks` (the ordered branch
+// list, live data) is UNCHANGED — existing players' picks replay onto the new
+// ladders. Fork choices persist separately in `sf_forge_path_forks`.
+//
+// Unit 1 wires the STAT nodes (HP/DEF/ATK/dmg/crit/move/pickup). Behavioral
+// nodes (regen, damage reduction, kill-stacks, etc.) are defined here with their
+// display text but a no-op apply — their effects land in Unit 2. Fork options
+// that are pure stats are wired now; behavioral fork options are stubbed too.
 
 import Foundation
 
@@ -21,7 +24,8 @@ final class ForgePathManager {
     private let defaults = UserDefaults.standard
 
     private enum Keys {
-        static let pathPicks = "sf_forge_path_picks"
+        static let pathPicks = "sf_forge_path_picks"   // live data — never rename
+        static let pathForks = "sf_forge_path_forks"   // v1.9: fork choices
     }
 
     // MARK: - Branches
@@ -50,48 +54,160 @@ final class ForgePathManager {
 
     // MARK: - Nodes
 
-    struct Node {
+    /// One side of a milestone fork.
+    struct ForkOption {
         let name: String
         let effectText: String
         let apply: (PlayerStats) -> Void
     }
 
-    /// Node cycles — the Nth pick in a branch grants cycle[N % count].
-    /// Each node ≈ two levels of the old flat bonuses (power budget).
-    private static let cycles: [Branch: [Node]] = [
+    /// A single authored ladder node. Normal nodes carry one `apply`; fork nodes
+    /// (every 5th level) carry two options resolved by the player's stored choice.
+    struct Node {
+        let level: Int
+        let name: String
+        let effectText: String
+        let apply: (PlayerStats) -> Void
+        let fork: (a: ForkOption, b: ForkOption)?
+
+        /// Normal node.
+        init(_ level: Int, _ name: String, _ effectText: String,
+             apply: @escaping (PlayerStats) -> Void) {
+            self.level = level
+            self.name = name
+            self.effectText = effectText
+            self.apply = apply
+            self.fork = nil
+        }
+
+        /// A behavioral node whose in-run effect lands in Unit 2 (no-op apply for now).
+        static func behavioral(_ level: Int, _ name: String, _ effectText: String) -> Node {
+            Node(level, name, effectText, apply: { _ in /* Unit 2 */ })
+        }
+
+        /// Milestone fork node.
+        init(fork level: Int, _ title: String, a: ForkOption, b: ForkOption) {
+            self.level = level
+            self.name = title
+            self.effectText = "A: \(a.name) · B: \(b.name)"
+            self.apply = { _ in }   // resolved via the stored fork choice, not this
+            self.fork = (a, b)
+        }
+    }
+
+    /// Behavioral fork option (effect lands in Unit 2).
+    private static func fx(_ name: String, _ text: String) -> ForkOption {
+        ForkOption(name: name, effectText: text, apply: { _ in /* Unit 2 */ })
+    }
+
+    // MARK: - Authored ladders (1–20). Content: docs/forge-path-ladders-v1.9.md.
+
+    private static let ladders: [Branch: [Node]] = [
         .vitality: [
-            Node(name: "Tempered Vessel", effectText: "+4 Max HP") { stats in
-                stats.maxHP += 4
-                stats.currentHP += 4
-            },
-            Node(name: "Iron Bones", effectText: "+2 DEF") { stats in
-                stats.defense += 2
-            }
+            Node(1, "Tempered Vessel", "+5 Max HP") { $0.maxHP += 5; $0.currentHP += 5 },
+            Node(2, "Iron Bones", "+2 DEF") { $0.defense += 2 },
+            Node(3, "Deep Reserve", "+5 Max HP") { $0.maxHP += 5; $0.currentHP += 5 },
+            Node(4, "Reinforced Frame", "+2 DEF") { $0.defense += 2 },
+            Node(fork: 5, "Recovery or Prevention",
+                 a: fx("Regenerator", "Recover 1 HP every 8s"),
+                 b: fx("Braced Impact", "First hit every 12s deals 25% less")),
+            Node(6, "Tempered Blood", "+5 Max HP") { $0.maxHP += 5; $0.currentHP += 5 },
+            Node(7, "Layered Plating", "+2 DEF") { $0.defense += 2 },
+            Node(8, "Durable Core", "+5 Max HP") { $0.maxHP += 5; $0.currentHP += 5 },
+            Node(9, "Hardened Shell", "+2 DEF") { $0.defense += 2 },
+            Node(fork: 10, "Preserve or Survive",
+                 a: fx("Vital Surplus", "Above 75% HP: +5% damage reduction"),
+                 b: fx("Last Stand", "Below 35% HP: +10% damage reduction")),
+            Node(11, "Deepened Vessel", "+6 Max HP") { $0.maxHP += 6; $0.currentHP += 6 },
+            Node(12, "Forged Spine", "+3 DEF") { $0.defense += 3 },
+            Node.behavioral(13, "Restoration", "+5% healing received"),
+            Node.behavioral(14, "Steady Pulse", "After 10s undamaged, recover 2 HP"),
+            Node(fork: 15, "Crowds or Priority",
+                 a: fx("Hold the Line", "5+ enemies near: +8% damage reduction"),
+                 b: fx("Giantkiller's Guard", "−10% damage from boss-class")),
+            Node(16, "Iron Lungs", "+6 Max HP") { $0.maxHP += 6; $0.currentHP += 6 },
+            Node(17, "Tempered Plate", "+3 DEF") { $0.defense += 3 },
+            Node.behavioral(18, "Defiant Recovery", "After taking damage, +10% healing for 4s"),
+            Node.behavioral(19, "Unshaken", "−10% duration of slows/impairments"),
+            Node(fork: 20, "Emergency or Insurance",
+                 a: fx("Second Breath", "Once/45s: below 25% HP restores 10% Max HP"),
+                 b: fx("Unyielding", "Once/45s: the next hit >20% Max HP is halved")),
         ],
         .ferocity: [
-            Node(name: "Whetted Edge", effectText: "+2 ATK") { stats in
-                stats.baseAttack += 2
-            },
-            Node(name: "Stoked Furnace", effectText: "+4% damage") { stats in
-                stats.damageMultiplier += 0.04
-            }
+            Node(1, "Whetted Edge", "+1 ATK") { $0.baseAttack += 1 },
+            Node(2, "Stoked Furnace", "+1% damage") { $0.damageMultiplier += 0.01 },
+            Node(3, "Honed Point", "+1 ATK") { $0.baseAttack += 1 },
+            Node(4, "Bellows", "+1% damage") { $0.damageMultiplier += 0.01 },
+            Node(fork: 5, "Risk or Reliability",
+                 a: fx("Berserker", "Below 50% HP: +5% damage"),
+                 b: ForkOption(name: "Executioner", effectText: "+2 ATK") { $0.baseAttack += 2 }),
+            Node(6, "Tempered Edge", "+1 ATK") { $0.baseAttack += 1 },
+            Node(7, "Furnace Pressure", "+1% damage") { $0.damageMultiplier += 0.01 },
+            Node(8, "Keen Steel", "+1 ATK") { $0.baseAttack += 1 },
+            Node(9, "Full Bellows", "+1% damage") { $0.damageMultiplier += 0.01 },
+            Node(fork: 10, "Swarms or Priority",
+                 a: fx("Cleaver", "4+ enemies near: +8% damage"),
+                 b: fx("Headsman", "+10% damage to boss-class")),
+            Node(11, "Forged Edge", "+2 ATK") { $0.baseAttack += 2 },
+            Node(12, "White Heat", "+1.5% damage") { $0.damageMultiplier += 0.015 },
+            Node.behavioral(13, "Rising Heat", "A kill grants +1% damage for 3s (stacks 5)"),
+            Node.behavioral(14, "Opening Blow", "+10% damage to enemies above 90% HP"),
+            Node(fork: 15, "Momentum or Patience",
+                 a: fx("Bloodrush", "A kill grants +5% attack speed for 4s (stacks 3)"),
+                 b: fx("Cold Fury", "Every 8s without a kill, +10% to the next enemy hit")),
+            Node(16, "Hammered Point", "+2 ATK") { $0.baseAttack += 2 },
+            Node(17, "Roaring Furnace", "+1.5% damage") { $0.damageMultiplier += 0.015 },
+            Node.behavioral(18, "Relentless Pressure", "Repeated hits on one foe: +1%/stack to +5%"),
+            Node.behavioral(19, "Overkill", "On kill, excess damage bursts to nearby foes"),
+            Node(fork: 20, "Sustained or Decisive",
+                 a: fx("Warpath", "After 6s of continuous damage, +10% damage"),
+                 b: fx("Killing Stroke", "Every 12s, the next direct attack deals +75%")),
         ],
         .cunning: [
-            Node(name: "Keen Eye", effectText: "+4% crit chance") { stats in
-                stats.critChance += 0.04
-            },
-            Node(name: "Light Step", effectText: "+4% move speed") { stats in
-                stats.moveSpeedMultiplier += 0.04
-            }
-        ]
+            Node(1, "Keen Eye", "+1% crit chance") { $0.critChance += 0.01 },
+            Node(2, "Light Step", "+1% move speed") { $0.moveSpeedMultiplier += 0.01 },
+            Node(3, "Sharp Focus", "+1% crit chance") { $0.critChance += 0.01 },
+            Node(4, "Fleet Footing", "+1% move speed") { $0.moveSpeedMultiplier += 0.01 },
+            Node(fork: 5, "Precision or Mobility",
+                 a: ForkOption(name: "Deadeye", effectText: "+10% critical damage") { $0.critMultiplier += 0.10 },
+                 b: ForkOption(name: "Windrunner", effectText: "+3% move speed") { $0.moveSpeedMultiplier += 0.03 }),
+            Node(6, "Clear Sight", "+1% crit chance") { $0.critChance += 0.01 },
+            Node(7, "Quickened Step", "+1% move speed") { $0.moveSpeedMultiplier += 0.01 },
+            Node(8, "Long Reach", "+5% pickup radius") { $0.pickupRadiusMultiplier += 0.05 },
+            Node(9, "Practiced Motion", "+1% move speed") { $0.moveSpeedMultiplier += 0.01 },
+            Node(fork: 10, "Collection or Escape",
+                 a: ForkOption(name: "Magnetized", effectText: "+15% pickup radius") { $0.pickupRadiusMultiplier += 0.15 },
+                 b: fx("Slipstream", "After a near-miss, +8% move speed for 2s")),
+            Node(11, "Trained Eye", "+1.5% crit chance") { $0.critChance += 0.015 },
+            Node(12, "Swift Form", "+1.5% move speed") { $0.moveSpeedMultiplier += 0.015 },
+            Node.behavioral(13, "Opportunist", "+5% damage to impaired foes"),
+            Node.behavioral(14, "Efficient Sweep", "Collecting XP grants +5% pickup for 2s (stacks 3)"),
+            Node(fork: 15, "Consistency or Volatility",
+                 a: fx("Calculated Strike", "Every 5th direct attack is a guaranteed crit"),
+                 b: fx("Lucky Break", "Crits have a 10% chance to deal +50% crit damage")),
+            Node(16, "Refined Focus", "+1.5% crit chance") { $0.critChance += 0.015 },
+            Node(17, "Effortless Motion", "+1.5% move speed") { $0.moveSpeedMultiplier += 0.015 },
+            Node.behavioral(18, "Read the Room", "When an elite/boss enters, +8% move speed for 4s"),
+            Node.behavioral(19, "Salvager", "Forge XP Coins are attracted from 10% farther"),
+            Node(fork: 20, "Planned or Emergency",
+                 a: fx("Foresight", "+1 reroll per run"),
+                 b: fx("Second Look", "Once/run: passing a whole offer regenerates it free")),
+        ],
     ]
 
-    // MARK: - Picks
+    static let ladderLength = 20   // authored depth (21–50 come later)
 
-    /// Every pick ever made, in order (cycle positions depend on order)
+    // MARK: - State
+
+    /// Every pick ever made, in order. The Nth pick in a branch = its level N.
     private(set) var picks: [Branch] = []
 
-    /// One pick per two forge levels, rounded up — migration-generous
+    /// Fork choices, keyed "Branch:level" → true = option B, false/absent = A.
+    private var forkChoices: [String: Bool] = [:]
+
+    private func forkKey(_ branch: Branch, _ level: Int) -> String { "\(branch.rawValue):\(level)" }
+
+    /// One pick per two forge levels, rounded up — migration-generous.
     var picksEarned: Int {
         (ProgressionManager.shared.forgeLevel + 1) / 2
     }
@@ -104,43 +220,69 @@ final class ForgePathManager {
         picks.filter { $0 == branch }.count
     }
 
-    /// The node the next pick in this branch would grant
-    func nextNode(for branch: Branch) -> Node? {
-        guard let cycle = Self.cycles[branch], !cycle.isEmpty else { return nil }
-        return cycle[countInBranch(branch) % cycle.count]
+    private func node(_ branch: Branch, level: Int) -> Node? {
+        guard let ladder = Self.ladders[branch], level >= 1, level <= ladder.count else { return nil }
+        return ladder[level - 1]
     }
 
-    /// Spend one available pick on a branch
-    func choose(_ branch: Branch) {
-        guard picksAvailable > 0 else { return }
-        picks.append(branch)
+    /// The node the next pick in this branch would grant (nil if the ladder's maxed).
+    func nextNode(for branch: Branch) -> Node? {
+        node(branch, level: countInBranch(branch) + 1)
+    }
+
+    /// Whether a chosen fork resolves to option B (true) vs A (false/default).
+    func forkChoiceIsB(_ branch: Branch, level: Int) -> Bool {
+        forkChoices[forkKey(branch, level)] ?? false
+    }
+
+    /// Set (or change) a milestone fork choice. Free — respec-friendly.
+    func setForkChoice(_ branch: Branch, level: Int, chooseB: Bool) {
+        forkChoices[forkKey(branch, level)] = chooseB
         save()
     }
 
-    /// v1.9 Unit 7: free, unlimited respec — clear all spent picks so every
-    /// earned mastery point becomes available to re-spend. Key unchanged
-    /// (live data); applyPathBonuses just replays the (now empty) list.
+    /// Spend one available pick on a branch. If it lands on a fork with no stored
+    /// choice, default to option A (the fork picker UI arrives in Unit 3).
+    func choose(_ branch: Branch) {
+        guard picksAvailable > 0, countInBranch(branch) < Self.ladderLength else { return }
+        picks.append(branch)
+        let level = countInBranch(branch)
+        if let node = node(branch, level: level), node.fork != nil, forkChoices[forkKey(branch, level)] == nil {
+            forkChoices[forkKey(branch, level)] = false   // default A
+        }
+        save()
+    }
+
+    /// v1.9 Unit 7: free, unlimited respec — clear all spent picks AND fork
+    /// choices so every earned mastery point is available to re-spend.
     func respec() {
         picks = []
+        forkChoices = [:]
         save()
     }
 
     // MARK: - Apply
 
-    /// Replay every pick through its branch cycle onto run stats
+    /// Walk each branch's spent count down its ladder, resolving forks via the
+    /// stored choice, onto run stats.
     func applyPathBonuses(to stats: PlayerStats) {
-        var branchCounts: [Branch: Int] = [:]
-        for branch in picks {
-            guard let cycle = Self.cycles[branch], !cycle.isEmpty else { continue }
-            let index = branchCounts[branch, default: 0]
-            cycle[index % cycle.count].apply(stats)
-            branchCounts[branch] = index + 1
+        for branch in Branch.allCases {
+            let count = countInBranch(branch)
+            guard count > 0, let ladder = Self.ladders[branch] else { continue }
+            for level in 1...min(count, ladder.count) {
+                let node = ladder[level - 1]
+                if let fork = node.fork {
+                    (forkChoiceIsB(branch, level: level) ? fork.b : fork.a).apply(stats)
+                } else {
+                    node.apply(stats)
+                }
+            }
         }
     }
 
     // MARK: - Summary
 
-    /// Branches with at least one pick, in canonical order, with counts
+    /// Branches with at least one pick, in canonical order, with counts.
     var summary: [(branch: Branch, count: Int)] {
         Branch.allCases.compactMap { branch in
             let count = countInBranch(branch)
@@ -152,18 +294,22 @@ final class ForgePathManager {
 
     private func save() {
         defaults.set(picks.map(\.rawValue), forKey: Keys.pathPicks)
+        defaults.set(forkChoices, forKey: Keys.pathForks)
     }
 
     private func load() {
         let raw = defaults.stringArray(forKey: Keys.pathPicks) ?? []
         picks = raw.compactMap(Branch.init(rawValue:))
+        forkChoices = (defaults.dictionary(forKey: Keys.pathForks) as? [String: Bool]) ?? [:]
     }
 
     // MARK: - Reset (testing)
 
     func resetAll() {
         picks = []
+        forkChoices = [:]
         defaults.removeObject(forKey: Keys.pathPicks)
+        defaults.removeObject(forKey: Keys.pathForks)
     }
 
     private init() {
