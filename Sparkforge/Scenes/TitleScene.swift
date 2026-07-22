@@ -81,6 +81,7 @@ final class TitleScene: SKScene {
     private var forgePathForkPending: ForgePathManager.Branch?  // fork picker open for this branch
     private var removeAdsValueModal: RemoveAdsModalNode?  // v1.8 (E3): value-prop before purchase
     private var skinPickerModal: SKNode?                  // v2.0 Unit 1: skins wardrobe
+    private var skinPickerFamily: String?                 // nil = family hub; else drilled into this family
 
     // v1.8 Unit 10: the CODEX hub + the scrollable page it opens.
     private var codexHub: CodexHubNode?
@@ -1504,131 +1505,214 @@ final class TitleScene: SKScene {
         return node
     }
 
+    /// Dispatcher: family HUB (skinPickerFamily == nil) or a family's DETAIL.
+    /// Mirrors the Forge Path hub→detail nav (consistent interaction language).
     private func showSkinPickerModal() {
-        let sm = SkinManager.shared
         dismissSkinPickerModal(animated: false)   // never stack on refresh
         AudioManager.shared.play(.cardSelect)
 
         let modal = SKNode()
         modal.zPosition = 300
-
         let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.8)
         dim.strokeColor = .clear
         modal.addChild(dim)
 
-        let count = sm.catalog.count
-        let panelW = Self.skinPanelW
-        let panelH = 86 + CGFloat(count) * (Self.skinCardH + Self.skinCardGap) + 74
-        let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
-        panel.fillColor = SKColor(hex: 0x161009)
-        panel.strokeColor = SKColor(hex: 0xE8B04C, alpha: 0.7)
-        panel.lineWidth = 1.5
-        panel.glowWidth = 5
-        modal.addChild(panel)
-        let top = panelH / 2
-
-        let title = SKLabelNode(fontNamed: "Menlo-Bold")
-        title.text = "✦ SKINS"
-        title.fontSize = 18
-        title.fontColor = SKColor(hex: 0xF0C070)
-        title.verticalAlignmentMode = .center
-        title.position = CGPoint(x: 0, y: top - 26)
-        modal.addChild(title)
-
-        let sub = SKLabelNode(fontNamed: "Menlo")
-        sub.text = "cosmetic only — never changes gameplay"
-        sub.fontSize = 10.5
-        sub.fontColor = SKColor(hex: 0x999999)
-        sub.verticalAlignmentMode = .center
-        sub.position = CGPoint(x: 0, y: top - 48)
-        modal.addChild(sub)
-
-        for (i, def) in sm.catalog.enumerated() {
-            let cy = skinCardCenterY(i, panelTop: top)
-            let owned = sm.isUnlocked(def)
-            let selected = owned && sm.selectedID == def.id
-
-            let card = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: Self.skinCardH), cornerRadius: 10)
-            card.fillColor = SKColor(hex: selected ? 0x241B0E : 0x120D08)
-            card.strokeColor = selected ? SKColor(hex: 0xF0C070, alpha: 0.9)
-                                        : SKColor(hex: def.tier == .premium ? 0x6AA0E0 : 0x5A4A2E,
-                                                  alpha: owned ? 0.6 : 0.35)
-            card.lineWidth = selected ? 2 : 1.2
-            card.position = CGPoint(x: 0, y: cy)
-            modal.addChild(card)
-
-            let preview = makeSkinPreview(def.appearance)
-            preview.position = CGPoint(x: -panelW / 2 + 46, y: cy)
-            if !owned { preview.alpha = 0.4 }
-            modal.addChild(preview)
-
-            let name = SKLabelNode(fontNamed: "Menlo-Bold")
-            name.text = def.name + (def.tier == .premium ? "  ◆" : "")
-            name.fontSize = 14
-            name.fontColor = owned ? SKColor(hex: 0xF2E4C8) : SKColor(hex: 0x8A8070)
-            name.verticalAlignmentMode = .center
-            name.horizontalAlignmentMode = .left
-            name.position = CGPoint(x: -panelW / 2 + 78, y: cy + 18)
-            modal.addChild(name)
-
-            let blurb = SKLabelNode(fontNamed: "Menlo")
-            blurb.text = def.blurb
-            blurb.fontSize = 8.5
-            blurb.fontColor = SKColor(hex: 0x8A8478)
-            blurb.verticalAlignmentMode = .center
-            blurb.horizontalAlignmentMode = .left
-            blurb.position = CGPoint(x: -panelW / 2 + 78, y: cy - 1)
-            modal.addChild(blurb)
-
-            // Status chip.
-            let status = SKLabelNode(fontNamed: "Menlo-Bold")
-            status.fontSize = 10.5
-            status.verticalAlignmentMode = .center
-            status.horizontalAlignmentMode = .left
-            status.position = CGPoint(x: -panelW / 2 + 78, y: cy - 22)
-            status.name = "skinStatus_\(def.id)"
-            if selected {
-                status.text = "✓ EQUIPPED";           status.fontColor = SKColor(hex: 0x8FE08F)
-            } else if owned {
-                status.text = "tap to equip";           status.fontColor = SKColor(hex: 0xF0C070)
-            } else if def.tier == .earned {
-                status.text = "🔒 locked";               status.fontColor = SKColor(hex: 0x8A8070)
-            } else {
-                status.text = "◆ premium";              status.fontColor = SKColor(hex: 0x6AA0E0)
-            }
-            modal.addChild(status)
+        if let fid = skinPickerFamily {
+            renderSkinFamilyDetail(fid, into: modal)
+        } else {
+            renderSkinHub(into: modal)
         }
-
-        // Footer.
-        let hint = SKLabelNode(fontNamed: "Menlo")
-        hint.text = "tap outside to close"
-        hint.fontSize = 10
-        hint.fontColor = SKColor(hex: 0x666666)
-        hint.verticalAlignmentMode = .center
-        hint.position = CGPoint(x: 0, y: -top + 22)
-        modal.addChild(hint)
-
-        #if DEBUG
-        let dbg = SKLabelNode(fontNamed: "Menlo-Bold")
-        dbg.text = sm.debugUnlockAll ? "[debug] unlock-all: ON" : "[debug] unlock-all: off"
-        dbg.fontSize = 10
-        dbg.fontColor = SKColor(hex: sm.debugUnlockAll ? 0x8FE08F : 0x775544)
-        dbg.verticalAlignmentMode = .center
-        dbg.position = CGPoint(x: 0, y: -top + 44)
-        dbg.name = "skinDebugToggle"
-        modal.addChild(dbg)
-        #endif
 
         addChild(modal)
         skinPickerModal = modal
         modal.alpha = 0
-        panel.setScale(0.9)
         modal.run(SKAction.fadeIn(withDuration: 0.18))
-        let pop = SKAction.scale(to: 1.0, duration: 0.18); pop.timingMode = .easeOut
-        panel.run(pop)
+        if let panel = modal.childNode(withName: "skinPanel") {
+            panel.setScale(0.9)
+            let pop = SKAction.scale(to: 1.0, duration: 0.18); pop.timingMode = .easeOut
+            panel.run(pop)
+        }
+        if skinPickerFamily != nil { loadSkinPremiumPrices() }   // detail-only
+    }
 
-        loadSkinPremiumPrices()   // fill premium price chips async
+    private func makeSkinPanel(h: CGFloat) -> SKShapeNode {
+        let panel = SKShapeNode(rectOf: CGSize(width: Self.skinPanelW, height: h), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x161009)
+        panel.strokeColor = SKColor(hex: 0xE8B04C, alpha: 0.7)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        panel.name = "skinPanel"
+        return panel
+    }
+
+    private func addSkinHeader(to modal: SKNode, top: CGFloat, title: String, sub: String) {
+        let t = SKLabelNode(fontNamed: "Menlo-Bold")
+        t.text = title; t.fontSize = 18; t.fontColor = SKColor(hex: 0xF0C070)
+        t.verticalAlignmentMode = .center; t.position = CGPoint(x: 0, y: top - 26)
+        modal.addChild(t)
+        let s = SKLabelNode(fontNamed: "Menlo")
+        s.text = sub; s.fontSize = 10.5; s.fontColor = SKColor(hex: 0x999999)
+        s.verticalAlignmentMode = .center; s.position = CGPoint(x: 0, y: top - 48)
+        modal.addChild(s)
+    }
+
+    private func addSkinFooter(to modal: SKNode, top: CGFloat) {
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "tap outside to close"; hint.fontSize = 10; hint.fontColor = SKColor(hex: 0x666666)
+        hint.verticalAlignmentMode = .center; hint.position = CGPoint(x: 0, y: -top + 22)
+        modal.addChild(hint)
+        #if DEBUG
+        let sm = SkinManager.shared
+        let dbg = SKLabelNode(fontNamed: "Menlo-Bold")
+        dbg.text = sm.debugUnlockAll ? "[debug] unlock-all: ON" : "[debug] unlock-all: off"
+        dbg.fontSize = 10
+        dbg.fontColor = SKColor(hex: sm.debugUnlockAll ? 0x8FE08F : 0x775544)
+        dbg.verticalAlignmentMode = .center; dbg.position = CGPoint(x: 0, y: -top + 44)
+        dbg.name = "skinDebugToggle"
+        modal.addChild(dbg)
+        #endif
+    }
+
+    /// HUB — a chip per skin family; secret families masked as ???.
+    private func renderSkinHub(into modal: SKNode) {
+        let sm = SkinManager.shared
+        let fams = sm.families
+        let panelW = Self.skinPanelW
+        let chipH: CGFloat = 74, gap: CGFloat = 10
+        let panelH = 86 + CGFloat(fams.count) * (chipH + gap) + 66
+        modal.addChild(makeSkinPanel(h: panelH))
+        let top = panelH / 2
+        addSkinHeader(to: modal, top: top, title: "✦ SKINS", sub: "cosmetic only — never changes gameplay")
+
+        for (i, fam) in fams.enumerated() {
+            let cy = top - 86 - chipH / 2 - CGFloat(i) * (chipH + gap)
+            let revealed = sm.isFamilyRevealed(fam)
+
+            let chip = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: chipH), cornerRadius: 10)
+            chip.fillColor = SKColor(hex: 0x140E06)
+            chip.strokeColor = SKColor(hex: 0xE8B04C, alpha: revealed ? 0.55 : 0.3)
+            chip.lineWidth = 1.4
+            chip.position = CGPoint(x: 0, y: cy)
+            if revealed { chip.name = "skinFamily_\(fam.id)" }
+            modal.addChild(chip)
+
+            if revealed, let flagship = sm.skins(in: fam.id).first(where: { sm.isUnlocked($0) }) ?? sm.skins(in: fam.id).first {
+                let pv = makeSkinPreview(flagship.appearance)
+                pv.position = CGPoint(x: -panelW / 2 + 46, y: cy)
+                modal.addChild(pv)
+            } else if !revealed {
+                let q = SKLabelNode(fontNamed: "Menlo-Bold")
+                q.text = "?"; q.fontSize = 28; q.fontColor = SKColor(hex: 0x6A5A3A)
+                q.verticalAlignmentMode = .center; q.horizontalAlignmentMode = .center
+                q.position = CGPoint(x: -panelW / 2 + 46, y: cy)
+                modal.addChild(q)
+            }
+
+            let name = SKLabelNode(fontNamed: "Menlo-Bold")
+            name.text = revealed ? fam.name : "???"
+            name.fontSize = 15
+            name.fontColor = revealed ? SKColor(hex: 0xF2E4C8) : SKColor(hex: 0x8A8070)
+            name.verticalAlignmentMode = .center; name.horizontalAlignmentMode = .left
+            name.position = CGPoint(x: -panelW / 2 + 78, y: cy + 12)
+            modal.addChild(name)
+
+            let sub = SKLabelNode(fontNamed: "Menlo")
+            sub.text = revealed ? "\(sm.ownedCount(in: fam.id)) / \(sm.skins(in: fam.id).count) owned   ›" : "locked"
+            sub.fontSize = 10; sub.fontColor = SKColor(hex: 0x9A8E78)
+            sub.verticalAlignmentMode = .center; sub.horizontalAlignmentMode = .left
+            sub.position = CGPoint(x: -panelW / 2 + 78, y: cy - 12)
+            modal.addChild(sub)
+        }
+        addSkinFooter(to: modal, top: top)
+    }
+
+    /// DETAIL — the skins within one family, with a back button.
+    private func renderSkinFamilyDetail(_ familyID: String, into modal: SKNode) {
+        let sm = SkinManager.shared
+        let skins = sm.skins(in: familyID)
+        let panelH = 86 + CGFloat(skins.count) * (Self.skinCardH + Self.skinCardGap) + 66
+        modal.addChild(makeSkinPanel(h: panelH))
+        let top = panelH / 2
+        addSkinHeader(to: modal, top: top, title: sm.family(familyID)?.name ?? "Skins",
+                      sub: "cosmetic only — never changes gameplay")
+
+        let back = SKLabelNode(fontNamed: "Menlo-Bold")
+        back.text = "‹ back"; back.fontSize = 12; back.fontColor = SKColor(hex: 0xE8B04C)
+        back.horizontalAlignmentMode = .left; back.verticalAlignmentMode = .center
+        back.position = CGPoint(x: -Self.skinPanelW / 2 + 16, y: top - 26)
+        back.name = "skinBack"
+        modal.addChild(back)
+
+        for (i, def) in skins.enumerated() {
+            renderSkinCard(def, index: i, panelTop: top, into: modal)
+        }
+        addSkinFooter(to: modal, top: top)
+    }
+
+    private func renderSkinCard(_ def: SkinDefinition, index i: Int, panelTop top: CGFloat, into modal: SKNode) {
+        let sm = SkinManager.shared
+        let panelW = Self.skinPanelW
+        let cy = skinCardCenterY(i, panelTop: top)
+        let owned = sm.isUnlocked(def)
+        let selected = owned && sm.selectedID == def.id
+        let masked = (sm.family(def.familyID)?.secret ?? false) && !owned
+
+        let card = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: Self.skinCardH), cornerRadius: 10)
+        card.fillColor = SKColor(hex: selected ? 0x241B0E : 0x120D08)
+        card.strokeColor = selected ? SKColor(hex: 0xF0C070, alpha: 0.9)
+                                    : SKColor(hex: def.tier == .premium ? 0x6AA0E0 : 0x5A4A2E,
+                                              alpha: owned ? 0.6 : 0.35)
+        card.lineWidth = selected ? 2 : 1.2
+        card.position = CGPoint(x: 0, y: cy)
+        card.name = "skinCard_\(def.id)"
+        modal.addChild(card)
+
+        if masked {
+            let q = SKLabelNode(fontNamed: "Menlo-Bold")
+            q.text = "?"; q.fontSize = 26; q.fontColor = SKColor(hex: 0x6A5A3A)
+            q.verticalAlignmentMode = .center; q.horizontalAlignmentMode = .center
+            q.position = CGPoint(x: -panelW / 2 + 46, y: cy)
+            modal.addChild(q)
+        } else {
+            let pv = makeSkinPreview(def.appearance)
+            pv.position = CGPoint(x: -panelW / 2 + 46, y: cy)
+            if !owned { pv.alpha = 0.4 }
+            modal.addChild(pv)
+        }
+
+        let name = SKLabelNode(fontNamed: "Menlo-Bold")
+        name.text = masked ? "???" : def.name + (def.tier == .premium ? "  ◆" : "")
+        name.fontSize = 14
+        name.fontColor = owned ? SKColor(hex: 0xF2E4C8) : SKColor(hex: 0x8A8070)
+        name.verticalAlignmentMode = .center; name.horizontalAlignmentMode = .left
+        name.position = CGPoint(x: -panelW / 2 + 78, y: cy + 18)
+        modal.addChild(name)
+
+        let blurb = SKLabelNode(fontNamed: "Menlo")
+        blurb.text = masked ? "???" : def.blurb
+        blurb.fontSize = 8.5; blurb.fontColor = SKColor(hex: 0x8A8478)
+        blurb.verticalAlignmentMode = .center; blurb.horizontalAlignmentMode = .left
+        blurb.position = CGPoint(x: -panelW / 2 + 78, y: cy - 1)
+        modal.addChild(blurb)
+
+        let status = SKLabelNode(fontNamed: "Menlo-Bold")
+        status.fontSize = 10.5
+        status.verticalAlignmentMode = .center; status.horizontalAlignmentMode = .left
+        status.position = CGPoint(x: -panelW / 2 + 78, y: cy - 22)
+        status.name = "skinStatus_\(def.id)"
+        if selected {
+            status.text = "✓ EQUIPPED";  status.fontColor = SKColor(hex: 0x8FE08F)
+        } else if owned {
+            status.text = "tap to equip"; status.fontColor = SKColor(hex: 0xF0C070)
+        } else if masked {
+            status.text = "🔒 ???";       status.fontColor = SKColor(hex: 0x8A8070)
+        } else if def.tier == .earned {
+            status.text = "🔒 locked";    status.fontColor = SKColor(hex: 0x8A8070)
+        } else {
+            status.text = "◆ premium";    status.fontColor = SKColor(hex: 0x6AA0E0)
+        }
+        modal.addChild(status)
     }
 
     /// Async-load StoreKit prices for premium skins and update their chips
@@ -1649,44 +1733,42 @@ final class TitleScene: SKScene {
     private func handleSkinPickerTap(_ location: CGPoint) {
         let sm = SkinManager.shared
         guard skinPickerModal != nil else { return }
-        // Recompute panel geometry deterministically (matches showSkinPickerModal).
-        let count = sm.catalog.count
-        let panelH = 86 + CGFloat(count) * (Self.skinCardH + Self.skinCardGap) + 74
-        let top = panelH / 2
+        // Named-node hit-testing (nodes-at-point) — no geometry to keep in sync
+        // with the renderers, and it works for both hub + detail layouts.
+        let hit = nodes(at: location)
 
         #if DEBUG
-        if let dbg = skinPickerModal?.childNode(withName: "skinDebugToggle") {
-            let f = CGRect(x: -100, y: dbg.position.y - 14, width: 200, height: 28)
-            if f.contains(location) {
-                sm.debugUnlockAll.toggle()
-                showSkinPickerModal()
-                return
-            }
+        if hit.contains(where: { $0.name == "skinDebugToggle" }) {
+            sm.debugUnlockAll.toggle(); showSkinPickerModal(); return
         }
         #endif
 
-        for (i, def) in sm.catalog.enumerated() {
-            let cy = skinCardCenterY(i, panelTop: top)
-            let f = CGRect(x: -(Self.skinPanelW - 32) / 2, y: cy - Self.skinCardH / 2,
-                           width: Self.skinPanelW - 32, height: Self.skinCardH)
-            guard f.contains(location) else { continue }
+        // Detail → hub.
+        if hit.contains(where: { $0.name == "skinBack" }) {
+            skinPickerFamily = nil; showSkinPickerModal(); return
+        }
+
+        // Hub → family detail.
+        if let chip = hit.first(where: { ($0.name ?? "").hasPrefix("skinFamily_") }) {
+            skinPickerFamily = String((chip.name ?? "").dropFirst("skinFamily_".count))
+            showSkinPickerModal(); return
+        }
+
+        // Detail: a skin card — equip (owned), buy (premium), or soft-nudge (locked).
+        if let card = hit.first(where: { ($0.name ?? "").hasPrefix("skinCard_") }),
+           let def = sm.definition(String((card.name ?? "").dropFirst("skinCard_".count))) {
             if sm.isUnlocked(def) {
-                if sm.selectedID != def.id {
-                    sm.select(def.id)
-                    AudioManager.shared.play(.cardSelect)
-                    showSkinPickerModal()   // refresh EQUIPPED state
-                }
+                if sm.selectedID != def.id { sm.select(def.id); showSkinPickerModal() }
             } else if def.tier == .premium {
                 purchaseSkin(def)
             } else {
-                AudioManager.shared.play(.orbPickup)   // locked earned — soft nudge, no-op
+                AudioManager.shared.play(.orbPickup)   // locked earned — soft nudge
             }
             return
         }
 
-        // Tap outside the panel closes.
-        let panelFrame = CGRect(x: -Self.skinPanelW / 2, y: -top, width: Self.skinPanelW, height: panelH)
-        if !panelFrame.contains(location) {
+        // Tap off the panel closes the whole modal.
+        if !hit.contains(where: { $0.name == "skinPanel" }) {
             dismissSkinPickerModal(animated: true)
         }
     }
@@ -1707,6 +1789,7 @@ final class TitleScene: SKScene {
         guard let modal = skinPickerModal else { return }
         skinPickerModal = nil
         if animated {
+            skinPickerFamily = nil   // real close (not a refresh) → reopen at the hub
             modal.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.15), SKAction.removeFromParent()]))
         } else {
             modal.removeFromParent()

@@ -5277,6 +5277,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.facetedLie)
+            SkinManager.shared.unlockEarned("spark_ascended")  // v2.0: clearing Arena 4 earns the Ascended skin
             for _ in 0..<10 {
                 let offset = CGPoint(
                     x: CGFloat.random(in: -40...40),

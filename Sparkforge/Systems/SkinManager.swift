@@ -46,9 +46,20 @@ struct SkinAppearance {
         glowBoost: 1.0)
 }
 
+/// A themed group of skins (the store hub shows family chips → drill into one).
+/// Mirrors the Forge Path Mastery-chip nav for a consistent interaction language.
+struct SkinFamily {
+    let id: String
+    let name: String
+    /// Secret families (e.g. Panda) render as `???` at the hub until a member is
+    /// owned (or revealed) — never leak the unlock logic.
+    let secret: Bool
+}
+
 /// One catalog entry.
 struct SkinDefinition {
     let id: String
+    let familyID: String
     let name: String
     let blurb: String
     let tier: SkinTier
@@ -64,51 +75,98 @@ final class SkinManager {
 
     // MARK: - Product ids (premium skins; must match ASC / the .storekit config)
 
-    static let premiumSparkProductID = "com.brandon.Sparkforge.skin.sparkprime"
+    static let premiumSparkProductID       = "com.brandon.Sparkforge.skin.primeember"
+    static let premiumStarCrossedProductID = "com.brandon.Sparkforge.skin.starcrossedprime"
+    static let premiumPandaProductID       = "com.brandon.Sparkforge.skin.flamepanda"
+
+    // MARK: - Families (hub chips → drill into one). New families just append.
+
+    let families: [SkinFamily] = [
+        SkinFamily(id: "core_spark", name: "Core Spark", secret: false),
+        SkinFamily(id: "starforged", name: "Starforged", secret: false),
+        SkinFamily(id: "panda",      name: "Panda",      secret: true),
+        // Later: "verdant" (Verdant Treekeeper, 11–20) + raw-purchasable families.
+    ]
 
     // MARK: - Catalog (ordered; auto-registering — future skins just append)
 
-    /// The v2.0 roster grows here. Unit 1 ships base + the earned "Ascended"
-    /// Spark (locked until Arena 5) + one premium skin to exercise the IAP path.
-    /// Panda skins + Growth skin append in later units — no plumbing changes.
+    /// Every family has earned + premium variants (base Spark is Core Spark's
+    /// base). Panda is secret (masked `???`) until revealed. Growth/Verdant skins
+    /// append later — no plumbing changes. Appearances are procedural palettes.
     let catalog: [SkinDefinition] = [
+        // ── Core Spark family ──────────────────────────────────────────────
         SkinDefinition(
-            id: "spark_base",
-            name: "Ember",
-            blurb: "The spark, freshly struck.",
-            tier: .base,
-            appearance: .base,
-            iapProductID: nil),
+            id: "spark_base", familyID: "core_spark",
+            name: "Ember", blurb: "The spark, freshly struck.",
+            tier: .base, appearance: .base, iapProductID: nil),
 
         SkinDefinition(
-            id: "spark_ascended",
+            id: "spark_ascended", familyID: "core_spark",
             name: "Ascended",
-            blurb: "A coal that became a star. Earned by clearing Arena 5.",
+            blurb: "A coal that became a star. Earned by clearing Arena 4.",
             tier: .earned,
             appearance: SkinAppearance(
-                coreColorHex: 0xFFE08A,        // brighter molten gold
-                glowColorHex: 0xFF7A12,        // intense ember halo
-                innerCoreColorHex: 0xFFFFFF,   // pure white-hot
-                eyeColorHex: 0x0A0A0A,
-                trailColorHex: 0xFFC24D,
-                flareRingColorHex: 0xFFE6B0,
-                glowBoost: 1.3),
+                coreColorHex: 0xFFE08A, glowColorHex: 0xFF7A12,
+                innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0x0A0A0A,
+                trailColorHex: 0xFFC24D, flareRingColorHex: 0xFFE6B0, glowBoost: 1.3),
             iapProductID: nil),
 
         SkinDefinition(
-            id: "spark_prime",
-            name: "Prime Ember",
-            blurb: "A refined, jewel-cut ember. Support the forge.",
+            id: "spark_prime", familyID: "core_spark",
+            name: "Prime Ember", blurb: "A refined, jewel-cut ember. Support the forge.",
             tier: .premium,
             appearance: SkinAppearance(
-                coreColorHex: 0xFF9E4D,
-                glowColorHex: 0xFF4D1A,        // deep, saturated core glow
-                innerCoreColorHex: 0xFFF2D8,
-                eyeColorHex: 0x0A0A0A,
-                trailColorHex: 0xFF7A2E,
-                flareRingColorHex: 0xFFB870,
-                glowBoost: 1.15),
+                coreColorHex: 0xFF9E4D, glowColorHex: 0xFF4D1A,
+                innerCoreColorHex: 0xFFF2D8, eyeColorHex: 0x0A0A0A,
+                trailColorHex: 0xFF7A2E, flareRingColorHex: 0xFFB870, glowBoost: 1.15),
             iapProductID: premiumSparkProductID),
+
+        // ── Starforged family (Arena 5 payoff) ─────────────────────────────
+        SkinDefinition(
+            id: "spark_starcrossed", familyID: "starforged",
+            name: "Star-Crossed Spark",
+            blurb: "Survived the forge's heart — but not untouched. Earned in Arena 5.",
+            tier: .earned,
+            appearance: SkinAppearance(
+                coreColorHex: 0x3B3170,        // deep indigo/midnight body
+                glowColorHex: 0x5A3AC8,        // violet-indigo halo
+                innerCoreColorHex: 0xFFFFFF,   // white-hot star center
+                eyeColorHex: 0xE0E0FF,         // star-white eyes
+                trailColorHex: 0x9A7AE8,
+                flareRingColorHex: 0xC8B0FF, glowBoost: 1.2),
+            iapProductID: nil),
+
+        SkinDefinition(
+            id: "spark_starcrossed_prime", familyID: "starforged",
+            name: "Star-Crossed Prime",
+            blurb: "The constellation, deepened. Support the forge.",
+            tier: .premium,
+            appearance: SkinAppearance(
+                coreColorHex: 0x2E2668, glowColorHex: 0x6A3AE0,
+                innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0xF0F0FF,
+                trailColorHex: 0xB088FF, flareRingColorHex: 0xE0C8FF, glowBoost: 1.3),
+            iapProductID: premiumStarCrossedProductID),
+
+        // ── Panda family (SECRET — masked ??? until revealed) ──────────────
+        SkinDefinition(
+            id: "spark_panda", familyID: "panda",
+            name: "Panda", blurb: "???",
+            tier: .earned,
+            appearance: SkinAppearance(
+                coreColorHex: 0xF2F2F2, glowColorHex: 0x888888,
+                innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0x0A0A0A,
+                trailColorHex: 0xCCCCCC, flareRingColorHex: 0xFFFFFF, glowBoost: 1.0),
+            iapProductID: nil),
+
+        SkinDefinition(
+            id: "spark_panda_flame", familyID: "panda",
+            name: "Flame Panda", blurb: "???",
+            tier: .premium,
+            appearance: SkinAppearance(
+                coreColorHex: 0xFF7733, glowColorHex: 0xFF3300,
+                innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0x0A0A0A,
+                trailColorHex: 0xFF5522, flareRingColorHex: 0xFFAA44, glowBoost: 1.4),
+            iapProductID: premiumPandaProductID),
     ]
 
     // MARK: - Persistence keys (new; never rename — live-player data)
@@ -134,6 +192,28 @@ final class SkinManager {
 
     func definition(_ id: String) -> SkinDefinition? {
         catalog.first { $0.id == id }
+    }
+
+    func family(_ id: String) -> SkinFamily? {
+        families.first { $0.id == id }
+    }
+
+    /// Skins belonging to a family, in catalog order.
+    func skins(in familyID: String) -> [SkinDefinition] {
+        catalog.filter { $0.familyID == familyID }
+    }
+
+    func ownedCount(in familyID: String) -> Int {
+        skins(in: familyID).filter { isUnlocked($0) }.count
+    }
+
+    /// A secret family stays masked (`???` at the hub) until a member is owned
+    /// (or debug reveals it). Non-secret families are always revealed.
+    func isFamilyRevealed(_ f: SkinFamily) -> Bool {
+        #if DEBUG
+        if debugUnlockAll { return true }
+        #endif
+        return !f.secret || ownedCount(in: f.id) > 0
     }
 
     /// The appearance to render for the currently selected skin (falls back to
