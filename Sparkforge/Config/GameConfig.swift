@@ -131,6 +131,48 @@ enum GameConfig {
         }
     }
 
+    // MARK: - The Unmade Star (v2.0 Arena 5 monument boss)
+    /// Axis: INEVITABILITY. The arena stops asking and starts deciding. Every
+    /// mechanic is telegraphed — a monument is huge, so tells must be
+    /// exceptionally clean or the spectacle becomes unfair soup.
+    enum UnmadeStar {
+        static let baseHealth: Int = 900
+        static let contactDamage: Int = 22
+        static let xpValue: Int = 260
+
+        // Collapse Marks — delayed ground markers that implode where you stood.
+        static let collapseInterval: TimeInterval = 3.4
+        static let collapseDelay: TimeInterval = 1.25          // telegraph window
+        static var collapseRadius: CGFloat { 78 * DeviceScale.gameplay }
+        static let collapseDamage: Int = 20
+
+        // Starfall Sequence — ordered descending impacts (read the order, move).
+        static let starfallInterval: TimeInterval = 6.5
+        static let starfallCount: Int = 4
+        static let starfallStagger: TimeInterval = 0.35
+        static let starfallDelay: TimeInterval = 1.1
+        static var starfallRadius: CGFloat { 66 * DeviceScale.gameplay }
+        static let starfallDamage: Int = 16
+
+        // Weight of the Center — phase 2's gravitational assertion (pulls you UP
+        // toward the monument, i.e. into danger). Boss-scale Gravemote grammar.
+        static let pullInterval: TimeInterval = 8.0
+        static let pullDuration: TimeInterval = 1.8
+        static let pullStrength: CGFloat = 95
+
+        // Accretion fragment strikes — orbital fragments break off and descend.
+        static let fragmentInterval: TimeInterval = 5.0
+        static let fragmentDelay: TimeInterval = 0.9
+        static var fragmentRadius: CGFloat { 58 * DeviceScale.gameplay }
+        static let fragmentDamage: Int = 14
+
+        // Cadence: every timer is multiplied by these as the star comes apart.
+        static let phase2Cadence: CGFloat = 0.85
+        static let phase3Cadence: CGFloat = 0.70
+        static let enrageThreshold: CGFloat = 0.15   // Final Compression
+        static let enrageCadence: CGFloat = 0.55
+    }
+
     enum Everglow {
         static let pulseInterval: TimeInterval = 2.0
         static var baseRadius: CGFloat { 70 * DeviceScale.gameplay }   // short; ×2 at T2

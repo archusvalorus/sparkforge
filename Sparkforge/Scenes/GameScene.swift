@@ -3925,8 +3925,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         showPounceImpact(at: target.position)
         switch target {
         case .enemy(let e):
+            apexFamiliarLifesteal(e.health)        // the pounce IS familiar damage
             executeMob(e)                          // instant kill + blood mist
         case .boss(let b):
+            apexFamiliarLifesteal(b.health)        // "edge to the end, then the bat feeds you"
             showBossExecuteEvent(at: b.position)   // screen-wide finish
             b.takeDamage(b.health)
         }
@@ -4983,6 +4985,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let star = UnmadeStarNode(arenaRadius: GameConfig.Arena.radius, hpScaling: hpScaling)
         star.position = MonumentBossNode.anchorPosition(arenaRadius: GameConfig.Arena.radius)
+
+        // Mechanics → scene. Hazards route through the standard boss-hazard path
+        // (i-frames, Silver Skin, Phase Skin all still apply).
+        star.onHazardDamage = { [weak self] damage in
+            self?.applyBossHazardDamage(damage, shakeIntensity: 7)
+        }
+        // Weight of the Center: drag the player toward the monument — i.e. UP,
+        // into the danger it owns. Same grammar as the Gravemote pull, boss-scale.
+        star.onPull = { [weak self] displacement in
+            guard let self = self, let b = self.boss else { return }
+            let d = self.player.position.distance(to: b.position)
+            guard d > 4 else { return }
+            let dir = (b.position - self.player.position).normalized
+            self.player.position += dir * displacement
+        }
 
         // 3) The single sanctioned pickup: one HP orb when the star hits 50%.
         star.onHalfHealth = { [weak self] in
