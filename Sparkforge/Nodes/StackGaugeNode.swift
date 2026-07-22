@@ -17,7 +17,9 @@ final class StackGaugeNode: SKNode {
     private let pipRadius: CGFloat
     private let spacing: CGFloat
 
-    init(pipRadius: CGFloat = 5.5, spacing: CGFloat = 16) {
+    // v2.0 HUD readout pass (Brandon, Jul 22): pips are bigger + more saturated
+    // so a glance reads the charge state mid-swarm.
+    init(pipRadius: CGFloat = 7.5, spacing: CGFloat = 21) {
         self.pipRadius = pipRadius
         self.spacing = spacing
         super.init()
@@ -84,9 +86,10 @@ final class StackGaugeNode: SKNode {
     // MARK: - Pip states
 
     private func lightPip(_ pip: SKShapeNode, newlyLit: Bool) {
-        pip.fillColor = SKColor(hex: filledColor, alpha: 0.9)
+        pip.fillColor = SKColor(hex: filledColor, alpha: 1.0)
         pip.strokeColor = SKColor(hex: filledColor, alpha: 1.0)
-        pip.glowWidth = 4
+        pip.lineWidth = 2
+        pip.glowWidth = 7
         if newlyLit {
             pip.removeAction(forKey: "pop")
             pip.setScale(1.6)
@@ -96,10 +99,12 @@ final class StackGaugeNode: SKNode {
 
     private func dimPip(_ pip: SKShapeNode) {
         pip.removeAction(forKey: "pop")
-        pip.fillColor = SKColor(hex: filledColor, alpha: 0.08)
-        pip.strokeColor = SKColor(hex: filledColor, alpha: 0.5)
-        pip.lineWidth = 1.5
-        pip.glowWidth = 0
+        // Empty pips keep a visible tinted body + ring so the gauge's CAPACITY
+        // reads at a glance, not just its current fill.
+        pip.fillColor = SKColor(hex: filledColor, alpha: 0.22)
+        pip.strokeColor = SKColor(hex: filledColor, alpha: 0.75)
+        pip.lineWidth = 2
+        pip.glowWidth = 1
         pip.setScale(1.0)
     }
 }

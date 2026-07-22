@@ -101,6 +101,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var erasureStackTimer: TimeInterval = 0
     private var erasureTriggerCooldown: TimeInterval = 0
     private let erasureGauge = StackGaugeNode()  // Unstable charge (reuses the rage meter)
+    /// v2.0: compact countdown rows for timer-based capstones (agency over the boom).
+    private let capstoneTimers = CapstoneTimerHUD()
+    /// v2.0: edge markers pointing at off-screen HP/magnet orbs (the doubled arena
+    /// made them hard to find — canon colours: green = health, blue = magnet).
+    private let orbIndicators = OrbIndicatorHUD()
     // v1.9: Event Horizon (Erasure T5) — one-per-run scripted run-ender.
     private var eventHorizonErased = false        // arena wiped
     private var eventHorizonEnded = false         // player erased
@@ -920,23 +925,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.9 Iron Maiden: Kinetic reserve gauge — centered just below the HP
         // bar, like a rage meter. Hidden until Kinetic Reserve (T4) is active.
+        // v2.0 HUD readout pass: each capstone gauge gets its OWN row. Multiple
+        // capstones can now be owned at once (the +1 pick), and stacking them in
+        // one slot rendered them on top of each other — maximally illegible.
         kineticGauge.position = CGPoint(x: 0, y: safeTop - 86)
         kineticGauge.zPosition = 101
         camera.addChild(kineticGauge)
         refreshKineticGauge()
 
-        // v1.9 Apex: pounce charge gauge — same slot (only one capstone gauge
-        // is normally active at once).
-        apexGauge.position = CGPoint(x: 0, y: safeTop - 86)
+        apexGauge.position = CGPoint(x: 0, y: safeTop - 110)
         apexGauge.zPosition = 101
         camera.addChild(apexGauge)
         refreshApexGauge()
 
-        // v1.9 Erasure: Unstable charge meter — same slot as the other capstone gauges.
-        erasureGauge.position = CGPoint(x: 0, y: safeTop - 86)
+        erasureGauge.position = CGPoint(x: 0, y: safeTop - 134)
         erasureGauge.zPosition = 101
         camera.addChild(erasureGauge)
         refreshErasureGauge()
+
+        // v2.0 HUD readout pass: compact countdown rows for TIMER-based
+        // capstones (Everglow eruption today; Variegated Rainbow plugs in free).
+        // RIGHT column, below the stat box — the centre lane is owned by
+        // level-up announcements + upgrade cards, which it collided with.
+        capstoneTimers.position = CGPoint(x: size.width / 2 - 22, y: safeTop - 196)
+        camera.addChild(capstoneTimers)
+
+        // v2.0: off-screen pickup markers ride the camera at origin (their own
+        // projection math places them on the screen-edge rectangle).
+        camera.addChild(orbIndicators)
     }
 
     /// Sync the Kinetic gauge to current stats — shown/hidden with Kinetic
@@ -1727,6 +1743,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard gameState == .playing else { return }
         gameState = .paused
         joystick.forceRelease()
+        // v2.0: in-world readouts must not render over the pause menu (the
+        // eruption countdown was crowding the PAUSED title).
+        capstoneTimers.isHidden = true
+        orbIndicators.isHidden = true
         pauseMenu.show(upgradeManager: upgradeManager)
     }
 
@@ -1735,6 +1755,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameState = .playing
         // Brief invulnerability after unpause so player can reorient
         invulnerableTimer = 1.0
+        capstoneTimers.isHidden = false
+        orbIndicators.isHidden = false
         pauseMenu.hide()
     }
 
@@ -2398,9 +2420,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         updateHUD()
-        
+
         // Camera follows player
         camera?.position = player.position
+
+        // v2.0: mark off-screen pickups. The doubled arena made orbs hard to
+        // FIND — and a pickup you can't locate isn't a positioning decision,
+        // it's a lottery. Health stays non-magnetized (canon); this just makes
+        // "is that heal worth the walk?" an answerable question.
+        var orbTargets: [OrbIndicatorHUD.Target] = []
+        orbTargets.reserveCapacity(healthOrbs.count + magnetOrbs.count)
+        for o in healthOrbs { orbTargets.append(.init(position: o.position, colorHex: 0x66DD66)) }
+        for o in magnetOrbs { orbTargets.append(.init(position: o.position, colorHex: 0x4AA3FF)) }
+        orbIndicators.update(targets: orbTargets, center: player.position, viewSize: size)
     }
     
     // MARK: - Enemy Updates
@@ -2946,6 +2978,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 everglowEruptionTimer -= GameConfig.Everglow.eruptionInterval
                 triggerEverglowEruption()
             }
+            // v2.0: surface the countdown — the player decides whether to kite
+            // and gather for the boom, or dive in now.
+            capstoneTimers.set("everglow", label: "🔥 ERUPTION", colorHex: 0xFF7A2E,
+                               remaining: GameConfig.Everglow.eruptionInterval - everglowEruptionTimer)
         }
     }
 
@@ -7040,6 +7076,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         eventHorizonVoided = false
         removeAction(forKey: "eventHorizonPeace")
         hideEventHorizonCountdown()
+        capstoneTimers.clearAll()   // v2.0: countdown rows never carry across runs
+        orbIndicators.clear()
         refreshErasureGauge()
         windchillStorm?.removeFromParent(); windchillStorm = nil
         windchillTimer = 0

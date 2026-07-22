@@ -139,7 +139,10 @@ enum GameConfig {
         static let pulseGrowthCap: CGFloat = 1.0       // +100% pulse (T3 cap)
         static let furnaceAtkGainPerHit: CGFloat = 0.005  // +0.5% ATK per hit (T4)
         static let atkGrowthCap: CGFloat = 0.5         // +50% ATK (T4 cap)
-        static let eruptionInterval: TimeInterval = 15.0
+        // v2.0 tuning (Brandon, Jul 22): 15s → 20s. The longer wait also SHARPENS
+        // the turtle-then-boom rhythm the countdown HUD created. Damage held at
+        // 500% for now — the interval alone is already a 25% throughput cut.
+        static let eruptionInterval: TimeInterval = 20.0
         static let eruptionMult: CGFloat = 5.0         // 500% ATK, arena-wide (T5)
         static let eruptionTelegraph: TimeInterval = 0.8
     }
