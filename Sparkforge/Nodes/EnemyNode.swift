@@ -57,12 +57,18 @@ class EnemyNode: SKNode {
     }
     
     // MARK: - Visual
-    
+
     private let bodyNode: SKShapeNode
     private let rimGlowNode: SKShapeNode
     private let leftEye: SKShapeNode
     private let rightEye: SKShapeNode
     private let mouth: SKShapeNode
+
+    // v2.0: themeable base palette so subclasses (Star Anvil family, future
+    // biomes) aren't locked to the red-devil look. Status-effect reverts read
+    // these instead of hardcoded hexes, so a themed enemy returns to ITS colors.
+    private var baseBodyHex: UInt32 = 0x1A1A1A
+    private var baseEyeHex: UInt32 = 0xFF2222
     
     // MARK: - Face Styles
     
@@ -260,8 +266,21 @@ class EnemyNode: SKNode {
         physicsBody = body
     }
     
+    // MARK: - Theming (v2.0)
+
+    /// Recolor the base body/rim/eyes (Star Anvil enemies, future biomes). Stores
+    /// body+eye as the new "base" so status-effect reverts return here, not to red.
+    func setBodyPalette(body: UInt32, rim: UInt32, eye: UInt32) {
+        baseBodyHex = body
+        baseEyeHex = eye
+        bodyNode.fillColor = SKColor(hex: body)
+        rimGlowNode.strokeColor = SKColor(hex: rim, alpha: 0.8)
+        leftEye.fillColor = SKColor(hex: eye)
+        rightEye.fillColor = SKColor(hex: eye)
+    }
+
     // MARK: - AI
-    
+
     func chase(target: CGPoint, deltaTime: TimeInterval, globalSlow: CGFloat = 0) {
         // v1.6: stun ticks in updateStatusEffects (so ranged enemies respect it too)
         // v1.9: a frozen enemy is locked in place too.
@@ -326,7 +345,7 @@ class EnemyNode: SKNode {
             freezeTimer -= deltaTime
             if freezeTimer <= 0 {
                 chillStacks = 0
-                bodyNode.fillColor = SKColor(hex: 0x1A1A1A)
+                bodyNode.fillColor = SKColor(hex: baseBodyHex)
             }
         }
 
@@ -350,9 +369,9 @@ class EnemyNode: SKNode {
             slowTimer -= deltaTime
             if slowTimer <= 0 {
                 currentSlow = 0
-                bodyNode.fillColor = SKColor(hex: 0x1A1A1A)
-                leftEye.fillColor = SKColor(hex: 0xFF2222)
-                rightEye.fillColor = SKColor(hex: 0xFF2222)
+                bodyNode.fillColor = SKColor(hex: baseBodyHex)
+                leftEye.fillColor = SKColor(hex: baseEyeHex)
+                rightEye.fillColor = SKColor(hex: baseEyeHex)
             }
         }
         
@@ -392,9 +411,10 @@ class EnemyNode: SKNode {
             },
             SKAction.wait(forDuration: 0.06),
             SKAction.run { [weak self] in
-                self?.bodyNode.fillColor = SKColor(hex: 0x1A1A1A)
-                self?.leftEye.fillColor = SKColor(hex: 0xFF2222)
-                self?.rightEye.fillColor = SKColor(hex: 0xFF2222)
+                guard let self else { return }
+                self.bodyNode.fillColor = SKColor(hex: self.baseBodyHex)
+                self.leftEye.fillColor = SKColor(hex: self.baseEyeHex)
+                self.rightEye.fillColor = SKColor(hex: self.baseEyeHex)
             }
         ])
         run(flash)

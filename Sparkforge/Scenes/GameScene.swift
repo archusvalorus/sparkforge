@@ -2426,6 +2426,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 }
             }
 
+            // v2.0 (Unit 2b): Gravemote — a telegraphed localized pull DRAGS the
+            // player toward the mote (the first enemy to displace the player).
+            // Gentle: a movable player fights it easily; it just steals clean lines.
+            if let mote = enemy as? GravemoteNode {
+                let strength = mote.updatePull(deltaTime: dt)
+                if strength > 0 {
+                    let d = player.position.distance(to: mote.position)
+                    if d < GravemoteNode.pullRadius && d > 4 {
+                        let dir = (mote.position - player.position).normalized
+                        player.position += dir * strength * CGFloat(dt)
+                    }
+                }
+            }
+
+            // v2.0 (Unit 2b): Anvilborn — anchors, winds up, then SLAMS a
+            // localized shockwave. Elite, NOT boss-class (no Giantkiller DR).
+            if let anvil = enemy as? AnvilbornNode {
+                if anvil.updateSlam(deltaTime: dt),
+                   player.position.distance(to: anvil.position) < AnvilbornNode.slamRadius {
+                    applyBossHazardDamage(AnvilbornNode.slamDamage,
+                                          shakeIntensity: 8, fromBossClass: false)
+                }
+            }
+
             // v1.8 Ironhide (Guard 3): tally the crowd pressing the player
             if playerStats.pressureDefBonus > 0
                 && enemy.position.distance(to: player.position) < playerStats.pressureDefRadius {
@@ -4824,6 +4848,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             spawnMirrorwoundEnemy()
             return
         }
+        // v2.0: and The Star Anvil (Arena 5)
+        if arenaConfig.id == 4 {
+            spawnStarAnvilEnemy()
+            return
+        }
 
         let elapsed = waveManager.elapsedTime
 
@@ -4871,6 +4900,35 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             enemy.setScale(sizeScale)
         }
 
+        enemies.append(enemy)
+        worldNode.addChild(enemy)
+    }
+
+    // MARK: - v2.0 (Unit 2b): Star Anvil Spawning (Arena 5)
+
+    /// Arena 5 spawn table (staggered vocabulary): Gravemotes teach the pull
+    /// first; Star Needle (committed line) joins mid-game; Anvilborn (mass) is
+    /// the next step. Spawns at the edge of the DOUBLED field (radius-relative,
+    /// not the fixed distance) so the big arena doesn't pop enemies mid-floor.
+    private func spawnStarAnvilEnemy() {
+        let elapsed = waveManager.elapsedTime
+        let baseHP: Int = elapsed < 60 ? 1 : (elapsed < 120 ? 2 : Int.random(in: 2...3))
+        let xp = max(1, baseHP + 1)
+
+        let enemy: EnemyNode
+        let roll = CGFloat.random(in: 0...1)
+        if elapsed >= 90 && roll < 0.20 {
+            // Elite: beefier + worth more. "The arena is running out of room."
+            enemy = AnvilbornNode(health: baseHP + 3, xpValue: xp + 3)
+        } else if elapsed >= 40 && roll < 0.50 {
+            enemy = StarNeedleNode(health: baseHP, xpValue: xp)   // "decision beats panic"
+        } else {
+            enemy = GravemoteNode(health: baseHP, xpValue: xp)    // "your position can be stolen"
+        }
+
+        let angle = CGFloat.random(in: 0...(2 * .pi))
+        let spawnR = GameConfig.Arena.radius * 0.95
+        enemy.position = CGPoint(x: cos(angle) * spawnR, y: sin(angle) * spawnR)
         enemies.append(enemy)
         worldNode.addChild(enemy)
     }
@@ -5500,7 +5558,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Shared damage path for boss arena hazards (lanes, future patterns).
     /// Respects i-frames, Phase Skin, and lethal saves like any other hit.
-    private func applyBossHazardDamage(_ damage: Int, shakeIntensity: CGFloat) {
+    /// v2.0: `fromBossClass` defaults to true (every pre-existing caller is a
+    /// boss hazard); Arena 5's Anvilborn slam passes false — it's an elite, so
+    /// boss-class DR (Giantkiller's Guard) must not apply to it.
+    private func applyBossHazardDamage(_ damage: Int, shakeIntensity: CGFloat,
+                                       fromBossClass: Bool = true) {
         guard gameState == .playing else { return }
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
@@ -5519,7 +5581,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         playerStats.resetOvercharge()
-        let died = applyPlayerDamage(damage, fromBossClass: true)  // boss hazard
+        let died = applyPlayerDamage(damage, fromBossClass: fromBossClass)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
