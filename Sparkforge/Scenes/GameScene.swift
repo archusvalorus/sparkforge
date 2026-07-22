@@ -44,6 +44,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v2.0: true for the duration of a MONUMENT boss fight — suppresses all
     /// pickup spawns (one HP orb at 50% boss HP is the only sanctioned drop).
     private var monumentFightActive: Bool = false
+    /// v2.0 (Unit 2c.3): the FALSE ENDING — after a monument falls the arena
+    /// goes silent and stays silent. The player is allowed to believe they've
+    /// reached the true end. Unit 3's Mote fills that silence.
+    private var falseEndingActive: Bool = false
 
     // v1.6: Quench Field momentum pulses (points/sec toward boss when positive)
     private var fieldImpulseStrength: CGFloat = 0
@@ -2340,7 +2344,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // the stage belongs to him. Boss-summoned minions (Titan's spawn
         // pattern) still arrive; waves resume the moment he falls.
         // v1.9 Erasure Event Horizon: the void has halted all spawning.
-        if !eventHorizonVoided {
+        if !eventHorizonVoided && !falseEndingActive {
         if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
         if spawnEvent.shouldSpawnMiniBoss {
             // v1.4: Spawn real boss if gate is met, otherwise mini-boss
@@ -2391,7 +2395,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // monument fight — the set-piece is about spectacle and the duel, not
         // foraging. The single sanctioned exception is one HP orb at 50% boss HP.
         healthOrbTimer += dt
-        if !monumentFightActive, healthOrbTimer >= nextHealthOrbSpawn {
+        if !monumentFightActive, !falseEndingActive, healthOrbTimer >= nextHealthOrbSpawn {
             healthOrbTimer = 0
             nextHealthOrbSpawn = TimeInterval.random(in: GameConfig.HealthOrb.minSpawnInterval...GameConfig.HealthOrb.maxSpawnInterval)
             let orb = HealthOrbNode()
@@ -2407,7 +2411,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // v1.4: Magnet orb spawning + updating (also suppressed during a monument fight)
         magnetOrbTimer += dt
-        if !monumentFightActive, magnetOrbTimer >= nextMagnetOrbSpawn {
+        if !monumentFightActive, !falseEndingActive, magnetOrbTimer >= nextMagnetOrbSpawn {
             magnetOrbTimer = 0
             nextMagnetOrbSpawn = TimeInterval.random(in: GameConfig.MagnetOrb.minSpawnInterval...GameConfig.MagnetOrb.maxSpawnInterval)
             let orb = MagnetOrbNode()
@@ -5015,6 +5019,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             self.monumentFightActive = false
+            self.beginFalseEnding()
             ProgressionManager.shared.recordKill(.boss)
             for _ in 0..<12 {
                 let offset = CGPoint(x: CGFloat.random(in: -60...60),
@@ -5029,6 +5034,60 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         boss = star
         worldNode.addChild(star)
         showBossEntrance(name: "THE UNMADE STAR", colorHex: 0xFFD98A)
+    }
+
+    // MARK: - v2.0 (Unit 2c.3): The False Ending
+
+    /// After the monument falls, the arena goes SILENT — and stays silent. No
+    /// waves, no pickups; just the player, the scattered rewards, and quiet.
+    ///
+    /// This is a deliberate lie. The Star Anvil is built to feel like the true
+    /// end: the boss was conclusive, the forge appears complete, the player is
+    /// allowed a real beat of triumph. Unit 3's Mote then arrives *outside the
+    /// normal rules* and invalidates it — and the more final this beat feels,
+    /// the more the interruption lands. See docs/arena5-star-anvil-creative.md.
+    private func beginFalseEnding() {
+        guard !falseEndingActive else { return }
+        falseEndingActive = true
+
+        // Let the collapse and the reward scatter breathe before the card.
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: 2.6),
+            SKAction.run { [weak self] in self?.showFalseEndingCard() }
+        ]), withKey: "falseEnding")
+    }
+
+    /// Understated and reverent — NOT a fanfare. It should read as "the forge is
+    /// finished with you," which is exactly the note Mote gets to interrupt.
+    private func showFalseEndingCard() {
+        guard let camera = camera else { return }
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "THE FORGE IS QUIET"
+        title.fontSize = 22
+        title.fontColor = SKColor(hex: 0xFFD98A)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: 26)
+        title.zPosition = 260
+        title.alpha = 0
+        camera.addChild(title)
+
+        let line = SKLabelNode(fontNamed: "Menlo")
+        line.text = "the forge weighed what you became"
+        line.fontSize = 12.5
+        line.fontColor = SKColor(hex: 0x9A8ED0)
+        line.verticalAlignmentMode = .center
+        line.position = CGPoint(x: 0, y: -2)
+        line.zPosition = 260
+        line.alpha = 0
+        camera.addChild(line)
+
+        // Slow, quiet, and it STAYS — the silence is the point. Unit 3 fills it.
+        title.run(SKAction.fadeAlpha(to: 1.0, duration: 1.6))
+        line.run(SKAction.sequence([
+            SKAction.wait(forDuration: 0.9),
+            SKAction.fadeAlpha(to: 1.0, duration: 1.6)
+        ]))
     }
 
     // MARK: - v2.0 (Unit 2b): Star Anvil Spawning (Arena 5)
@@ -7201,6 +7260,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         levelUpOverlay.childNode(withName: "statRow")?.removeFromParent()
         bossDefeatedThisRun = false
         monumentFightActive = false
+        falseEndingActive = false
         pendingForgeXP = 0
         
         // v1.4: Reset orb timers
