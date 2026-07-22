@@ -41,6 +41,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v1.6: any arena's boss lives here (Slag Titan or Quench Warden)
     private var boss: (any ArenaBossNode)? = nil
     private var bossDefeatedThisRun: Bool = false
+    /// v2.0: true for the duration of a MONUMENT boss fight — suppresses all
+    /// pickup spawns (one HP orb at 50% boss HP is the only sanctioned drop).
+    private var monumentFightActive: Bool = false
 
     // v1.6: Quench Field momentum pulses (points/sec toward boss when positive)
     private var fieldImpulseStrength: CGFloat = 0
@@ -2350,6 +2353,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 spawnDynamoChoir()
             } else if arenaConfig.id == 3 && ProgressionManager.shared.facetedLieUnlocked && boss == nil {
                 spawnFacetedLie()
+            } else if arenaConfig.id == 4 && boss == nil {
+                spawnUnmadeStar()   // v2.0: monument instance #1 (no unlock gate — Arena 5 is DEBUG-only until Unit 2 completes)
             } else {
                 spawnMiniBoss()
             }
@@ -2382,8 +2387,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         // v1.4: Health orb spawning + updating
+        // v2.0 LOCKED monument rule: pickup spawns are SUPPRESSED for the whole
+        // monument fight — the set-piece is about spectacle and the duel, not
+        // foraging. The single sanctioned exception is one HP orb at 50% boss HP.
         healthOrbTimer += dt
-        if healthOrbTimer >= nextHealthOrbSpawn {
+        if !monumentFightActive, healthOrbTimer >= nextHealthOrbSpawn {
             healthOrbTimer = 0
             nextHealthOrbSpawn = TimeInterval.random(in: GameConfig.HealthOrb.minSpawnInterval...GameConfig.HealthOrb.maxSpawnInterval)
             let orb = HealthOrbNode()
@@ -2397,9 +2405,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return false
         }
         
-        // v1.4: Magnet orb spawning + updating
+        // v1.4: Magnet orb spawning + updating (also suppressed during a monument fight)
         magnetOrbTimer += dt
-        if magnetOrbTimer >= nextMagnetOrbSpawn {
+        if !monumentFightActive, magnetOrbTimer >= nextMagnetOrbSpawn {
             magnetOrbTimer = 0
             nextMagnetOrbSpawn = TimeInterval.random(in: GameConfig.MagnetOrb.minSpawnInterval...GameConfig.MagnetOrb.maxSpawnInterval)
             let orb = MagnetOrbNode()
@@ -3782,15 +3790,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // T3 execute: weak NORMAL enemies die outright on a bite (never boss-class).
             if playerStats.apexBloodhound && !bossClass
                 && e.healthPercent < GameConfig.Apex.executeThreshold {
+                apexFamiliarLifesteal(e.health)   // the killing blow IS the damage dealt
                 executeMob(e)
-            } else if e.takeDamage(GameConfig.BossClass.scaledDamage(base, isBossClass: bossClass)) {
-                recordBatKill(e)
+            } else {
+                let dealt = GameConfig.BossClass.scaledDamage(base, isBossClass: bossClass)
+                apexFamiliarLifesteal(dealt)
+                if e.takeDamage(dealt) { recordBatKill(e) }
             }
         case .boss(let b):
-            b.takeDamage(GameConfig.BossClass.scaledDamage(base, isBossClass: true))
+            let dealt = GameConfig.BossClass.scaledDamage(base, isBossClass: true)
+            apexFamiliarLifesteal(dealt)
+            b.takeDamage(dealt)
         }
         apexRegisterAttack()   // T5: every bite charges the pounce gauge
         showBiteSpark(at: target.position)
+    }
+
+    /// v2.0 (Brandon, Jul 22): 50% of ALL damage the familiar deals heals Spark.
+    /// Turns Apex from pure predation into the build's sustain engine — the bat
+    /// feeds you. Routed through stats.heal so healing-received bonuses (Forge
+    /// Path Restoration/Defiant) apply as normal.
+    private func apexFamiliarLifesteal(_ dealt: Int) {
+        guard dealt > 0, playerStats.currentHP > 0 else { return }
+        let heal = max(1, Int((CGFloat(dealt) * GameConfig.Apex.familiarLifestealFrac).rounded()))
+        playerStats.heal(heal)
     }
 
     /// A familiar kill: remove + bookkeeping, and feed the bat's damage growth.
@@ -4938,6 +4961,57 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         enemies.append(enemy)
         worldNode.addChild(enemy)
+    }
+
+    // MARK: - v2.0 (Unit 2c): The Unmade Star — monument instance #1
+
+    /// Arena 5's set-piece. Applies the LOCKED monument fight rules on arrival:
+    /// the board is WIPED (no XP from the wipe — no free level), and pickup
+    /// spawns are suppressed for the duration, with exactly one HP orb granted
+    /// at 50% boss health. The fight should be spectacle + duel, not foraging
+    /// through a swarm. See the monument-boss-class memory.
+    private func spawnUnmadeStar() {
+        let elapsed = waveManager.elapsedTime
+        let hpScaling = Int(elapsed / 30) * 12
+
+        // 1) Board wipe — silent, no XP orbs, no drops.
+        for e in enemies { e.removeFromParent() }
+        enemies.removeAll()
+
+        // 2) Pickup spawns off for the fight.
+        monumentFightActive = true
+
+        let star = UnmadeStarNode(arenaRadius: GameConfig.Arena.radius, hpScaling: hpScaling)
+        star.position = MonumentBossNode.anchorPosition(arenaRadius: GameConfig.Arena.radius)
+
+        // 3) The single sanctioned pickup: one HP orb when the star hits 50%.
+        star.onHalfHealth = { [weak self] in
+            guard let self = self else { return }
+            let orb = HealthOrbNode()
+            orb.position = HealthOrbNode.randomArenaPosition()
+            orb.zPosition = 4
+            self.healthOrbs.append(orb)
+            self.worldNode.addChild(orb)
+        }
+
+        star.onDeath = { [weak self] pos, xp in
+            guard let self = self else { return }
+            self.bossDefeatedThisRun = true
+            self.monumentFightActive = false
+            ProgressionManager.shared.recordKill(.boss)
+            for _ in 0..<12 {
+                let offset = CGPoint(x: CGFloat.random(in: -60...60),
+                                     y: CGFloat.random(in: -60...60))
+                self.spawnXPOrb(at: pos + offset, value: xp / 12)
+            }
+            self.spawnForgeCoins(at: pos)
+            self.boss = nil
+            self.worldNode.shake(intensity: 20, duration: 0.7)
+        }
+
+        boss = star
+        worldNode.addChild(star)
+        showBossEntrance(name: "THE UNMADE STAR", colorHex: 0xFFD98A)
     }
 
     // MARK: - v2.0 (Unit 2b): Star Anvil Spawning (Arena 5)
@@ -7109,6 +7183,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         levelNeedsStat = false
         levelUpOverlay.childNode(withName: "statRow")?.removeFromParent()
         bossDefeatedThisRun = false
+        monumentFightActive = false
         pendingForgeXP = 0
         
         // v1.4: Reset orb timers

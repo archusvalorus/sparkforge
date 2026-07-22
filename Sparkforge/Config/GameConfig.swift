@@ -238,6 +238,9 @@ enum GameConfig {
         static let familiarMaxFrac: CGFloat = 0.50      // up to 50% ATK
         static let familiarFracPerStep: CGFloat = 0.01  // +1% ...
         static let familiarKillsPerStep: Int = 5        // ... per 5 familiar kills
+        // v2.0 (Brandon, Jul 22): 50% of ALL damage the familiar deals heals
+        // Spark — the bat becomes the build's sustain engine, not just offense.
+        static let familiarLifestealFrac: CGFloat = 0.50
         static var familiarRange: CGFloat { 0.6 * Arena.radius }
         static var familiarHomeOffset: CGFloat { 46 * DeviceScale.gameplay }
         // T2 Bloodfed
