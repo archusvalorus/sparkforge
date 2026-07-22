@@ -45,6 +45,11 @@ final class PlayerNode: SKNode {
     private var polarFeatures: SKNode?       // v1.9 Polar Vortex (T5): santa hat (fixed on head)
     private var polarBeard: SKNode?          // v1.9 Polar Vortex: beard — rides eyesNode, seated low
 
+    // v2.0 Unit 1: the active skin's palette. `.base` reproduces stock Spark, so
+    // every color-restore (damage flash, reset, level-up ring) reads from here
+    // rather than hardcoding GameConfig — that's what lets a skin re-tint Spark.
+    private var appearance: SkinAppearance = .base
+
     // MARK: - Init
 
     override init() {
@@ -107,10 +112,27 @@ final class PlayerNode: SKNode {
 
         applyLevelVisuals()
         setupPhysics()
+        applyAppearance(SkinManager.shared.selectedAppearance)   // v2.0: wear the chosen skin
     }
 
     required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) not implemented")
+    }
+
+    // MARK: - v2.0 Unit 1: Skins (procedural re-tint of the layered Spark)
+
+    /// Re-paint every Spark layer from a skin palette. Purely cosmetic — no
+    /// stat/hitbox/ability effect. Stores the palette so subsequent color
+    /// restores (damage flash, level-up FX) stay on-skin.
+    func applyAppearance(_ a: SkinAppearance) {
+        appearance = a
+        coreNode.fillColor = SKColor(hex: a.coreColorHex)
+        innerCoreNode.fillColor = SKColor(hex: a.innerCoreColorHex)
+        glowNode.fillColor = SKColor(hex: a.glowColorHex, alpha: min(0.3 * a.glowBoost, 0.6))
+        trailEmitter.particleColor = SKColor(hex: a.trailColorHex)
+        for eye in [leftEye, rightEye] where eye.strokeColor == .clear {
+            eye.fillColor = SKColor(hex: a.eyeColorHex)
+        }
     }
 
     // MARK: - v1.7: Ember Trail
@@ -328,7 +350,7 @@ final class PlayerNode: SKNode {
         // Expanding ember ring — grows with level
         let ring = SKShapeNode(circleOfRadius: GameConfig.Player.visualRadius)
         ring.fillColor = .clear
-        ring.strokeColor = SKColor(hex: GameConfig.Spark.flareRingColorHex)
+        ring.strokeColor = SKColor(hex: appearance.flareRingColorHex)
         ring.lineWidth = 2.5
         ring.glowWidth = 4
         ring.blendMode = .add
@@ -347,7 +369,7 @@ final class PlayerNode: SKNode {
         for i in 0..<8 {
             let angle = CGFloat(i) / 8 * 2 * .pi + CGFloat.random(in: -0.2...0.2)
             let fleck = SKShapeNode(circleOfRadius: 2)
-            fleck.fillColor = SKColor(hex: GameConfig.Spark.flareRingColorHex)
+            fleck.fillColor = SKColor(hex: appearance.flareRingColorHex)
             fleck.strokeColor = .clear
             fleck.blendMode = .add
             fleck.zPosition = 11
@@ -380,7 +402,7 @@ final class PlayerNode: SKNode {
     private func showHitFace() {
         guard !isDead else { return }
         let e = eyeR * 1.6
-        let eyeColor = SKColor(hex: GameConfig.Spark.eyeColorHex)
+        let eyeColor = SKColor(hex: appearance.eyeColorHex)
 
         let leftPath = CGMutablePath()   // ">"
         leftPath.move(to: CGPoint(x: -e, y: e))
@@ -413,7 +435,7 @@ final class PlayerNode: SKNode {
                             transform: nil)
         for eye in [leftEye, rightEye] {
             eye.path = circle
-            eye.fillColor = SKColor(hex: GameConfig.Spark.eyeColorHex)
+            eye.fillColor = SKColor(hex: appearance.eyeColorHex)
             eye.strokeColor = .clear
             eye.lineWidth = 0
         }
@@ -431,7 +453,8 @@ final class PlayerNode: SKNode {
             SKAction.run { [weak self] in self?.coreNode.fillColor = flashColor },
             SKAction.wait(forDuration: 0.1),
             SKAction.run { [weak self] in
-                self?.coreNode.fillColor = SKColor(hex: GameConfig.Player.coreColorHex)
+                guard let self else { return }
+                self.coreNode.fillColor = SKColor(hex: self.appearance.coreColorHex)
             }
         ])
         run(flash, withKey: "damageFlash")
@@ -642,7 +665,7 @@ final class PlayerNode: SKNode {
         glowNode.setScale(1.0)
         glowNode.alpha = 1.0
         glowNode.removeAction(forKey: "glowBreathe")
-        coreNode.fillColor = SKColor(hex: GameConfig.Player.coreColorHex)
+        applyAppearance(SkinManager.shared.selectedAppearance)   // v2.0: re-pull the chosen skin (may have changed between runs)
         trailEmitter.particleBirthRate = 0
         eyeOffset = .zero
         eyesNode.position = CGPoint(x: 0, y: GameConfig.Player.visualRadius * GameConfig.Spark.eyeBaseYFactor)

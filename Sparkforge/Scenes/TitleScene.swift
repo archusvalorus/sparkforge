@@ -80,6 +80,7 @@ final class TitleScene: SKScene {
     private var forgePathDetailBranch: ForgePathManager.Branch?
     private var forgePathForkPending: ForgePathManager.Branch?  // fork picker open for this branch
     private var removeAdsValueModal: RemoveAdsModalNode?  // v1.8 (E3): value-prop before purchase
+    private var skinPickerModal: SKNode?                  // v2.0 Unit 1: skins wardrobe
 
     // v1.8 Unit 10: the CODEX hub + the scrollable page it opens.
     private var codexHub: CodexHubNode?
@@ -90,6 +91,20 @@ final class TitleScene: SKScene {
     /// page. Stops the tap that opens a page (began on the hub) from bleeding
     /// through into a card-detail tap on the freshly-presented page.
     private var codexTouchBeganOnPage = false
+
+    // v2.0 Unit 1.5: home-menu scroll (tap-vs-drag). The stacked home content
+    // outgrew one screen (arena selector → capstone pills → skins/ads/footer),
+    // so it pans vertically. Nodes move by `menuScrollOffset`; hit-tests read
+    // live positions, so they need no offset math. Fixed nodes (background FX,
+    // the gear) stay out of `menuScrollNodes`.
+    private var menuScrollNodes: [(node: SKNode, baseY: CGFloat)] = []
+    private var menuScrollOffset: CGFloat = 0
+    private var menuScrollLastY: CGFloat = 0
+    private var menuScrollMovement: CGFloat = 0
+    private var menuTouchTracking = false
+    private var menuContentTopY: CGFloat = 0
+    private var menuContentBottomY: CGFloat = 0
+
     /// v1.9: the shared Settings modal (with Erase on the title surface) + the
     /// multi-step erase confirmation flow it can launch.
     private var settingsMenu: SettingsMenuNode?
@@ -128,6 +143,10 @@ final class TitleScene: SKScene {
         setupTapPrompt()
         setupSettings()
         setupSettingsGear(topInset: view.safeAreaInsets.top)
+
+        // v2.0 Unit 1.5: snapshot the scrollable home stack (after all content
+        // exists) so the menu can pan to reach every element.
+        buildMenuScrollSet(topInset: view.safeAreaInsets.top, bottomInset: view.safeAreaInsets.bottom)
 
         // v1.7: warm up the blessing-choice ad while the forge is unclaimed
         if !DailyForgeManager.shared.hasClaimedToday && !IAPManager.shared.hasRemovedAds {
@@ -764,7 +783,8 @@ final class TitleScene: SKScene {
         // v1.8: "tap to ignite" is the CTA — restyled as a blue button
         // (Restart style) for a splash of color + contrast. Font stays Menlo
         // (that courier vibe) but italic and larger; 312-wide to match the home
-        // column. Tapping anywhere still ignites — this box is purely visual.
+        // column. v2.0 Unit 1.5: this box is now the ONLY start-a-run hit target
+        // (named "ignitePromptBox") — empty-space taps no longer ignite.
         let igniteBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
         igniteBox.fillColor = SKColor(hex: 0x18345C)
         igniteBox.strokeColor = SKColor(hex: 0x5AA0F0, alpha: 0.85)
@@ -816,6 +836,27 @@ final class TitleScene: SKScene {
         codexLabel.verticalAlignmentMode = .center
         codexBtn.addChild(codexLabel)
         addChild(codexBtn)
+
+        layoutY -= 54
+
+        // v2.0 Unit 1: SKINS entry — a warm-gold pill (cosmetic wardrobe), its
+        // own color lane so it never confuses with CODEX (violet) or Remove Ads.
+        let skinsBtn = SKNode()
+        skinsBtn.position = CGPoint(x: 0, y: layoutY)
+        skinsBtn.zPosition = 10
+        skinsBtn.name = "skinsButton"
+        let skinsBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
+        skinsBox.fillColor = SKColor(hex: 0x1E1815)
+        skinsBox.strokeColor = SKColor(hex: 0xE8B04C, alpha: 0.55)
+        skinsBox.lineWidth = 1.5
+        skinsBtn.addChild(skinsBox)
+        let skinsLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        skinsLabel.text = "✦  SKINS"
+        skinsLabel.fontSize = 15 * s
+        skinsLabel.fontColor = SKColor(hex: 0xF0C070)
+        skinsLabel.verticalAlignmentMode = .center
+        skinsBtn.addChild(skinsLabel)
+        addChild(skinsBtn)
 
         layoutY -= 54  // clear gap before the Remove Ads box (anti-mistap)
 
@@ -950,6 +991,10 @@ final class TitleScene: SKScene {
             handleRemoveAdsValueTap(location)
             return
         }
+        if skinPickerModal != nil {                // v2.0 Unit 1: skins picker
+            handleSkinPickerTap(location)
+            return
+        }
 
         // v1.6: blessing modal eats every tap until dismissed
         if blessingModal != nil {
@@ -957,6 +1002,18 @@ final class TitleScene: SKScene {
             return
         }
 
+        // v2.0 Unit 1.5: the home menu scrolls, so it uses tap-vs-drag. Record
+        // the touch here; the button hit-tests fire on touch-UP (handleHomeTapUp)
+        // and ONLY if the touch didn't drag past the threshold (a drag scrolls).
+        menuScrollLastY = location.y
+        menuScrollMovement = 0
+        menuTouchTracking = true
+    }
+
+    /// The home-screen button hit-tests, run on touch-UP for a non-drag tap.
+    /// Menu node positions already carry the live scroll offset, so these frames
+    /// stay correct while scrolled (the gear is fixed, tested in scene space).
+    private func handleHomeTapUp(_ location: CGPoint) {
         // v1.7: arrows cycle every unlocked arena PLUS the next locked one
         // (shown with its unlock requirement); thumb-size hit zones
         for arrow in [arenaPrevArrow, arenaNextArrow] where !arrow.isHidden {
@@ -971,16 +1028,20 @@ final class TitleScene: SKScene {
                     pm.currentArena = displayedArenaIndex
                 }
                 refreshArenaSection()
+                applyMenuScroll()   // keep arena nodes at the current scroll offset
                 return
             }
         }
 
-        // Check Daily Forge tap — use the BG node's position for hit testing
+        // Check Daily Forge tap — bg.position is LOCAL to dailyForgeButton (which
+        // sits at origin but now moves with menu scroll), so convert to scene
+        // space for a hit-test that stays correct while scrolled.
         if dailyForgeButton.parent != nil,
            let bg = dailyForgeButton.childNode(withName: "dailyForgeBG") {
+            let bgScene = convert(bg.position, from: dailyForgeButton)
             let forgeFrame = CGRect(
-                x: bg.position.x - 156,
-                y: bg.position.y - 25,
+                x: bgScene.x - 156,
+                y: bgScene.y - 25,
                 width: 312, height: 50
             )
             if forgeFrame.contains(location) {
@@ -1018,6 +1079,16 @@ final class TitleScene: SKScene {
                                width: 312, height: 42)
             if frame.contains(location) {
                 presentCodexHub()
+                return
+            }
+        }
+
+        // v2.0 Unit 1: SKINS entry
+        if let skinsBtn = childNode(withName: "skinsButton") {
+            let frame = CGRect(x: skinsBtn.position.x - 156, y: skinsBtn.position.y - 21,
+                               width: 312, height: 42)
+            if frame.contains(location) {
+                showSkinPickerModal()
                 return
             }
         }
@@ -1063,31 +1134,100 @@ final class TitleScene: SKScene {
             }
         }
 
-        // Any other tap → start game
-        startGame()
+        // v2.0 Unit 1.5: ONLY the ignite CTA starts a run. The old "any other
+        // tap → startGame()" catch-all caused accidental launches during the
+        // playtest loop — empty-space taps now do nothing.
+        if let ignite = childNode(withName: "ignitePromptBox") {
+            let frame = CGRect(x: ignite.position.x - 160, y: ignite.position.y - 26,
+                               width: 320, height: 52)
+            if frame.contains(location) {
+                startGame()
+            }
+        }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first, let page = codexPage else { return }
+        guard let touch = touches.first else { return }
         let loc = touch.location(in: self)
-        let dy = loc.y - codexScrollLastY
-        codexScrollLastY = loc.y
-        codexScrollMovement += abs(dy)
-        page.scroll(by: dy)
+
+        // Codex page scroll (unchanged).
+        if let page = codexPage {
+            let dy = loc.y - codexScrollLastY
+            codexScrollLastY = loc.y
+            codexScrollMovement += abs(dy)
+            page.scroll(by: dy)
+            return
+        }
+
+        // v2.0 Unit 1.5: home menu drag-scroll.
+        if menuTouchTracking {
+            let dy = loc.y - menuScrollLastY
+            menuScrollLastY = loc.y
+            menuScrollMovement += abs(dy)
+            menuScrollOffset = clampedMenuOffset(menuScrollOffset + dy)
+            applyMenuScroll()
+        }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first, let page = codexPage else { return }
-        // Ignore the tap that opened this page (it began on the hub, not the
-        // page) so it can't bleed through into a card-detail tap.
-        guard codexTouchBeganOnPage else { return }
-        guard codexScrollMovement < 8 else { return }   // a drag, not a tap
+        guard let touch = touches.first else { return }
         let loc = touch.location(in: self)
-        // v1.9 Unit 2: the Card codex consumes taps to open/close a card detail.
-        if page.handleTapUp(at: loc) { return }
-        // A tap on the ✕ closes the page (back to the hub).
-        if page.hitTestClose(at: loc) {
-            dismissCodexPage()
+
+        // Codex page tap-up (unchanged).
+        if let page = codexPage {
+            // Ignore the tap that opened this page (it began on the hub, not the
+            // page) so it can't bleed through into a card-detail tap.
+            guard codexTouchBeganOnPage else { return }
+            guard codexScrollMovement < 8 else { return }   // a drag, not a tap
+            if page.handleTapUp(at: loc) { return }
+            if page.hitTestClose(at: loc) { dismissCodexPage() }
+            return
+        }
+
+        // v2.0 Unit 1.5: home menu — fire button hit-tests only on a real tap
+        // (a drag was a scroll, not a click).
+        if menuTouchTracking {
+            menuTouchTracking = false
+            if menuScrollMovement < 10 { handleHomeTapUp(loc) }
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        menuTouchTracking = false
+    }
+
+    // MARK: - v2.0 Unit 1.5: Home menu scroll
+
+    /// Snapshot the scrollable home nodes + their resting Y. Fixed nodes stay
+    /// out: background particle emitters, negative-z glow, and the gear/overlays.
+    private func buildMenuScrollSet(topInset: CGFloat, bottomInset: CGFloat) {
+        menuScrollNodes = children.compactMap { node in
+            if node is SKEmitterNode { return nil }                 // background embers
+            if node.zPosition < 0 { return nil }                    // forge glow
+            if node.zPosition >= 20 { return nil }                  // gear + future overlays
+            if node.name == "settingsGearButton" { return nil }     // belt & suspenders
+            return (node, node.position.y)
+        }
+        menuContentTopY = menuScrollNodes.map { $0.baseY }.max() ?? 0
+        menuContentBottomY = menuScrollNodes.map { $0.baseY }.min() ?? 0
+    }
+
+    /// Clamp an offset so the stack can't be dragged past emptiness: positive
+    /// offset scrolls UP (reveals the bottom), negative scrolls DOWN (reveals
+    /// the top). If content already fits, the clamp collapses to 0.
+    private func clampedMenuOffset(_ value: CGFloat) -> CGFloat {
+        let insets = view?.safeAreaInsets ?? .zero
+        let topLimit = size.height / 2 - insets.top - 30
+        let botLimit = -size.height / 2 + insets.bottom + 30
+        let maxOff = Swift.max(0, botLimit - menuContentBottomY)
+        let minOff = Swift.min(0, topLimit - menuContentTopY)
+        return Swift.max(minOff, Swift.min(maxOff, value))
+    }
+
+    /// Reposition every scrollable node to its base Y plus the live offset.
+    private func applyMenuScroll() {
+        for entry in menuScrollNodes {
+            entry.node.position = CGPoint(x: entry.node.position.x, y: entry.baseY + menuScrollOffset)
         }
     }
 
@@ -1320,6 +1460,256 @@ final class TitleScene: SKScene {
             if (eraseTextField?.text ?? "").uppercased() == "ERASE" { performErase() }
         default:
             break
+        }
+    }
+
+    // MARK: - v2.0 Unit 1: Skins wardrobe
+
+    private static let skinPanelW: CGFloat = 336
+    private static let skinCardH: CGFloat = 84
+    private static let skinCardGap: CGFloat = 8
+
+    /// Y-center of skin card `i`, given the panel's top edge.
+    private func skinCardCenterY(_ i: Int, panelTop: CGFloat) -> CGFloat {
+        let firstTop = panelTop - 86          // below title + subtitle
+        return firstTop - Self.skinCardH / 2 - CGFloat(i) * (Self.skinCardH + Self.skinCardGap)
+    }
+
+    /// A tiny static Spark, drawn from a skin palette — the wardrobe preview.
+    /// Same layered look as PlayerNode, no physics/trail (cheap + self-contained).
+    private func makeSkinPreview(_ a: SkinAppearance) -> SKNode {
+        let node = SKNode()
+        let R: CGFloat = 13
+        let glow = SKShapeNode(circleOfRadius: R + 7)
+        glow.fillColor = SKColor(hex: a.glowColorHex, alpha: min(0.3 * a.glowBoost, 0.6))
+        glow.strokeColor = .clear
+        glow.glowWidth = 6
+        node.addChild(glow)
+        let core = SKShapeNode(circleOfRadius: R)
+        core.fillColor = SKColor(hex: a.coreColorHex)
+        core.strokeColor = .clear
+        node.addChild(core)
+        let inner = SKShapeNode(circleOfRadius: R * 0.55)
+        inner.fillColor = SKColor(hex: a.innerCoreColorHex)
+        inner.strokeColor = .clear
+        inner.blendMode = .add
+        node.addChild(inner)
+        for side in [CGFloat(-1), 1] {
+            let eye = SKShapeNode(circleOfRadius: R * 0.17)
+            eye.fillColor = SKColor(hex: a.eyeColorHex)
+            eye.strokeColor = .clear
+            eye.position = CGPoint(x: side * R * 0.26, y: R * 0.14)
+            node.addChild(eye)
+        }
+        return node
+    }
+
+    private func showSkinPickerModal() {
+        let sm = SkinManager.shared
+        dismissSkinPickerModal(animated: false)   // never stack on refresh
+        AudioManager.shared.play(.cardSelect)
+
+        let modal = SKNode()
+        modal.zPosition = 300
+
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.8)
+        dim.strokeColor = .clear
+        modal.addChild(dim)
+
+        let count = sm.catalog.count
+        let panelW = Self.skinPanelW
+        let panelH = 86 + CGFloat(count) * (Self.skinCardH + Self.skinCardGap) + 74
+        let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x161009)
+        panel.strokeColor = SKColor(hex: 0xE8B04C, alpha: 0.7)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        modal.addChild(panel)
+        let top = panelH / 2
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "✦ SKINS"
+        title.fontSize = 18
+        title.fontColor = SKColor(hex: 0xF0C070)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: top - 26)
+        modal.addChild(title)
+
+        let sub = SKLabelNode(fontNamed: "Menlo")
+        sub.text = "cosmetic only — never changes gameplay"
+        sub.fontSize = 10.5
+        sub.fontColor = SKColor(hex: 0x999999)
+        sub.verticalAlignmentMode = .center
+        sub.position = CGPoint(x: 0, y: top - 48)
+        modal.addChild(sub)
+
+        for (i, def) in sm.catalog.enumerated() {
+            let cy = skinCardCenterY(i, panelTop: top)
+            let owned = sm.isUnlocked(def)
+            let selected = owned && sm.selectedID == def.id
+
+            let card = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: Self.skinCardH), cornerRadius: 10)
+            card.fillColor = SKColor(hex: selected ? 0x241B0E : 0x120D08)
+            card.strokeColor = selected ? SKColor(hex: 0xF0C070, alpha: 0.9)
+                                        : SKColor(hex: def.tier == .premium ? 0x6AA0E0 : 0x5A4A2E,
+                                                  alpha: owned ? 0.6 : 0.35)
+            card.lineWidth = selected ? 2 : 1.2
+            card.position = CGPoint(x: 0, y: cy)
+            modal.addChild(card)
+
+            let preview = makeSkinPreview(def.appearance)
+            preview.position = CGPoint(x: -panelW / 2 + 46, y: cy)
+            if !owned { preview.alpha = 0.4 }
+            modal.addChild(preview)
+
+            let name = SKLabelNode(fontNamed: "Menlo-Bold")
+            name.text = def.name + (def.tier == .premium ? "  ◆" : "")
+            name.fontSize = 14
+            name.fontColor = owned ? SKColor(hex: 0xF2E4C8) : SKColor(hex: 0x8A8070)
+            name.verticalAlignmentMode = .center
+            name.horizontalAlignmentMode = .left
+            name.position = CGPoint(x: -panelW / 2 + 78, y: cy + 18)
+            modal.addChild(name)
+
+            let blurb = SKLabelNode(fontNamed: "Menlo")
+            blurb.text = def.blurb
+            blurb.fontSize = 8.5
+            blurb.fontColor = SKColor(hex: 0x8A8478)
+            blurb.verticalAlignmentMode = .center
+            blurb.horizontalAlignmentMode = .left
+            blurb.position = CGPoint(x: -panelW / 2 + 78, y: cy - 1)
+            modal.addChild(blurb)
+
+            // Status chip.
+            let status = SKLabelNode(fontNamed: "Menlo-Bold")
+            status.fontSize = 10.5
+            status.verticalAlignmentMode = .center
+            status.horizontalAlignmentMode = .left
+            status.position = CGPoint(x: -panelW / 2 + 78, y: cy - 22)
+            status.name = "skinStatus_\(def.id)"
+            if selected {
+                status.text = "✓ EQUIPPED";           status.fontColor = SKColor(hex: 0x8FE08F)
+            } else if owned {
+                status.text = "tap to equip";           status.fontColor = SKColor(hex: 0xF0C070)
+            } else if def.tier == .earned {
+                status.text = "🔒 locked";               status.fontColor = SKColor(hex: 0x8A8070)
+            } else {
+                status.text = "◆ premium";              status.fontColor = SKColor(hex: 0x6AA0E0)
+            }
+            modal.addChild(status)
+        }
+
+        // Footer.
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "tap outside to close"
+        hint.fontSize = 10
+        hint.fontColor = SKColor(hex: 0x666666)
+        hint.verticalAlignmentMode = .center
+        hint.position = CGPoint(x: 0, y: -top + 22)
+        modal.addChild(hint)
+
+        #if DEBUG
+        let dbg = SKLabelNode(fontNamed: "Menlo-Bold")
+        dbg.text = sm.debugUnlockAll ? "[debug] unlock-all: ON" : "[debug] unlock-all: off"
+        dbg.fontSize = 10
+        dbg.fontColor = SKColor(hex: sm.debugUnlockAll ? 0x8FE08F : 0x775544)
+        dbg.verticalAlignmentMode = .center
+        dbg.position = CGPoint(x: 0, y: -top + 44)
+        dbg.name = "skinDebugToggle"
+        modal.addChild(dbg)
+        #endif
+
+        addChild(modal)
+        skinPickerModal = modal
+        modal.alpha = 0
+        panel.setScale(0.9)
+        modal.run(SKAction.fadeIn(withDuration: 0.18))
+        let pop = SKAction.scale(to: 1.0, duration: 0.18); pop.timingMode = .easeOut
+        panel.run(pop)
+
+        loadSkinPremiumPrices()   // fill premium price chips async
+    }
+
+    /// Async-load StoreKit prices for premium skins and update their chips
+    /// (mirrors loadRemoveAdsPrice — StoreKit is the source of truth).
+    private func loadSkinPremiumPrices() {
+        for def in SkinManager.shared.catalog where def.tier == .premium {
+            guard let pid = def.iapProductID, !SkinManager.shared.isUnlocked(def) else { continue }
+            Task { @MainActor in
+                guard let price = await IAPManager.shared.displayPrice(for: pid),
+                      let chip = skinPickerModal?.childNode(withName: "skinStatus_\(def.id)") as? SKLabelNode
+                else { return }
+                chip.text = "◆ \(price) · tap to buy"
+                chip.fontColor = SKColor(hex: 0x6AA0E0)
+            }
+        }
+    }
+
+    private func handleSkinPickerTap(_ location: CGPoint) {
+        let sm = SkinManager.shared
+        guard skinPickerModal != nil else { return }
+        // Recompute panel geometry deterministically (matches showSkinPickerModal).
+        let count = sm.catalog.count
+        let panelH = 86 + CGFloat(count) * (Self.skinCardH + Self.skinCardGap) + 74
+        let top = panelH / 2
+
+        #if DEBUG
+        if let dbg = skinPickerModal?.childNode(withName: "skinDebugToggle") {
+            let f = CGRect(x: -100, y: dbg.position.y - 14, width: 200, height: 28)
+            if f.contains(location) {
+                sm.debugUnlockAll.toggle()
+                showSkinPickerModal()
+                return
+            }
+        }
+        #endif
+
+        for (i, def) in sm.catalog.enumerated() {
+            let cy = skinCardCenterY(i, panelTop: top)
+            let f = CGRect(x: -(Self.skinPanelW - 32) / 2, y: cy - Self.skinCardH / 2,
+                           width: Self.skinPanelW - 32, height: Self.skinCardH)
+            guard f.contains(location) else { continue }
+            if sm.isUnlocked(def) {
+                if sm.selectedID != def.id {
+                    sm.select(def.id)
+                    AudioManager.shared.play(.cardSelect)
+                    showSkinPickerModal()   // refresh EQUIPPED state
+                }
+            } else if def.tier == .premium {
+                purchaseSkin(def)
+            } else {
+                AudioManager.shared.play(.orbPickup)   // locked earned — soft nudge, no-op
+            }
+            return
+        }
+
+        // Tap outside the panel closes.
+        let panelFrame = CGRect(x: -Self.skinPanelW / 2, y: -top, width: Self.skinPanelW, height: panelH)
+        if !panelFrame.contains(location) {
+            dismissSkinPickerModal(animated: true)
+        }
+    }
+
+    private func purchaseSkin(_ def: SkinDefinition) {
+        guard let pid = def.iapProductID else { return }
+        if let chip = skinPickerModal?.childNode(withName: "skinStatus_\(def.id)") as? SKLabelNode {
+            chip.text = "purchasing…"; chip.fontColor = SKColor(hex: 0xCCCCCC)
+        }
+        Task { @MainActor in
+            let ok = await IAPManager.shared.purchase(pid)
+            if ok { SkinManager.shared.select(def.id) }
+            if skinPickerModal != nil { showSkinPickerModal() }   // reflect owned/equipped
+        }
+    }
+
+    private func dismissSkinPickerModal(animated: Bool) {
+        guard let modal = skinPickerModal else { return }
+        skinPickerModal = nil
+        if animated {
+            modal.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.15), SKAction.removeFromParent()]))
+        } else {
+            modal.removeFromParent()
         }
     }
 
