@@ -132,6 +132,15 @@ final class TitleScene: SKScene {
         let screenHeight = size.height > 100 ? size.height : 667
         layoutY = min(screenHeight * 0.30, 280)
         
+        #if DEBUG
+        // v2.0 Unit 2a dev aid: unlock Arena 5 (Star Anvil) so it's selectable
+        // for testing. Its live "clear Arena 4 → unlock" wiring lands when Unit 2
+        // is complete; release builds are unaffected (Arena 5 stays a teaser).
+        if ProgressionManager.shared.arenasUnlocked < ArenaConfig.all.count {
+            ProgressionManager.shared.arenasUnlocked = ArenaConfig.all.count
+        }
+        #endif
+
         displayedArenaIndex = ArenaConfig.current.id
 
         setupEmberParticles()

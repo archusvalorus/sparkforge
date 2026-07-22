@@ -343,6 +343,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             buildCoilworksMotif(radius: radius)
         case 3:
             buildMirrorwoundMotif(radius: radius)
+        case 4:
+            buildStarAnvilMotif(radius: radius)
         default:
             buildCrucibleMotif(radius: radius)
         }
@@ -370,6 +372,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.fadeAlpha(to: 0.4, duration: 1.5)
         ])
         dangerRing.run(SKAction.repeatForever(dangerPulse))
+
+        // v2.0 (Unit 2a): the Star Anvil's boundary is "forged" — a white-hot gold
+        // edge with an intermittent violet-black gravitational flicker layered over
+        // it (a second faint ring that pulses out of phase). Cosmic weight, not
+        // electrical or mirrored.
+        if arenaConfig.id == 4 {
+            let flicker = SKShapeNode(path: floorPath)
+            flicker.fillColor = .clear
+            flicker.strokeColor = SKColor(hex: 0x5A3AA0, alpha: 0.5)   // gravity-violet
+            flicker.lineWidth = GameConfig.Arena.boundaryLineWidth * 0.7
+            flicker.glowWidth = 9
+            flicker.zPosition = -8.5
+            worldNode.addChild(flicker)
+            flicker.alpha = 0
+            flicker.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.6, duration: 0.9),
+                SKAction.fadeAlpha(to: 0.0, duration: 1.7),
+                SKAction.wait(forDuration: Double.random(in: 0.4...1.2))
+            ])))
+        }
     }
 
     /// Arena 1 motif: concentric forge rings + cross-hair grid (original v1.0 look)
@@ -396,6 +418,74 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             line.lineWidth = 0.5
             line.zPosition = -9.5
             worldNode.addChild(line)
+        }
+    }
+
+    /// v2.0 Arena 5 motif (Lyra canon): concentric compression rings, broken
+    /// orbital arcs, a central hammered starburst, and crescent gravity scours.
+    /// Cosmic weight, disciplined — grand, never busy; danger language must stay
+    /// clearer than atmosphere. See docs/arena5-star-anvil-creative.md.
+    private func buildStarAnvilMotif(radius: CGFloat) {
+        let veinHex = arenaConfig.detailLineHex
+        let goldHex = arenaConfig.boundaryColorHex
+
+        // Concentric compression rings (tightening toward the core).
+        for (i, f) in [CGFloat(0.28), 0.5, 0.72, 0.9].enumerated() {
+            let ring = SKShapeNode(circleOfRadius: radius * f)
+            ring.fillColor = .clear
+            ring.strokeColor = SKColor(hex: veinHex, alpha: 0.30 - CGFloat(i) * 0.05)
+            ring.lineWidth = 1
+            ring.zPosition = -9.5
+            worldNode.addChild(ring)
+        }
+
+        // Broken orbital arcs — partial rings with gaps.
+        let arcs: [(r: CGFloat, start: CGFloat, sweep: CGFloat)] = [
+            (radius * 0.40, 0.3, 2.1),
+            (radius * 0.63, 3.2, 1.6),
+            (radius * 0.82, 4.6, 2.4)
+        ]
+        for a in arcs {
+            let p = CGMutablePath()
+            p.addArc(center: .zero, radius: a.r, startAngle: a.start,
+                     endAngle: a.start + a.sweep, clockwise: false)
+            let arc = SKShapeNode(path: p)
+            arc.strokeColor = SKColor(hex: veinHex, alpha: 0.32)
+            arc.lineWidth = 1.2
+            arc.zPosition = -9.5
+            worldNode.addChild(arc)
+        }
+
+        // Central hammered starburst — radial impact lines from the core.
+        for k in 0..<12 {
+            let angle = CGFloat(k) / 12 * 2 * .pi
+            let innerR = radius * 0.06
+            let outerR = radius * (0.22 + CGFloat(k % 3) * 0.05)
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: cos(angle) * innerR, y: sin(angle) * innerR))
+            p.addLine(to: CGPoint(x: cos(angle) * outerR, y: sin(angle) * outerR))
+            let ray = SKShapeNode(path: p)
+            ray.strokeColor = SKColor(hex: goldHex, alpha: 0.18)
+            ray.lineWidth = 1
+            ray.zPosition = -9.5
+            worldNode.addChild(ray)
+        }
+
+        // Crescent gravity scours — short curved scars, off-center.
+        let scours: [(pos: CGPoint, r: CGFloat, start: CGFloat)] = [
+            (CGPoint(x: radius * 0.35, y: radius * 0.40), radius * 0.18, 1.0),
+            (CGPoint(x: -radius * 0.50, y: -radius * 0.20), radius * 0.14, 3.4),
+            (CGPoint(x: radius * 0.10, y: -radius * 0.55), radius * 0.16, 5.0)
+        ]
+        for s in scours {
+            let p = CGMutablePath()
+            p.addArc(center: s.pos, radius: s.r, startAngle: s.start,
+                     endAngle: s.start + 1.8, clockwise: false)
+            let scar = SKShapeNode(path: p)
+            scar.strokeColor = SKColor(hex: veinHex, alpha: 0.22)
+            scar.lineWidth = 1
+            scar.zPosition = -9.5
+            worldNode.addChild(scar)
         }
     }
 

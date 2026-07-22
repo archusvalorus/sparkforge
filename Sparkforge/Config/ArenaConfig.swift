@@ -97,7 +97,31 @@ struct ArenaConfig {
         bellTime: 120.0   // larger arena → later bell, a longer escalation
     )
 
-    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound]
+    // v2.0 (Unit 2a): Arena 5 — The Star Anvil. The hidden heart of the forge,
+    // where sparks are judged. Tests INEVITABILITY. Palette is Lyra canon: floor
+    // = deep obsidian with cold indigo undertones + star-metal veining; boundary
+    // = white-hot gold (forged, not electrical), with a violet-black gravitational
+    // flicker layered in setupArena; danger = gravity-violet (pull warning
+    // language). Ceremonial and grand, NOT busy. Doubled footprint: radiusScale
+    // 2.6 (2× Arena 4's 1.3) — the boss is a monument occupying the top third, so
+    // the field must be large. See docs/arena5-star-anvil-creative.md.
+    // TUNING WATCH: radiusScale 2.6 = ~4× Arena 4's area — perf + spawn-density
+    // sensitive; the headline knob for Brandon's 2a playtest.
+    static let starAnvil = ArenaConfig(
+        id: 4,
+        name: "The Star Anvil",
+        displayName: "ARENA 5: THE STAR ANVIL",
+        flavorLine: "the forge weighs what you became",
+        floorColorHex: 0x0C0A16,
+        boundaryColorHex: 0xFFD98A,
+        dangerGlowHex: 0x5A3AA0,
+        detailLineHex: 0x585090,
+        accentColorHex: 0x9A7AE0,
+        radiusScale: 2.6,
+        bellTime: 160.0   // doubled field → a longer, more ceremonial escalation
+    )
+
+    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil]
 
     /// The currently selected arena, clamped to what's unlocked.
     static var current: ArenaConfig {
