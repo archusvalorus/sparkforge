@@ -534,6 +534,14 @@ final class PlayerStats {
     private var aegisPulseTimer: TimeInterval = 0.0
 
     /// Null Bloom: chance on kill to leave a slowing zone
+    // MARK: - v2.0 Phase C: Growth
+    /// > 0 ⇒ Terra is owned and cultivated ground exists.
+    var terraZoneRadius: CGFloat = 0.0
+    /// Enemy slow applied inside cultivated ground.
+    var terraSlow: CGFloat = 0.30
+    /// Thornsoil: damage per second to enemies standing in cultivated ground.
+    var thornsoilDPS: Int = 0
+
     var nullBloomChance: CGFloat = 0.0
     var nullBloomRadius: CGFloat = 35.0
     var nullBloomSlow: CGFloat = 0.4
@@ -1066,6 +1074,9 @@ final class PlayerStats {
         aegisPulseInterval = 4.0
         aegisPulseRadius = 70.0
         aegisPulseTimer = 0.0
+        terraZoneRadius = 0.0
+        terraSlow = 0.30
+        thornsoilDPS = 0
         nullBloomChance = 0.0
         nullBloomRadius = 35.0
         nullBloomSlow = 0.4

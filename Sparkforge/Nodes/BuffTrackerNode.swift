@@ -14,9 +14,15 @@ final class BuffTrackerNode: SKNode {
     // MARK: - Config
 
     /// Display order on the HUD — matches the pre-v1.7 pip order
-    private static let tagOrder: [UpgradeManager.Tag] = [
-        .fire, .shock, .bleed, .guardT, .voidT, .chill
-    ]
+    /// Display order = enum declaration order, minus Neutral (which is not a
+    /// tree and never earns a chip).
+    ///
+    /// v2.0 Phase C: this was a hardcoded literal, and adding the Growth tag
+    /// silently produced a tree with no chip — an array gets no exhaustiveness
+    /// checking, so nothing failed to compile. Derived from `allCases` now, so
+    /// the next tag appears for free instead of going missing.
+    private static let tagOrder: [UpgradeManager.Tag] =
+        UpgradeManager.Tag.allCases.filter { $0 != .neutral }
 
     private static let badgeSize = CGSize(width: 58, height: 26)
     private static let rowHeight: CGFloat = 32

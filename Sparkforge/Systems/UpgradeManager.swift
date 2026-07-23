@@ -31,9 +31,22 @@ final class UpgradeManager {
         case guardT  = "Guard"
         case voidT   = "Void"
         case chill   = "Chill"
+        /// v2.0 Phase C — the 7th tagged tree. Growth modifies the ARENA rather
+        /// than Spark: cultivated ground, living structures, territory.
+        case growth  = "Growth"
         case neutral = "Neutral"
     }
     
+    /// v2.0 Phase C: a named thing a run can possess, used to gate offers.
+    /// Deliberately its own type rather than reusing Tag — a capability is not
+    /// always a tree ("has a bleed source" isn't the Bleed tag), and conflating
+    /// them is what would force a second gating system later.
+    enum Capability: String, Hashable {
+        /// The run has cultivated ground. Granted by Terra; required by every
+        /// other Growth card. Picking Terra is opting into a build grammar.
+        case growthUnlocked
+    }
+
     // MARK: - Card Definition
     
     struct UpgradeCard {
@@ -57,6 +70,21 @@ final class UpgradeManager {
         /// fires the grand capstone reveal (vs a quiet flourish for signature
         /// maxes). Capstone IDENTITIES are authored from Lyra's tier riff.
         var isCapstone: Bool = false
+
+        // MARK: v2.0 Phase C — offer eligibility
+        //
+        // ONE layer, three jobs. Growth's Terra gate is what forced it, but the
+        // same provides/requires check is what the banked "never offer an
+        // AMPLIFIER before its ENABLER" rule needs (a bleed-damage card with no
+        // bleed source is a dead pick that kills tension), and what arena
+        // tree-gating / element omission will need later. Do not build a second
+        // gating system for those — extend this one.
+
+        /// Capabilities this card grants the run when picked.
+        var provides: Set<Capability> = []
+        /// Capabilities the run must ALREADY have for this card to be offered.
+        /// Unmet ⇒ hard-gated out of the draw entirely.
+        var requires: Set<Capability> = []
 
         var maxTier: Int { 1 + higherTiers.count }
 
@@ -91,6 +119,10 @@ final class UpgradeManager {
     /// leveling a card doesn't reorder it. Drives the build viewer,
     /// analytics, and build hints.
     private(set) var pickedCardIDs: [String] = []
+
+    /// v2.0 Phase C: capabilities this RUN has unlocked. Per-run, never
+    /// persisted — reset with everything else, like pickedCardIDs.
+    private(set) var capabilities: Set<Capability> = []
 
     /// v1.9: id → current tier this run (absent = not owned). Per-run,
     /// reset with everything else — no persistence, like pickedCardIDs.
@@ -151,6 +183,11 @@ final class UpgradeManager {
 
         let available = allCards.filter { card in
             guard tier(of: card.id) < card.maxTier else { return false }
+            // v2.0 Phase C: hard eligibility gate. A card whose requirements the
+            // run hasn't met never enters the draw — not down-weighted, ABSENT.
+            // Growth cards before Terra would be dead picks, and a dead pick in
+            // a 3-card spread is a wasted level-up.
+            guard card.requires.isSubset(of: capabilities) else { return false }
             // Capstones never come from the random pool once one is in progress —
             // the in-progress one(s) are injected by parity; others are locked out.
             if card.isCapstone && hasInProgress { return false }
@@ -230,6 +267,10 @@ final class UpgradeManager {
     /// cards per tree) and depth (card tiers) stay separate axes.
     func pickCard(_ card: UpgradeCard, stats: PlayerStats) {
         let current = tier(of: card.id)
+
+        // Capabilities are granted on the FIRST pick — re-picking to level a
+        // card can't re-unlock what it already opened.
+        if current == 0 { capabilities.formUnion(card.provides) }
 
         if current == 0 {
             pickedCardIDs.append(card.id)
@@ -331,6 +372,7 @@ final class UpgradeManager {
         case .guardT:  return "🛡️ Fortress forming"
         case .voidT:   return "🕳️ Void touched"
         case .chill:   return "❄️ Frost spreading"
+        case .growth:  return "🌱 Something is taking root"
         case .neutral: return nil
         }
     }
@@ -345,6 +387,7 @@ final class UpgradeManager {
     
     func reset() {
         pickedCardIDs.removeAll()
+        capabilities.removeAll()
         cardTiers.removeAll()
         tagCounts.removeAll()
         appliedSynergies.removeAll()
@@ -480,6 +523,11 @@ final class UpgradeManager {
             return [SynergyTier(threshold: 3, title: "Frostbite", effect: "Chilled enemies move even slower"),
                     SynergyTier(threshold: 5, title: "Shatter", effect: "Frozen enemies burst when struck"),
                     SynergyTier(threshold: 7, title: "Absolute Zero", effect: "The arena slows; shatters come easy")]
+        case .growth:
+            // C1.7 authors these. Empty is correct until then — Growth ships
+            // its cards first and its synergy tiers with the balance pass, so
+            // nothing claims a tier that doesn't fire yet.
+            return []
         case .neutral:
             return []
         }
@@ -931,6 +979,31 @@ final class UpgradeManager {
         ) { stats in
             stats.aegisPulseActive = true
         })
+
+        // ═══════════════════════════════════
+        // 🌱 GROWTH  (v2.0 Phase C)
+        //
+        // Terra is the ENTRY card and the only Growth card offered before it is
+        // owned. Picking it is opting into a build grammar, not taking a stat —
+        // which is exactly why it carries `provides` and every other Growth card
+        // carries `requires`.
+        // ═══════════════════════════════════
+
+        cards.append(UpgradeCard(
+            id: "v20_terra", name: "Terra", tag: .growth,
+            description: "Cultivate the arena. Unlock Growth cards.",
+            // ONE TIER, by design (Brandon): Terra opens the options that grant
+            // the effects rather than being prescriptive itself.
+            apply: { stats in stats.terraZoneRadius = 110 },
+            provides: [.growthUnlocked]
+        ))
+
+        cards.append(UpgradeCard(
+            id: "v20_thornsoil", name: "Thornsoil", tag: .growth,
+            description: "Cultivated ground wounds what walks on it",
+            apply: { stats in stats.thornsoilDPS = 6 },
+            requires: [.growthUnlocked]
+        ))
 
         cards.append(UpgradeCard(
             id: "v16_null_bloom", name: "Null Bloom", tag: .voidT,

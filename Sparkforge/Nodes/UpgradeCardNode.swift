@@ -38,6 +38,9 @@ final class UpgradeCardNode: SKNode {
         case .bleed:   return 0xCC3333
         case .guardT:  return 0x88AA44
         case .voidT:   return 0x9944CC
+        // Growth's forest body — deliberately NOT the brighter health green,
+        // which stays exclusive to healing pickups (creative handoff §4).
+        case .growth:  return 0x2E8B47
         case .chill:   return 0x66DDFF
         case .neutral: return 0x999999
         }
@@ -69,6 +72,7 @@ final class UpgradeCardNode: SKNode {
         case .guardT:  return "🛡️"
         case .voidT:   return "🕳️"
         case .chill:   return "❄️"
+        case .growth:  return "🌱"
         case .neutral: return "⚪"
         }
     }
