@@ -7598,13 +7598,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             time: waveManager.elapsedTime,
             bossDefeated: bossDefeatedThisRun
         )
-        // v2.0 (B2b): Boss Mode rewards are sandbox-isolated. Uncapped, a
-        // gauntlet's boss-dense payout would make it the optimal Forge farm and
-        // warp normal play around it; zero would make the mode pointless. The
-        // cap keeps it worth running without making it the only thing worth
-        // running.
+        // v2.0: Boss Mode rewards are sandbox-isolated. Uncapped, a gauntlet's
+        // boss-dense payout would make it the optimal Forge farm and warp normal
+        // play around it; zero would make the mode pointless.
+        //
+        // A flat min() was NOT enough. forgeXPForRun takes bossDefeated as a
+        // BOOL, so felling a single boss already awards its +100 bonus — which
+        // meant every gauntlet that killed anything paid exactly the cap, and a
+        // full clear was worth the same as dying to boss 2. That's a constant,
+        // not a cap, and it removes any reason to push deeper.
+        //
+        // So the cap is now the FULL-CLEAR reward, and a run earns the share it
+        // actually cleared. 1 of 4 felled pays a quarter of it.
         if isGauntlet {
-            forgeXP = min(forgeXP, GameConfig.BossMode.forgeXPCapPerRun)
+            let felled = gauntlet?.bossesFelled ?? 0
+            let total = max(1, gauntlet?.totalStages ?? 1)
+            let earned = Double(GameConfig.BossMode.forgeXPCapPerRun)
+                * (Double(felled) / Double(total))
+            forgeXP = min(forgeXP, Int(earned.rounded()))
         }
         pendingForgeXP = forgeXP
         ProgressionManager.shared.addForgeXP(forgeXP)
@@ -7654,7 +7665,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let summary = SKLabelNode(fontNamed: "Menlo")
             var parts: [String] = []
             if let dials = BossModeDials.shared.summaryText { parts.append(dials) }
-            parts.append("Forge XP +\(pendingForgeXP) (capped \(GameConfig.BossMode.forgeXPCapPerRun))")
+            let felled = gauntlet?.bossesFelled ?? 0
+            let total = max(1, gauntlet?.totalStages ?? 1)
+            parts.append("Forge XP +\(pendingForgeXP) of \(GameConfig.BossMode.forgeXPCapPerRun)  ·  \(felled)/\(total) felled")
             summary.text = parts.joined(separator: "    ")
             summary.name = "gauntletSummary"
             summary.fontSize = 11
