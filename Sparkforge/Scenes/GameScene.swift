@@ -2711,7 +2711,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if let boss = boss, !boss.isDead {
-            let dist = player.position.distance(to: boss.position)
+            // Surface distance: a monument's origin can sit far outside range
+            // even while the player is pressed against its body.
+            let dist = player.position.distance(to: boss.position) - boss.targetingRadius
             if dist < range && dist < closestDist {
                 closestDist = dist
                 closestPosition = boss.position
@@ -3427,7 +3429,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 return .enemy(e)
             }
             if let boss = boss, !boss.isDead, node === (boss as SKNode),
-               player.position.distance(to: boss.position) <= retention {
+               player.position.distance(to: boss.position) - boss.targetingRadius <= retention {
                 return .boss(boss)
             }
         }
@@ -3440,7 +3442,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if d <= acquire && d < nearestDist { nearestDist = d; nearest = .enemy(enemy) }
         }
         if let boss = boss, !boss.isDead {
-            let d = player.position.distance(to: boss.position)
+            let d = player.position.distance(to: boss.position) - boss.targetingRadius
             if d <= acquire && d < nearestDist { nearestDist = d; nearest = .boss(boss) }
         }
         return nearest
@@ -3779,7 +3781,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         if playerStats.apexBloodhound, let b = nearestBleed { return .enemy(b) }
         if let n = nearest { return .enemy(n) }
-        if let boss = boss, !boss.isDead, player.position.distance(to: boss.position) <= range {
+        if let boss = boss, !boss.isDead,
+           player.position.distance(to: boss.position) - boss.targetingRadius <= range {
             return .boss(boss)
         }
         return nil

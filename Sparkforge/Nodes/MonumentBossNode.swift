@@ -32,6 +32,10 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     var healthPercent: CGFloat { maxHealth > 0 ? max(0, CGFloat(health) / CGFloat(maxHealth)) : 0 }
     let contactDamage: Int
     var vulnerabilityMultiplier: CGFloat = 1.0
+    /// Set by `configurePhysics` — monuments are huge, so every range check
+    /// (auto-aim, the Apex familiar, Skybeam's lasso) must measure to the body
+    /// surface rather than the origin.
+    private(set) var targetingRadius: CGFloat = 0
 
     // MARK: - Monument state
 
@@ -72,6 +76,7 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     /// auto-aim-nearest is canon and a precision target the player can't aim at
     /// would be pure frustration. Call once the subclass knows its radius.
     func configurePhysics(radius: CGFloat) {
+        targetingRadius = radius
         let body = SKPhysicsBody(circleOfRadius: radius)
         body.isDynamic = true
         body.affectedByGravity = false
