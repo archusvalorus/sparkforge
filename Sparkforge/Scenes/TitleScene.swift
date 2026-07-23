@@ -82,6 +82,7 @@ final class TitleScene: SKScene {
     private var removeAdsValueModal: RemoveAdsModalNode?  // v1.8 (E3): value-prop before purchase
     private var skinPickerModal: SKNode?                  // v2.0 Unit 1: skins wardrobe
     private var skinPickerFamily: String?                 // nil = family hub; else drilled into this family
+    private var bossModeModal: SKNode?                    // v2.0 B1: boss-mode roster
 
     // v1.8 Unit 10: the CODEX hub + the scrollable page it opens.
     private var codexHub: CodexHubNode?
@@ -868,6 +869,28 @@ final class TitleScene: SKScene {
         skinsBtn.addChild(skinsLabel)
         addChild(skinsBtn)
 
+        // v2.0 (B1): BOSS MODE — a permanent slot, shown once the player has
+        // actually felled something. Crimson lane, distinct from CODEX/SKINS.
+        if BossRegistry.shared.isAvailable {
+            layoutY -= 54
+            let bossBtn = SKNode()
+            bossBtn.position = CGPoint(x: 0, y: layoutY)
+            bossBtn.zPosition = 10
+            bossBtn.name = "bossModeButton"
+            let bossBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
+            bossBox.fillColor = SKColor(hex: 0x1F1214)
+            bossBox.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.55)
+            bossBox.lineWidth = 1.5
+            bossBtn.addChild(bossBox)
+            let bossLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+            bossLabel.text = "☠  BOSS MODE"
+            bossLabel.fontSize = 15 * s
+            bossLabel.fontColor = SKColor(hex: 0xF08078)
+            bossLabel.verticalAlignmentMode = .center
+            bossBtn.addChild(bossLabel)
+            addChild(bossBtn)
+        }
+
         layoutY -= 54  // clear gap before the Remove Ads box (anti-mistap)
 
         // Remove Ads button — v1.8 (E2): a distinct bordered pill so it reads
@@ -1005,6 +1028,10 @@ final class TitleScene: SKScene {
             handleSkinPickerTap(location)
             return
         }
+        if bossModeModal != nil {                  // v2.0 B1: boss mode roster
+            handleBossModeTap(location)
+            return
+        }
 
         // v1.6: blessing modal eats every tap until dismissed
         if blessingModal != nil {
@@ -1089,6 +1116,16 @@ final class TitleScene: SKScene {
                                width: 312, height: 42)
             if frame.contains(location) {
                 presentCodexHub()
+                return
+            }
+        }
+
+        // v2.0 B1: BOSS MODE entry
+        if let bossBtn = childNode(withName: "bossModeButton") {
+            let frame = CGRect(x: bossBtn.position.x - 156, y: bossBtn.position.y - 21,
+                               width: 312, height: 42)
+            if frame.contains(location) {
+                showBossModeModal()
                 return
             }
         }
@@ -1470,6 +1507,115 @@ final class TitleScene: SKScene {
             if (eraseTextField?.text ?? "").uppercased() == "ERASE" { performErase() }
         default:
             break
+        }
+    }
+
+    // MARK: - v2.0 (B1): Boss Mode roster
+
+    /// B1 surfaces the ARENA-AWARE registry: every boss listed with the arena it
+    /// belongs to and its grammar, because Boss Mode loads that arena to fight it
+    /// (monuments are unreadable anywhere else). Sequential/Mixup + the challenge
+    /// dials land in B2/B3.
+    private func showBossModeModal() {
+        dismissBossModeModal(animated: false)
+        AudioManager.shared.play(.cardSelect)
+        let roster = BossRegistry.shared.unlocked
+
+        let modal = SKNode()
+        modal.zPosition = 300
+        let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.8)
+        dim.strokeColor = .clear
+        modal.addChild(dim)
+
+        let rowH: CGFloat = 56, gap: CGFloat = 8
+        let panelW: CGFloat = 336
+        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 66
+        let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x140C0D)
+        panel.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.7)
+        panel.lineWidth = 1.5
+        panel.glowWidth = 5
+        panel.name = "bossPanel"
+        modal.addChild(panel)
+        let top = panelH / 2
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "☠ BOSS MODE"
+        title.fontSize = 18
+        title.fontColor = SKColor(hex: 0xF08078)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: top - 26)
+        modal.addChild(title)
+
+        let sub = SKLabelNode(fontNamed: "Menlo")
+        sub.text = "\(roster.count) felled — fight them again, your way"
+        sub.fontSize = 10.5
+        sub.fontColor = SKColor(hex: 0x999999)
+        sub.verticalAlignmentMode = .center
+        sub.position = CGPoint(x: 0, y: top - 48)
+        modal.addChild(sub)
+
+        for (i, e) in roster.enumerated() {
+            let cy = top - 92 - rowH / 2 - CGFloat(i) * (rowH + gap)
+            let row = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: rowH), cornerRadius: 10)
+            row.fillColor = SKColor(hex: 0x1A1012)
+            row.strokeColor = SKColor(hex: e.accentHex, alpha: 0.5)
+            row.lineWidth = 1.3
+            row.position = CGPoint(x: 0, y: cy)
+            modal.addChild(row)
+
+            let name = SKLabelNode(fontNamed: "Menlo-Bold")
+            name.text = e.name
+            name.fontSize = 14
+            name.fontColor = SKColor(hex: e.accentHex)
+            name.verticalAlignmentMode = .center
+            name.horizontalAlignmentMode = .left
+            name.position = CGPoint(x: -panelW / 2 + 22, y: cy + 10)
+            modal.addChild(name)
+
+            let meta = SKLabelNode(fontNamed: "Menlo")
+            let grammar = e.grammar == .monument ? "MONUMENT" : "ARENA"
+            meta.text = "Arena \(e.arenaID + 1)  ·  \(grammar)"
+            meta.fontSize = 9.5
+            meta.fontColor = SKColor(hex: e.grammar == .monument ? 0xFFD98A : 0x9A8E88)
+            meta.verticalAlignmentMode = .center
+            meta.horizontalAlignmentMode = .left
+            meta.position = CGPoint(x: -panelW / 2 + 22, y: cy - 12)
+            modal.addChild(meta)
+        }
+
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "sequential + mixup + dials — coming next"
+        hint.fontSize = 10
+        hint.fontColor = SKColor(hex: 0x6A5A58)
+        hint.verticalAlignmentMode = .center
+        hint.position = CGPoint(x: 0, y: -top + 30)
+        modal.addChild(hint)
+
+        addChild(modal)
+        bossModeModal = modal
+        modal.alpha = 0
+        panel.setScale(0.9)
+        modal.run(SKAction.fadeIn(withDuration: 0.18))
+        let pop = SKAction.scale(to: 1.0, duration: 0.18); pop.timingMode = .easeOut
+        panel.run(pop)
+    }
+
+    private func handleBossModeTap(_ location: CGPoint) {
+        guard bossModeModal != nil else { return }
+        if !nodes(at: location).contains(where: { $0.name == "bossPanel" }) {
+            dismissBossModeModal(animated: true)
+        }
+    }
+
+    private func dismissBossModeModal(animated: Bool) {
+        guard let modal = bossModeModal else { return }
+        bossModeModal = nil
+        if animated {
+            modal.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.15), SKAction.removeFromParent()]))
+        } else {
+            modal.removeFromParent()
         }
     }
 

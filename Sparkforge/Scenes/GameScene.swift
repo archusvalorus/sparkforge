@@ -5032,6 +5032,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.monumentFightActive = false
             self.beginFalseEnding()
             ProgressionManager.shared.recordKill(.boss)
+            ProgressionManager.shared.recordBossDefeat("unmade_star")
             for _ in 0..<12 {
                 let offset = CGPoint(x: CGFloat.random(in: -60...60),
                                      y: CGFloat.random(in: -60...60))
@@ -5512,7 +5513,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
-            CodexManager.shared.recordDefeat(.slagTitan)  // v1.8 Unit 5
+            CodexManager.shared.recordDefeat(.slagTitan)
+            ProgressionManager.shared.recordBossDefeat("slag_titan")  // v1.8 Unit 5
             // Spawn massive XP shower
             for _ in 0..<10 {
                 let offset = CGPoint(
@@ -5565,7 +5567,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
-            CodexManager.shared.recordDefeat(.quenchWarden)  // v1.8 Unit 5
+            CodexManager.shared.recordDefeat(.quenchWarden)
+            ProgressionManager.shared.recordBossDefeat("quench_warden")  // v1.8 Unit 5
             ProgressionManager.shared.wardenKills += 1
             // v1.7: felling the Warden opens The Coilworks
             if ProgressionManager.shared.arenasUnlocked < 3 {
@@ -5654,7 +5657,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
-            CodexManager.shared.recordDefeat(.dynamoChoir)  // v1.8 Unit 5
+            CodexManager.shared.recordDefeat(.dynamoChoir)
+            ProgressionManager.shared.recordBossDefeat("dynamo_choir")  // v1.8 Unit 5
             ProgressionManager.shared.choirKills += 1  // banked for Arena 4's gate
             // v1.8 (Unit 11): felling the Choir opens The Mirrorwound
             if ProgressionManager.shared.arenasUnlocked < 4 {
@@ -5706,6 +5710,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.facetedLie)
+            ProgressionManager.shared.recordBossDefeat("faceted_lie")
             SkinManager.shared.unlockEarned("spark_ascended")  // v2.0: clearing Arena 4 earns the Ascended skin
             for _ in 0..<10 {
                 let offset = CGPoint(

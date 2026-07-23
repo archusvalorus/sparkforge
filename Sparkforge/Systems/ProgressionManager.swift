@@ -34,8 +34,40 @@ final class ProgressionManager {
         static let forgeLevel = "sf_forge_level"
         static let currentArena = "sf_current_arena"
         static let arenasUnlocked = "sf_arenas_unlocked"
+        /// v2.0 Boss Mode: ids of bosses the player has actually FELLED.
+        static let defeatedBosses = "sf_defeated_bosses"
     }
     
+    // MARK: - v2.0: Boss defeats (Boss Mode roster gate)
+
+    /// Ids of bosses the player has felled at least once. Boss Mode only offers
+    /// what you've actually beaten — re-fighting is a victory lap, not a preview.
+    private(set) var defeatedBosses: Set<String> {
+        get { Set(defaults.stringArray(forKey: Keys.defeatedBosses) ?? []) }
+        set { defaults.set(Array(newValue), forKey: Keys.defeatedBosses) }
+    }
+
+    func recordBossDefeat(_ id: String) {
+        var set = defeatedBosses
+        guard !set.contains(id) else { return }
+        set.insert(id)
+        defeatedBosses = set
+    }
+
+    /// True if the boss has been felled. Falls back to the legacy per-boss
+    /// unlock flags so players who beat these BEFORE v2.0 keep their access
+    /// instead of having to re-earn the whole roster.
+    func hasDefeatedBoss(_ id: String) -> Bool {
+        if defeatedBosses.contains(id) { return true }
+        switch id {
+        case "slag_titan":    return arena1BossUnlocked
+        case "quench_warden": return quenchWardenUnlocked
+        case "dynamo_choir":  return dynamoChoirUnlocked
+        case "faceted_lie":   return facetedLieUnlocked
+        default:              return false
+        }
+    }
+
     // MARK: - Kill Stats
     
     var meleeKills: Int {
