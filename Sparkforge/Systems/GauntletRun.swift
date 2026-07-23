@@ -30,6 +30,11 @@ final class GauntletRun {
     /// The bosses this run will face, in the order it will face them.
     let lineup: [BossEntry]
 
+    /// How this run was ordered, kept so a retry rebuilds the SAME mode. A
+    /// mixup retry re-shuffles — a fresh random order is the point of mixup —
+    /// but it never silently drops you back into sequential.
+    let order: Order
+
     /// 0-based index into `lineup`. `stage` (1-based) is what the design speaks in.
     private(set) var index: Int = 0
 
@@ -40,6 +45,7 @@ final class GauntletRun {
     private(set) var bossesFelled: Int = 0
 
     init?(order: Order) {
+        self.order = order
         let registry = BossRegistry.shared
         switch order {
         case .sequential:

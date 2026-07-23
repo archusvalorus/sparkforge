@@ -89,10 +89,16 @@ final class BossRegistry {
     /// Sequential order = the order the player met them (by arena).
     var sequential: [BossEntry] { unlocked.sorted { $0.arenaID < $1.arenaID } }
 
-    /// Mixup draws at random, optionally capped.
+    /// Mixup draws at random, capped at `count`.
+    ///
+    /// v2.0 (B2b): draws WITHOUT replacement. The B1 version used
+    /// `randomElement()` per slot, which could hand you the same boss twice in
+    /// one gauntlet while omitting another entirely — that reads as a bug at
+    /// the moment it happens, and it quietly changes run length. Mixup is meant
+    /// to be "the same set, a different order", so it shuffles and takes.
     func mixup(count: Int) -> [BossEntry] {
-        let pool = unlocked
+        let pool = unlocked.shuffled()
         guard !pool.isEmpty else { return [] }
-        return (0..<max(1, count)).compactMap { _ in pool.randomElement() }
+        return Array(pool.prefix(max(1, min(count, pool.count))))
     }
 }

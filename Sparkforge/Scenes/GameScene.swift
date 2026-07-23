@@ -5159,6 +5159,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gauntletBossOnField = true
         gauntletTransitioning = false
 
+        if isFirst {
+            // ARAM: you start ahead, and you start NOW. Grants, not picks —
+            // a draft screen in front of the button would be exactly the
+            // friction this mode exists to avoid.
+            grantOpenerCards(GameConfig.BossMode.openerCards)
+        } else {
+            // The between-boss heal. Spawned into the NEW arena rather than the
+            // old one so the orbs are reachable for the fight they're meant to
+            // carry you through — an orb left in the previous field would be
+            // clamped to the new boundary at a meaningless position.
+            spawnInterBossHeals()
+        }
+
         switch entry.id {
         case "slag_titan":     spawnBoss()
         case "quench_warden":  spawnQuenchWarden()
@@ -5174,6 +5187,58 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         showGauntletStageBanner(entry: entry, stage: g.stage, of: g.totalStages)
+    }
+
+    /// Auto-GRANT opener cards — "as if you levelled up N times", minus the
+    /// menu. Cards are drawn from the normal pool and applied through the normal
+    /// pick path, so tiers, synergies and capstone rules all behave; only the
+    /// selection UI and its reveal modals are skipped.
+    private func grantOpenerCards(_ count: Int) {
+        guard count > 0 else { return }
+        var granted: [String] = []
+
+        for _ in 0..<count {
+            // Draw one at a time: each pick changes what's eligible next, so a
+            // single batch draw could hand out a card the previous grant just
+            // made redundant.
+            guard let card = upgradeManager.drawCards(count: 1, level: player.currentLevel).first
+            else { break }
+            upgradeManager.pickCard(card, stats: playerStats)
+            granted.append(card.name)
+
+            // Synergies still APPLY (checkSynergies commits them to stats); the
+            // reveal modals are intentionally dropped. Three stacked modals
+            // before the first boss would undo the whole one-button premise.
+            _ = upgradeManager.checkSynergies(stats: playerStats)
+        }
+
+        statHUD.update(from: playerStats)
+        refreshKineticGauge()
+        refreshApexGauge()
+        refreshErasureGauge()
+        buffTracker.update(tagCounts: upgradeManager.tagCounts)
+        player.updateCollisionRadius()
+        hpBar.updateFill(playerStats.hpPercent,
+                         currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
+
+        // You were given something — say what, or the buffs read as noise.
+        if !granted.isEmpty {
+            showBuildHint("✦ " + granted.joined(separator: "  ·  "))
+        }
+    }
+
+    /// The between-boss heal: 2–3 orbs, randomized. The variance is the point —
+    /// a fixed number becomes a resource you plan around instead of a break.
+    private func spawnInterBossHeals() {
+        let count = Int.random(in: GameConfig.BossMode.interBossHealsMin
+                               ... GameConfig.BossMode.interBossHealsMax)
+        for _ in 0..<count {
+            let orb = HealthOrbNode()
+            orb.position = HealthOrbNode.randomArenaPosition()
+            orb.zPosition = 4
+            healthOrbs.append(orb)
+            worldNode.addChild(orb)
+        }
     }
 
     /// Tear the current arena down and build another in its place, then put the
@@ -6225,6 +6290,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     private func spawnXPOrb(at position: CGPoint, value: Int) {
+        var value = value
+        // v2.0 (B2b): Boss Mode has no wave to farm and no clock to survive, so
+        // levelling comes entirely from the bosses — they pay 5× at stage 1,
+        // +1× per stage after. Applied at the single orb seam rather than at
+        // five boss-death sites. Boss-summoned minions ride the same multiplier;
+        // they're part of the fight that earned it.
+        if let g = gauntlet {
+            value = max(1, Int((Double(value) * g.currentXPMultiplier).rounded()))
+        }
         let orb = XPOrbNode(xpValue: value)
         orb.position = position
         xpOrbs.append(orb)
@@ -7344,12 +7418,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // v1.4: Record to ProgressionManager
         ProgressionManager.shared.recordSurvival(waveManager.elapsedTime)
-        let forgeXP = ProgressionManager.shared.forgeXPForRun(
+        var forgeXP = ProgressionManager.shared.forgeXPForRun(
             kills: killCount,
             level: player.currentLevel,
             time: waveManager.elapsedTime,
             bossDefeated: bossDefeatedThisRun
         )
+        // v2.0 (B2b): Boss Mode rewards are sandbox-isolated. Uncapped, a
+        // gauntlet's boss-dense payout would make it the optimal Forge farm and
+        // warp normal play around it; zero would make the mode pointless. The
+        // cap keeps it worth running without making it the only thing worth
+        // running.
+        if isGauntlet {
+            forgeXP = min(forgeXP, GameConfig.BossMode.forgeXPCapPerRun)
+        }
         pendingForgeXP = forgeXP
         ProgressionManager.shared.addForgeXP(forgeXP)
         
@@ -7752,7 +7834,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gauntletWon = false
         bossHPScalingOverride = nil
 
-        guard let fresh = GauntletRun(order: .sequential) else {
+        // Retry rebuilds the same MODE the player chose, not a default.
+        let order = gauntlet?.order ?? .sequential
+        guard let fresh = GauntletRun(order: order) else {
             // The roster emptied out from under us — fall back to normal play
             // rather than sitting in a mode with nothing to fight.
             gauntlet = nil

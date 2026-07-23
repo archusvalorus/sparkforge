@@ -83,6 +83,10 @@ final class TitleScene: SKScene {
     private var skinPickerModal: SKNode?                  // v2.0 Unit 1: skins wardrobe
     private var skinPickerFamily: String?                 // nil = family hub; else drilled into this family
     private var bossModeModal: SKNode?                    // v2.0 B1: boss-mode roster
+    /// v2.0 (B2b): chosen gauntlet order. Session-only — Sequential is the
+    /// honest default (the order you met them), and a run-shaping choice
+    /// shouldn't silently persist into a session you didn't set it in.
+    private var bossModeOrderName = "orderSequential"
 
     // v1.8 Unit 10: the CODEX hub + the scrollable page it opens.
     private var codexHub: CodexHubNode?
@@ -1530,8 +1534,9 @@ final class TitleScene: SKScene {
 
         let rowH: CGFloat = 56, gap: CGFloat = 8
         let panelW: CGFloat = 336
-        // Bottom padding carries the roster clear of the gauntlet button + hint.
-        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 100
+        // Bottom padding carries the roster clear of the order chips, the
+        // gauntlet button and the hint.
+        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 142
         let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
         panel.fillColor = SKColor(hex: 0x140C0D)
         panel.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.7)
@@ -1603,6 +1608,30 @@ final class TitleScene: SKScene {
             modal.addChild(meta)
         }
 
+        // v2.0 (B2b): order pick — SEQUENTIAL or MIXUP. Two chips, one tap,
+        // default already correct: this stays a decision you can ignore, not a
+        // setup screen you have to clear.
+        let chipW = (panelW - 32 - 10) / 2
+        for (i, mode) in [("SEQUENTIAL", "orderSequential"), ("MIXUP", "orderMixup")].enumerated() {
+            let selected = (mode.1 == bossModeOrderName)
+            let chip = SKShapeNode(rectOf: CGSize(width: chipW, height: 30), cornerRadius: 8)
+            chip.fillColor = SKColor(hex: selected ? 0x2A1114 : 0x160D0E)
+            chip.strokeColor = SKColor(hex: 0xE0554C, alpha: selected ? 0.85 : 0.3)
+            chip.lineWidth = selected ? 1.6 : 1.0
+            chip.position = CGPoint(x: (i == 0 ? -1 : 1) * (chipW + 10) / 2, y: -top + 108)
+            chip.name = mode.1
+            modal.addChild(chip)
+
+            let lbl = SKLabelNode(fontNamed: "Menlo-Bold")
+            lbl.text = mode.0
+            lbl.fontSize = 11
+            lbl.fontColor = SKColor(hex: selected ? 0xF08078 : 0x7A6260)
+            lbl.verticalAlignmentMode = .center
+            lbl.position = chip.position
+            lbl.name = mode.1 + "Label"
+            modal.addChild(lbl)
+        }
+
         // v2.0 (B2a): the mode's actual proposition — one button, straight in,
         // all of them back-to-back. The roster above stays as context.
         let enter = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: 46), cornerRadius: 10)
@@ -1646,6 +1675,17 @@ final class TitleScene: SKScene {
 
         // v2.0 (B2a): one button straight into the gauntlet — no mode menu, no
         // loadout screen. The friction belongs in the fight, not in front of it.
+        // Order chips: re-open the modal so the selection redraws.
+        for name in ["orderSequential", "orderMixup"] {
+            if hits.contains(where: { $0.name == name || $0.name == name + "Label" }) {
+                guard bossModeOrderName != name else { return }
+                bossModeOrderName = name
+                AudioManager.shared.play(.cardSelect)
+                showBossModeModal()
+                return
+            }
+        }
+
         if hits.contains(where: { $0.name == "gauntletButton" || $0.name == "gauntletButtonLabel" }) {
             dismissBossModeModal(animated: false)
             startGauntlet()
@@ -1657,7 +1697,7 @@ final class TitleScene: SKScene {
         }
     }
 
-    /// Launch a Boss Mode run. B2a ships SEQUENTIAL order; Mixup lands in B2b.
+    /// Launch a Boss Mode run in the currently selected order.
     private func startGauntlet() {
         guard let view = view else { return }
         AudioManager.shared.play(.bossEntrance)
@@ -1666,9 +1706,16 @@ final class TitleScene: SKScene {
         gameScene.scaleMode = .resizeFill
         gameScene.anchorPoint = CGPoint(x: 0.5, y: 0.5)
 
+        // Mixup is the same SET in a different order, so it draws the full
+        // roster — run length stays identical between the two modes and only
+        // the sequence changes.
+        let order: GauntletRun.Order = bossModeOrderName == "orderMixup"
+            ? .mixup(count: BossRegistry.shared.unlocked.count)
+            : .sequential
+
         // If the registry can't produce a lineup there is nothing to enter —
         // stay on the title rather than presenting an empty run.
-        guard gameScene.configureAsGauntlet(order: .sequential) else { return }
+        guard gameScene.configureAsGauntlet(order: order) else { return }
 
         let transition = SKTransition.fade(with: .black, duration: 0.35)
         view.presentScene(gameScene, transition: transition)
