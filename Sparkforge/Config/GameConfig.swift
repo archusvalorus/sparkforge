@@ -173,6 +173,21 @@ enum GameConfig {
         static let enrageCadence: CGFloat = 0.55
     }
 
+    // MARK: - Mote (v2.0 Unit 3) — the mascot who enters by deleting you
+    /// The joke must be EARNED: the first appearance gates behind real mastery so
+    /// it never punishes a new player. See docs/mote-v2.0-handoff.md.
+    enum Mote {
+        static let requiredLifetimeKills: Int = 10_000
+        static let requiredBossKills: Int = 10
+        /// Beats of the scripted sequence.
+        static let dreadDelay: TimeInterval = 2.4      // after the false-ending card settles
+        static let resolveDuration: TimeInterval = 0.9 // he fades into existence
+        static let regardPause: TimeInterval = 1.2     // he looks at you
+        static let crossDuration: TimeInterval = 0.26  // impossible speed
+        /// Dev-only: skip the mastery gate to test the sequence.
+        static let debugForceEntrance: Bool = false
+    }
+
     enum Everglow {
         static let pulseInterval: TimeInterval = 2.0
         static var baseRadius: CGFloat { 70 * DeviceScale.gameplay }   // short; ×2 at T2

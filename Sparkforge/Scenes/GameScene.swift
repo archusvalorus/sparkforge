@@ -49,6 +49,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// reached the true end. Unit 3's Mote fills that silence.
     private var falseEndingActive: Bool = false
     private var falseEndingCard: SKNode?
+    /// v2.0 (Unit 3): the scripted Mote assassination. Suppresses the revive
+    /// offer (a revive would break the bit) and rewrites the death copy.
+    private var killedByMote = false
+    private var mote: MoteNode?
 
     // v1.6: Quench Field momentum pulses (points/sec toward boss when positive)
     private var fieldImpulseStrength: CGFloat = 0
@@ -990,6 +994,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         deathText.fontSize = 28
         deathText.fontColor = SKColor(hex: 0xFF4444)
         deathText.text = "SPARK EXTINGUISHED"
+        deathText.name = "deathTitle"
         deathText.position = CGPoint(x: 0, y: 90)
         deathOverlay.addChild(deathText)
         
@@ -1001,6 +1006,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         scoreText.position = CGPoint(x: 0, y: 55)
         deathOverlay.addChild(scoreText)
         
+        // v2.0: Mote's death gets its own copy — you didn't lose, you were FOUND.
+        if let title = deathOverlay.childNode(withName: "deathTitle") as? SKLabelNode {
+            title.text = killedByMote ? "MOTE FOUND YOU" : "SPARK EXTINGUISHED"
+            title.fontColor = SKColor(hex: killedByMote ? 0xC77BFF : 0xFF4444)
+        }
+
         // New record badge (hidden by default)
         let recordBadge = SKLabelNode(fontNamed: "Menlo-Bold")
         recordBadge.fontSize = 16
@@ -5042,6 +5053,85 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         showBossEntrance(name: "THE UNMADE STAR", colorHex: 0xFFD98A)
     }
 
+
+    // MARK: - v2.0 (Unit 3): MOTE — the mascot who enters by deleting you
+
+    /// The joke must be EARNED. Gates on lifetime mastery so a new player never
+    /// eats it, and fires only once (ever). See docs/mote-v2.0-handoff.md.
+    private func tryMoteEntrance() {
+        guard gameState == .playing, !killedByMote, mote == nil else { return }
+        let pm = ProgressionManager.shared
+        let alreadyMet = UserDefaults.standard.bool(forKey: "sparkforge_mote_met")
+        var eligible = !alreadyMet
+            && pm.totalKills >= GameConfig.Mote.requiredLifetimeKills
+            && pm.bossKills >= GameConfig.Mote.requiredBossKills
+        if GameConfig.Mote.debugForceEntrance { eligible = true }
+        guard eligible else { return }
+        beginMoteEntrance()
+    }
+
+    /// The arena went quiet. The forge looked finished. Then something that does
+    /// not obey the game's rules resolves at the edge of it.
+    private func beginMoteEntrance() {
+        let C = GameConfig.Mote.self
+
+        // The game "glitches on purpose" — neon-white over violent purple.
+        flashScreen(colorHex: 0xC77BFF, alpha: 0.20, duration: 0.55)
+        AudioManager.shared.play(.bossEntrance)
+
+        let m = MoteNode()
+        let side: CGFloat = Bool.random() ? 1 : -1
+        m.position = CGPoint(x: player.position.x + side * size.width * 0.52,
+                             y: player.position.y + CGFloat.random(in: -40...90))
+        m.alpha = 0
+        m.setScale(0.55)
+        worldNode.addChild(m)
+        mote = m
+
+        m.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.fadeIn(withDuration: C.resolveDuration),
+                SKAction.scale(to: 1.0, duration: C.resolveDuration)
+            ]),
+            SKAction.run { [weak m] in m?.regard() },      // he looks at you
+            SKAction.wait(forDuration: C.regardPause),
+            SKAction.run { [weak self] in self?.moteCross() }
+        ]))
+    }
+
+    /// Impossible speed. You do not get to react to this.
+    private func moteCross() {
+        guard let m = mote else { return }
+        let dash = SKAction.move(to: player.position, duration: GameConfig.Mote.crossDuration)
+        dash.timingMode = .easeIn
+        m.run(SKAction.sequence([dash, SKAction.run { [weak self] in self?.moteScriptedKill() }]))
+    }
+
+    /// An unlock-by-assassination, NOT a balance failure. He bypasses DEF,
+    /// shields, i-frames, lethal saves and Last Light by simply not asking them.
+    private func moteScriptedKill() {
+        guard gameState == .playing else { return }
+        killedByMote = true
+        UserDefaults.standard.set(true, forKey: "sparkforge_mote_met")
+
+        playerStats.currentHP = 0
+        worldNode.shake(intensity: 18, duration: 0.4)
+        flashScreen(colorHex: 0xFFFFFF, alpha: 0.55, duration: 0.28)
+        AudioManager.shared.play(.bossExecute)
+
+        // Mote speaks only AFTER the hit. Funny-rude, never cruel.
+        mote?.say("Bet that hurt, heehee!")
+
+        // The reward for being deleted: Arena 5's earned skin.
+        SkinManager.shared.unlockEarned("spark_starcrossed")
+
+        // Let the bubble land before the result screen.
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: 1.9),
+            SKAction.run { [weak self] in self?.playerDied() }
+        ]))
+    }
+
     // MARK: - v2.0 (Unit 2c.3): The False Ending
 
     /// After the monument falls, the arena goes SILENT — and stays silent. No
@@ -5059,7 +5149,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Let the collapse and the reward scatter breathe before the card.
         run(SKAction.sequence([
             SKAction.wait(forDuration: 2.6),
-            SKAction.run { [weak self] in self?.showFalseEndingCard() }
+            SKAction.run { [weak self] in self?.showFalseEndingCard() },
+            SKAction.wait(forDuration: GameConfig.Mote.dreadDelay),
+            SKAction.run { [weak self] in self?.tryMoteEntrance() }
         ]), withKey: "falseEnding")
     }
 
@@ -6997,7 +7089,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Show/hide revive button
         if let reviveBtn = deathOverlay.childNode(withName: "reviveButton") {
-            reviveBtn.alpha = adReviveManager.canRevive ? 1.0 : 0.0
+            // Mote's kill suppresses the revive offer outright: reviving from a
+            // scripted assassination breaks the joke (handoff canon).
+            reviveBtn.alpha = (adReviveManager.canRevive && !killedByMote) ? 1.0 : 0.0
             
             // Update label for IAP users
             if adReviveManager.adsRemoved {
@@ -7271,6 +7365,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossDefeatedThisRun = false
         monumentFightActive = false
         falseEndingActive = false
+        killedByMote = false
+        mote?.removeFromParent()
+        mote = nil
         falseEndingCard?.removeFromParent()
         falseEndingCard = nil
         pendingForgeXP = 0
