@@ -1806,6 +1806,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // must not survive back to the title, or the player's own arena choice
         // would silently read as whichever boss they last fought.
         ArenaConfig.overrideID = nil
+        // B3: the challenge dials are equally transient. A campaign boss fought
+        // right after a dialled gauntlet must be authored-difficulty, not
+        // whatever the player last set here.
+        BossModeDials.shared.reset()
 
         let titleScene = TitleScene(size: view.bounds.size)
         titleScene.scaleMode = .resizeFill
@@ -3267,6 +3271,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     @discardableResult
     private func applyPlayerDamage(_ raw: Int, fromBossClass: Bool) -> Bool {
         var dmg = CGFloat(raw)
+
+        // v2.0 (B3): Boss Mode ATK dial — scales incoming boss-class damage,
+        // BEFORE the player's own mitigation runs, so DEF/DR still behave. Only
+        // boss-class sources; the dial is about the boss's threat, not adds.
+        if isGauntlet, fromBossClass {
+            dmg *= BossModeDials.shared.atk
+        }
 
         // Unyielding (20B): once/CD, halve a hit that exceeds 20% of Max HP.
         if playerStats.forgeUnyielding, forgeUnyieldingCooldown <= 0,
@@ -5186,6 +5197,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
+        // B3 challenge dials — applied AFTER the boss exists, at spawn, so the
+        // HP scale takes hold before the health bar first draws. ATK rides the
+        // player-damage seam; only DEF needs to live on the boss.
+        if let b = boss {
+            let dials = BossModeDials.shared
+            b.applyChallengeHealthScale(dials.hp)
+            b.challengeFlatReduction = dials.flatDamageReduction
+        }
+
         showGauntletStageBanner(entry: entry, stage: g.stage, of: g.totalStages)
     }
 
@@ -5196,6 +5216,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func grantOpenerCards(_ count: Int) {
         guard count > 0 else { return }
         var granted: [String] = []
+        var synergies: [UpgradeManager.SynergyUnlock] = []
 
         for _ in 0..<count {
             // Draw one at a time: each pick changes what's eligible next, so a
@@ -5203,13 +5224,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // made redundant.
             guard let card = upgradeManager.drawCards(count: 1, level: player.currentLevel).first
             else { break }
+            let tierBefore = upgradeManager.tier(of: card.id)
             upgradeManager.pickCard(card, stats: playerStats)
             granted.append(card.name)
 
-            // Synergies still APPLY (checkSynergies commits them to stats); the
-            // reveal modals are intentionally dropped. Three stacked modals
-            // before the first boss would undo the whole one-button premise.
-            _ = upgradeManager.checkSynergies(stats: playerStats)
+            // A capstone maxed by a grant still earns its reveal.
+            if card.maxTier > 1, tierBefore < card.maxTier,
+               upgradeManager.tier(of: card.id) >= card.maxTier, card.isCapstone {
+                pendingCapstones.append(CardMaxReveal(
+                    tag: card.tag, cardName: card.name,
+                    effect: card.description(forTier: card.maxTier), isCapstone: true))
+            }
+
+            synergies.append(contentsOf: upgradeManager.checkSynergies(stats: playerStats))
         }
 
         statHUD.update(from: playerStats)
@@ -5224,6 +5251,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // You were given something — say what, or the buffs read as noise.
         if !granted.isEmpty {
             showBuildHint("✦ " + granted.joined(separator: "  ·  "))
+        }
+
+        // Hitting a synergy is a real beat and the opener can hit several, so
+        // the grand reveal fires here exactly as it would on a level-up. It
+        // holds the game while the boss entrance plays behind it, and drains
+        // into the standard post-pick invulnerability buffer.
+        synergyQueue = synergies
+        capstoneQueue = pendingCapstones
+        pendingCapstones = []
+        if !synergyQueue.isEmpty || !capstoneQueue.isEmpty {
+            gameState = .synergyReveal
+            presentNextReveal()
         }
     }
 
@@ -7409,15 +7448,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Big screen shake on death
         worldNode.shake(intensity: 12, duration: 0.35)
         
-        // Record high scores
-        let result = HighScoreManager.shared.recordRun(
-            time: waveManager.elapsedTime,
-            level: player.currentLevel,
-            kills: killCount
-        )
-        
-        // v1.4: Record to ProgressionManager
-        ProgressionManager.shared.recordSurvival(waveManager.elapsedTime)
+        // Record high scores — but NOT for a gauntlet. Boss Mode is sandbox-
+        // isolated: survival time is meaningless there (the mode has no clock to
+        // outlast), and letting it write campaign bests would show a bogus
+        // "NEW BEST TIME" and pollute the leaderboard a normal run competes on.
+        let result: HighScoreManager.RunResult
+        if isGauntlet {
+            result = HighScoreManager.RunResult(isNewBestTime: false, isNewBestLevel: false)
+        } else {
+            result = HighScoreManager.shared.recordRun(
+                time: waveManager.elapsedTime,
+                level: player.currentLevel,
+                kills: killCount
+            )
+            // v1.4: Record to ProgressionManager (survival stats — campaign only)
+            ProgressionManager.shared.recordSurvival(waveManager.elapsedTime)
+        }
+
         var forgeXP = ProgressionManager.shared.forgeXPForRun(
             kills: killCount,
             level: player.currentLevel,
@@ -7451,13 +7498,46 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let seconds = Int(elapsed) % 60
         
         if let scoreLabel = deathOverlay.childNode(withName: "deathScore") as? SKLabelNode {
-            scoreLabel.text = String(format: "Survived %d:%02d  •  Level %d  •  %d kills", minutes, seconds, player.currentLevel, killCount)
+            if let g = gauntlet {
+                // A gauntlet is measured in bosses, not clock time — surviving
+                // "3:20" says nothing; "felled 4 of 5" is the whole story.
+                let reached = min(g.stage, g.totalStages)
+                scoreLabel.text = gauntletWon
+                    ? String(format: "All %d bosses felled  •  Level %d", g.totalStages, player.currentLevel)
+                    : String(format: "Felled %d of %d  •  reached %@  •  Level %d",
+                             g.bossesFelled, g.totalStages,
+                             g.currentEntry?.name ?? g.lineup[reached - 1].name,
+                             player.currentLevel)
+            } else {
+                scoreLabel.text = String(format: "Survived %d:%02d  •  Level %d  •  %d kills", minutes, seconds, player.currentLevel, killCount)
+            }
             // v1.8: bound to the screen — the stats line was spilling off both edges.
             scoreLabel.fontSize = 18
             let maxScoreWidth = size.width - 32
             while scoreLabel.frame.width > maxScoreWidth && scoreLabel.fontSize > 11 {
                 scoreLabel.fontSize -= 0.5
             }
+        }
+
+        // B3 run summary: the dial line + capped-reward note, shown only for a
+        // gauntlet and only when there's something to say. Built fresh each
+        // death and torn down on restart with the rest of the overlay state.
+        deathOverlay.childNode(withName: "gauntletSummary")?.removeFromParent()
+        if isGauntlet {
+            let summary = SKLabelNode(fontNamed: "Menlo")
+            var parts: [String] = []
+            if let dials = BossModeDials.shared.summaryText { parts.append(dials) }
+            parts.append("Forge XP +\(pendingForgeXP) (capped \(GameConfig.BossMode.forgeXPCapPerRun))")
+            summary.text = parts.joined(separator: "    ")
+            summary.name = "gauntletSummary"
+            summary.fontSize = 11
+            summary.fontColor = SKColor(hex: 0x9A8E88)
+            summary.verticalAlignmentMode = .center
+            summary.horizontalAlignmentMode = .center
+            summary.position = CGPoint(x: 0, y: 10)   // the slot bestLabel vacates
+            let maxW = size.width - 40
+            while summary.frame.width > maxW && summary.fontSize > 8 { summary.fontSize -= 0.5 }
+            deathOverlay.addChild(summary)
         }
         
         // v2.0: Mote's death gets its own copy — you didn't lose, you were FOUND.
@@ -7502,8 +7582,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
-        // Best time display
+        // Best time display — hidden for a gauntlet, whose result is told by
+        // the B3 summary line instead (survival "Best" means nothing here).
         if let bestLabel = deathOverlay.childNode(withName: "bestLabel") as? SKLabelNode {
+            bestLabel.isHidden = isGauntlet
             bestLabel.text = "Best: \(HighScoreManager.shared.bestTimeFormatted)  •  Runs: \(HighScoreManager.shared.totalRuns)"
         }
         

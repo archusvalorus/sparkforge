@@ -27,11 +27,12 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     // MARK: - ArenaBossNode surface
 
     private(set) var health: Int
-    let maxHealth: Int
+    private(set) var maxHealth: Int
     private(set) var isDead = false
     var healthPercent: CGFloat { maxHealth > 0 ? max(0, CGFloat(health) / CGFloat(maxHealth)) : 0 }
     let contactDamage: Int
     var vulnerabilityMultiplier: CGFloat = 1.0
+    var challengeFlatReduction: Int = 0          // v2.0 (B3): Boss Mode DEF dial
     /// Set by `configurePhysics` — monuments are huge, so every range check
     /// (auto-aim, the Apex familiar, Skybeam's lasso) must measure to the body
     /// surface rather than the origin.
@@ -155,13 +156,21 @@ class MonumentBossNode: SKNode, ArenaBossNode {
 
     // MARK: - Damage / phases
 
+    /// v2.0 (B3): Boss Mode HP dial. Applied at SPAWN only — scaling mid-fight
+    /// would make the health bar lie about a fight already in progress.
+    func applyChallengeHealthScale(_ factor: CGFloat) {
+        guard factor != 1.0 else { return }
+        maxHealth = max(1, Int((CGFloat(maxHealth) * factor).rounded()))
+        health = maxHealth
+    }
+
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
         guard !isDead else { return true }
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= scaled
+        health -= challengedDamage(scaled, raw: amount)
 
         refreshHealthBar()
 

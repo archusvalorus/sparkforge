@@ -1534,9 +1534,9 @@ final class TitleScene: SKScene {
 
         let rowH: CGFloat = 56, gap: CGFloat = 8
         let panelW: CGFloat = 336
-        // Bottom padding carries the roster clear of the order chips, the
-        // gauntlet button and the hint.
-        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 142
+        // Bottom padding carries the roster clear of the challenge dials, the
+        // order chips, the gauntlet button and the hint.
+        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 262
         let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
         panel.fillColor = SKColor(hex: 0x140C0D)
         panel.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.7)
@@ -1608,6 +1608,52 @@ final class TitleScene: SKScene {
             modal.addChild(meta)
         }
 
+        // v2.0 (B3): challenge dials — HP/ATK/DEF, up AND down. Down is not a
+        // lesser mode; it's the no-gates philosophy applied to difficulty, and
+        // it's safe because Boss Mode's rewards are already capped + isolated.
+        let dials = BossModeDials.shared
+        let dialHeader = SKLabelNode(fontNamed: "Menlo-Bold")
+        dialHeader.text = dials.isDefault ? "CHALLENGE DIALS" : "CHALLENGE DIALS — MODIFIED"
+        dialHeader.fontSize = 11
+        dialHeader.fontColor = SKColor(hex: dials.isDefault ? 0x8A7E78 : 0xFFCC44)
+        dialHeader.verticalAlignmentMode = .center
+        dialHeader.position = CGPoint(x: 0, y: -top + 244)
+        modal.addChild(dialHeader)
+
+        let dialRowY: [BossModeDials.Key: CGFloat] = [.hp: -top + 216, .atk: -top + 188, .def: -top + 160]
+        for key in BossModeDials.Key.allCases {
+            let y = dialRowY[key] ?? 0
+            let v = dials.value(key)
+
+            let name = SKLabelNode(fontNamed: "Menlo-Bold")
+            name.text = key.label
+            name.fontSize = 12
+            name.fontColor = SKColor(hex: key.colorHex)
+            name.horizontalAlignmentMode = .left
+            name.verticalAlignmentMode = .center
+            name.position = CGPoint(x: -panelW / 2 + 22, y: y)
+            modal.addChild(name)
+
+            // − stepper
+            let minusEnabled = v > BossModeDials.minValue
+            addDialStepper(to: modal, symbol: "−", name: "dialMinus_\(key.rawValue)",
+                           x: panelW / 2 - 120, y: y, enabled: minusEnabled)
+
+            // value — brighter when off the authored 1.0×
+            let valLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+            valLabel.text = String(format: v == 1.0 ? "%.0f×" : "%.2f×", Double(v))
+            valLabel.fontSize = 12
+            valLabel.fontColor = SKColor(hex: v == 1.0 ? 0xAAAAAA : key.colorHex)
+            valLabel.verticalAlignmentMode = .center
+            valLabel.position = CGPoint(x: panelW / 2 - 74, y: y)
+            modal.addChild(valLabel)
+
+            // + stepper
+            let plusEnabled = v < BossModeDials.maxValue
+            addDialStepper(to: modal, symbol: "+", name: "dialPlus_\(key.rawValue)",
+                           x: panelW / 2 - 28, y: y, enabled: plusEnabled)
+        }
+
         // v2.0 (B2b): order pick — SEQUENTIAL or MIXUP. Two chips, one tap,
         // default already correct: this stays a decision you can ignore, not a
         // setup screen you have to clear.
@@ -1669,9 +1715,49 @@ final class TitleScene: SKScene {
         panel.run(pop)
     }
 
+    /// A ±  square button for a challenge dial. Disabled steppers dim and stop
+    /// registering, so a dial pinned at its limit reads as pinned.
+    private func addDialStepper(to modal: SKNode, symbol: String, name: String,
+                                x: CGFloat, y: CGFloat, enabled: Bool) {
+        let box = SKShapeNode(rectOf: CGSize(width: 28, height: 26), cornerRadius: 6)
+        box.fillColor = SKColor(hex: 0x1E1214)
+        box.strokeColor = SKColor(hex: 0xE0554C, alpha: enabled ? 0.7 : 0.18)
+        box.lineWidth = 1.2
+        box.position = CGPoint(x: x, y: y)
+        box.name = enabled ? name : nil       // nil name ⇒ tap falls through
+        box.alpha = enabled ? 1.0 : 0.4
+        modal.addChild(box)
+
+        let sym = SKLabelNode(fontNamed: "Menlo-Bold")
+        sym.text = symbol
+        sym.fontSize = 16
+        sym.fontColor = SKColor(hex: enabled ? 0xF08078 : 0x6A5A58)
+        sym.verticalAlignmentMode = .center
+        sym.horizontalAlignmentMode = .center
+        sym.position = box.position
+        sym.name = enabled ? name : nil
+        modal.addChild(sym)
+    }
+
     private func handleBossModeTap(_ location: CGPoint) {
         guard bossModeModal != nil else { return }
         let hits = nodes(at: location)
+
+        // Challenge dial steppers: adjust, then redraw so the value + limits update.
+        for key in BossModeDials.Key.allCases {
+            if hits.contains(where: { $0.name == "dialMinus_\(key.rawValue)" }) {
+                BossModeDials.shared.adjust(key, by: -BossModeDials.step)
+                AudioManager.shared.play(.cardSelect)
+                showBossModeModal()
+                return
+            }
+            if hits.contains(where: { $0.name == "dialPlus_\(key.rawValue)" }) {
+                BossModeDials.shared.adjust(key, by: BossModeDials.step)
+                AudioManager.shared.play(.cardSelect)
+                showBossModeModal()
+                return
+            }
+        }
 
         // v2.0 (B2a): one button straight into the gauntlet — no mode menu, no
         // loadout screen. The friction belongs in the fight, not in front of it.

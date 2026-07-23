@@ -52,6 +52,7 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
 
     private(set) var health: Int
     var vulnerabilityMultiplier: CGFloat = 1.0   // v1.9: capstone-debuff vulnerability
+    var challengeFlatReduction: Int = 0          // v2.0 (B3): Boss Mode DEF dial
     private(set) var maxHealth: Int
     private(set) var isDead: Bool = false
 
@@ -555,13 +556,21 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
 
     // MARK: - Damage
 
+    /// v2.0 (B3): Boss Mode HP dial. Applied at SPAWN only — scaling mid-fight
+    /// would make the health bar lie about a fight already in progress.
+    func applyChallengeHealthScale(_ factor: CGFloat) {
+        guard factor != 1.0 else { return }
+        maxHealth = max(1, Int((CGFloat(maxHealth) * factor).rounded()))
+        health = maxHealth
+    }
+
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
         guard !isDead else { return false }
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= scaled
+        health -= challengedDamage(scaled, raw: amount)
 
         let flash = SKAction.sequence([
             SKAction.run { [weak self] in
