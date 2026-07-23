@@ -67,6 +67,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var gauntletBossOnField = false
     /// Set while an arena swap / interstitial is playing so update() stands down.
     private var gauntletTransitioning = false
+    /// A stage handoff that came due while the game was showing a level-up,
+    /// pause or reveal screen. Picked up on the first frame play resumes.
+    private var gauntletStagePending = false
+    private var gauntletStagePendingIsFirst = false
     /// Overrides the elapsed-time HP scaling every boss computes for itself.
     /// Boss Mode has no clock pressure, so difficulty comes from the stage ramp.
     private var bossHPScalingOverride: Int?
@@ -2451,6 +2455,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.4: Update boss AI
         boss?.update(deltaTime: dt, playerPosition: player.position)
+
+        // v2.0 (B3 fix): a stage handoff that came due behind a level-up or
+        // pause screen resumes here — update() only runs while .playing, so
+        // reaching this line already proves the game is back.
+        if isGauntlet, gauntletStagePending {
+            beginGauntletStage(isFirst: gauntletStagePendingIsFirst)
+        }
 
         // v2.0 (B2a): the gauntlet's stage clock. Every boss's onDeath already
         // clears `boss`, so watching for that transition lets all five of them
@@ -5155,9 +5166,27 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// and future callers; the scene routes through its wired spawners.)
     private func beginGauntletStage(isFirst: Bool) {
         // The interstitial is a scheduled action, and SKActions keep running
-        // after the player dies. Without this a death during the beat between
-        // bosses would spawn the next one onto a finished run.
-        guard gameState == .playing else { return }
+        // regardless of gameState — so this can land in the middle of anything.
+        //
+        // A DEAD run is terminal: never start another stage on it.
+        guard gameState != .dead else { return }
+
+        // Everything else — level-up, pause, synergy reveal — is TRANSIENT. The
+        // stage is not cancelled by them, only DEFERRED.
+        //
+        // Bailing outright here deadlocked the whole mode: a boss's XP shower
+        // routinely levels the player several times, those card screens easily
+        // outlast the 2.4s interstitial, so the handoff fired during a pick and
+        // was silently dropped — and since advanceGauntlet() guards on
+        // !gauntletTransitioning, nothing could ever re-trigger it. The run just
+        // sat in an empty arena forever.
+        guard gameState == .playing else {
+            gauntletStagePending = true
+            gauntletStagePendingIsFirst = isFirst
+            return
+        }
+        gauntletStagePending = false
+
         guard let g = gauntlet, let entry = g.currentEntry else { return }
 
         // Load this boss's home arena. On the first stage configureAsGauntlet()
@@ -7559,6 +7588,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         removeAction(forKey: "gauntletStage")
         gauntletTransitioning = false
         gauntletBossOnField = false
+        gauntletStagePending = false
 
         // v2.0: in-world readouts must not bleed onto the result screen.
         falseEndingCard?.removeFromParent()
@@ -7913,6 +7943,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         removeAction(forKey: "gauntletClear")
         gauntletBossOnField = false
         gauntletTransitioning = false
+        gauntletStagePending = false
         gauntletWon = false
         bossHPScalingOverride = nil
 
