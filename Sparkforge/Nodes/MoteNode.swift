@@ -27,7 +27,7 @@ import SpriteKit
 final class MoteNode: SKNode {
 
     /// Deliberately tiny. The joke is that this ends you.
-    static let bodyRadius: CGFloat = 13
+    static let bodyRadius: CGFloat = 15   // tiny by canon, but the detail must read
 
     private let eyeL = SKShapeNode(circleOfRadius: 2.6)
     private let eyeR = SKShapeNode(circleOfRadius: 2.2)   // asymmetry is canon
@@ -43,90 +43,180 @@ final class MoteNode: SKNode {
 
     private func buildBody() {
         let R = MoteNode.bodyRadius
+        let stone = SKColor(hex: 0xD8D4DE)      // pale carved stone
+        let stoneEdge = SKColor(hex: 0x8A8296)
+        let cloth = SKColor(hex: 0x2A1B44)      // deep violet tattered body
+        let arcane = SKColor(hex: 0xB061FF)
 
-        // Neon-white aura — the "from another layer of the app" too-crisp glow.
-        let aura = SKShapeNode(circleOfRadius: R * 1.7)
-        aura.fillColor = SKColor(hex: 0xC79BFF, alpha: 0.22)
-        aura.strokeColor = SKColor(hex: 0xE9D6FF, alpha: 0.85)
-        aura.lineWidth = 1.5
-        aura.glowWidth = 14
-        aura.zPosition = -1
+        // Arcane aura — he is lit from inside by something else.
+        let aura = SKShapeNode(circleOfRadius: R * 1.9)
+        aura.fillColor = SKColor(hex: 0x8A3FD8, alpha: 0.16)
+        aura.strokeColor = .clear
+        aura.glowWidth = 16
+        aura.zPosition = -2
         addChild(aura)
 
-        // Tattered cloak — greyscale, asymmetric, ragged hem.
-        let cloak = SKShapeNode()
-        let cp = CGMutablePath()
-        cp.move(to: CGPoint(x: -R * 0.95, y: R * 0.35))
-        cp.addLine(to: CGPoint(x:  R * 0.90, y: R * 0.42))
-        cp.addLine(to: CGPoint(x:  R * 1.05, y: -R * 0.85))
-        cp.addLine(to: CGPoint(x:  R * 0.45, y: -R * 0.45))   // ragged
-        cp.addLine(to: CGPoint(x:  R * 0.10, y: -R * 1.15))
-        cp.addLine(to: CGPoint(x: -R * 0.35, y: -R * 0.50))
-        cp.addLine(to: CGPoint(x: -R * 0.80, y: -R * 1.00))
-        cp.closeSubpath()
-        cloak.path = cp
-        cloak.fillColor = SKColor(hex: 0xE8E8EE)
-        cloak.strokeColor = SKColor(hex: 0x9A93A8, alpha: 0.9)
-        cloak.lineWidth = 1
-        cloak.zPosition = 1
-        addChild(cloak)
-
-        // The void face — a black hole where a face should be.
-        let face = SKShapeNode(circleOfRadius: R * 0.72)
-        face.fillColor = SKColor(hex: 0x05040A)
-        face.strokeColor = SKColor(hex: 0xB88CFF, alpha: 0.55)
-        face.lineWidth = 1.2
-        face.position = CGPoint(x: 0, y: R * 0.18)
-        face.zPosition = 2
-        addChild(face)
-
-        // Glowing purple eyes — mismatched on purpose.
-        for (eye, dx) in [(eyeL, -R * 0.26), (eyeR, R * 0.28)] {
-            eye.fillColor = SKColor(hex: 0xC77BFF)
-            eye.strokeColor = .clear
-            eye.glowWidth = 7
-            eye.blendMode = .add
-            eye.position = CGPoint(x: dx, y: R * 0.22)
-            eye.zPosition = 3
-            addChild(eye)
-        }
-
-        // Cracked horn crown — uneven, a couple of stubs, one broken short.
-        let hornSpecs: [(x: CGFloat, h: CGFloat, lean: CGFloat)] = [
-            (-R * 0.62, R * 0.85, -0.22), (-R * 0.18, R * 1.15, -0.05),
-            ( R * 0.26, R * 0.60,  0.14), ( R * 0.66, R * 0.95,  0.30)
-        ]
-        for spec in hornSpecs {
+        // TWO great curved horns sweeping out and up from the hood.
+        for side in [CGFloat(-1), 1] {
             let horn = SKShapeNode()
             let p = CGMutablePath()
-            let baseY = R * 0.66
-            p.move(to: CGPoint(x: spec.x - R * 0.13, y: baseY))
-            p.addLine(to: CGPoint(x: spec.x + spec.lean * R, y: baseY + spec.h))
-            p.addLine(to: CGPoint(x: spec.x + R * 0.13, y: baseY))
+            let baseX = side * R * 0.62, baseY = R * 0.34
+            p.move(to: CGPoint(x: baseX, y: baseY))
+            // outer sweep
+            p.addCurve(to: CGPoint(x: side * R * 1.62, y: R * 1.46),
+                       control1: CGPoint(x: side * R * 1.52, y: baseY + R * 0.10),
+                       control2: CGPoint(x: side * R * 1.78, y: R * 0.92))
+            // tip hooks inward
+            p.addCurve(to: CGPoint(x: side * R * 0.98, y: R * 0.62),
+                       control1: CGPoint(x: side * R * 1.30, y: R * 1.30),
+                       control2: CGPoint(x: side * R * 1.22, y: R * 0.86))
             p.closeSubpath()
             horn.path = p
-            horn.fillColor = SKColor(hex: 0xF2EFF7)
-            horn.strokeColor = SKColor(hex: 0x8A7FA0, alpha: 0.9)
-            horn.lineWidth = 0.8
-            horn.zPosition = 2.5
+            horn.fillColor = stone
+            horn.strokeColor = stoneEdge
+            horn.lineWidth = 1
+            horn.zPosition = 0.5
             addChild(horn)
         }
 
-        // THREE-fingered hands — tiny, and canon.
+        // Tattered body — wide, ragged, hanging below the hood.
+        let body = SKShapeNode()
+        let bp = CGMutablePath()
+        bp.move(to: CGPoint(x: -R * 0.86, y: R * 0.30))
+        bp.addLine(to: CGPoint(x:  R * 0.86, y: R * 0.30))
+        bp.addLine(to: CGPoint(x:  R * 1.04, y: -R * 0.62))
+        bp.addLine(to: CGPoint(x:  R * 0.58, y: -R * 0.34))   // ragged hem
+        bp.addLine(to: CGPoint(x:  R * 0.30, y: -R * 1.24))
+        bp.addLine(to: CGPoint(x:  R * 0.02, y: -R * 0.52))
+        bp.addLine(to: CGPoint(x: -R * 0.34, y: -R * 1.06))
+        bp.addLine(to: CGPoint(x: -R * 0.62, y: -R * 0.40))
+        bp.addLine(to: CGPoint(x: -R * 1.00, y: -R * 0.70))
+        bp.closeSubpath()
+        body.path = bp
+        body.fillColor = cloth
+        body.strokeColor = SKColor(hex: 0x6A4AA8, alpha: 0.8)
+        body.lineWidth = 1
+        body.zPosition = 1
+        addChild(body)
+
+        // The stone hood — the dominant silhouette, framing the void.
+        let hood = SKShapeNode(circleOfRadius: R * 0.94)
+        hood.fillColor = stone
+        hood.strokeColor = stoneEdge
+        hood.lineWidth = 1.2
+        hood.position = CGPoint(x: 0, y: R * 0.30)
+        hood.zPosition = 2
+        addChild(hood)
+
+        // The void inside it — a hole where a face should be.
+        let face = SKShapeNode(circleOfRadius: R * 0.70)
+        face.fillColor = SKColor(hex: 0x040309)
+        face.strokeColor = .clear
+        face.position = CGPoint(x: 0, y: R * 0.24)
+        face.zPosition = 3
+        addChild(face)
+
+        // Large oval lavender eyes, softly glowing (slight asymmetry kept).
+        for (eye, dx, scale) in [(eyeL, -R * 0.30, CGFloat(1.0)), (eyeR, R * 0.31, CGFloat(0.92))] {
+            eye.path = CGPath(ellipseIn: CGRect(x: -R * 0.15, y: -R * 0.21,
+                                                width: R * 0.30, height: R * 0.42), transform: nil)
+            eye.fillColor = SKColor(hex: 0xE0BBFF)
+            eye.strokeColor = .clear
+            eye.glowWidth = 8
+            eye.blendMode = .add
+            eye.setScale(scale)
+            eye.position = CGPoint(x: dx, y: R * 0.26)
+            eye.zPosition = 4
+            addChild(eye)
+        }
+
+        // Carved collar at the throat.
+        let collar = SKShapeNode(rectOf: CGSize(width: R * 1.34, height: R * 0.30),
+                                 cornerRadius: R * 0.11)
+        collar.fillColor = stone
+        collar.strokeColor = stoneEdge
+        collar.lineWidth = 1
+        collar.position = CGPoint(x: 0, y: -R * 0.34)
+        collar.zPosition = 3.5
+        addChild(collar)
+
+        // Diamond pendant with an arcane mark.
+        let pendant = SKShapeNode()
+        let dp = CGMutablePath()
+        dp.move(to: CGPoint(x: 0, y: -R * 0.52))
+        dp.addLine(to: CGPoint(x: R * 0.22, y: -R * 0.76))
+        dp.addLine(to: CGPoint(x: 0, y: -R * 1.00))
+        dp.addLine(to: CGPoint(x: -R * 0.22, y: -R * 0.76))
+        dp.closeSubpath()
+        pendant.path = dp
+        pendant.fillColor = SKColor(hex: 0x1A1030)
+        pendant.strokeColor = stone
+        pendant.lineWidth = 1
+        pendant.zPosition = 3.6
+        addChild(pendant)
+        let spark = SKShapeNode(circleOfRadius: R * 0.07)
+        spark.fillColor = SKColor(hex: 0xD79BFF)
+        spark.strokeColor = .clear
+        spark.glowWidth = 4
+        spark.blendMode = .add
+        spark.position = CGPoint(x: 0, y: -R * 0.76)
+        spark.zPosition = 3.7
+        addChild(spark)
+
+        // THREE-fingered stone hands, crackling with arcane lightning.
         for side in [CGFloat(-1), 1] {
             let hand = SKNode()
-            hand.position = CGPoint(x: side * R * 1.02, y: -R * 0.18)
+            hand.position = CGPoint(x: side * R * 1.16, y: -R * 0.16)
+            hand.zPosition = 2.5
             for f in 0..<3 {
-                let finger = SKShapeNode(rectOf: CGSize(width: R * 0.16, height: R * 0.34),
-                                         cornerRadius: R * 0.07)
-                finger.fillColor = SKColor(hex: 0xF2EFF7)
-                finger.strokeColor = .clear
-                finger.position = CGPoint(x: CGFloat(f - 1) * R * 0.19,
-                                          y: CGFloat(f == 1 ? 0.06 : 0) * R)
+                let finger = SKShapeNode(rectOf: CGSize(width: R * 0.17, height: R * 0.40),
+                                         cornerRadius: R * 0.08)
+                finger.fillColor = stone
+                finger.strokeColor = stoneEdge
+                finger.lineWidth = 0.6
+                finger.position = CGPoint(x: CGFloat(f - 1) * R * 0.21,
+                                          y: (f == 1 ? R * 0.09 : 0))
+                finger.zRotation = CGFloat(f - 1) * 0.20 * side
                 hand.addChild(finger)
             }
-            hand.zPosition = 1.5
+            // Jagged arcane crackle off the fingertips.
+            for j in 0..<3 {
+                let bolt = SKShapeNode()
+                let lp = CGMutablePath()
+                let ox = side * R * (0.30 + CGFloat(j) * 0.16)
+                lp.move(to: CGPoint(x: ox, y: R * 0.10))
+                lp.addLine(to: CGPoint(x: ox + side * R * 0.22, y: R * 0.34))
+                lp.addLine(to: CGPoint(x: ox + side * R * 0.12, y: R * 0.36))
+                lp.addLine(to: CGPoint(x: ox + side * R * 0.34, y: R * 0.66))
+                bolt.path = lp
+                bolt.strokeColor = arcane
+                bolt.lineWidth = 1.3
+                bolt.glowWidth = 4
+                bolt.blendMode = .add
+                hand.addChild(bolt)
+                bolt.run(SKAction.repeatForever(SKAction.sequence([
+                    SKAction.fadeAlpha(to: 0.15, duration: 0.10 + Double(j) * 0.05),
+                    SKAction.fadeAlpha(to: 1.0, duration: 0.09 + Double(j) * 0.04)
+                ])))
+            }
             addChild(hand)
+        }
+
+        // Drifting arcane motes around him.
+        for i in 0..<6 {
+            let m = SKShapeNode(circleOfRadius: R * 0.06)
+            m.fillColor = arcane
+            m.strokeColor = .clear
+            m.glowWidth = 3
+            m.blendMode = .add
+            let a = CGFloat(i) / 6 * .pi * 2
+            m.position = CGPoint(x: cos(a) * R * 1.5, y: sin(a) * R * 1.25)
+            m.zPosition = 0
+            addChild(m)
+            m.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.moveBy(x: 0, y: R * 0.4, duration: 1.1 + Double(i) * 0.13),
+                SKAction.moveBy(x: 0, y: -R * 0.4, duration: 1.0 + Double(i) * 0.11)
+            ])))
         }
     }
 
