@@ -5119,11 +5119,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // The reward for being deleted: Arena 5's earned skin.
         SkinManager.shared.unlockEarned("spark_starcrossed")
 
-        // Let the bubble land before the result screen.
-        run(SKAction.sequence([
-            SKAction.wait(forDuration: 1.9),
-            SKAction.run { [weak self] in self?.playerDied() }
-        ]))
+        // Death lands ON CONTACT — no dwell, no ceremony. He touches you and the
+        // run is simply over. The bubble and his gloating then play OVER the
+        // result screen, which is deliberate: he doesn't respect the UI either.
+        playerDied()
     }
 
     // MARK: - v2.0 (Unit 2c.3): The False Ending
