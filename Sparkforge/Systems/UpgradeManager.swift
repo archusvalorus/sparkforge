@@ -124,6 +124,13 @@ final class UpgradeManager {
     /// persisted — reset with everything else, like pickedCardIDs.
     private(set) var capabilities: Set<Capability> = []
 
+    /// Level-ups since each GATEWAY card was last offered, driving the pity
+    /// guarantee below. Keyed by card id; per-run like everything else here.
+    private var levelsSinceGatewayOffer: [String: Int] = [:]
+    /// The level the last draw was for, so a REROLL of the same level doesn't
+    /// tick the pity counter (a reroll is one offer, not two).
+    private var lastDrawLevel: Int = -1
+
     /// v1.9: id → current tier this run (absent = not owned). Per-run,
     /// reset with everything else — no persistence, like pickedCardIDs.
     private(set) var cardTiers: [String: Int] = [:]
@@ -215,6 +222,41 @@ final class UpgradeManager {
                 if !drawn.contains(where: { $0.id == card.id }) {
                     drawn.append(card)
                 }
+            }
+        }
+
+        // v2.0 Phase C — GATEWAY PITY.
+        //
+        // drawCards weights trees by how many cards they still have (a shuffled
+        // flat pool means more cards ⇒ earlier first occurrence). A brand-new
+        // tree with a single draftable card therefore surfaces ~5% of the time,
+        // which made Terra appear about once every 20 level-ups and left the
+        // whole Growth tree unreachable in practice.
+        //
+        // So a card that OPENS a pool gets a floor on its offer rate: if it
+        // hasn't been seen for `gatewayPityLevels` level-ups, it takes a slot.
+        // Deliberately narrow — this is not a general re-weighting of the draft
+        // (that would change the feel of every tree in a shipped, tuned game),
+        // it's a discoverability floor for cards that gate content.
+        let isNewLevel = (level != lastDrawLevel)
+        lastDrawLevel = level
+        for gateway in allCards where !gateway.provides.isEmpty {
+            // Only unowned gateways whose own requirements are met.
+            guard tier(of: gateway.id) == 0,
+                  gateway.requires.isSubset(of: capabilities) else {
+                levelsSinceGatewayOffer[gateway.id] = 0
+                continue
+            }
+            if drawn.contains(where: { $0.id == gateway.id }) {
+                levelsSinceGatewayOffer[gateway.id] = 0
+                continue
+            }
+            let waited = (levelsSinceGatewayOffer[gateway.id] ?? 0) + (isNewLevel ? 1 : 0)
+            if waited >= GameConfig.Drafting.gatewayPityLevels, !drawn.isEmpty {
+                drawn[0] = gateway               // front slot; capstones take the back
+                levelsSinceGatewayOffer[gateway.id] = 0
+            } else {
+                levelsSinceGatewayOffer[gateway.id] = waited
             }
         }
 
@@ -388,6 +430,8 @@ final class UpgradeManager {
     func reset() {
         pickedCardIDs.removeAll()
         capabilities.removeAll()
+        levelsSinceGatewayOffer.removeAll()
+        lastDrawLevel = -1
         cardTiers.removeAll()
         tagCounts.removeAll()
         appliedSynergies.removeAll()

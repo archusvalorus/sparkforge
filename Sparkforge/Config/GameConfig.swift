@@ -88,6 +88,19 @@ enum GameConfig {
         static let debugStartStage: Int = 1
     }
 
+    // MARK: - Card Drafting (v2.0 Phase C)
+    enum Drafting {
+        /// A GATEWAY card (one that unlocks a whole pool — Terra) is guaranteed
+        /// a slot if it hasn't been offered for this many level-ups.
+        ///
+        /// Needed because `drawCards` weights trees by how many cards they still
+        /// have: a brand-new tree with one draftable card surfaces ~5% of the
+        /// time, so Terra appeared about once every 20 levels and the Growth
+        /// tree was effectively unreachable. A gateway you can't find is a tree
+        /// that doesn't exist.
+        static let gatewayPityLevels: Int = 3
+    }
+
     // MARK: - Arena
     enum Arena {
         /// Radius of the circular arena in points — device-aware.
