@@ -1530,7 +1530,8 @@ final class TitleScene: SKScene {
 
         let rowH: CGFloat = 56, gap: CGFloat = 8
         let panelW: CGFloat = 336
-        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 66
+        // Bottom padding carries the roster clear of the gauntlet button + hint.
+        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 100
         let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
         panel.fillColor = SKColor(hex: 0x140C0D)
         panel.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.7)
@@ -1585,12 +1586,32 @@ final class TitleScene: SKScene {
             modal.addChild(meta)
         }
 
+        // v2.0 (B2a): the mode's actual proposition — one button, straight in,
+        // all of them back-to-back. The roster above stays as context.
+        let enter = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: 46), cornerRadius: 10)
+        enter.fillColor = SKColor(hex: 0x2A1114)
+        enter.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.9)
+        enter.lineWidth = 1.6
+        enter.glowWidth = 3
+        enter.position = CGPoint(x: 0, y: -top + 62)
+        enter.name = "gauntletButton"
+        modal.addChild(enter)
+
+        let enterLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        enterLabel.text = "ENTER THE GAUNTLET"
+        enterLabel.fontSize = 15
+        enterLabel.fontColor = SKColor(hex: 0xF08078)
+        enterLabel.verticalAlignmentMode = .center
+        enterLabel.position = CGPoint(x: 0, y: -top + 62)
+        enterLabel.name = "gauntletButtonLabel"
+        modal.addChild(enterLabel)
+
         let hint = SKLabelNode(fontNamed: "Menlo")
-        hint.text = "sequential + mixup + dials — coming next"
+        hint.text = "all \(roster.count), back-to-back — no revives"
         hint.fontSize = 10
         hint.fontColor = SKColor(hex: 0x6A5A58)
         hint.verticalAlignmentMode = .center
-        hint.position = CGPoint(x: 0, y: -top + 30)
+        hint.position = CGPoint(x: 0, y: -top + 20)
         modal.addChild(hint)
 
         addChild(modal)
@@ -1604,9 +1625,36 @@ final class TitleScene: SKScene {
 
     private func handleBossModeTap(_ location: CGPoint) {
         guard bossModeModal != nil else { return }
-        if !nodes(at: location).contains(where: { $0.name == "bossPanel" }) {
+        let hits = nodes(at: location)
+
+        // v2.0 (B2a): one button straight into the gauntlet — no mode menu, no
+        // loadout screen. The friction belongs in the fight, not in front of it.
+        if hits.contains(where: { $0.name == "gauntletButton" || $0.name == "gauntletButtonLabel" }) {
+            dismissBossModeModal(animated: false)
+            startGauntlet()
+            return
+        }
+
+        if !hits.contains(where: { $0.name == "bossPanel" }) {
             dismissBossModeModal(animated: true)
         }
+    }
+
+    /// Launch a Boss Mode run. B2a ships SEQUENTIAL order; Mixup lands in B2b.
+    private func startGauntlet() {
+        guard let view = view else { return }
+        AudioManager.shared.play(.bossEntrance)
+
+        let gameScene = GameScene(size: view.bounds.size)
+        gameScene.scaleMode = .resizeFill
+        gameScene.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+
+        // If the registry can't produce a lineup there is nothing to enter —
+        // stay on the title rather than presenting an empty run.
+        guard gameScene.configureAsGauntlet(order: .sequential) else { return }
+
+        let transition = SKTransition.fade(with: .black, duration: 0.35)
+        view.presentScene(gameScene, transition: transition)
     }
 
     private func dismissBossModeModal(animated: Bool) {

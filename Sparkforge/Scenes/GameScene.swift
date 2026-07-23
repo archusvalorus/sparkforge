@@ -34,7 +34,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let adReviveManager = AdReviveManager()
 
     // v1.6: Selected arena's visual identity (resolved at scene creation)
-    private let arenaConfig = ArenaConfig.current
+    // v2.0 (B2a): now a var — Boss Mode re-resolves it on every arena swap.
+    // Normal play still resolves it exactly once and never touches it again.
+    private var arenaConfig = ArenaConfig.current
     
     // MARK: - Boss Mechanics
 
@@ -53,6 +55,40 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// offer (a revive would break the bit) and rewrites the death copy.
     private var killedByMote = false
     private var mote: MoteNode?
+
+    // MARK: - v2.0 (B2a): Boss Mode — the Gauntlet
+
+    /// Non-nil ⇒ this scene is a GAUNTLET run, not a normal survival run.
+    /// Set by `configureAsGauntlet(order:)` before the scene is presented.
+    private var gauntlet: GauntletRun?
+    /// True while a stage's boss is on the field. The transition from
+    /// `true` + `boss == nil` is what advances the gauntlet — that way every
+    /// boss's existing `onDeath` closure keeps working untouched.
+    private var gauntletBossOnField = false
+    /// Set while an arena swap / interstitial is playing so update() stands down.
+    private var gauntletTransitioning = false
+    /// Overrides the elapsed-time HP scaling every boss computes for itself.
+    /// Boss Mode has no clock pressure, so difficulty comes from the stage ramp.
+    private var bossHPScalingOverride: Int?
+    /// True when the run ended by CLEARING the gauntlet rather than dying —
+    /// the result screen reads very differently for the two.
+    private var gauntletWon = false
+
+    var isGauntlet: Bool { gauntlet != nil }
+
+    /// Entry point — call before presenting the scene. Returns false when the
+    /// registry has nothing unlocked to fight (Boss Mode shouldn't be reachable
+    /// then, but the scene refuses to start a zero-boss run regardless).
+    @discardableResult
+    func configureAsGauntlet(order: GauntletRun.Order) -> Bool {
+        guard let run = GauntletRun(order: order) else { return false }
+        gauntlet = run
+        // Resolve the FIRST boss's home arena before didMove builds anything,
+        // so the run opens directly in the right field.
+        ArenaConfig.overrideID = run.currentEntry?.arenaID
+        arenaConfig = ArenaConfig.current
+        return true
+    }
 
     // v1.6: Quench Field momentum pulses (points/sec toward boss when positive)
     private var fieldImpulseStrength: CGFloat = 0
@@ -184,7 +220,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let worldNode = SKNode()
     
     // MARK: - Arena Visuals
-    
+
+    /// v2.0 (B2a): every arena visual — floor, motif, boundary, danger ring,
+    /// ambience — lives under this one container instead of loose in worldNode.
+    /// Boss Mode swaps arenas between stages, and a swap has to be able to tear
+    /// the old arena down without touching the player, enemies or pickups that
+    /// share worldNode. One container makes that a single removeAllChildren().
+    private let arenaLayer = SKNode()
     private let arenaFloor = SKShapeNode()
     private let arenaBoundary = SKShapeNode()
     
@@ -279,7 +321,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // World node holds all gameplay objects (for screen shake)
         worldNode.position = .zero
         addChild(worldNode)
-        
+
+        // v2.0 (B2a): arena visuals get their own swappable container.
+        worldNode.addChild(arenaLayer)
+
         setupArena()
         setupPlayer()
         setupJoystick()
@@ -302,9 +347,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Preload rewarded ad
         adReviveManager.preloadAd()
         
-        // Show tutorial hint on first run
-        showTutorialHintIfNeeded()
-        
+        // Show tutorial hint on first run — never in Boss Mode, which is by
+        // definition reached only by players who have already felled a boss.
+        if !isGauntlet { showTutorialHintIfNeeded() }
+
+        // v2.0 (B2a): the gauntlet doesn't wait for a bell. Stage 1 opens now.
+        if isGauntlet { beginGauntletStage(isFirst: true) }
+
         // Listen for app backgrounding
         NotificationCenter.default.addObserver(
             self, selector: #selector(appDidEnterBackground),
@@ -334,6 +383,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - Setup (gameplay objects go into worldNode)
     
+    /// v2.0 (B2a): drop the current arena so another can be built in its place.
+    /// Only ever called by the gauntlet's stage transition — normal play builds
+    /// its arena once and lives in it for the whole run.
+    private func teardownArena() {
+        // The floor and boundary are long-lived stored nodes that get re-pathed
+        // and re-added, so their per-arena animations must be cancelled or the
+        // next arena inherits the last one's pulse.
+        arenaFloor.removeAllActions()
+        arenaBoundary.removeAllActions()
+        arenaLayer.removeAllChildren()
+    }
+
     private func setupArena() {
         // v1.6: colors + motif come from the selected arena's config
         let radius = GameConfig.Arena.radius
@@ -350,7 +411,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         arenaFloor.fillColor = SKColor(hex: arenaConfig.floorColorHex)
         arenaFloor.strokeColor = .clear
         arenaFloor.zPosition = -10
-        worldNode.addChild(arenaFloor)
+        arenaLayer.addChild(arenaFloor)
 
         // Per-arena floor motif
         switch arenaConfig.id {
@@ -373,7 +434,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         arenaBoundary.lineWidth = GameConfig.Arena.boundaryLineWidth
         arenaBoundary.glowWidth = 6
         arenaBoundary.zPosition = -9
-        worldNode.addChild(arenaBoundary)
+        arenaLayer.addChild(arenaBoundary)
 
         // Outer danger glow — pulsing warning ring just outside boundary
         let dangerRing = SKShapeNode(circleOfRadius: radius + 4)
@@ -382,7 +443,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         dangerRing.lineWidth = 8
         dangerRing.glowWidth = 10
         dangerRing.zPosition = -8
-        worldNode.addChild(dangerRing)
+        arenaLayer.addChild(dangerRing)
 
         let dangerPulse = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.15, duration: 1.5),
@@ -401,7 +462,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             flicker.lineWidth = GameConfig.Arena.boundaryLineWidth * 0.7
             flicker.glowWidth = 9
             flicker.zPosition = -8.5
-            worldNode.addChild(flicker)
+            arenaLayer.addChild(flicker)
             flicker.alpha = 0
             flicker.run(SKAction.repeatForever(SKAction.sequence([
                 SKAction.fadeAlpha(to: 0.6, duration: 0.9),
@@ -420,7 +481,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ring.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.4 - CGFloat(i) * 0.1)
             ring.lineWidth = 1
             ring.zPosition = -9.5
-            worldNode.addChild(ring)
+            arenaLayer.addChild(ring)
         }
 
         for angle in stride(from: 0.0, to: CGFloat.pi, by: CGFloat.pi / 4) {
@@ -434,7 +495,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             line.strokeColor = SKColor(hex: 0x222222, alpha: 0.2)
             line.lineWidth = 0.5
             line.zPosition = -9.5
-            worldNode.addChild(line)
+            arenaLayer.addChild(line)
         }
     }
 
@@ -453,7 +514,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ring.strokeColor = SKColor(hex: veinHex, alpha: 0.30 - CGFloat(i) * 0.05)
             ring.lineWidth = 1
             ring.zPosition = -9.5
-            worldNode.addChild(ring)
+            arenaLayer.addChild(ring)
         }
 
         // Broken orbital arcs — partial rings with gaps.
@@ -470,7 +531,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             arc.strokeColor = SKColor(hex: veinHex, alpha: 0.32)
             arc.lineWidth = 1.2
             arc.zPosition = -9.5
-            worldNode.addChild(arc)
+            arenaLayer.addChild(arc)
         }
 
         // Central hammered starburst — radial impact lines from the core.
@@ -485,7 +546,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ray.strokeColor = SKColor(hex: goldHex, alpha: 0.18)
             ray.lineWidth = 1
             ray.zPosition = -9.5
-            worldNode.addChild(ray)
+            arenaLayer.addChild(ray)
         }
 
         // Crescent gravity scours — short curved scars, off-center.
@@ -502,7 +563,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             scar.strokeColor = SKColor(hex: veinHex, alpha: 0.22)
             scar.lineWidth = 1
             scar.zPosition = -9.5
-            worldNode.addChild(scar)
+            arenaLayer.addChild(scar)
         }
     }
 
@@ -523,7 +584,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ring.lineWidth = 1
             ring.position = spec.offset
             ring.zPosition = -9.5
-            worldNode.addChild(ring)
+            arenaLayer.addChild(ring)
         }
 
         // Radial stress fractures — jagged two-segment lines at irregular angles
@@ -544,7 +605,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             fracture.strokeColor = SKColor(hex: arenaConfig.boundaryColorHex, alpha: 0.14)
             fracture.lineWidth = 0.8
             fracture.zPosition = -9.5
-            worldNode.addChild(fracture)
+            arenaLayer.addChild(fracture)
         }
 
         // Four shallow diagonal cooling channels crossing the floor
@@ -564,7 +625,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             channel.strokeColor = SKColor(hex: 0x0B0E12, alpha: 0.55)
             channel.lineWidth = 3
             channel.zPosition = -9.6
-            worldNode.addChild(channel)
+            arenaLayer.addChild(channel)
         }
     }
     
@@ -593,7 +654,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 arc.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.42 - CGFloat(i) * 0.08)
                 arc.lineWidth = 1
                 arc.zPosition = -9.5
-                worldNode.addChild(arc)
+                arenaLayer.addChild(arc)
             }
         }
 
@@ -624,7 +685,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 line.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.35)
                 line.lineWidth = 1
                 line.zPosition = -9.5
-                worldNode.addChild(line)
+                arenaLayer.addChild(line)
 
                 // Pulse overlay for the same segment (lights up briefly)
                 let pulse = SKShapeNode(path: path)
@@ -632,7 +693,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 pulse.lineWidth = 1
                 pulse.alpha = 0
                 pulse.zPosition = -9.4
-                worldNode.addChild(pulse)
+                arenaLayer.addChild(pulse)
                 conduits.append(pulse)
             }
 
@@ -642,7 +703,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 dot.strokeColor = .clear
                 dot.position = point
                 dot.zPosition = -9.5
-                worldNode.addChild(dot)
+                arenaLayer.addChild(dot)
 
                 let glow = SKShapeNode(circleOfRadius: 2.5)
                 glow.fillColor = SKColor(hex: 0xF6D36B)
@@ -650,7 +711,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 glow.position = point
                 glow.alpha = 0
                 glow.zPosition = -9.4
-                worldNode.addChild(glow)
+                arenaLayer.addChild(glow)
                 nodes.append(glow)
             }
 
@@ -736,7 +797,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             arc.strokeColor = SKColor(hex: glass, alpha: 0.16)
             arc.lineWidth = 1
             arc.zPosition = -9.5
-            worldNode.addChild(arc)
+            arenaLayer.addChild(arc)
         }
 
         // Irregular triangular shard plates, each paired with a partner
@@ -773,7 +834,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             plate.strokeColor = SKColor(hex: glass, alpha: 0.22)
             plate.lineWidth = 1
             plate.zPosition = -9.6
-            worldNode.addChild(plate)
+            arenaLayer.addChild(plate)
 
             // One bright edge of the plate carries the traveling glint.
             let edge = CGMutablePath()
@@ -784,7 +845,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             glint.lineWidth = 1.5
             glint.alpha = 0
             glint.zPosition = -9.4
-            worldNode.addChild(glint)
+            arenaLayer.addChild(glint)
             glintEdges.append(glint)
         }
 
@@ -815,7 +876,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             crack.strokeColor = SKColor(hex: glass, alpha: 0.12)
             crack.lineWidth = 0.8
             crack.zPosition = -9.5
-            worldNode.addChild(crack)
+            arenaLayer.addChild(crack)
         }
 
         // Ambient reflection as punctuation: every few seconds one shard edge
@@ -1278,6 +1339,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera.addChild(pauseMenu)
     }
     
+    /// The vignette hangs off the CAMERA, not the arena layer, so an arena swap
+    /// can't tear it down with the rest of the field. Replacing it by name keeps
+    /// a gauntlet from stacking one darkening overlay per stage.
+    private func installArenaVignette() {
+        guard let view = view, let camera = camera else { return }
+        camera.childNode(withName: "arenaVignette")?.removeFromParent()
+        let vignette = VignetteNode(size: view.bounds.size)
+        vignette.name = "arenaVignette"
+        camera.addChild(vignette)
+    }
+
     private func setupEmberParticles() {
         // Small ember texture
         let dotSize = CGSize(width: 8, height: 8)
@@ -1291,20 +1363,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.6: per-arena ambience — Crucible rises, The Quench falls
         if arenaConfig.id == 1 {
             setupQuenchAsh(texture: dotTexture)
-            if let view = view {
-                let vignette = VignetteNode(size: view.bounds.size)
-                camera?.addChild(vignette)
-            }
+            installArenaVignette()
             return
         }
 
         // v1.7: The Coilworks crackles — static motes jitter and hop
         if arenaConfig.id == 2 {
             setupCoilworksStatic(texture: dotTexture)
-            if let view = view {
-                let vignette = VignetteNode(size: view.bounds.size)
-                camera?.addChild(vignette)
-            }
+            installArenaVignette()
             return
         }
 
@@ -1313,10 +1379,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // the mirror arena gets a cold, occasional silver drift instead.
         if arenaConfig.id == 3 {
             setupMirrorwoundDrift(texture: dotTexture)
-            if let view = view {
-                let vignette = VignetteNode(size: view.bounds.size)
-                camera?.addChild(vignette)
-            }
+            installArenaVignette()
             return
         }
 
@@ -1340,7 +1403,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         emitter.particleBlendMode = .add
         emitter.zPosition = -5
         emitter.particleTexture = dotTexture
-        worldNode.addChild(emitter)
+        arenaLayer.addChild(emitter)
         
         // Larger sparks — rare, brighter, slower
         let sparkEmitter = SKEmitterNode()
@@ -1363,7 +1426,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         sparkEmitter.particleBlendMode = .add
         sparkEmitter.zPosition = -4
         sparkEmitter.particleTexture = dotTexture
-        worldNode.addChild(sparkEmitter)
+        arenaLayer.addChild(sparkEmitter)
         
         // Faint ash — very dim, slow, gray
         let ashEmitter = SKEmitterNode()
@@ -1385,13 +1448,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ashEmitter.particleBlendMode = .alpha
         ashEmitter.zPosition = -6
         ashEmitter.particleTexture = dotTexture
-        worldNode.addChild(ashEmitter)
+        arenaLayer.addChild(ashEmitter)
         
         // Vignette overlay
-        if let view = view {
-            let vignette = VignetteNode(size: view.bounds.size)
-            camera?.addChild(vignette)
-        }
+        installArenaVignette()
     }
 
     /// v1.6 Arena 2 ambience (Lyra canon): soft ash falling like verdicts —
@@ -1419,7 +1479,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         motes.particleBlendMode = .add
         motes.zPosition = -5
         motes.particleTexture = texture
-        worldNode.addChild(motes)
+        arenaLayer.addChild(motes)
 
         // Rare longer hop-sparks — a mote that jumps before dying
         let sparks = SKEmitterNode()
@@ -1438,7 +1498,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         sparks.particleBlendMode = .add
         sparks.zPosition = -5
         sparks.particleTexture = texture
-        worldNode.addChild(sparks)
+        arenaLayer.addChild(sparks)
     }
 
     /// v1.8 Arena 4 ambient (Lyra canon): "occasional mirrored particle drift."
@@ -1465,7 +1525,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         drift.particleBlendMode = .alpha          // cold, not glowing
         drift.zPosition = -5
         drift.particleTexture = texture
-        worldNode.addChild(drift)
+        arenaLayer.addChild(drift)
     }
 
     private func setupQuenchAsh(texture: SKTexture) {
@@ -1490,7 +1550,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ash.particleBlendMode = .alpha
         ash.zPosition = -5
         ash.particleTexture = texture
-        worldNode.addChild(ash)
+        arenaLayer.addChild(ash)
 
         // Sparse heavier flakes swaying the other way
         let flakes = SKEmitterNode()
@@ -1513,7 +1573,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         flakes.particleBlendMode = .alpha
         flakes.zPosition = -4
         flakes.particleTexture = texture
-        worldNode.addChild(flakes)
+        arenaLayer.addChild(flakes)
 
         // Near-floor haze — very dim, almost still
         let haze = SKEmitterNode()
@@ -1535,7 +1595,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         haze.particleBlendMode = .alpha
         haze.zPosition = -6
         haze.particleTexture = texture
-        worldNode.addChild(haze)
+        arenaLayer.addChild(haze)
     }
 
     // MARK: - Tutorial Hint
@@ -1741,7 +1801,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func returnToTitle() {
         guard let view = view else { return }
-        
+
+        // v2.0 (B2a): the gauntlet's arena override is transient run state. It
+        // must not survive back to the title, or the player's own arena choice
+        // would silently read as whichever boss they last fought.
+        ArenaConfig.overrideID = nil
+
         let titleScene = TitleScene(size: view.bounds.size)
         titleScene.scaleMode = .resizeFill
         titleScene.anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -2352,7 +2417,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // the stage belongs to him. Boss-summoned minions (Titan's spawn
         // pattern) still arrive; waves resume the moment he falls.
         // v1.9 Erasure Event Horizon: the void has halted all spawning.
-        if !eventHorizonVoided && !falseEndingActive {
+        // v2.0 (B2a): the gauntlet has NO adds and no bell — it drives its own
+        // boss spawns from the stage machine, so the wave dispatch stands down
+        // entirely. (Boss-summoned minions still arrive; those come from the
+        // boss, not the wave manager, and are part of the fight.)
+        if !eventHorizonVoided && !falseEndingActive && !isGauntlet {
         if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
         if spawnEvent.shouldSpawnMiniBoss {
             // v1.4: Spawn real boss if gate is met, otherwise mini-boss
@@ -2378,6 +2447,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.4: Update boss AI
         boss?.update(deltaTime: dt, playerPosition: player.position)
+
+        // v2.0 (B2a): the gauntlet's stage clock. Every boss's onDeath already
+        // clears `boss`, so watching for that transition lets all five of them
+        // keep their existing death handling completely untouched.
+        if isGauntlet, gauntletBossOnField, boss == nil {
+            advanceGauntlet()
+        }
 
         // v1.7: Relay Imp danger arcs (Coilworks only)
         if arenaConfig.id == 2 {
@@ -4989,7 +5065,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// through a swarm. See the monument-boss-class memory.
     private func spawnUnmadeStar() {
         let elapsed = waveManager.elapsedTime
-        let hpScaling = Int(elapsed / 30) * 12
+        let hpScaling = bossHPScaling(elapsed: elapsed, step: 12)
 
         // 1) Board wipe — silent, no XP orbs, no drops.
         for e in enemies { e.removeFromParent() }
@@ -5049,12 +5125,245 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
 
+    // MARK: - v2.0 (B2a): Boss Mode — the Gauntlet
+
+    /// Bosses size themselves off elapsed time in normal play. The gauntlet has
+    /// no clock to pressure you with, so it substitutes the stage ramp.
+    private func bossHPScaling(elapsed: TimeInterval, step: Int) -> Int {
+        if let override = bossHPScalingOverride { return override }
+        return Int(elapsed / 30) * step
+    }
+
+    /// Build the arena for `entry` and put its boss on the field.
+    ///
+    /// Every boss keeps its EXISTING spawn function — wiring, callbacks, death
+    /// handling and all. The gauntlet only chooses which one to call and what
+    /// difficulty to hand it. That's deliberate: a boss's mechanics are the most
+    /// intricate code in the project and Boss Mode has no business reimplementing
+    /// them. (`BossEntry.make` stays the registry's own constructor for metadata
+    /// and future callers; the scene routes through its wired spawners.)
+    private func beginGauntletStage(isFirst: Bool) {
+        // The interstitial is a scheduled action, and SKActions keep running
+        // after the player dies. Without this a death during the beat between
+        // bosses would spawn the next one onto a finished run.
+        guard gameState == .playing else { return }
+        guard let g = gauntlet, let entry = g.currentEntry else { return }
+
+        // Load this boss's home arena. On the first stage configureAsGauntlet()
+        // already resolved it, so only a real change costs a rebuild.
+        if !isFirst || ArenaConfig.overrideID != entry.arenaID {
+            swapArena(to: entry.arenaID)
+        }
+
+        bossHPScalingOverride = g.currentHPScaling
+        gauntletBossOnField = true
+        gauntletTransitioning = false
+
+        switch entry.id {
+        case "slag_titan":     spawnBoss()
+        case "quench_warden":  spawnQuenchWarden()
+        case "dynamo_choir":   spawnDynamoChoir()
+        case "faceted_lie":    spawnFacetedLie()
+        case "unmade_star":    spawnUnmadeStar()
+        default:
+            // An entry the scene has no wired spawner for. Skipping is the only
+            // safe move — a stage that can never end would soft-lock the run.
+            gauntletBossOnField = false
+            advanceGauntlet()
+            return
+        }
+
+        showGauntletStageBanner(entry: entry, stage: g.stage, of: g.totalStages)
+    }
+
+    /// Tear the current arena down and build another in its place, then put the
+    /// player back at a legal position for the new field.
+    private func swapArena(to arenaID: Int) {
+        ArenaConfig.overrideID = arenaID
+        arenaConfig = ArenaConfig.current
+
+        teardownArena()
+        setupArena()
+        setupEmberParticles()
+
+        // The field just changed size. Anything still holding a position from
+        // the old arena has to be brought inside the new boundary — and the
+        // player has to start the fight somewhere survivable.
+        waveManager.bellTime = arenaConfig.bellTime
+        player.position = .zero
+        camera?.position = .zero
+        clampLooseNodesToArena()
+    }
+
+    /// After a swap the new arena may be far smaller than the old one. Pull any
+    /// surviving loose object back inside it rather than leaving pickups
+    /// stranded outside a boundary the player can't cross.
+    private func clampLooseNodesToArena() {
+        let maxDist = GameConfig.Arena.radius - 24
+        func clamp(_ node: SKNode) {
+            if node.position.length > maxDist {
+                node.position = node.position.normalized * maxDist
+            }
+        }
+        healthOrbs.forEach(clamp)
+        magnetOrbs.forEach(clamp)
+        forgeCoins.forEach(clamp)
+        xpOrbs.forEach(clamp)
+    }
+
+    /// The boss for this stage has fallen. Move to the next one, or finish.
+    private func advanceGauntlet() {
+        guard let g = gauntlet, !gauntletTransitioning else { return }
+        gauntletTransitioning = true
+        gauntletBossOnField = false
+
+        // A boss's summoned minions outlive it — the Slag Titan's spawn pattern
+        // in particular. They belong to THAT fight, so the stage ends with them.
+        // (Bosses clear their own world hazards inside die(); only their adds
+        // and shots need collecting here.)
+        for e in enemies { e.removeFromParent() }
+        enemies.removeAll()
+        for p in enemyProjectiles { p.removeFromParent() }
+        enemyProjectiles.removeAll()
+
+        guard let nextEntry = g.advance() else {
+            gauntletCleared()
+            return
+        }
+
+        showGauntletInterstitial(nextEntry: nextEntry, stage: g.stage, of: g.totalStages)
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.BossMode.interstitialDuration),
+            SKAction.run { [weak self] in self?.beginGauntletStage(isFirst: false) }
+        ]), withKey: "gauntletStage")
+    }
+
+    /// Every boss in the lineup is down. The run is over — and won.
+    private func gauntletCleared() {
+        bossHPScalingOverride = nil
+        guard gameState == .playing else { return }
+
+        // A cleared gauntlet still ends the run; it just ends it on your terms.
+        // Routing through playerDied() would be a lie, so the victory banner
+        // plays and then the standard result screen is shown by playerDied()'s
+        // sibling path — see gauntletFinishRun().
+        let banner = SKLabelNode(fontNamed: "Menlo-Bold")
+        banner.text = "GAUNTLET CLEARED"
+        banner.fontSize = 30
+        banner.fontColor = SKColor(hex: 0xFFD98A)
+        banner.verticalAlignmentMode = .center
+        banner.position = CGPoint(x: 0, y: 40)
+        banner.zPosition = 260
+        banner.setScale(0.7)
+        banner.alpha = 0
+        camera?.addChild(banner)
+
+        let sub = SKLabelNode(fontNamed: "Menlo")
+        sub.text = "\(gauntlet?.bossesFelled ?? 0) felled — every one of them"
+        sub.fontSize = 13
+        sub.fontColor = SKColor(hex: 0xC9B79A)
+        sub.verticalAlignmentMode = .center
+        sub.position = CGPoint(x: 0, y: 8)
+        sub.zPosition = 260
+        sub.alpha = 0
+        camera?.addChild(sub)
+
+        let pop = SKAction.group([
+            SKAction.fadeIn(withDuration: 0.3),
+            SKAction.scale(to: 1.0, duration: 0.35)
+        ])
+        pop.timingMode = .easeOut
+        banner.run(pop)
+        sub.run(SKAction.sequence([SKAction.wait(forDuration: 0.25),
+                                   SKAction.fadeIn(withDuration: 0.3)]))
+        AudioManager.shared.play(.bossEntrance)
+        worldNode.shake(intensity: 8, duration: 0.4)
+
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: 2.8),
+            SKAction.run { [weak self] in
+                banner.removeFromParent()
+                sub.removeFromParent()
+                self?.gauntletFinishRun(cleared: true)
+            }
+        ]), withKey: "gauntletClear")
+    }
+
+    /// The gauntlet's run-end. Shares the standard result screen so scores,
+    /// stats and the return-to-title path all behave, but a cleared gauntlet
+    /// gets its own title instead of "SPARK EXTINGUISHED".
+    private func gauntletFinishRun(cleared: Bool) {
+        guard gameState == .playing else { return }
+        gauntletWon = cleared
+        playerStats.currentHP = 0
+        playerDied()
+    }
+
+    /// Stage banner — reuses the boss-entrance grammar, adds the stage count so
+    /// the player always knows how deep they are.
+    private func showGauntletStageBanner(entry: BossEntry, stage: Int, of total: Int) {
+        showBossEntrance(name: entry.name.uppercased(), colorHex: entry.accentHex)
+
+        let counter = SKLabelNode(fontNamed: "Menlo-Bold")
+        counter.text = "STAGE \(stage) / \(total)"
+        counter.fontSize = 12
+        counter.fontColor = SKColor(hex: 0x9A8E88)
+        counter.verticalAlignmentMode = .center
+        counter.position = CGPoint(x: 0, y: -46)
+        counter.zPosition = 260
+        counter.alpha = 0
+        camera?.addChild(counter)
+        counter.run(SKAction.sequence([
+            SKAction.fadeIn(withDuration: 0.25),
+            SKAction.wait(forDuration: 1.6),
+            SKAction.fadeOut(withDuration: 0.4),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// The beat between bosses: name the next one, then hand the field over.
+    private func showGauntletInterstitial(nextEntry: BossEntry, stage: Int, of total: Int) {
+        let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        label.text = "NEXT — STAGE \(stage) / \(total)"
+        label.fontSize = 15
+        label.fontColor = SKColor(hex: 0xE0554C)
+        label.verticalAlignmentMode = .center
+        label.position = CGPoint(x: 0, y: 26)
+        label.zPosition = 260
+        label.alpha = 0
+        camera?.addChild(label)
+
+        let name = SKLabelNode(fontNamed: "Menlo-Bold")
+        name.text = nextEntry.name.uppercased()
+        name.fontSize = 22
+        name.fontColor = SKColor(hex: nextEntry.accentHex)
+        name.verticalAlignmentMode = .center
+        name.position = CGPoint(x: 0, y: -4)
+        name.zPosition = 260
+        name.alpha = 0
+        camera?.addChild(name)
+
+        let fade = SKAction.sequence([
+            SKAction.fadeIn(withDuration: 0.3),
+            SKAction.wait(forDuration: GameConfig.BossMode.interstitialDuration - 0.85),
+            SKAction.fadeOut(withDuration: 0.4),
+            SKAction.removeFromParent()
+        ])
+        label.run(fade)
+        name.run(fade)
+        AudioManager.shared.play(.cardSelect)
+    }
+
     // MARK: - v2.0 (Unit 3): MOTE — the mascot who enters by deleting you
 
     /// The joke must be EARNED. Gates on lifetime mastery so a new player never
     /// eats it, and fires only once (ever). See docs/mote-v2.0-handoff.md.
     private func tryMoteEntrance() {
         guard gameState == .playing, !killedByMote, mote == nil else { return }
+        // Mote's entrance is a once-ever scripted beat that must land in the
+        // campaign, on the false ending's silence. Boss Mode is a sandbox — the
+        // joke would be spent in the wrong place.
+        guard !isGauntlet else { return }
         let pm = ProgressionManager.shared
         let alreadyMet = UserDefaults.standard.bool(forKey: "sparkforge_mote_met")
         var eligible = !alreadyMet
@@ -5137,6 +5446,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// normal rules* and invalidates it — and the more final this beat feels,
     /// the more the interruption lands. See docs/arena5-star-anvil-creative.md.
     private func beginFalseEnding() {
+        // v2.0 (B2a): the false ending is an ARENA 5 CAMPAIGN beat — it only
+        // works as the quiet after a first-time monument kill. In Boss Mode the
+        // Unmade Star is just stage N of a gauntlet, and going silent there
+        // would strand the run instead of ending it.
+        guard !isGauntlet else { return }
         guard !falseEndingActive else { return }
         falseEndingActive = true
 
@@ -5482,7 +5796,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func spawnBoss() {
         let elapsed = waveManager.elapsedTime
-        let hpScaling = Int(elapsed / 30) * 5
+        let hpScaling = bossHPScaling(elapsed: elapsed, step: 5)
         
         let bossNode = BossNode(config: BossNode.slagTitan, hpScaling: hpScaling)
         bossNode.position = BossNode.spawnPosition()
@@ -5541,7 +5855,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func spawnQuenchWarden() {
         let elapsed = waveManager.elapsedTime
-        let hpScaling = Int(elapsed / 30) * 5
+        let hpScaling = bossHPScaling(elapsed: elapsed, step: 5)
 
         let warden = QuenchWardenNode(hpScaling: hpScaling)
         warden.position = QuenchWardenNode.spawnPosition()
@@ -5598,7 +5912,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func spawnDynamoChoir() {
         let elapsed = waveManager.elapsedTime
-        let hpScaling = Int(elapsed / 30) * 5
+        let hpScaling = bossHPScaling(elapsed: elapsed, step: 5)
 
         let choir = DynamoChoirNode(hpScaling: hpScaling)
         choir.position = DynamoChoirNode.spawnPosition()
@@ -5688,7 +6002,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func spawnFacetedLie() {
         let elapsed = waveManager.elapsedTime
-        let hpScaling = Int(elapsed / 30) * 5
+        let hpScaling = bossHPScaling(elapsed: elapsed, step: 5)
 
         let lie = FacetedLieNode(hpScaling: hpScaling)
         lie.position = FacetedLieNode.spawnPosition()
@@ -7065,10 +7379,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         // v2.0: Mote's death gets its own copy — you didn't lose, you were FOUND.
+        // v2.0 (B2a): and a cleared gauntlet isn't a death at all.
         if let title = deathOverlay.childNode(withName: "deathTitle") as? SKLabelNode {
-            title.text = killedByMote ? "MOTE FOUND YOU" : "SPARK EXTINGUISHED"
-            title.fontColor = SKColor(hex: killedByMote ? 0xC77BFF : 0xFF4444)
+            if gauntletWon {
+                title.text = "GAUNTLET CLEARED"
+                title.fontColor = SKColor(hex: 0xFFD98A)
+            } else if isGauntlet {
+                title.text = "THE GAUNTLET WINS"
+                title.fontColor = SKColor(hex: 0xE0554C)
+            } else {
+                title.text = killedByMote ? "MOTE FOUND YOU" : "SPARK EXTINGUISHED"
+                title.fontColor = SKColor(hex: killedByMote ? 0xC77BFF : 0xFF4444)
+            }
         }
+
+        // v2.0 (B2a): a death cancels any pending stage handoff outright.
+        removeAction(forKey: "gauntletStage")
+        gauntletTransitioning = false
+        gauntletBossOnField = false
 
         // v2.0: in-world readouts must not bleed onto the result screen.
         falseEndingCard?.removeFromParent()
@@ -7101,7 +7429,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if let reviveBtn = deathOverlay.childNode(withName: "reviveButton") {
             // Mote's kill suppresses the revive offer outright: reviving from a
             // scripted assassination breaks the joke (handoff canon).
-            reviveBtn.alpha = (adReviveManager.canRevive && !killedByMote) ? 1.0 : 0.0
+            // v2.0 (B2a): Boss Mode death is FINAL — no ads, no revives. It's
+            // pure boss mode, and the mode is worth nothing if it has an undo.
+            reviveBtn.alpha = (adReviveManager.canRevive && !killedByMote && !isGauntlet) ? 1.0 : 0.0
             
             // Update label for IAP users
             if adReviveManager.adsRemoved {
@@ -7113,7 +7443,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // v1.5: Show/hide XP boost button
         if let xpBoostBtn = deathOverlay.childNode(withName: "xpBoostButton") {
-            xpBoostBtn.alpha = adReviveManager.canBoostXP && pendingForgeXP > 0 ? 1.0 : 0.0
+            // B2a: Boss Mode rewards are sandbox-isolated, so the doubler stays
+            // out of it — doubling a capped, isolated payout is meaningless.
+            xpBoostBtn.alpha = (adReviveManager.canBoostXP && pendingForgeXP > 0 && !isGauntlet) ? 1.0 : 0.0
             
             if let label = xpBoostBtn.childNode(withName: "xpBoostLabel") as? SKLabelNode {
                 label.text = "2x FORGE XP (+\(pendingForgeXP))"
@@ -7404,5 +7736,31 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera?.position = .zero
 
         gameState = .playing
+
+        // v2.0 (B2a): restarting a gauntlet starts a NEW gauntlet from stage 1
+        // rather than resuming where it ended — the mode's whole proposition is
+        // that you go the distance in one unbroken run.
+        if gauntlet != nil { restartGauntlet() }
+    }
+
+    /// Rebuild the gauntlet from stage 1, arena and all.
+    private func restartGauntlet() {
+        removeAction(forKey: "gauntletStage")
+        removeAction(forKey: "gauntletClear")
+        gauntletBossOnField = false
+        gauntletTransitioning = false
+        gauntletWon = false
+        bossHPScalingOverride = nil
+
+        guard let fresh = GauntletRun(order: .sequential) else {
+            // The roster emptied out from under us — fall back to normal play
+            // rather than sitting in a mode with nothing to fight.
+            gauntlet = nil
+            ArenaConfig.overrideID = nil
+            return
+        }
+        gauntlet = fresh
+        if let first = fresh.currentEntry { swapArena(to: first.arenaID) }
+        beginGauntletStage(isFirst: true)
     }
 }

@@ -123,8 +123,23 @@ struct ArenaConfig {
 
     static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil]
 
+    /// v2.0 (B2a): a TRANSIENT arena override for Boss Mode.
+    ///
+    /// The gauntlet fights each boss in its own home arena, which means swapping
+    /// arenas mid-run. It must NOT do that by writing `ProgressionManager
+    /// .currentArena` — that's the player's persisted menu selection, and a
+    /// gauntlet that ends in a crash or a force-quit would leave them parked in
+    /// an arena they never chose. This override lives in memory only, is never
+    /// persisted, and is cleared when the gauntlet ends.
+    ///
+    /// It also bypasses the `arenasUnlocked` clamp on purpose: Boss Mode only
+    /// ever offers bosses the player has actually felled, so their home arena is
+    /// by definition one the player has already stood in.
+    static var overrideID: Int? = nil
+
     /// The currently selected arena, clamped to what's unlocked.
     static var current: ArenaConfig {
+        if let id = overrideID, id >= 0, id < all.count { return all[id] }
         let pm = ProgressionManager.shared
         let maxIndex = min(pm.arenasUnlocked, all.count) - 1
         let index = max(0, min(pm.currentArena, maxIndex))

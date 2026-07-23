@@ -11,7 +11,65 @@ import CoreGraphics
 import Foundation
 
 enum GameConfig {
-    
+
+    // MARK: - Boss Mode (v2.0, Unit B2)
+
+    /// The gauntlet: one button, bosses back-to-back, in their OWN home arenas,
+    /// until you clear them all or die. Not a practice selector.
+    enum BossMode {
+        /// Arena bosses ramp with the stage you meet them at. The ramp does NOT
+        /// compound — each stage's buff applies to that boss's own base HP.
+        static let arenaRampPerStage: Double = 0.125      // +12.5% × stage
+
+        /// Monuments are DECOUPLED from the stage ramp — flat, stage-independent.
+        /// A monument's base is already multiples of an arena boss, so handing it
+        /// the biggest multiplier makes a CLIFF, not a curve. Bias the wall LOW:
+        /// an unbeatable final boss silently kills the mode, a too-easy one just
+        /// gets buffed next patch. Asymmetric risk.
+        static let monumentFlatRamp: Double = 0.25        // +25%, always
+
+        /// Boss HP scaling in normal play is `Int(elapsed/30) * step`. Boss Mode
+        /// has no elapsed-time pressure, so it converts its ramp into the same
+        /// currency: rampFraction × this budget.
+        static let hpScalingBudget: Double = 60
+
+        /// Stage 1 awards 5× XP, growing +1× per stage thereafter.
+        static let baseXPMultiplier: Double = 5
+        static let xpMultiplierPerStage: Double = 1
+
+        /// Beat time between a boss falling and the next arena resolving.
+        static let interstitialDuration: TimeInterval = 2.4
+
+        // --- B2b lands these; declared here so the design reads in one place ---
+
+        /// Auto-GRANTED opener cards (ARAM model: start ahead, no menu friction).
+        static let openerCards: Int = 3
+        /// HP orbs dropped between bosses — randomized; the variance is the point.
+        static let interBossHealsMin: Int = 2
+        static let interBossHealsMax: Int = 3
+        /// Sandbox isolation: uncapped Forge XP would make Boss Mode the optimal
+        /// farm and warp normal play; zero would make it pointless.
+        static let forgeXPCapPerRun: Int = 100
+
+        // MARK: Dev-only playtest seams
+        //
+        // Boss Mode's lineup is gated on what the save has actually felled,
+        // which makes the LATE stages — and the monument in particular —
+        // expensive to reach when you only want to look at one fight. These two
+        // flags open the gauntlet at any point without touching player data, so
+        // a boss can be examined in its gauntlet context in seconds.
+        //
+        // Ship values are `false` / `1`. Both are DEBUG-only by construction:
+        // release builds compile the normal path and can't read these.
+
+        /// Offer every registered boss regardless of defeat records.
+        static let debugForceFullRoster: Bool = false
+
+        /// Open the gauntlet at this 1-based stage instead of stage 1.
+        /// Clamped to the lineup, so an over-large value lands on the last boss.
+        static let debugStartStage: Int = 1
+    }
+
     // MARK: - Arena
     enum Arena {
         /// Radius of the circular arena in points — device-aware.

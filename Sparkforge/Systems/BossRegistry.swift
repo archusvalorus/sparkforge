@@ -75,7 +75,13 @@ final class BossRegistry {
     func entry(_ id: String) -> BossEntry? { all.first { $0.id == id } }
 
     /// The roster Boss Mode can actually offer.
-    var unlocked: [BossEntry] { all.filter { $0.isUnlocked } }
+    var unlocked: [BossEntry] {
+        #if DEBUG
+        // Dev-only: examine any fight without first earning it on this save.
+        if GameConfig.BossMode.debugForceFullRoster { return all }
+        #endif
+        return all.filter { $0.isUnlocked }
+    }
 
     /// Boss Mode is only worth surfacing once there's something in it.
     var isAvailable: Bool { !unlocked.isEmpty }
