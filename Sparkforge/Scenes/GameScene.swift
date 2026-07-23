@@ -7615,7 +7615,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let total = max(1, gauntlet?.totalStages ?? 1)
             let earned = Double(GameConfig.BossMode.forgeXPCapPerRun)
                 * (Double(felled) / Double(total))
-            forgeXP = min(forgeXP, Int(earned.rounded()))
+            forgeXP = max(GameConfig.BossMode.forgeXPConsolation,
+                          min(forgeXP, Int(earned.rounded())))
         }
         pendingForgeXP = forgeXP
         ProgressionManager.shared.addForgeXP(forgeXP)

@@ -58,8 +58,16 @@ enum GameConfig {
         static let interBossHealsMin: Int = 2
         static let interBossHealsMax: Int = 3
         /// Sandbox isolation: uncapped Forge XP would make Boss Mode the optimal
-        /// farm and warp normal play; zero would make it pointless.
+        /// farm and warp normal play; zero would make it pointless. This is the
+        /// FULL-CLEAR reward — a run earns the share of it that it cleared.
         static let forgeXPCapPerRun: Int = 100
+
+        /// Consolation for a gauntlet that felled nothing. Death here is final
+        /// with no revives, so walking away with literally nothing is a harsh
+        /// note to end on. Deliberately small — a fifth of what one boss pays,
+        /// so it reads as "thanks for trying", never as a reason to farm
+        /// deliberate quick losses.
+        static let forgeXPConsolation: Int = 5
 
         // MARK: Dev-only playtest seams
         //
