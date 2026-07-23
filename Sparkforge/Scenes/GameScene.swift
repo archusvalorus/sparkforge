@@ -1006,12 +1006,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         scoreText.position = CGPoint(x: 0, y: 55)
         deathOverlay.addChild(scoreText)
         
-        // v2.0: Mote's death gets its own copy — you didn't lose, you were FOUND.
-        if let title = deathOverlay.childNode(withName: "deathTitle") as? SKLabelNode {
-            title.text = killedByMote ? "MOTE FOUND YOU" : "SPARK EXTINGUISHED"
-            title.fontColor = SKColor(hex: killedByMote ? 0xC77BFF : 0xFF4444)
-        }
-
         // New record badge (hidden by default)
         let recordBadge = SKLabelNode(fontNamed: "Menlo-Bold")
         recordBadge.fontSize = 16
@@ -7066,6 +7060,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
+        // v2.0: Mote's death gets its own copy — you didn't lose, you were FOUND.
+        if let title = deathOverlay.childNode(withName: "deathTitle") as? SKLabelNode {
+            title.text = killedByMote ? "MOTE FOUND YOU" : "SPARK EXTINGUISHED"
+            title.fontColor = SKColor(hex: killedByMote ? 0xC77BFF : 0xFF4444)
+        }
+
+        // v2.0: in-world readouts must not bleed onto the result screen.
+        falseEndingCard?.removeFromParent()
+        falseEndingCard = nil
+        capstoneTimers.isHidden = true
+        orbIndicators.isHidden = true
+
         // New record badge
         if let badge = deathOverlay.childNode(withName: "recordBadge") as? SKLabelNode {
             if result.isNewBestTime && result.isNewBestLevel {

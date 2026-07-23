@@ -180,10 +180,10 @@ enum GameConfig {
         static let requiredLifetimeKills: Int = 10_000
         static let requiredBossKills: Int = 10
         /// Beats of the scripted sequence.
-        static let dreadDelay: TimeInterval = 2.4      // after the false-ending card settles
-        static let resolveDuration: TimeInterval = 0.9 // he fades into existence
-        static let regardPause: TimeInterval = 1.2     // he looks at you
-        static let crossDuration: TimeInterval = 0.26  // impossible speed
+        static let dreadDelay: TimeInterval = 1.0      // he does not wait politely
+        static let resolveDuration: TimeInterval = 0.45 // he fades into existence
+        static let regardPause: TimeInterval = 0.5     // he looks at you (just long enough to register)
+        static let crossDuration: TimeInterval = 0.18  // impossible speed
         /// Dev-only: skip the mastery gate to test the sequence.
         static let debugForceEntrance: Bool = true   // TEMP: testing the entrance
     }
