@@ -48,6 +48,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// goes silent and stays silent. The player is allowed to believe they've
     /// reached the true end. Unit 3's Mote fills that silence.
     private var falseEndingActive: Bool = false
+    private var falseEndingCard: SKNode?
 
     // v1.6: Quench Field momentum pulses (points/sec toward boss when positive)
     private var fieldImpulseStrength: CGFloat = 0
@@ -1754,6 +1755,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // eruption countdown was crowding the PAUSED title).
         capstoneTimers.isHidden = true
         orbIndicators.isHidden = true
+        falseEndingCard?.isHidden = true
         pauseMenu.show(upgradeManager: upgradeManager)
     }
 
@@ -1764,6 +1766,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         invulnerableTimer = 1.0
         capstoneTimers.isHidden = false
         orbIndicators.isHidden = false
+        falseEndingCard?.isHidden = false
         pauseMenu.hide()
     }
 
@@ -5064,6 +5067,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// finished with you," which is exactly the note Mote gets to interrupt.
     private func showFalseEndingCard() {
         guard let camera = camera else { return }
+        let card = SKNode()
+        card.zPosition = 260
+        camera.addChild(card)
+        falseEndingCard = card
 
         let title = SKLabelNode(fontNamed: "Menlo-Bold")
         title.text = "THE FORGE IS QUIET"
@@ -5073,7 +5080,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         title.position = CGPoint(x: 0, y: 26)
         title.zPosition = 260
         title.alpha = 0
-        camera.addChild(title)
+        card.addChild(title)
 
         let line = SKLabelNode(fontNamed: "Menlo")
         line.text = "the forge weighed what you became"
@@ -5083,7 +5090,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         line.position = CGPoint(x: 0, y: -2)
         line.zPosition = 260
         line.alpha = 0
-        camera.addChild(line)
+        card.addChild(line)
 
         // Slow, quiet, and it STAYS — the silence is the point. Unit 3 fills it.
         title.run(SKAction.fadeAlpha(to: 1.0, duration: 1.6))
@@ -7264,6 +7271,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossDefeatedThisRun = false
         monumentFightActive = false
         falseEndingActive = false
+        falseEndingCard?.removeFromParent()
+        falseEndingCard = nil
         pendingForgeXP = 0
         
         // v1.4: Reset orb timers

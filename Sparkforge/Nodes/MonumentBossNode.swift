@@ -77,6 +77,7 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     /// would be pure frustration. Call once the subclass knows its radius.
     func configurePhysics(radius: CGFloat) {
         targetingRadius = radius
+        installHealthBar(bodyRadius: radius)
         let body = SKPhysicsBody(circleOfRadius: radius)
         body.isDynamic = true
         body.affectedByGravity = false
@@ -97,6 +98,61 @@ class MonumentBossNode: SKNode, ArenaBossNode {
         CGPoint(x: 0, y: arenaRadius * 0.52)
     }
 
+    // MARK: - Health bar
+
+    private var hpBarFill: SKShapeNode?
+    private var hpBarBG: SKShapeNode?
+    private var hpBarWidth: CGFloat = 0
+
+    /// Monuments show their attrition. The mystique of a huge unknowable thing is
+    /// good, but players are being taught compounding builds — they've earned the
+    /// information to judge "am I actually chunking this down, or should I run?"
+    /// Sits BELOW the body (a monument is already at the top of the field, so a
+    /// bar above it would be off-screen).
+    private func installHealthBar(bodyRadius r: CGFloat) {
+        guard hpBarFill == nil else { return }
+        let w = r * 1.7, h: CGFloat = 11
+        hpBarWidth = w
+        let y = -(r + 34)
+
+        let bg = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 3)
+        bg.fillColor = SKColor(hex: 0x140F26, alpha: 0.9)
+        bg.strokeColor = SKColor(hex: 0xFFD98A, alpha: 0.45)
+        bg.lineWidth = 1.5
+        bg.position = CGPoint(x: 0, y: y)
+        bg.zPosition = 8
+        addChild(bg)
+        hpBarBG = bg
+
+        let fill = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 3)
+        fill.fillColor = SKColor(hex: 0xFFD98A)
+        fill.strokeColor = .clear
+        fill.glowWidth = 3
+        fill.position = CGPoint(x: 0, y: y)
+        fill.zPosition = 8.1
+        addChild(fill)
+        hpBarFill = fill
+    }
+
+    /// The monument is collapsing — retire its bar rather than leaving an empty
+    /// red sliver under the death animation.
+    private func fadeOutHealthBar() {
+        let fade = SKAction.fadeOut(withDuration: 0.3)
+        hpBarFill?.run(fade)
+        hpBarBG?.run(fade)
+    }
+
+    /// Shrink the fill from the RIGHT (left-anchored), and shift its tint as the
+    /// monument comes apart — gold → hot amber → collapse red.
+    private func refreshHealthBar() {
+        guard let fill = hpBarFill else { return }
+        let pct = max(0, min(1, healthPercent))
+        fill.xScale = max(0.0001, pct)
+        fill.position = CGPoint(x: -hpBarWidth * (1 - pct) / 2, y: fill.position.y)
+        let hex: UInt32 = pct > 0.66 ? 0xFFD98A : (pct > 0.33 ? 0xFFA34D : 0xE8503C)
+        fill.fillColor = SKColor(hex: hex)
+    }
+
     // MARK: - Damage / phases
 
     @discardableResult
@@ -106,6 +162,8 @@ class MonumentBossNode: SKNode, ArenaBossNode {
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
         health -= scaled
+
+        refreshHealthBar()
 
         if !halfHealthFired && healthPercent <= 0.5 {
             halfHealthFired = true
@@ -126,6 +184,7 @@ class MonumentBossNode: SKNode, ArenaBossNode {
             health = 0
             isDead = true
             physicsBody?.categoryBitMask = 0   // stop registering hits mid-collapse
+            fadeOutHealthBar()
             onDeath?(position, xpValue)
             beginDeathSequence()
             return true
