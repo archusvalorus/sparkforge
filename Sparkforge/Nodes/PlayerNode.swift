@@ -32,6 +32,10 @@ final class PlayerNode: SKNode {
     private let emberWrap = SKNode()        // v1.7: carries the breathe so pulses don't fight it
     private let coreNode: SKShapeNode       // ember body — the readable player mass
     private let glowNode: SKShapeNode       // soft outer aura, grows with level
+    /// v2.0 Phase C: rising spore motes shown while Spark stands on cultivated
+    /// ground — the visible half of "this ground is working for you".
+    private var nourishMotes: SKEmitterNode?
+    private(set) var isNourished = false
     private let trailEmitter = SKEmitterNode()
 
     // v1.8: base-Spark eyes — two black dots that look toward travel.
@@ -291,6 +295,63 @@ final class PlayerNode: SKNode {
     ///
     /// Carries the level's own visuals; the CALLER drives the card/stat
     /// presentation, exactly as the XP path does.
+    // MARK: - v2.0 Phase C: cultivated-ground feedback
+
+    /// Toggle the "nourished" state. Idempotent, so the scene can call it every
+    /// frame from a simple occupancy test without churning nodes.
+    func setNourished(_ on: Bool) {
+        guard on != isNourished else { return }
+        isNourished = on
+        // The emitter is built ONCE and its birth rate toggled, rather than
+        // being created and destroyed. Walking the zone boundary would
+        // otherwise stack a fresh emitter on every crossing while the previous
+        // ones were still fading out.
+        buildNourishMotesIfNeeded()
+        nourishMotes?.particleBirthRate = on ? Self.nourishBirthRate : 0
+    }
+
+    private static let nourishBirthRate: CGFloat = 14
+
+    private func buildNourishMotesIfNeeded() {
+        guard nourishMotes == nil else { return }
+        let dot = SKTexture(image: UIGraphicsImageRenderer(
+            size: CGSize(width: 6, height: 6)).image { ctx in
+                UIColor.white.setFill()
+                ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: 6, height: 6))
+            })
+
+        let motes = SKEmitterNode()
+        motes.particleTexture = dot
+        motes.particleBirthRate = 0        // the toggle turns it on
+        motes.particleLifetime = 1.2
+        motes.particleLifetimeRange = 0.5
+        // Spawn in a band WIDER than Spark's body so the motes read around him
+        // rather than being swallowed by his own glow.
+        motes.particlePositionRange = CGVector(dx: 40, dy: 6)
+        motes.particleSpeed = 30            // drifting UP, out of the soil
+        motes.particleSpeedRange = 12
+        motes.emissionAngle = .pi / 2
+        motes.emissionAngleRange = 0.45
+        motes.particleAlpha = 0.85
+        motes.particleAlphaSpeed = -0.6
+        motes.particleScale = 0.075
+        motes.particleScaleRange = 0.03
+        motes.particleScaleSpeed = -0.02
+        // Above the cultivated ground (1.5), below the actors — so they layer
+        // onto the soil they're rising out of.
+        motes.particleZPosition = 2
+        // Spore-light: pale green-white, per the handoff palette. Distinct from
+        // the health-orb green so it reads as "attuned", never as "healing".
+        motes.particleColor = SKColor(hex: 0xC9D96F)
+        motes.particleColorBlendFactor = 1.0
+        motes.particleBlendMode = .add
+        motes.position = CGPoint(x: 0, y: -10)
+        motes.zPosition = -1                // behind Spark, so it never masks him
+        motes.targetNode = parent           // motes stay in the world, not on Spark
+        addChild(motes)
+        nourishMotes = motes
+    }
+
     func grantLevel() {
         guard !isDead else { return }
         currentXP = 0

@@ -1038,7 +1038,7 @@ final class UpgradeManager {
             description: "Cultivate the arena. Unlock Growth cards.",
             // ONE TIER, by design (Brandon): Terra opens the options that grant
             // the effects rather than being prescriptive itself.
-            apply: { stats in stats.terraZoneRadius = 110 },
+            apply: { stats in stats.terraZoneRadius = GameConfig.Growth.terraRadius },
             provides: [.growthUnlocked]
         ))
 

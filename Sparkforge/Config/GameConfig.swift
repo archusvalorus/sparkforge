@@ -88,6 +88,23 @@ enum GameConfig {
         static let debugStartStage: Int = 1
     }
 
+    // MARK: - Growth (v2.0 Phase C)
+    enum Growth {
+        /// Terra's starting footprint. Big enough to fight around, small enough
+        /// that leaving it stays a real decision.
+        static var terraRadius: CGFloat { 110 * DeviceScale.gameplay }
+        /// Hard ceiling on simultaneous cultivated zones. The creative handoff
+        /// warns explicitly about a "frame-rate extinction event" — Growth
+        /// stacks zones, structures, projectiles and particles, so the cap is
+        /// here from the first unit rather than retrofitted after a bad run.
+        static let maxZones: Int = 4
+        /// Enemy slow inside cultivated ground.
+        static let enemySlow: CGFloat = 0.30
+        /// How often ground effects tick (seconds). Damage is per-tick, so the
+        /// DPS on a card means what it says.
+        static let tickInterval: TimeInterval = 1.0
+    }
+
     // MARK: - Card Drafting (v2.0 Phase C)
     enum Drafting {
         /// A GATEWAY card (one that unlocks a whole pool — Terra) is guaranteed

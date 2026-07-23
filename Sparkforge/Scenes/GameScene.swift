@@ -221,9 +221,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // later". C1.2 generalises this into the reusable, capped, pooled primitive
     // with player-side effects and the Terra+ modify-all path; the shape here is
     // deliberately the minimum that makes Terra a real card rather than a key.
-    private var cultivatedZoneNode: SKShapeNode?
-    private var cultivatedZoneCenter: CGPoint?
-    private var thornsoilAccumulator: TimeInterval = 0
+    private var cultivatedZones: [CultivatedZoneNode] = []
+    private var groundTickAccumulator: TimeInterval = 0
     
     // MARK: - Nodes
     
@@ -2149,7 +2148,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.0 Phase C: Terra plants cultivated ground the moment it's taken.
         // No-op for every other card, and idempotent if Terra is somehow
         // re-applied.
-        plantCultivatedGround()
+        plantTerraGroundIfNeeded()
 
         // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
@@ -4978,52 +4977,71 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - v2.0 Phase C (C1.1): Growth — cultivated ground
 
-    /// Terra plants cultivated ground where Spark is standing. Fixed position
-    /// on purpose: Growth is about TERRITORY, so the zone is a place you choose
-    /// to defend and fight around, never an aura that follows you.
-    private func plantCultivatedGround() {
-        guard playerStats.terraZoneRadius > 0, cultivatedZoneNode == nil else { return }
-        let r = playerStats.terraZoneRadius
-        let center = player.position
+    /// Plant cultivated ground. Fixed position on purpose: Growth is about
+    /// TERRITORY, so a zone is a place you chose to defend and fight around,
+    /// never an aura that follows you. Brandon's device read confirmed it —
+    /// planting under Spark is exactly what makes the ground feel like YOURS.
+    @discardableResult
+    private func plantCultivatedGround(at position: CGPoint? = nil,
+                                       radius: CGFloat? = nil) -> CultivatedZoneNode? {
+        let r = radius ?? playerStats.terraZoneRadius
+        guard r > 0, cultivatedZones.count < GameConfig.Growth.maxZones else { return nil }
 
-        let zone = SKShapeNode(circleOfRadius: r)
-        // Forest body, NOT the brighter health green — that stays exclusive to
-        // healing pickups (creative handoff §4 readability rules). Kept quieter
-        // than enemy attacks so it reads as terrain, not as a threat.
-        zone.fillColor = SKColor(hex: 0x174A2A, alpha: 0.22)
-        zone.strokeColor = SKColor(hex: 0x5FCF62, alpha: 0.40)
-        zone.lineWidth = 1.5
-        zone.position = center
-        zone.zPosition = 1.5          // under pickups and actors, over the floor
+        let zone = CultivatedZoneNode(radius: r)
+        zone.position = position ?? player.position
         worldNode.addChild(zone)
+        cultivatedZones.append(zone)
+        return zone
+    }
 
-        // A slow breath so it reads as alive rather than as a UI decal.
-        zone.run(SKAction.repeatForever(SKAction.sequence([
-            SKAction.fadeAlpha(to: 0.85, duration: 1.6),
-            SKAction.fadeAlpha(to: 1.0, duration: 1.6)
-        ])))
-
-        cultivatedZoneNode = zone
-        cultivatedZoneCenter = center
+    /// Terra's one-shot plant. Separate from the general planter so the Tree
+    /// capstone and future Growth cards can plant their own ground without
+    /// re-triggering Terra's copy.
+    private func plantTerraGroundIfNeeded() {
+        guard playerStats.terraZoneRadius > 0, cultivatedZones.isEmpty else { return }
+        guard plantCultivatedGround(radius: playerStats.terraZoneRadius) != nil else { return }
         showBuildHint("🌱 The ground is yours now")
     }
 
-    /// Enemies standing in cultivated ground are slowed, and — once Thornsoil is
-    /// owned — wounded. Damage ticks on a 1s accumulator rather than per-frame
-    /// so the DPS number in the card means what it says.
+    /// The Terra+ path: reach into EVERY active zone at once. Built before any
+    /// Terra+ card exists so those cards stay data rather than new systems —
+    /// Rich Soil is a radius multiplier, not a subsystem.
+    private func modifyAllCultivatedZones(radiusScale: CGFloat) {
+        for zone in cultivatedZones {
+            zone.setRadius(zone.radius * radiusScale)
+        }
+    }
+
+    /// The occupancy pass — the heart of the primitive.
+    ///
+    /// A cultivated zone is not a damage field; it's GROUND, and it treats its
+    /// occupants differently depending on whose ground it is:
+    ///   • Spark   — nourished. Visibly so, and the hook where the Tree's
+    ///               move-speed and regen tiers will attach.
+    ///   • enemies — slowed, and wounded once Thornsoil is owned.
+    ///
+    /// One pass answers both questions, so the asymmetry can never drift.
     private func updateCultivatedGround(_ dt: TimeInterval) {
-        guard let center = cultivatedZoneCenter else { return }
-        let r = playerStats.terraZoneRadius
-        guard r > 0 else { return }
+        guard !cultivatedZones.isEmpty else {
+            // No ground ⇒ definitely not standing on it. Cheap early-out that
+            // also guarantees the visual can't survive the zone that caused it.
+            if player.isNourished { player.setNourished(false) }
+            return
+        }
 
-        thornsoilAccumulator += dt
-        let tick = thornsoilAccumulator >= 1.0
-        if tick { thornsoilAccumulator = 0 }
+        groundTickAccumulator += dt
+        let tick = groundTickAccumulator >= GameConfig.Growth.tickInterval
+        if tick { groundTickAccumulator = 0 }
 
+        // --- Spark's side of the bargain ---
+        let playerOnGround = cultivatedZones.contains { $0.covers(player.position) }
+        player.setNourished(playerOnGround)
+
+        // --- everyone else's ---
         var killed: [EnemyNode] = []
         for enemy in enemies where !enemy.isDying {
-            guard enemy.position.distance(to: center) < r else { continue }
-            enemy.applySlow(playerStats.effectiveSlow(playerStats.terraSlow), duration: 0.3)
+            guard cultivatedZones.contains(where: { $0.covers(enemy.position) }) else { continue }
+            enemy.applySlow(playerStats.effectiveSlow(GameConfig.Growth.enemySlow), duration: 0.3)
             if tick, playerStats.thornsoilDPS > 0 {
                 let dmg = GameConfig.BossClass.scaledDamage(playerStats.thornsoilDPS,
                                                             isBossClass: enemy.isMiniBoss)
@@ -5385,7 +5403,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // The RANDOM opener grants through pickCard directly, bypassing
         // commitCard — so a granted Terra has to plant its ground here too.
-        plantCultivatedGround()
+        plantTerraGroundIfNeeded()
 
         statHUD.update(from: playerStats)
         refreshKineticGauge()
@@ -8022,10 +8040,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.6: Clean up gravity wells + chill trail + Quench card state
         gravityWells.forEach { $0.removeFromParent() }
         gravityWells.removeAll()
-        cultivatedZoneNode?.removeFromParent()
-        cultivatedZoneNode = nil
-        cultivatedZoneCenter = nil
-        thornsoilAccumulator = 0
+        cultivatedZones.forEach { $0.removeFromParent() }
+        cultivatedZones.removeAll()
+        groundTickAccumulator = 0
+        player.setNourished(false)
         chillTrailPoints.removeAll()
         singularityTimer = 0
         chillTrailDropTimer = 0
