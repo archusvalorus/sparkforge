@@ -71,6 +71,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// pause or reveal screen. Picked up on the first frame play resumes.
     private var gauntletStagePending = false
     private var gauntletStagePendingIsFirst = false
+    /// True ⇒ the player DRAFTS the opener (picks each card); false ⇒ the ARAM
+    /// chaos path grants them at random. Chosen on the title screen.
+    private var gauntletDraftOpener = true
+    /// Draft-opener sequencing.
+    private var openerDraftRunning = false
+    private var openerDraftRemaining = 0
+    private var openerDraftTotal = 0
+    /// Counts down in real time while a draft round fades in. update() is
+    /// gated on .playing, so this can't be a dt timer — an SKAction on the
+    /// scene clears it instead.
+    private var openerDraftInputLock: TimeInterval = 0
     /// Overrides the elapsed-time HP scaling every boss computes for itself.
     /// Boss Mode has no clock pressure, so difficulty comes from the stage ramp.
     private var bossHPScalingOverride: Int?
@@ -84,9 +95,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// registry has nothing unlocked to fight (Boss Mode shouldn't be reachable
     /// then, but the scene refuses to start a zero-boss run regardless).
     @discardableResult
-    func configureAsGauntlet(order: GauntletRun.Order) -> Bool {
+    func configureAsGauntlet(order: GauntletRun.Order, draftOpener: Bool = true) -> Bool {
         guard let run = GauntletRun(order: order) else { return false }
         gauntlet = run
+        gauntletDraftOpener = draftOpener
         // Resolve the FIRST boss's home arena before didMove builds anything,
         // so the run opens directly in the right field.
         ArenaConfig.overrideID = run.currentEntry?.arenaID
@@ -355,8 +367,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // definition reached only by players who have already felled a boss.
         if !isGauntlet { showTutorialHintIfNeeded() }
 
-        // v2.0 (B2a): the gauntlet doesn't wait for a bell. Stage 1 opens now.
-        if isGauntlet { beginGauntletStage(isFirst: true) }
+        // v2.0: the gauntlet doesn't wait for a bell. The opener runs first,
+        // then it hands the field to boss 1.
+        if isGauntlet { beginGauntletOpener() }
 
         // Listen for app backgrounding
         NotificationCenter.default.addObserver(
@@ -1709,6 +1722,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 gameState = .playing
                 return
             }
+            // v2.0: the draft opener presents rounds back-to-back with cards in
+            // the SAME screen position, so a stray second tap would silently
+            // burn the next pick before the player ever saw it. A short lockout
+            // covering the overlay fade-in makes that impossible. Normal
+            // level-ups resume to gameplay, where a stray tap is harmless, so
+            // this only guards the draft.
+            if openerDraftRunning, openerDraftInputLock > 0 { return }
             handleCardSelection(touch)
             
         case .paused:
@@ -2081,6 +2101,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if let stat = levelStatPick {
             playerStats.applyStatBonus(stat)
             statHUD.update(from: playerStats)
+            // The HP bar is normally refreshed by updateHUD(), which doesn't run
+            // while a modal is up. In a normal level-up you resume immediately
+            // so nobody notices; the draft opener stacks 8 modals back to back,
+            // so a MAX HP pick would appear to do nothing for the whole draft.
+            hpBar.updateFill(playerStats.hpPercent,
+                             currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
             levelStatPick = nil
             levelNeedsStat = false   // a 2nd (extra-pick) card won't re-require a stat
         }
@@ -2322,6 +2348,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Resume play after the pick (and any synergy reveals) — the post-pick
     /// invulnerability buffer so the player can reorient.
     private func completeLevelUp() {
+        // v2.0: the gauntlet's DRAFT opener is a sequence of granted level-ups.
+        // Every pick funnels through here, so this is where the next round is
+        // dealt — and where the sequence hands off to boss 1.
+        if openerDraftRunning {
+            stepOpenerDraft()
+            return
+        }
         invulnerableTimer = 2.5
         let blink = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.5, duration: 0.2),
@@ -5199,12 +5232,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gauntletBossOnField = true
         gauntletTransitioning = false
 
-        if isFirst {
-            // ARAM: you start ahead, and you start NOW. Grants, not picks —
-            // a draft screen in front of the button would be exactly the
-            // friction this mode exists to avoid.
-            grantOpenerCards(GameConfig.BossMode.openerCards)
-        } else {
+        if !isFirst {
             // The between-boss heal. Spawned into the NEW arena rather than the
             // old one so the orbs are reachable for the fight they're meant to
             // carry you through — an orb left in the previous field would be
@@ -5242,12 +5270,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// menu. Cards are drawn from the normal pool and applied through the normal
     /// pick path, so tiers, synergies and capstone rules all behave; only the
     /// selection UI and its reveal modals are skipped.
-    private func grantOpenerCards(_ count: Int) {
+    private func runRandomOpener(_ count: Int) {
         guard count > 0 else { return }
         var granted: [String] = []
         var synergies: [UpgradeManager.SynergyUnlock] = []
 
         for _ in 0..<count {
+            // A granted card is a granted LEVEL — the level must actually
+            // advance or the cheap early XP curve stays in front of boss 1.
+            player.grantLevel()
+            // Chaos mode takes the random stat every time; the draft path gets
+            // the normal even/odd cadence through triggerLevelUp().
+            if let stat = PlayerStats.StatKind.allCases.randomElement() {
+                playerStats.applyStatBonus(stat)
+            }
             // Draw one at a time: each pick changes what's eligible next, so a
             // single batch draw could hand out a card the previous grant just
             // made redundant.
@@ -5276,6 +5312,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         player.updateCollisionRadius()
         hpBar.updateFill(playerStats.hpPercent,
                          currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
+        levelLabel.text = "LV \(player.currentLevel)"
+        xpBar.updateFill(player.xpProgress)
 
         // You were given something — say what, or the buffs read as noise.
         if !granted.isEmpty {
@@ -5292,6 +5330,66 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if !synergyQueue.isEmpty || !capstoneQueue.isEmpty {
             gameState = .synergyReveal
             presentNextReveal()
+        }
+    }
+
+    // MARK: - The opener (DRAFT or RANDOM)
+
+    /// Open the gauntlet. Both paths grant the same number of LEVELS — they
+    /// differ only in who chooses the cards.
+    ///
+    /// DRAFT lets you build deliberately, so Boss Mode doubles as a build
+    /// testbed. RANDOM keeps the ARAM chaos for players who want it. Making it
+    /// an explicit choice is the whole point: a random build you *opted into*
+    /// is a challenge, while a random build you were handed is just a bad
+    /// surprise before a boss you can't revive against.
+    private func beginGauntletOpener() {
+        let count = max(0, GameConfig.BossMode.openerCards)
+        guard count > 0 else { beginGauntletStage(isFirst: true); return }
+
+        if gauntletDraftOpener {
+            openerDraftTotal = count
+            openerDraftRemaining = count
+            openerDraftRunning = true
+            stepOpenerDraft()
+        } else {
+            runRandomOpener(count)
+            // Reveals may have taken the screen; beginGauntletStage defers
+            // itself in that case and resumes on the first playing frame.
+            beginGauntletStage(isFirst: true)
+        }
+    }
+
+    /// Deal the next draft round, or hand the field to boss 1 when done.
+    ///
+    /// Each round is a REAL level-up — `triggerLevelUp()` unchanged — so the
+    /// even/odd stat cadence, synergy reveals and capstone reveals all behave
+    /// exactly as they do in a normal run. Only the label is overridden, to
+    /// say where you are in the draft.
+    private func stepOpenerDraft() {
+        guard openerDraftRemaining > 0 else {
+            openerDraftRunning = false
+            levelUpOverlay.alpha = 0
+            // completeLevelUp() was intercepted, so the resume it normally
+            // performs happens here instead.
+            invulnerableTimer = 2.5
+            gameState = .playing
+            beginGauntletStage(isFirst: true)
+            return
+        }
+        openerDraftRemaining -= 1
+        player.grantLevel()
+        triggerLevelUp()
+        openerDraftInputLock = 1
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: 0.28),
+            SKAction.run { [weak self] in self?.openerDraftInputLock = 0 }
+        ]), withKey: "openerDraftLock")
+        if let label = levelUpOverlay.childNode(withName: "levelUpLabel") as? SKLabelNode {
+            label.text = "OPENER \(openerDraftTotal - openerDraftRemaining) / \(openerDraftTotal)"
+            // "OPENER 8 / 8" is much wider than "LEVEL 8" and ran under the
+            // stat panel at the stock size.
+            label.fontSize = 22
         }
     }
 
@@ -7589,6 +7687,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gauntletTransitioning = false
         gauntletBossOnField = false
         gauntletStagePending = false
+        openerDraftRunning = false
+        openerDraftRemaining = 0
+        openerDraftInputLock = 0
+        removeAction(forKey: "openerDraftLock")
 
         // v2.0: in-world readouts must not bleed onto the result screen.
         falseEndingCard?.removeFromParent()
@@ -7944,6 +8046,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gauntletBossOnField = false
         gauntletTransitioning = false
         gauntletStagePending = false
+        openerDraftRunning = false
+        openerDraftRemaining = 0
+        openerDraftInputLock = 0
+        removeAction(forKey: "openerDraftLock")
         gauntletWon = false
         bossHPScalingOverride = nil
 
@@ -7958,6 +8064,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         gauntlet = fresh
         if let first = fresh.currentEntry { swapArena(to: first.arenaID) }
-        beginGauntletStage(isFirst: true)
+        beginGauntletOpener()
     }
 }

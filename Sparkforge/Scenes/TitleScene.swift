@@ -87,6 +87,9 @@ final class TitleScene: SKScene {
     /// honest default (the order you met them), and a run-shaping choice
     /// shouldn't silently persist into a session you didn't set it in.
     private var bossModeOrderName = "orderSequential"
+    /// v2.0: opener mode. DRAFT is the default — a build you chose is the
+    /// friendlier landing, and chaos stays one tap away for anyone who wants it.
+    private var bossModeOpenerName = "openerDraft"
 
     // v1.8 Unit 10: the CODEX hub + the scrollable page it opens.
     private var codexHub: CodexHubNode?
@@ -1535,8 +1538,8 @@ final class TitleScene: SKScene {
         let rowH: CGFloat = 56, gap: CGFloat = 8
         let panelW: CGFloat = 336
         // Bottom padding carries the roster clear of the challenge dials, the
-        // order chips, the gauntlet button and the hint.
-        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 262
+        // opener + order chips, the gauntlet button and the hint.
+        let panelH = 92 + CGFloat(roster.count) * (rowH + gap) + 290
         let panel = SKShapeNode(rectOf: CGSize(width: panelW, height: panelH), cornerRadius: 14)
         panel.fillColor = SKColor(hex: 0x140C0D)
         panel.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.7)
@@ -1617,10 +1620,10 @@ final class TitleScene: SKScene {
         dialHeader.fontSize = 11
         dialHeader.fontColor = SKColor(hex: dials.isDefault ? 0x8A7E78 : 0xFFCC44)
         dialHeader.verticalAlignmentMode = .center
-        dialHeader.position = CGPoint(x: 0, y: -top + 244)
+        dialHeader.position = CGPoint(x: 0, y: -top + 272)
         modal.addChild(dialHeader)
 
-        let dialRowY: [BossModeDials.Key: CGFloat] = [.hp: -top + 216, .atk: -top + 188, .def: -top + 160]
+        let dialRowY: [BossModeDials.Key: CGFloat] = [.hp: -top + 244, .atk: -top + 216, .def: -top + 188]
         for key in BossModeDials.Key.allCases {
             let y = dialRowY[key] ?? 0
             let v = dials.value(key)
@@ -1664,7 +1667,31 @@ final class TitleScene: SKScene {
             chip.fillColor = SKColor(hex: selected ? 0x2A1114 : 0x160D0E)
             chip.strokeColor = SKColor(hex: 0xE0554C, alpha: selected ? 0.85 : 0.3)
             chip.lineWidth = selected ? 1.6 : 1.0
-            chip.position = CGPoint(x: (i == 0 ? -1 : 1) * (chipW + 10) / 2, y: -top + 108)
+            chip.position = CGPoint(x: (i == 0 ? -1 : 1) * (chipW + 10) / 2, y: -top + 112)
+            chip.name = mode.1
+            modal.addChild(chip)
+
+            let lbl = SKLabelNode(fontNamed: "Menlo-Bold")
+            lbl.text = mode.0
+            lbl.fontSize = 11
+            lbl.fontColor = SKColor(hex: selected ? 0xF08078 : 0x7A6260)
+            lbl.verticalAlignmentMode = .center
+            lbl.position = chip.position
+            lbl.name = mode.1 + "Label"
+            modal.addChild(lbl)
+        }
+
+        // v2.0: opener pick — DRAFT your 8 cards, or take them at RANDOM.
+        // Chaos you opted into is a challenge; chaos you were handed before an
+        // unrevivable boss is just a bad surprise. Draft also turns Boss Mode
+        // into a build testbed, which is worth as much as the chaos is.
+        for (i, mode) in [("DRAFT", "openerDraft"), ("RANDOM", "openerRandom")].enumerated() {
+            let selected = (mode.1 == bossModeOpenerName)
+            let chip = SKShapeNode(rectOf: CGSize(width: chipW, height: 30), cornerRadius: 8)
+            chip.fillColor = SKColor(hex: selected ? 0x2A1114 : 0x160D0E)
+            chip.strokeColor = SKColor(hex: 0xE0554C, alpha: selected ? 0.85 : 0.3)
+            chip.lineWidth = selected ? 1.6 : 1.0
+            chip.position = CGPoint(x: (i == 0 ? -1 : 1) * (chipW + 10) / 2, y: -top + 150)
             chip.name = mode.1
             modal.addChild(chip)
 
@@ -1772,6 +1799,17 @@ final class TitleScene: SKScene {
             }
         }
 
+        // Opener chips: same treatment.
+        for name in ["openerDraft", "openerRandom"] {
+            if hits.contains(where: { $0.name == name || $0.name == name + "Label" }) {
+                guard bossModeOpenerName != name else { return }
+                bossModeOpenerName = name
+                AudioManager.shared.play(.cardSelect)
+                showBossModeModal()
+                return
+            }
+        }
+
         if hits.contains(where: { $0.name == "gauntletButton" || $0.name == "gauntletButtonLabel" }) {
             dismissBossModeModal(animated: false)
             startGauntlet()
@@ -1801,7 +1839,9 @@ final class TitleScene: SKScene {
 
         // If the registry can't produce a lineup there is nothing to enter —
         // stay on the title rather than presenting an empty run.
-        guard gameScene.configureAsGauntlet(order: order) else { return }
+        guard gameScene.configureAsGauntlet(order: order,
+                                            draftOpener: bossModeOpenerName == "openerDraft")
+        else { return }
 
         let transition = SKTransition.fade(with: .black, duration: 0.35)
         view.presentScene(gameScene, transition: transition)

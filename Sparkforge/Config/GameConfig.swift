@@ -42,8 +42,18 @@ enum GameConfig {
 
         // --- B2b lands these; declared here so the design reads in one place ---
 
-        /// Auto-GRANTED opener cards (ARAM model: start ahead, no menu friction).
-        static let openerCards: Int = 3
+        /// Opener size — how many levels the gauntlet grants before boss 1.
+        ///
+        /// Calibrated against the XP curve, not picked by feel. Levels 2-6 cost
+        /// 43 XP combined — under a fifth of one boss reward — so a level-1
+        /// start meant boss 1's shower cascaded through ~10 levels at once and
+        /// every later stage felt flat by comparison. Opening at level 9 puts
+        /// the player roughly where a normal run MEETS the Slag Titan, which
+        /// lands each boss at a steady +2 to +4 levels instead of +10 then +1.
+        ///
+        /// Halving the XP multiplier does NOT fix this — at 2.5x boss 1 still
+        /// pays 8 levels. The starting level is the only real lever.
+        static let openerCards: Int = 8
         /// HP orbs dropped between bosses — randomized; the variance is the point.
         static let interBossHealsMin: Int = 2
         static let interBossHealsMax: Int = 3

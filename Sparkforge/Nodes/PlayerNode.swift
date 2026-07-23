@@ -281,6 +281,23 @@ final class PlayerNode: SKNode {
         return false
     }
 
+    /// v2.0 (Boss Mode opener): advance one level WITHOUT earning the XP.
+    ///
+    /// The gauntlet opens by granting levels outright — "as if you'd fought
+    /// your way to the first boss". It has to be a real level increment rather
+    /// than a pile of XP, because the early curve is so cheap (levels 2-6 cost
+    /// 43 XP combined) that awarding XP instead would let one boss's shower
+    /// cascade through the whole early ladder at once.
+    ///
+    /// Carries the level's own visuals; the CALLER drives the card/stat
+    /// presentation, exactly as the XP path does.
+    func grantLevel() {
+        guard !isDead else { return }
+        currentXP = 0
+        currentLevel += 1
+        onLevelUp()
+    }
+
     func xpRequired(forLevel level: Int) -> Int {
         let base = Double(GameConfig.Leveling.baseXPRequired)
         let factor = GameConfig.Leveling.xpScalingFactor
