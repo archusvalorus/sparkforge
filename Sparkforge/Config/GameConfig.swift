@@ -185,7 +185,7 @@ enum GameConfig {
         static let regardPause: TimeInterval = 0.5     // he looks at you (just long enough to register)
         static let crossDuration: TimeInterval = 0.18  // impossible speed
         /// Dev-only: skip the mastery gate to test the sequence.
-        static let debugForceEntrance: Bool = true   // TEMP: testing the entrance
+        static let debugForceEntrance: Bool = false
     }
 
     enum Everglow {
