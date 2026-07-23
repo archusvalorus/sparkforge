@@ -1555,6 +1555,23 @@ final class TitleScene: SKScene {
         sub.fontColor = SKColor(hex: 0x999999)
         sub.verticalAlignmentMode = .center
         sub.position = CGPoint(x: 0, y: top - 48)
+
+        #if DEBUG
+        // A dev seam left switched on is indistinguishable from a bug — the
+        // gauntlet just behaves wrongly and says nothing about why. So when a
+        // seam is active, the mode announces it in the one place you can't
+        // miss on the way in. (Release builds never compile this.)
+        var seams: [String] = []
+        if GameConfig.BossMode.debugForceFullRoster { seams.append("full roster") }
+        if GameConfig.BossMode.debugStartStage > 1 {
+            seams.append("start @ stage \(GameConfig.BossMode.debugStartStage)")
+        }
+        if !seams.isEmpty {
+            sub.text = "⚠︎ DEBUG — " + seams.joined(separator: " · ")
+            sub.fontColor = SKColor(hex: 0xFFCC44)
+        }
+        #endif
+
         modal.addChild(sub)
 
         for (i, e) in roster.enumerated() {
