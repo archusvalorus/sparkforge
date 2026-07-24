@@ -491,9 +491,12 @@ enum GameConfig {
     /// player CHOOSE one of these, odd levels auto-award a random one. Starting
     /// values — balance-sensitive; tuned against the stable post-v1.8 baseline.
     enum LevelUp {
+        // v2.0 tuning (Brandon, Jul 24): ATK 2→5, DEF 1→5. The old values were
+        // undertuned out of caution — clears leaned on revives once the arena
+        // filled. HP held at 10 for now (its late-run scaling is still open).
         static let hpBonus: Int = 10        // +max HP (also heals for the same)
-        static let attackBonus: Int = 2     // +base projectile damage
-        static let defenseBonus: Int = 1    // +flat damage reduction
+        static let attackBonus: Int = 5     // +base projectile damage
+        static let defenseBonus: Int = 5    // +flat damage reduction
     }
     
     // MARK: - Enemy
