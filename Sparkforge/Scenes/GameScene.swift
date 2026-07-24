@@ -235,6 +235,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var terraGhost: CultivatedZoneNode?
     /// Live Defensive Flowers (C1.3). Permanent-up-to-cap, rooted to the ground.
     private var flowers: [DefensiveFlowerNode] = []
+    /// The Tree capstone (C1.6): one organism, planted once, matured per tier.
+    private var treeNode: TreeNode?
+    private var treeGroundRegenAccumulator: TimeInterval = 0
+    private var treeAnimalTimer: TimeInterval = 0
+    /// The rare mountain-lion pet (T5): roams and mauls for a few seconds.
+    private var lionPet: SKLabelNode?
+    private var lionPetTimer: TimeInterval = 0
     /// Seconds Spark has spent standing on cultivated ground. Only advances
     /// while he's actually on it, and deliberately NOT reset when he steps off
     /// — the ground is feeding him, so stepping out to dodge shouldn't erase
@@ -2197,6 +2204,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // is belt-and-suspenders, not a real path.
         if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
         if card.id == "v20_vinewall" { raiseVineWall() }
+        if card.id == "v20_tree" { growTree(to: upgradeManager.tier(of: card.id)) }
 
         // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
@@ -2455,6 +2463,156 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Keep the stored Terra radius in step so a later re-plant (a fresh run)
         // starts from the base, not the grown size — growth is per-run state.
         showBuildHint("🌱 Your ground spreads")
+    }
+
+    // MARK: - v2.0 Phase C (C1.6): The Tree (Growth capstone)
+
+    /// PLACEHOLDER ROSTER — Brandon designs the real one (see the
+    /// tree-capstone-animal-pool memory: 5–10 animals, per-animal modifiers, a
+    /// rare pet). The three-part model (base timer · damage mult · per-animal
+    /// modifier) is what's load-bearing; the specific creatures + behaviours are
+    /// meant to be revised. Kept small and legible so the architecture is clear.
+    private struct TreeAnimal {
+        let emoji: String
+        let damageMult: CGFloat   // on top of the global animalDamageMult
+        let radiusMult: CGFloat   // AoE size on arrival
+        let leavesThorns: Bool    // a per-animal BEHAVIOUR, not just a number
+    }
+    private static let treeAnimals: [TreeAnimal] = [
+        TreeAnimal(emoji: "🐰", damageMult: 0.8, radiusMult: 0.8, leavesThorns: false),
+        TreeAnimal(emoji: "🐿️", damageMult: 1.0, radiusMult: 1.0, leavesThorns: false),
+        TreeAnimal(emoji: "🦌", damageMult: 1.4, radiusMult: 1.3, leavesThorns: false),
+        TreeAnimal(emoji: "🦔", damageMult: 1.0, radiusMult: 1.0, leavesThorns: true),
+        TreeAnimal(emoji: "🦊", damageMult: 1.1, radiusMult: 0.9, leavesThorns: false),
+    ]
+
+    /// Plant the Tree (T1) or mature it (T2+). Reuses the Terra garden — the
+    /// Tree stands in your cultivated ground and grows it as it matures, rather
+    /// than minting a separate zone (rooted to Terra). Idempotent per tier.
+    private func growTree(to tier: Int) {
+        if treeNode == nil {
+            let tree = TreeNode()
+            // Plant at the centre of the largest cultivated zone — in the heart
+            // of the garden. (Tree requires growthUnlocked, so a zone exists.)
+            let host = cultivatedZones.max(by: { $0.radius < $1.radius })
+            tree.position = host?.position ?? player.position
+            tree.zPosition = 3
+            worldNode.addChild(tree)
+            treeNode = tree
+            showBuildHint("🌳 A sapling takes root")
+        }
+        treeNode?.setTier(tier)
+
+        // The garden grows as the Tree matures (handoff: influence expands).
+        let grow: CGFloat = {
+            switch tier {
+            case 1: return GameConfig.Tree.growthT1
+            case 2: return GameConfig.Tree.growthT2
+            case 4: return GameConfig.Tree.growthT4
+            default: return 0
+            }
+        }()
+        if grow > 0 {
+            let cap = GameConfig.Arena.radius * GameConfig.Growth.maxZoneRadiusFactor
+            for zone in cultivatedZones {
+                zone.setRadius(min(cap, zone.radius * (1 + grow)))
+            }
+        }
+    }
+
+    /// T5 "The Forest Wakes": launch a woodland animal at the priority target on
+    /// a fixed cadence, surfaced on the CapstoneTimerHUD so the player owns the
+    /// rhythm. A rare launch is the mountain-lion PET instead.
+    private func updateTreeCanopy(_ dt: TimeInterval) {
+        guard playerStats.treeTier >= 5 else { return }
+        updateLionPet(dt)
+
+        treeAnimalTimer += dt
+        capstoneTimers.set("tree", label: "🌳 FOREST", colorHex: 0x5FCF62,
+                           remaining: GameConfig.Tree.animalInterval - treeAnimalTimer)
+        guard treeAnimalTimer >= GameConfig.Tree.animalInterval else { return }
+        treeAnimalTimer = 0
+
+        // The rare pet — only if one isn't already prowling.
+        if lionPet == nil, CGFloat.random(in: 0...1) < GameConfig.Tree.lionChance {
+            spawnLionPet()
+            return
+        }
+        guard let target = findPriorityTarget() else { return }
+        launchAnimal(at: target.position)
+    }
+
+    private func launchAnimal(at targetPos: CGPoint) {
+        guard let tree = treeNode, let animal = Self.treeAnimals.randomElement() else { return }
+        let label = SKLabelNode(text: animal.emoji)
+        label.fontSize = 26
+        label.verticalAlignmentMode = .center
+        label.horizontalAlignmentMode = .center
+        label.position = tree.position + CGPoint(x: 0, y: 30)
+        label.zPosition = 9
+        worldNode.addChild(label)
+
+        // An arcing pounce to the target's spot, then it strikes.
+        let flight = SKAction.move(to: targetPos, duration: 0.45)
+        flight.timingMode = .easeIn
+        label.run(SKAction.sequence([
+            SKAction.group([flight, SKAction.rotate(byAngle: .pi * 2, duration: 0.45)]),
+            SKAction.run { [weak self] in
+                guard let self = self else { return }
+                let dmg = Int(self.playerStats.effectiveAttack
+                              * GameConfig.Tree.animalDamageMult * animal.damageMult)
+                let radius = 46 * DeviceScale.gameplay * animal.radiusMult
+                self.damageEnemiesInRadius(radius, around: targetPos, damage: dmg, bossClassScaled: true)
+                self.showRingPulse(at: targetPos, radius: radius, colorHex: 0x9BE86F)
+                if animal.leavesThorns { self.spawnNullBloom(at: targetPos) }  // brief slow patch
+            },
+            SKAction.fadeOut(withDuration: 0.12),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// The rare mountain-lion pet: roams toward the nearest enemy, mauling on
+    /// contact, for a few seconds. A self-contained placeholder — a future pass
+    /// can reskin it onto the FamiliarNode/Apex summon framework.
+    private func spawnLionPet() {
+        let lion = SKLabelNode(text: "🦁")
+        lion.fontSize = 30
+        lion.verticalAlignmentMode = .center
+        lion.horizontalAlignmentMode = .center
+        lion.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: 24)
+        lion.zPosition = 9
+        worldNode.addChild(lion)
+        lionPet = lion
+        lionPetTimer = GameConfig.Tree.lionDuration
+        showBuildHint("🦁 The mountain lion prowls")
+    }
+
+    private func updateLionPet(_ dt: TimeInterval) {
+        guard let lion = lionPet else { return }
+        lionPetTimer -= dt
+        if lionPetTimer <= 0 {
+            lion.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.3),
+                                        SKAction.removeFromParent()]))
+            lionPet = nil
+            return
+        }
+        // Stalk the nearest enemy; maul on contact.
+        guard let prey = enemies.filter({ !$0.isDying })
+            .min(by: { lion.position.distance(to: $0.position) < lion.position.distance(to: $1.position) })
+        else { return }
+        let dir = (prey.position - lion.position).normalized
+        lion.position += dir * GameConfig.Tree.lionSpeed * CGFloat(dt)
+        lion.xScale = dir.x < 0 ? -1 : 1   // face travel
+        if lion.position.distance(to: prey.position) < 26 {
+            let dmg = Int(playerStats.effectiveAttack * GameConfig.Tree.lionMaulMult)
+            if prey.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: prey.isMiniBoss)) {
+                if let idx = enemies.firstIndex(where: { $0 === prey }) {
+                    let p = prey.position, xp = prey.xpValue
+                    enemies.remove(at: idx)
+                    onEnemyKilled(at: p, xpValue: xp, enemy: prey)
+                }
+            }
+        }
     }
 
     // MARK: - v2.0 Phase C (C1.5): Vine Wall — the garden's thorny hedge
@@ -2745,6 +2903,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateCultivatedGround(dt)
         updateFlowers(dt)
         updateVineWall(dt)
+        updateTreeCanopy(dt)
         updateFalseOpening(dt)
 
         let spawnEvent = waveManager.update(deltaTime: dt)
@@ -5368,6 +5527,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
+        // Tree capstone tiers, both gated on standing in the garden:
+        //   T2 Rootreach — move speed;  T3 Shelter — stronger regen.
+        // treeGroundMoveBonus is transient: set here, cleared when off-ground.
+        playerStats.treeGroundMoveBonus =
+            (playerOnGround && playerStats.treeTier >= 2) ? GameConfig.Tree.moveBonusT2 : 0
+        if playerOnGround && playerStats.treeTier >= 3 {
+            treeGroundRegenAccumulator += dt
+            if treeGroundRegenAccumulator >= GameConfig.Tree.regenInterval {
+                treeGroundRegenAccumulator -= GameConfig.Tree.regenInterval
+                if playerStats.currentHP < playerStats.maxHP {
+                    playerStats.heal(GameConfig.Tree.regenHPT3)
+                    hpBar.flashHeal()
+                }
+            }
+        }
+
         // --- everyone else's ---
         var killed: [EnemyNode] = []
         for enemy in enemies where !enemy.isDying {
@@ -5739,6 +5914,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
             if card.id == "v20_vinewall" { raiseVineWall() }
+        if card.id == "v20_tree" { growTree(to: upgradeManager.tier(of: card.id)) }
 
             // A capstone maxed by a grant still earns its reveal.
             if card.maxTier > 1, tierBefore < card.maxTier,
@@ -8440,6 +8616,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         cultivatedZones.removeAll()
         flowers.forEach { $0.removeFromParent() }
         flowers.removeAll()
+        treeNode?.removeFromParent(); treeNode = nil
+        treeAnimalTimer = 0
+        treeGroundRegenAccumulator = 0
+        lionPet?.removeFromParent(); lionPet = nil
+        lionPetTimer = 0
         groundTickAccumulator = 0
         groundRegenAccumulator = 0
         pendingTerraPlacement = false

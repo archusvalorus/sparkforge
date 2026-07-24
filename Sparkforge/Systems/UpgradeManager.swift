@@ -1052,6 +1052,29 @@ final class UpgradeManager {
         // Defensive Flowers — a 3-tier ladder that maps onto the 3-flower cap:
         // each pick grows one more bloom on your ground. The stat closures are
         // empty; the flower itself is a scene structure the scene grows on pick.
+        // THE TREE — Growth's one capstone. Plant a sapling; help it become a
+        // problem. Five tiers: sapling → sanctuary → territory → awakened habitat.
+        cards.append(UpgradeCard(
+            id: "v20_tree", name: "Tree", tag: .growth,
+            description: "Plant a sapling. Help it become a problem.",
+            apply: { stats in stats.treeTier = 1 },
+            higherTiers: [
+                { stats in stats.treeTier = 2 },   // Rootreach: move speed on ground
+                { stats in stats.treeTier = 3 },   // Shelter: regen on ground
+                { stats in stats.treeTier = 4 },   // Wild Domain: the garden swells
+                { stats in stats.treeTier = 5 }    // The Forest Wakes: it launches animals
+            ],
+            tierDescriptions: [
+                "Sapling — a tree takes root in your garden, and the ground grows",
+                "Rootreach — you move faster while standing on cultivated ground",
+                "Shelter — you slowly heal while standing on cultivated ground",
+                "Wild Domain — the Tree matures; your territory swells",
+                "The Forest Wakes — the Tree launches woodland animals at your enemies"
+            ],
+            isCapstone: true,
+            requires: [.growthUnlocked]
+        ))
+
         cards.append(UpgradeCard(
             id: "v20_vinewall", name: "Vine Wall", tag: .growth,
             description: "A thorny hedge rings your cultivated ground, repelling the swarm",

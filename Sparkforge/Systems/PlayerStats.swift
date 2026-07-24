@@ -551,6 +551,12 @@ final class PlayerStats {
     /// T3 also catches enemy projectiles crossing it.
     var vineWallTier: Int = 0
     var vineWallActive: Bool { vineWallTier > 0 }
+    /// The Tree (Growth capstone, C1.6). 0 = not planted; 1..5.
+    /// T2 move speed, T3 regen (both on cultivated ground), T4 domain, T5 wakes.
+    var treeTier: Int = 0
+    /// Transient: the scene sets this to the Tree move bonus while Spark stands
+    /// on cultivated ground, 0 otherwise. Folded into effectiveMoveSpeed.
+    var treeGroundMoveBonus: CGFloat = 0
 
     var nullBloomChance: CGFloat = 0.0
     var nullBloomRadius: CGFloat = 35.0
@@ -660,7 +666,7 @@ final class PlayerStats {
     
     /// Effective move speed (+ Forge Path temp buffs: Read the Room / Slipstream)
     var effectiveMoveSpeed: CGFloat {
-        return GameConfig.Player.speed * (moveSpeedMultiplier + forgeMoveBonus)
+        return GameConfig.Player.speed * (moveSpeedMultiplier + forgeMoveBonus + treeGroundMoveBonus)
     }
     
     /// Effective projectile speed
@@ -1090,6 +1096,8 @@ final class PlayerStats {
         seedFragments = 0
         seedReembed = false
         vineWallTier = 0
+        treeTier = 0
+        treeGroundMoveBonus = 0
         nullBloomChance = 0.0
         nullBloomRadius = 35.0
         nullBloomSlow = 0.4

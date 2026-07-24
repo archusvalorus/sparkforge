@@ -160,6 +160,32 @@ enum GameConfig {
         static let vineBlocksProjectiles = true
     }
 
+    // MARK: - The Tree (Growth capstone, C1.6)
+    enum Tree {
+        /// Move-speed bonus while standing on cultivated ground (T2 Rootreach).
+        static let moveBonusT2: CGFloat = 0.15
+        /// HP regenerated per `regenInterval` on cultivated ground (T3 Shelter).
+        /// Clearly above Terra's baseline (1 HP / 10s) so the tier lands.
+        static let regenHPT3: Int = 3
+        static let regenInterval: TimeInterval = 4.0
+        /// The garden grows as the Tree matures (fraction of current radius).
+        static let growthT1: CGFloat = 0.10   // Sapling settles in
+        static let growthT2: CGFloat = 0.15   // Rootreach
+        static let growthT4: CGFloat = 0.35   // Wild Domain — substantial
+
+        // --- T5 The Forest Wakes: the animal launcher ---
+        /// Cadence of launches. Shown on the CapstoneTimerHUD.
+        static let animalInterval: TimeInterval = 4.5
+        /// Base damage as a fraction of Spark's effective ATK (~150%).
+        static let animalDamageMult: CGFloat = 1.5
+        /// Chance a launch is the RARE mountain-lion PET instead of a projectile.
+        static let lionChance: CGFloat = 0.06
+        static let lionDuration: TimeInterval = 10.0
+        static var lionSpeed: CGFloat { 210 * DeviceScale.gameplay }
+        /// Lion contact damage per maul, as a fraction of Spark's ATK.
+        static let lionMaulMult: CGFloat = 0.6
+    }
+
     // MARK: - Card Drafting (v2.0 Phase C)
     enum Drafting {
         /// A GATEWAY card (one that unlocks a whole pool — Terra) is guaranteed
