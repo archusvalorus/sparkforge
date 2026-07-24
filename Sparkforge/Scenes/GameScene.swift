@@ -8206,6 +8206,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ])
         player.run(SKAction.repeat(blink, count: 25), withKey: "invulnBlink")
 
+        // v2.0 fix: playerDied() hid these in-world readouts so they couldn't
+        // bleed onto the result screen — but revive resumes the SAME run, and
+        // resumeFromRevive never un-hid them. The eruption timer state survived
+        // fine; its DISPLAY didn't. Restore it, symmetric with resumeGame().
+        // (Same latent bug for Polar Vortex / Variegated Rainbow timers.)
+        capstoneTimers.isHidden = false
+        orbIndicators.isHidden = false
+
         gameState = .playing
         lastUpdateTime = 0  // Reset delta time to avoid jump
     }
