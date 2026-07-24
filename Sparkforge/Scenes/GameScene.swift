@@ -2196,6 +2196,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // placed — cultivatedZones is therefore always non-empty here. The guard
         // is belt-and-suspenders, not a real path.
         if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
+        if card.id == "v20_vinewall" { raiseVineWall() }
 
         // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
@@ -2456,6 +2457,46 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         showBuildHint("🌱 Your ground spreads")
     }
 
+    // MARK: - v2.0 Phase C (C1.5): Vine Wall — the garden's thorny hedge
+
+    /// Enable the hedge on every cultivated zone (and remember to enable it on
+    /// zones planted later). No-op with no ground yet.
+    private func raiseVineWall() {
+        for zone in cultivatedZones { zone.setVineWall(true) }
+    }
+
+    /// The hedge holds the line: normal enemies crossing a zone's edge band are
+    /// heavily slowed and shoved back OUT. Bosses and minibosses pass through —
+    /// the fallback design (Brandon): a wall for the swarm, not for the titans.
+    /// T3 also catches enemy projectiles crossing the hedge.
+    private func updateVineWall(_ dt: TimeInterval) {
+        guard playerStats.vineWallActive else { return }
+        let repel = GameConfig.Growth.vineRepel
+            * (playerStats.vineWallTier >= 2 ? GameConfig.Growth.vineRepelT2Mult : 1.0)
+
+        for zone in cultivatedZones where zone.hasVineWall {
+            let r = zone.radius
+            let band = r * GameConfig.Growth.vineBandFraction
+            let inner = r - band
+            for e in enemies where !e.isDying && !e.isMiniBoss {
+                let d = e.position.distance(to: zone.position)
+                guard d > inner, d < r + band else { continue }   // in the edge band
+                e.applySlow(playerStats.effectiveSlow(GameConfig.Growth.vineSlow), duration: 0.3)
+                let out = (e.position - zone.position).normalized
+                e.position += out * repel * CGFloat(dt)            // shoved outward
+            }
+
+            // T3: the hedge catches enemy projectiles crossing into the garden.
+            if playerStats.vineWallTier >= 3, GameConfig.Growth.vineBlocksProjectiles {
+                enemyProjectiles.removeAll { proj in
+                    guard proj.position.distance(to: zone.position) < r else { return false }
+                    proj.removeFromParent()
+                    return true
+                }
+            }
+        }
+    }
+
     // MARK: - v2.0 Phase C (C1.4): Seed Spore Shot
 
     /// A seeded enemy died: burst `seedFragments` spore fragments radially. Each
@@ -2703,6 +2744,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateNullBlooms(dt)
         updateCultivatedGround(dt)
         updateFlowers(dt)
+        updateVineWall(dt)
         updateFalseOpening(dt)
 
         let spawnEvent = waveManager.update(deltaTime: dt)
@@ -5262,6 +5304,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let zone = CultivatedZoneNode(radius: r)
         zone.position = position ?? player.position
+        if playerStats.vineWallActive { zone.setVineWall(true) }   // C1.5: inherit the hedge
         worldNode.addChild(zone)
         cultivatedZones.append(zone)
         return zone
@@ -5695,6 +5738,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 }
             }
             if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
+            if card.id == "v20_vinewall" { raiseVineWall() }
 
             // A capstone maxed by a grant still earns its reveal.
             if card.maxTier > 1, tierBefore < card.maxTier,

@@ -144,6 +144,20 @@ enum GameConfig {
         /// Fragments fly farther at T2+ (a shorter base range keeps T1 local).
         static var seedFragmentRange: CGFloat { 150 * DeviceScale.gameplay }
         static let seedFragmentRangeT2Mult: CGFloat = 1.6
+
+        // --- Vine Wall (C1.5) — a thorny hedge around the garden ---
+        // Rooted to Terra: the wall is the garden's own perimeter, not a loose
+        // placeable barrier. Zone-based fallback (Brandon's call): it heavily
+        // SLOWS and REPELS normal enemies crossing in; bosses/elites pass.
+        /// Band around a zone's edge where the hedge acts, as a fraction of radius.
+        static let vineBandFraction: CGFloat = 0.16
+        /// Heavy slow applied inside the band (vs the ambient 30% ground slow).
+        static let vineSlow: CGFloat = 0.65
+        /// Outward shove per second on a normal enemy in the band (points/s).
+        static var vineRepel: CGFloat { 90 * DeviceScale.gameplay }
+        static let vineRepelT2Mult: CGFloat = 1.5
+        /// T3: the hedge also catches enemy projectiles crossing it.
+        static let vineBlocksProjectiles = true
     }
 
     // MARK: - Card Drafting (v2.0 Phase C)

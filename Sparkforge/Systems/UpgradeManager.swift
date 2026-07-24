@@ -1053,6 +1053,22 @@ final class UpgradeManager {
         // each pick grows one more bloom on your ground. The stat closures are
         // empty; the flower itself is a scene structure the scene grows on pick.
         cards.append(UpgradeCard(
+            id: "v20_vinewall", name: "Vine Wall", tag: .growth,
+            description: "A thorny hedge rings your cultivated ground, repelling the swarm",
+            apply: { stats in stats.vineWallTier = 1 },
+            higherTiers: [
+                { stats in stats.vineWallTier = 2 },
+                { stats in stats.vineWallTier = 3 }
+            ],
+            tierDescriptions: [
+                "A thorny hedge rings your cultivated ground, repelling the swarm",
+                "The bramble shoves harder — the swarm barely gets a foot in",
+                "The hedge thickens, catching enemy shots that cross it"
+            ],
+            requires: [.growthUnlocked]
+        ))
+
+        cards.append(UpgradeCard(
             id: "v20_seed_spore", name: "Seed Spore Shot", tag: .growth,
             description: "Your shots seed enemies; a seeded enemy bursts into spores when it dies",
             apply: { stats in stats.seedFragments = GameConfig.Growth.seedFragmentsT1 },

@@ -547,6 +547,10 @@ final class PlayerStats {
     var seedShotActive: Bool { seedFragments > 0 }
     /// T3: a burst fragment may re-embed a (secondary) seed on the enemy it hits.
     var seedReembed: Bool = false
+    /// Vine Wall (C1.5). 0 = none; the hedge rings the garden. T2 shoves harder,
+    /// T3 also catches enemy projectiles crossing it.
+    var vineWallTier: Int = 0
+    var vineWallActive: Bool { vineWallTier > 0 }
 
     var nullBloomChance: CGFloat = 0.0
     var nullBloomRadius: CGFloat = 35.0
@@ -1085,6 +1089,7 @@ final class PlayerStats {
         thornsoilDPS = 0
         seedFragments = 0
         seedReembed = false
+        vineWallTier = 0
         nullBloomChance = 0.0
         nullBloomRadius = 35.0
         nullBloomSlow = 0.4

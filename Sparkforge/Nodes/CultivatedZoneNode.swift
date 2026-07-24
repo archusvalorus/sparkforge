@@ -31,6 +31,9 @@ final class CultivatedZoneNode: SKNode {
 
     private let ground = SKShapeNode()
     private let rim = SKShapeNode()
+    /// C1.5 Vine Wall: a thorny hedge drawn on the zone's edge when active.
+    private var vineRing: SKShapeNode?
+    private(set) var hasVineWall = false
 
     // MARK: - Init
 
@@ -67,6 +70,31 @@ final class CultivatedZoneNode: SKNode {
                           transform: nil)
         ground.path = path
         rim.path = path
+        vineRing?.path = path
+    }
+
+    /// C1.5: toggle the thorny hedge on this zone's perimeter.
+    func setVineWall(_ on: Bool) {
+        guard on != hasVineWall else { return }
+        hasVineWall = on
+        if on {
+            let ring = SKShapeNode()
+            ring.fillColor = .clear
+            ring.strokeColor = SKColor(hex: 0x2E6B3A, alpha: 0.9)   // deep bramble green
+            ring.lineWidth = 5
+            ring.glowWidth = 2
+            ring.zPosition = 2   // above the ground fill, below actors
+            addChild(ring)
+            vineRing = ring
+            applyRadiusToPaths()
+            // A slow bristle so it reads as a living hedge, not a painted ring.
+            ring.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.7, duration: 1.2),
+                SKAction.fadeAlpha(to: 1.0, duration: 1.2)
+            ])))
+        } else {
+            vineRing?.removeFromParent(); vineRing = nil
+        }
     }
 
     /// Grow (or shrink) the zone. Used by Terra+ cards and by the Tree capstone
