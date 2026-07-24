@@ -623,123 +623,61 @@ final class TitleScene: SKScene {
             return
         }
 
-        if arena.id == 0 {
-            let progress = pm.arena1Progress
+        // v2.0: the gate is now PER-RUN — clear 100 in a single run to summon
+        // the boss, then fell it to open the next arena. The old lifetime
+        // kill-progress bars are gone; the card now shows the RULE and, once
+        // done, the boss-felled achievement (the true, persistent unlock signal).
+        survivalCheckLabel.isHidden = true
+        let arenaBoss: (boss: String, nextArena: String, bossID: String, accent: UInt32)? = {
+            switch arena.id {
+            case 0: return ("The Slag Titan",   "THE QUENCH",     "slag_titan",   0xFFAA33)
+            case 1: return ("The Quench Warden","THE COILWORKS",  "quench_warden",0xD8A94A)
+            case 2: return ("The Dynamo Choir", "THE MIRRORWOUND","dynamo_choir", 0xF6D36B)
+            case 3: return ("The Faceted Lie",  "",               "faceted_lie",  0x9C748C)
+            default: return nil
+            }
+        }()
 
-            // Cap the display at the gate like arenas 2–4 — lifetime kills keep
-            // accumulating for stats, but the arena gate reads N/100, not 5007/100.
-            let shownKills = min(progress.currentKills, progress.requiredKills)
-            let killText = "\(shownKills)/\(progress.requiredKills) kills"
-            killProgressLabel.text = progress.killProgress >= 1.0 ? "✓ \(killText)" : "○ \(killText)"
-            killProgressLabel.fontColor = progress.killProgress >= 1.0
+        if let g = arenaBoss {
+            let felled = pm.hasDefeatedBoss(g.bossID)
+            arenaFlavorLabel.text = arena.flavorLine
+            arenaFlavorLabel.isHidden = (arena.id == 0)   // Crucible keeps its clean look
+
+            killProgressLabel.text = felled
+                ? "✓ \(g.boss) has fallen"
+                : "○ Clear 100 in a single run to summon \(g.boss)"
+            killProgressLabel.fontColor = felled
                 ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
             killProgressLabel.isHidden = false
 
-            // v1.6: survival row only appears when the gate requires it
-            if ProgressionManager.arena1Gate.survivalRequired {
-                survivalCheckLabel.text = progress.survivalMet ? "✓ Survived 2 minutes" : "○ Survive 2 minutes"
-                survivalCheckLabel.fontColor = progress.survivalMet
-                    ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
-                survivalCheckLabel.isHidden = false
-            } else {
-                survivalCheckLabel.isHidden = true
-            }
-
-            arenaFlavorLabel.isHidden = true
-
-            if pm.arenasUnlocked >= 2 {
-                arenaReadyLabel.isHidden = true
-            } else if progress.allMet {
-                arenaReadyLabel.text = "★ BOSS UNLOCKED ★"
+            if g.nextArena.isEmpty {
+                // Last live arena — no next to open; just honor the kill.
+                arenaReadyLabel.isHidden = !felled
+                if felled {
+                    arenaReadyLabel.text = "★ THE LIE TAKES SHAPE ★"
+                    arenaReadyLabel.fontSize = 15
+                    arenaReadyLabel.fontColor = SKColor(hex: g.accent)
+                }
+            } else if felled {
+                arenaReadyLabel.text = "★ \(g.nextArena) OPEN ★"
                 arenaReadyLabel.fontSize = 15
-                arenaReadyLabel.fontColor = SKColor(hex: 0xFFAA33)
+                arenaReadyLabel.fontColor = SKColor(hex: g.accent)
                 arenaReadyLabel.isHidden = false
             } else {
-                arenaReadyLabel.text = "🔒 THE QUENCH lies beyond the Titan"
+                arenaReadyLabel.text = "🔒 \(g.nextArena) lies beyond \(g.boss)"
                 arenaReadyLabel.fontSize = 13
                 arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
                 arenaReadyLabel.isHidden = false
-            }
-        } else if arena.id == 1 {
-            // v1.6 Unit 6: The Quench shows the Warden's gate
-            let gate = ProgressionManager.arena2Gate
-            let kills = pm.quenchKills
-            let met = pm.quenchWardenUnlocked
-
-            let killText = "\(min(kills, gate.totalKillsRequired))/\(gate.totalKillsRequired) kills in the Quench"
-            killProgressLabel.text = met ? "✓ \(killText)" : "○ \(killText)"
-            killProgressLabel.fontColor = met
-                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
-            killProgressLabel.isHidden = false
-
-            survivalCheckLabel.isHidden = true
-            arenaFlavorLabel.text = arena.flavorLine
-            arenaFlavorLabel.isHidden = false
-
-            if met && pm.arenasUnlocked < 3 {
-                arenaReadyLabel.text = "★ THE WARDEN STIRS ★"
-                arenaReadyLabel.fontSize = 15
-                arenaReadyLabel.fontColor = SKColor(hex: 0xD8A94A)
-                arenaReadyLabel.isHidden = false
-            } else if pm.arenasUnlocked < 3 {
-                arenaReadyLabel.text = "🔒 THE COILWORKS hums beyond the Warden"
-                arenaReadyLabel.fontSize = 13
-                arenaReadyLabel.fontColor = SKColor(hex: 0x777777)
-                arenaReadyLabel.isHidden = false
-            } else {
-                arenaReadyLabel.isHidden = true
-            }
-        } else if arena.id == 2 {
-            // v1.7 Unit 7: The Coilworks shows the Choir's gate
-            let gate = ProgressionManager.arena3Gate
-            let kills = pm.coilworksKills
-            let met = pm.dynamoChoirUnlocked
-
-            let killText = "\(min(kills, gate.totalKillsRequired))/\(gate.totalKillsRequired) kills in the Coilworks"
-            killProgressLabel.text = met ? "✓ \(killText)" : "○ \(killText)"
-            killProgressLabel.fontColor = met
-                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
-            killProgressLabel.isHidden = false
-
-            survivalCheckLabel.isHidden = true
-            arenaFlavorLabel.text = arena.flavorLine
-            arenaFlavorLabel.isHidden = false
-
-            if met {
-                arenaReadyLabel.text = "★ THE CHOIR FINDS TEMPO ★"
-                arenaReadyLabel.fontSize = 15
-                arenaReadyLabel.fontColor = SKColor(hex: 0xF6D36B)
-                arenaReadyLabel.isHidden = false
-            } else {
-                arenaReadyLabel.isHidden = true
             }
         } else {
-            // v1.8 Unit 13: The Mirrorwound shows the Faceted Lie's gate.
-            let gate = ProgressionManager.arena4Gate
-            let kills = pm.mirrorwoundKills
-            let met = pm.facetedLieUnlocked
-
-            let killText = "\(min(kills, gate.totalKillsRequired))/\(gate.totalKillsRequired) kills in the Mirrorwound"
-            killProgressLabel.text = met ? "✓ \(killText)" : "○ \(killText)"
-            killProgressLabel.fontColor = met
-                ? SKColor(hex: 0x66AA66) : SKColor(hex: 0xCCCCCC)
-            killProgressLabel.isHidden = false
-
-            survivalCheckLabel.isHidden = true
+            // Arena 5+ (Star Anvil, DEBUG-only for now): no gate copy yet.
+            killProgressLabel.isHidden = true
             arenaFlavorLabel.text = arena.flavorLine
             arenaFlavorLabel.isHidden = false
-
-            if met {
-                arenaReadyLabel.text = "★ THE LIE TAKES SHAPE ★"
-                arenaReadyLabel.fontSize = 15
-                arenaReadyLabel.fontColor = SKColor(hex: 0x9C748C)
-                arenaReadyLabel.isHidden = false
-            } else {
-                arenaReadyLabel.isHidden = true
-            }
+            arenaReadyLabel.isHidden = true
         }
     }
-    
+
     // MARK: - v1.4: Daily Forge
     
     private func setupDailyForge() {
