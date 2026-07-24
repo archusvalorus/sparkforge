@@ -4813,9 +4813,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         windchillStorm?.path = CGPath(ellipseIn: CGRect(x: -r, y: -r, width: 2 * r, height: 2 * r), transform: nil)
         windchillStorm?.position = player.position
 
-        // Wispy arctic air swirling inside the vortex.
+        // v2.0 (Brandon): standing in the storm SLOWS you — the vortex costs
+        // tempo on entry, not just Chill ticking toward a distant freeze.
+        // Per-frame with a short refresh, matching the cultivated-ground idiom.
+        for e in enemies where !e.isDying && player.position.distance(to: e.position) < r {
+            e.applySlow(playerStats.effectiveSlow(GameConfig.PolarVortex.windchillSlow), duration: 0.3)
+        }
+
+        // Gale winds swirling inside the vortex — denser + faster now.
         windchillWispTimer += dt
-        if windchillWispTimer >= 0.11 {
+        if windchillWispTimer >= GameConfig.PolarVortex.galeInterval {
             windchillWispTimer = 0
             spawnFrostWisp(radius: r)
         }
@@ -4849,12 +4856,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         wisp.zPosition = 4
         wisp.alpha = 0
         worldNode.addChild(wisp)
-        let tangent = CGPoint(x: -sin(ang), y: cos(ang)) * CGFloat.random(in: 28...52)
+        let tangent = CGPoint(x: -sin(ang), y: cos(ang))
+            * CGFloat.random(in: GameConfig.PolarVortex.galeSpeedMin...GameConfig.PolarVortex.galeSpeedMax)
+        // Faster travel over a shorter life so the swoosh reads as WIND, not drift.
         wisp.run(SKAction.sequence([
             SKAction.group([
-                SKAction.sequence([SKAction.fadeAlpha(to: 0.5, duration: 0.3),
-                                   SKAction.fadeOut(withDuration: 0.7)]),
-                SKAction.move(by: CGVector(dx: tangent.x, dy: tangent.y), duration: 1.0)
+                SKAction.sequence([SKAction.fadeAlpha(to: 0.55, duration: 0.2),
+                                   SKAction.fadeOut(withDuration: 0.5)]),
+                SKAction.move(by: CGVector(dx: tangent.x, dy: tangent.y), duration: 0.7)
             ]),
             SKAction.removeFromParent()
         ]))

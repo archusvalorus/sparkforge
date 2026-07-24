@@ -209,6 +209,14 @@ enum GameConfig {
         static let windchillInterval: TimeInterval = 1.0   // 1 Chill stack/s
         static var windchillRadius: CGFloat { 130 * DeviceScale.gameplay }
         static let windchillRadiusT5Mult: CGFloat = 2.1    // storm ×2.1 at T5 (broad, not full-arena)
+        // v2.0 (Brandon, Jul 24): the storm now also SLOWS what stands in it —
+        // "entering the vortex" should immediately cost the enemy tempo, not
+        // just tick Chill toward a far-off freeze.
+        static let windchillSlow: CGFloat = 0.30
+        // Gale winds — bigger, faster, more frequent swooshes (Brandon).
+        static let galeInterval: TimeInterval = 0.055     // was 0.11 — ~2× denser
+        static let galeSpeedMin: CGFloat = 55             // was 28
+        static let galeSpeedMax: CGFloat = 100            // was 52
         // T4 Glacial Condensation — every 3 shots condense into one icicle.
         static let glacialEveryN: Int = 3
         static let icicleMult: CGFloat = 2.0       // 200% ATK
