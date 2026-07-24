@@ -328,12 +328,10 @@ final class ProgressionManager {
         case .ranged: rangedKills += 1
         case .boss:
             bossKills += 1
-            // v1.6: Arena 2 gate — Slag Titan kill + 100 total kills
-            // (the kills condition is met by the time anyone faces him,
-            // but it's encoded so the gate survives future retuning)
-            if arenasUnlocked < 2 && totalKills >= ProgressionManager.arena1Gate.totalKillsRequired {
-                arenasUnlocked = 2
-            }
+            // v2.0: Arena 2 now unlocks on the Slag Titan's DEATH (see the
+            // boss's onDeath in GameScene), consistent with Arenas 3 & 4. The
+            // old lifetime-total-kills gate here is what let a grind-heavy save
+            // reach Arena 2 without actually felling the Titan.
         }
     }
     

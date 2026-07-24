@@ -44,6 +44,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v1.6: any arena's boss lives here (Slag Titan or Quench Warden)
     private var boss: (any ArenaBossNode)? = nil
     private var bossDefeatedThisRun: Bool = false
+    /// v2.0: the real arena boss is per-run and kill-driven — this guards it to
+    /// one spawn per run so climbing past the kill threshold can't re-trigger it.
+    private var arenaBossSpawnedThisRun: Bool = false
     /// v2.0: true for the duration of a MONUMENT boss fight — suppresses all
     /// pickup spawns (one HP orb at 50% boss HP is the only sanctioned drop).
     private var monumentFightActive: Bool = false
@@ -2662,24 +2665,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // boss, not the wave manager, and are part of the fight.)
         if !eventHorizonVoided && !falseEndingActive && !isGauntlet {
         if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
-        if spawnEvent.shouldSpawnMiniBoss {
-            // v1.4: Spawn real boss if gate is met, otherwise mini-boss
-            // v1.6: each arena summons its own warden at the 90s bell
-            if arenaConfig.id == 0 && ProgressionManager.shared.arena1BossUnlocked && boss == nil {
-                spawnBoss()
-            } else if arenaConfig.id == 1 && ProgressionManager.shared.quenchWardenUnlocked && boss == nil {
-                spawnQuenchWarden()
-            } else if arenaConfig.id == 2 && ProgressionManager.shared.dynamoChoirUnlocked && boss == nil {
-                spawnDynamoChoir()
-            } else if arenaConfig.id == 3 && ProgressionManager.shared.facetedLieUnlocked && boss == nil {
-                spawnFacetedLie()
-            } else if arenaConfig.id == 4 && boss == nil {
-                spawnUnmadeStar()   // v2.0: monument instance #1 (no unlock gate — Arena 5 is DEBUG-only until Unit 2 completes)
-            } else {
-                spawnMiniBoss()
-            }
-            // v1.9 Forge Path Read the Room (Cun 18): an elite/boss appearance
-            // grants a brief burst of move speed.
+
+        // v2.0 (Brandon): the real arena boss is now KILL-DRIVEN and PER-RUN —
+        // it answers once you've cleared `bossSpawnKills` enemies in THIS run,
+        // checked every frame, once per run. This is the "mob count" half of
+        // "mob count + boss kill" and replaces the old lifetime unlock gates.
+        // Waits for any 90s mini-boss to fall first, so the two never overlap —
+        // mini-boss is the escalation, then the boss arrives.
+        let miniBossAlive = enemies.contains { $0.isMiniBoss && !$0.isDying }
+        if !arenaBossSpawnedThisRun, boss == nil, !miniBossAlive,
+           killCount >= GameConfig.Wave.bossSpawnKills {
+            spawnCurrentArenaBoss()
+            arenaBossSpawnedThisRun = true
+            if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
+        }
+
+        // The 90s bell is now a pre-boss ESCALATION: a mini-boss, but only if you
+        // haven't already earned the real boss this run (no doubling up).
+        if spawnEvent.shouldSpawnMiniBoss, boss == nil, !arenaBossSpawnedThisRun {
+            spawnMiniBoss()
             if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
         }
         }  // end Event Horizon spawn guard
@@ -6368,6 +6372,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - v1.4: Boss Spawn
     
+    /// v2.0: spawn THIS arena's real boss (kill-driven, per-run). A monument
+    /// (Arena 5) has no kill gate of its own here — it's DEBUG-only until Unit 2
+    /// wires its unlock — but it still routes through the same dispatch.
+    private func spawnCurrentArenaBoss() {
+        switch arenaConfig.id {
+        case 0: spawnBoss()
+        case 1: spawnQuenchWarden()
+        case 2: spawnDynamoChoir()
+        case 3: spawnFacetedLie()
+        case 4: spawnUnmadeStar()
+        default: spawnMiniBoss()   // arenas with no authored boss yet
+        }
+    }
+
     private func spawnBoss() {
         let elapsed = waveManager.elapsedTime
         let hpScaling = bossHPScaling(elapsed: elapsed, step: 5)
@@ -6403,6 +6421,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.slagTitan)
             ProgressionManager.shared.recordBossDefeat("slag_titan")  // v1.8 Unit 5
+            // v2.0: felling the Titan opens The Quench — consistent with the
+            // Warden→Coilworks and Choir→Mirrorwound unlocks. Was previously a
+            // lifetime-kill check in recordKill, which is what let a grind-heavy
+            // save skip the fight. arenasUnlocked only ever climbs, so already-
+            // unlocked players keep their access (grandfathered).
+            if ProgressionManager.shared.arenasUnlocked < 2 {
+                ProgressionManager.shared.arenasUnlocked = 2
+            }
             // Spawn massive XP shower
             for _ in 0..<10 {
                 let offset = CGPoint(
@@ -8377,6 +8403,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         levelNeedsStat = false
         levelUpOverlay.childNode(withName: "statRow")?.removeFromParent()
         bossDefeatedThisRun = false
+        arenaBossSpawnedThisRun = false
         monumentFightActive = false
         falseEndingActive = false
         killedByMote = false

@@ -600,6 +600,14 @@ enum GameConfig {
         static let miniBossSpawnTime: TimeInterval = 90.0
         /// Spawn distance from arena center (just outside boundary)
         static let spawnDistance: CGFloat = Arena.radius + 40
+
+        /// v2.0 (Brandon, Jul 24): the arena's real boss now answers a PER-RUN
+        /// mob count, not a lifetime tally. You must clear this many enemies IN
+        /// THE CURRENT RUN before the boss appears — "master the arena before
+        /// the next lesson." Unlocking the next arena then requires felling that
+        /// boss the same run. Replaces the old lifetime `<arena>Unlocked` gates,
+        /// which let a grind-heavy save skip straight through.
+        static let bossSpawnKills: Int = 100
     }
 
     // MARK: - Ashling splitter (v1.6; v1.8 B2 shard protection)
