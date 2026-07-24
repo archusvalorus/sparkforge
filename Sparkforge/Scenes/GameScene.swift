@@ -2529,7 +2529,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateLionPet(dt)
 
         treeAnimalTimer += dt
-        capstoneTimers.set("tree", label: "🌳 FOREST", colorHex: 0x5FCF62,
+        capstoneTimers.set("tree", label: "🌳 NATURE CANON", colorHex: 0x5FCF62,
                            remaining: GameConfig.Tree.animalInterval - treeAnimalTimer)
         guard treeAnimalTimer >= GameConfig.Tree.animalInterval else { return }
         treeAnimalTimer = 0

@@ -1096,7 +1096,7 @@ final class UpgradeManager {
                 "Rootreach — you move faster while standing on cultivated ground",
                 "Shelter — you slowly heal while standing on cultivated ground",
                 "Wild Domain — the Tree matures; your territory swells",
-                "The Forest Wakes — the Tree launches woodland animals at your enemies"
+                "The Forest Wakes — the NATURE CANON fires woodland animals at your enemies"
             ],
             isCapstone: true,
             requires: [.growthUnlocked]
