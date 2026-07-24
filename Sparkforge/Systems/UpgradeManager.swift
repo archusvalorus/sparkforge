@@ -1053,6 +1053,25 @@ final class UpgradeManager {
         // each pick grows one more bloom on your ground. The stat closures are
         // empty; the flower itself is a scene structure the scene grows on pick.
         cards.append(UpgradeCard(
+            id: "v20_seed_spore", name: "Seed Spore Shot", tag: .growth,
+            description: "Your shots seed enemies; a seeded enemy bursts into spores when it dies",
+            apply: { stats in stats.seedFragments = GameConfig.Growth.seedFragmentsT1 },
+            higherTiers: [
+                { stats in stats.seedFragments = GameConfig.Growth.seedFragmentsT2 },
+                { stats in
+                    stats.seedFragments = GameConfig.Growth.seedFragmentsT3
+                    stats.seedReembed = true          // T3: spores re-embed, once
+                }
+            ],
+            tierDescriptions: [
+                "Your shots seed enemies; a seeded enemy bursts into spores when it dies",
+                "More spores, flung farther",
+                "Spores can re-seed the enemies they strike — the bloom spreads"
+            ],
+            requires: [.growthUnlocked]
+        ))
+
+        cards.append(UpgradeCard(
             id: "v20_wildbloom", name: "Wildbloom", tag: .growth,
             description: "Grow a defensive flower on your cultivated ground",
             apply: { _ in },

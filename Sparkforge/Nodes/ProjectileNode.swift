@@ -25,6 +25,9 @@ final class ProjectileNode: SKNode {
     let spawnsGravityWell: Bool
     /// v1.9 Polar Vortex (T4): a condensed icicle that shatters into shards on hit
     let isIcicle: Bool
+    /// v2.0 Phase C (C1.4): Seed Spore Shot generation carried by a FRAGMENT.
+    /// 0 = a normal shot; ≥1 = a burst fragment, used to cap re-embedding.
+    var seedGeneration: Int = 0
 
     init(direction: CGPoint,
          speed: CGFloat = GameConfig.Projectile.speed,
@@ -35,7 +38,8 @@ final class ProjectileNode: SKNode {
          spawnsGravityWell: Bool = false,
          voidStyle: Bool = false,
          isIcicle: Bool = false,
-         frostStyle: Bool = false) {
+         frostStyle: Bool = false,
+         seedStyle: Bool = false) {
         self.isIcicle = isIcicle
 
         self.direction = direction.normalized
@@ -73,6 +77,13 @@ final class ProjectileNode: SKNode {
             bulletNode.strokeColor = SKColor(hex: 0x2E9BD6, alpha: 0.8)
             bulletNode.lineWidth = 0.5
             bulletNode.glowWidth = isCrit ? 5 : 3
+        } else if seedStyle {
+            // v2.0 Phase C: a spore — seed-gold, small, with a soft green glow.
+            bulletNode = SKShapeNode(circleOfRadius: radius * 0.85)
+            bulletNode.fillColor = SKColor(hex: 0xC9D96F)
+            bulletNode.strokeColor = SKColor(hex: 0x5FCF62, alpha: 0.8)
+            bulletNode.lineWidth = 0.5
+            bulletNode.glowWidth = 3
         } else {
             bulletNode = SKShapeNode(circleOfRadius: radius)
             bulletNode.fillColor = isCrit ? SKColor(hex: 0xFF4444) : SKColor(hex: config.colorHex)

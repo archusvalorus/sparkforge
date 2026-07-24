@@ -38,6 +38,11 @@ class EnemyNode: SKNode {
     /// primitive: Skybeam "Called", later Apex "Marked", Polar Vortex "Frostbitten".
     var vulnerabilityMultiplier: CGFloat = 1.0
     var isVulnerable: Bool { vulnerabilityMultiplier > 1.0 }
+    /// v2.0 Phase C (C1.4) — Seed Spore Shot. 0 = unseeded; 1 = a primary seed;
+    /// 2 = a re-embedded (secondary) seed. The generation caps the chain: a
+    /// gen-2 seed's fragments never re-embed, so reproduction can't run away.
+    var seedGeneration: Int = 0
+    var isSeeded: Bool { seedGeneration > 0 }
     /// v1.9 Polar Vortex — Windchill accumulates Chill; at the freeze threshold
     /// the enemy freezes (locked in place), then becomes Frostbitten.
     var chillStacks: Int = 0

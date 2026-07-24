@@ -134,6 +134,16 @@ enum GameConfig {
         static let flowerFireInterval: TimeInterval = 1.4
         /// A flower only engages targets within this reach.
         static var flowerRange: CGFloat { 240 * DeviceScale.gameplay }
+
+        // --- Seed Spore Shot (C1.4) — embed → kill → reproduce ---
+        static let seedFragmentsT1: Int = 3      // burst count at tier 1
+        static let seedFragmentsT2: Int = 5      // tier 2: more seeds
+        static let seedFragmentsT3: Int = 6      // tier 3: more still, and re-embed
+        /// A burst fragment's damage as a fraction of a normal shot.
+        static let seedFragmentDamage: CGFloat = 0.30
+        /// Fragments fly farther at T2+ (a shorter base range keeps T1 local).
+        static var seedFragmentRange: CGFloat { 150 * DeviceScale.gameplay }
+        static let seedFragmentRangeT2Mult: CGFloat = 1.6
     }
 
     // MARK: - Card Drafting (v2.0 Phase C)

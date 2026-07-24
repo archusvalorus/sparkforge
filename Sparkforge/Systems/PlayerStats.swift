@@ -541,6 +541,12 @@ final class PlayerStats {
     var terraSlow: CGFloat = 0.30
     /// Thornsoil: damage per second to enemies standing in cultivated ground.
     var thornsoilDPS: Int = 0
+    /// Seed Spore Shot (C1.4). >0 ⇒ shots embed a seed; the number is the burst
+    /// fragment count on a seeded enemy's death. Grows per tier.
+    var seedFragments: Int = 0
+    var seedShotActive: Bool { seedFragments > 0 }
+    /// T3: a burst fragment may re-embed a (secondary) seed on the enemy it hits.
+    var seedReembed: Bool = false
 
     var nullBloomChance: CGFloat = 0.0
     var nullBloomRadius: CGFloat = 35.0
@@ -1077,6 +1083,8 @@ final class PlayerStats {
         terraZoneRadius = 0.0
         terraSlow = 0.30
         thornsoilDPS = 0
+        seedFragments = 0
+        seedReembed = false
         nullBloomChance = 0.0
         nullBloomRadius = 35.0
         nullBloomSlow = 0.4

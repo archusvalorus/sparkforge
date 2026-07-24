@@ -2456,6 +2456,57 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         showBuildHint("🌱 Your ground spreads")
     }
 
+    // MARK: - v2.0 Phase C (C1.4): Seed Spore Shot
+
+    /// A seeded enemy died: burst `seedFragments` spore fragments radially. Each
+    /// fragment carries the source generation so a T3 re-embed can go exactly one
+    /// generation deeper and no further.
+    private func seedBurst(at position: CGPoint, generation: Int) {
+        let count = max(1, playerStats.seedFragments)
+        let baseAngle = CGFloat.random(in: 0..<(2 * .pi))
+        for i in 0..<count {
+            let a = baseAngle + CGFloat(i) / CGFloat(count) * 2 * .pi
+            fireSeedFragment(from: position,
+                             direction: CGPoint(x: cos(a), y: sin(a)),
+                             generation: generation)
+        }
+        // A soft spore puff so the reproduction reads at a glance.
+        let puff = SKShapeNode(circleOfRadius: 6)
+        puff.fillColor = SKColor(hex: 0xC9D96F, alpha: 0.5)
+        puff.strokeColor = SKColor(hex: 0x5FCF62, alpha: 0.6)
+        puff.lineWidth = 1
+        puff.position = position
+        puff.zPosition = 6
+        worldNode.addChild(puff)
+        puff.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 2.4, duration: 0.3),
+                            SKAction.fadeOut(withDuration: 0.3)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// Spawn one spore fragment. Self-contained (short range, spore look, reduced
+    /// damage) so it doesn't perturb the main fire path; rides the standard
+    /// projectile→enemy collision, so re-embedding and damage happen for free.
+    private func fireSeedFragment(from position: CGPoint, direction: CGPoint, generation: Int) {
+        let rangeMult = generation >= 1 && playerStats.seedFragments >= GameConfig.Growth.seedFragmentsT2
+            ? GameConfig.Growth.seedFragmentRangeT2Mult : 1.0
+        let frag = ProjectileNode(
+            direction: direction,
+            speed: playerStats.effectiveProjectileSpeed * 0.9,
+            range: GameConfig.Growth.seedFragmentRange * rangeMult,
+            pierces: 0,
+            damageMultiplier: playerStats.effectiveDamageMultiplier * GameConfig.Growth.seedFragmentDamage,
+            isCrit: false,
+            seedStyle: true
+        )
+        frag.seedGeneration = generation
+        frag.position = position
+        frag.zPosition = 8
+        projectiles.append(frag)
+        worldNode.addChild(frag)
+    }
+
     // MARK: - v2.0 Phase C (C1.3): Defensive Flowers
 
     /// Grow a flower ON cultivated ground (rooted to Terra — never loose in the
@@ -5287,8 +5338,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         for enemy in killed {
             if let index = enemies.firstIndex(where: { $0 === enemy }) {
-                spawnXPOrb(at: enemy.position, value: enemy.xpValue)
+                let pos = enemy.position, xp = enemy.xpValue
                 enemies.remove(at: index)
+                // Route through the canonical kill hook, not a manual XP spawn:
+                // it owns killCount (now the per-run boss gate), the seed burst,
+                // forge triggers and the XP orb. A manual spawnXPOrb here both
+                // skipped the gate and would double the orb.
+                onEnemyKilled(at: pos, xpValue: xp, enemy: enemy)
             }
         }
     }
@@ -6937,6 +6993,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             iceburst(at: position)
         }
 
+        // v2.0 Phase C (C1.4): Seed Spore Shot — a seeded foe's death REPRODUCES,
+        // bursting spore fragments outward. Reads the enemy's generation so the
+        // T3 re-embed chain stays capped.
+        if let e = enemy, e.isSeeded {
+            seedBurst(at: position, generation: e.seedGeneration)
+        }
+
         // v1.9 Forge Path kill triggers (Unit 2b).
         forgeTimeSinceKill = 0
         forgeColdFuryArmed = false   // a kill resets Cold Fury's "no-kill" clock
@@ -7580,6 +7643,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     damageEnemiesInRadius(GameConfig.ForgePath.holdLineRadius, around: enemyNode.position,
                                           damage: transfer, bossClassScaled: true)
                 }
+            }
+        }
+
+        // v2.0 Phase C (C1.4): Seed Spore Shot — embed on hit.
+        //   • a normal shot (gen 0) plants a primary seed (gen 1)
+        //   • a burst FRAGMENT re-embeds a secondary seed (gen 2) only at T3,
+        //     and only one generation deeper — the chain guard
+        // Set BEFORE the kill check so a killing shot still seeds → bursts.
+        if playerStats.seedShotActive {
+            if projectileNode.seedGeneration == 0 {
+                enemyNode.seedGeneration = max(enemyNode.seedGeneration, 1)
+            } else if playerStats.seedReembed, projectileNode.seedGeneration < 2 {
+                enemyNode.seedGeneration = max(enemyNode.seedGeneration, 2)
             }
         }
 
