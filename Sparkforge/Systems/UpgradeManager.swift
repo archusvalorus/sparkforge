@@ -1049,6 +1049,22 @@ final class UpgradeManager {
             requires: [.growthUnlocked]
         ))
 
+        // Defensive Flowers — a 3-tier ladder that maps onto the 3-flower cap:
+        // each pick grows one more bloom on your ground. The stat closures are
+        // empty; the flower itself is a scene structure the scene grows on pick.
+        cards.append(UpgradeCard(
+            id: "v20_wildbloom", name: "Wildbloom", tag: .growth,
+            description: "Grow a defensive flower on your cultivated ground",
+            apply: { _ in },
+            higherTiers: [ { _ in }, { _ in } ],
+            tierDescriptions: [
+                "Grow a defensive flower on your cultivated ground",
+                "Grow a second flower — the garden bares its thorns",
+                "Grow a third flower — the whole bed is watching"
+            ],
+            requires: [.growthUnlocked]
+        ))
+
         cards.append(UpgradeCard(
             id: "v16_null_bloom", name: "Null Bloom", tag: .voidT,
             description: "Kills may leave brief slowing zones"

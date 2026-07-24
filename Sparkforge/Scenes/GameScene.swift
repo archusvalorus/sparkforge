@@ -230,6 +230,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var pendingTerraPlacement = false
     /// The ghost preview shown during placement, following the finger.
     private var terraGhost: CultivatedZoneNode?
+    /// Live Defensive Flowers (C1.3). Permanent-up-to-cap, rooted to the ground.
+    private var flowers: [DefensiveFlowerNode] = []
     /// Seconds Spark has spent standing on cultivated ground. Only advances
     /// while he's actually on it, and deliberately NOT reset when he steps off
     /// — the ground is feeding him, so stepping out to dodge shouldn't erase
@@ -2185,6 +2187,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 expandGarden()
             }
         }
+        // Wildbloom grows a flower per pick (and expands the garden above, as
+        // any Growth card does). The eligibility layer gates Wildbloom behind
+        // growthUnlocked, so it can never appear before Terra is owned AND
+        // placed — cultivatedZones is therefore always non-empty here. The guard
+        // is belt-and-suspenders, not a real path.
+        if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
 
         // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
@@ -2445,6 +2453,54 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         showBuildHint("🌱 Your ground spreads")
     }
 
+    // MARK: - v2.0 Phase C (C1.3): Defensive Flowers
+
+    /// Grow a flower ON cultivated ground (rooted to Terra — never loose in the
+    /// arena). No-op past the cap or with no ground yet. Returns whether one grew.
+    @discardableResult
+    private func growFlower() -> Bool {
+        guard flowers.count < GameConfig.Growth.maxFlowers,
+              let spot = randomPointOnCultivatedGround() else { return false }
+        let flower = DefensiveFlowerNode()
+        flower.position = spot
+        flower.fireCooldown = TimeInterval.random(in: 0...GameConfig.Growth.flowerFireInterval)
+        flowers.append(flower)
+        worldNode.addChild(flower)
+        return true
+    }
+
+    /// A random point inside a random cultivated zone — where a flower may root.
+    private func randomPointOnCultivatedGround() -> CGPoint? {
+        guard let zone = cultivatedZones.randomElement() else { return nil }
+        // Rejection-free: pick a radius with sqrt bias for uniform area coverage,
+        // kept just inside the rim so the flower reads as ON the ground.
+        let r = zone.radius * 0.85 * sqrt(CGFloat.random(in: 0...1))
+        let a = CGFloat.random(in: 0..<(2 * .pi))
+        return zone.position + CGPoint(x: cos(a) * r, y: sin(a) * r)
+    }
+
+    /// Each flower acquires a target within range and fires on its cooldown.
+    private func updateFlowers(_ dt: TimeInterval) {
+        guard !flowers.isEmpty else { return }
+        for flower in flowers {
+            flower.fireCooldown -= dt
+            guard flower.fireCooldown <= 0 else { continue }
+            guard let target = findPriorityTarget(from: flower.position,
+                                                  maxRange: GameConfig.Growth.flowerRange,
+                                                  usePlayer: false) else { continue }
+            let dir = flower.aim(at: target.position)
+            flower.flashFire()
+            flower.fireCooldown = GameConfig.Growth.flowerFireInterval
+            // Ride the proven player-projectile pipeline from the flower's
+            // position, at a fraction of normal damage, with modifiers OFF so a
+            // flower can't echo/split/absorb-into-glacial like a real shot.
+            fireProjectile(direction: dir,
+                           originOffset: flower.position - player.position,
+                           damageScale: GameConfig.Growth.flowerDamageFraction,
+                           allowModifiers: false)
+        }
+    }
+
     /// Enter the placement beat: freeze into `.placingZone`, raise a ghost
     /// preview and a prompt. The level-up overlay has already faded, so the
     /// board is clear behind it.
@@ -2592,6 +2648,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateArcWake(dt)
         updateNullBlooms(dt)
         updateCultivatedGround(dt)
+        updateFlowers(dt)
         updateFalseOpening(dt)
 
         let spawnEvent = waveManager.update(deltaTime: dt)
@@ -3386,19 +3443,46 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func findIronMaidenTarget() -> CombatTarget? {
-        if let boss = boss, !boss.isDead { return .boss(boss) }
-        var miniboss: EnemyNode?
-        var nearest: EnemyNode?
-        var nearestDist = CGFloat.greatestFiniteMagnitude
+    /// The shared priority-target rule for arena-origin attackers: boss first,
+    /// then the nearest miniboss/elite, then the nearest normal enemy.
+    ///
+    /// v2.0 Phase C: generalised to take an ORIGIN and an optional range, so a
+    /// Defensive Flower (C1.3), the Tree's animal launcher (C1.6) and the Panda
+    /// samurai (C2) all share one targeting brain instead of copying it four
+    /// times. `from` defaults to the player, `maxRange` to unlimited — which
+    /// reproduces Iron Maiden's original behaviour exactly.
+    ///
+    /// "Nearest" is measured to the target's SURFACE via `targetingRadius`, so a
+    /// monument boss whose origin is far but whose body is right there still
+    /// reads as close (the same fix that unbroke auto-aim on the Unmade Star).
+    private func findPriorityTarget(from origin: CGPoint = .zero,
+                                    maxRange: CGFloat = .greatestFiniteMagnitude,
+                                    usePlayer: Bool = true) -> CombatTarget? {
+        let source = usePlayer ? player.position : origin
+        if let boss = boss, !boss.isDead {
+            let d = source.distance(to: boss.position) - boss.targetingRadius
+            if d <= maxRange { return .boss(boss) }
+        }
+        var miniboss: EnemyNode?; var minibossDist = CGFloat.greatestFiniteMagnitude
+        var nearest: EnemyNode?;  var nearestDist = CGFloat.greatestFiniteMagnitude
         for enemy in enemies where !enemy.isDying {
-            if enemy.isMiniBoss, miniboss == nil { miniboss = enemy }
-            let dist = player.position.distance(to: enemy.position)
+            let dist = source.distance(to: enemy.position)
+            guard dist <= maxRange else { continue }
+            if enemy.isMiniBoss, dist < minibossDist { minibossDist = dist; miniboss = enemy }
             if dist < nearestDist { nearestDist = dist; nearest = enemy }
         }
         if let mb = miniboss { return .enemy(mb) }
         if let n = nearest { return .enemy(n) }
         return nil
+    }
+
+    /// Iron Maiden's targeting — now a thin call into the shared rule (player
+    /// origin, unlimited range). One deliberate refinement folded in: it now
+    /// prefers the NEAREST miniboss rather than the first one iterated, which
+    /// only differs when two minibosses are alive at once (rare) and is strictly
+    /// the better pick.
+    private func findIronMaidenTarget() -> CombatTarget? {
+        findPriorityTarget()
     }
 
     private func fireIronMaidenProjectile() {
@@ -5541,6 +5625,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     expandGarden()
                 }
             }
+            if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
 
             // A capstone maxed by a grant still earns its reveal.
             if card.maxTier > 1, tierBefore < card.maxTier,
@@ -8190,6 +8275,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gravityWells.removeAll()
         cultivatedZones.forEach { $0.removeFromParent() }
         cultivatedZones.removeAll()
+        flowers.forEach { $0.removeFromParent() }
+        flowers.removeAll()
         groundTickAccumulator = 0
         groundRegenAccumulator = 0
         pendingTerraPlacement = false

@@ -122,6 +122,18 @@ enum GameConfig {
         /// could swallow the whole floor, "leaving cultivated ground stays a
         /// real decision" (handoff §8) dies — the tension IS the tradeoff.
         static let maxZoneRadiusFactor: CGFloat = 0.55
+
+        // --- Defensive Flowers (C1.3) — structures ROOTED to the ground ---
+        /// Hard ceiling on live flowers. Permanent-up-to-cap: they never expire,
+        /// so the cap is what keeps a Growth build from becoming an AFK turret
+        /// farm (handoff §8).
+        static let maxFlowers: Int = 3
+        /// A flower's shot as a fraction of a normal player shot (~25% ATK).
+        static let flowerDamageFraction: CGFloat = 0.25
+        /// Seconds between a flower's shots.
+        static let flowerFireInterval: TimeInterval = 1.4
+        /// A flower only engages targets within this reach.
+        static var flowerRange: CGFloat { 240 * DeviceScale.gameplay }
     }
 
     // MARK: - Card Drafting (v2.0 Phase C)
