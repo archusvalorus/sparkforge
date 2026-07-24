@@ -223,6 +223,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // deliberately the minimum that makes Terra a real card rather than a key.
     private var cultivatedZones: [CultivatedZoneNode] = []
     private var groundTickAccumulator: TimeInterval = 0
+    /// Seconds Spark has spent standing on cultivated ground. Only advances
+    /// while he's actually on it, and deliberately NOT reset when he steps off
+    /// — the ground is feeding him, so stepping out to dodge shouldn't erase
+    /// the progress he'd already banked.
+    private var groundRegenAccumulator: TimeInterval = 0
     
     // MARK: - Nodes
     
@@ -5037,6 +5042,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let playerOnGround = cultivatedZones.contains { $0.covers(player.position) }
         player.setNourished(playerOnGround)
 
+        // Terra's baseline nourishment: a slow trickle of HP for standing on
+        // your own ground. Small enough that it never replaces health orbs or
+        // pre-empts the Tree capstone's T3 "Shelter" tier, but present enough
+        // that holding the zone is a real, felt decision.
+        if playerOnGround {
+            groundRegenAccumulator += dt
+            if groundRegenAccumulator >= GameConfig.Growth.regenInterval {
+                groundRegenAccumulator -= GameConfig.Growth.regenInterval
+                if playerStats.currentHP < playerStats.maxHP {
+                    playerStats.heal(GameConfig.Growth.baseRegenHP)
+                    hpBar.flashHeal()
+                }
+            }
+        }
+
         // --- everyone else's ---
         var killed: [EnemyNode] = []
         for enemy in enemies where !enemy.isDying {
@@ -8043,6 +8063,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         cultivatedZones.forEach { $0.removeFromParent() }
         cultivatedZones.removeAll()
         groundTickAccumulator = 0
+        groundRegenAccumulator = 0
         player.setNourished(false)
         chillTrailPoints.removeAll()
         singularityTimer = 0

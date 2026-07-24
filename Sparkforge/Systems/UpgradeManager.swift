@@ -1035,7 +1035,7 @@ final class UpgradeManager {
 
         cards.append(UpgradeCard(
             id: "v20_terra", name: "Terra", tag: .growth,
-            description: "Cultivate the arena. Unlock Growth cards.",
+            description: "Cultivate the arena. Your ground mends you. Unlock Growth cards.",
             // ONE TIER, by design (Brandon): Terra opens the options that grant
             // the effects rather than being prescriptive itself.
             apply: { stats in stats.terraZoneRadius = GameConfig.Growth.terraRadius },

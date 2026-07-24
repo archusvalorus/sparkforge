@@ -35,6 +35,7 @@ final class PlayerNode: SKNode {
     /// v2.0 Phase C: rising spore motes shown while Spark stands on cultivated
     /// ground — the visible half of "this ground is working for you".
     private var nourishMotes: SKEmitterNode?
+    private var nourishHalo: SKShapeNode?
     private(set) var isNourished = false
     private let trailEmitter = SKEmitterNode()
 
@@ -308,9 +309,25 @@ final class PlayerNode: SKNode {
         // ones were still fading out.
         buildNourishMotesIfNeeded()
         nourishMotes?.particleBirthRate = on ? Self.nourishBirthRate : 0
+
+        guard let halo = nourishHalo else { return }
+        halo.removeAllActions()
+        if on {
+            halo.run(SKAction.fadeAlpha(to: 1.0, duration: 0.25))
+            let pulse = SKAction.sequence([
+                SKAction.group([SKAction.scale(to: 1.10, duration: 1.1),
+                                SKAction.fadeAlpha(to: 0.75, duration: 1.1)]),
+                SKAction.group([SKAction.scale(to: 1.0, duration: 1.1),
+                                SKAction.fadeAlpha(to: 1.0, duration: 1.1)])
+            ])
+            pulse.timingMode = .easeInEaseOut
+            halo.run(SKAction.repeatForever(pulse), withKey: "nourishPulse")
+        } else {
+            halo.run(SKAction.fadeOut(withDuration: 0.3))
+        }
     }
 
-    private static let nourishBirthRate: CGFloat = 14
+    private static let nourishBirthRate: CGFloat = 32
 
     private func buildNourishMotesIfNeeded() {
         guard nourishMotes == nil else { return }
@@ -323,20 +340,20 @@ final class PlayerNode: SKNode {
         let motes = SKEmitterNode()
         motes.particleTexture = dot
         motes.particleBirthRate = 0        // the toggle turns it on
-        motes.particleLifetime = 1.2
+        motes.particleLifetime = 1.35
         motes.particleLifetimeRange = 0.5
         // Spawn in a band WIDER than Spark's body so the motes read around him
         // rather than being swallowed by his own glow.
-        motes.particlePositionRange = CGVector(dx: 40, dy: 6)
-        motes.particleSpeed = 30            // drifting UP, out of the soil
-        motes.particleSpeedRange = 12
+        motes.particlePositionRange = CGVector(dx: 46, dy: 6)
+        motes.particleSpeed = 38            // drifting UP, out of the soil
+        motes.particleSpeedRange = 14
         motes.emissionAngle = .pi / 2
         motes.emissionAngleRange = 0.45
-        motes.particleAlpha = 0.85
-        motes.particleAlphaSpeed = -0.6
-        motes.particleScale = 0.075
-        motes.particleScaleRange = 0.03
-        motes.particleScaleSpeed = -0.02
+        motes.particleAlpha = 1.0
+        motes.particleAlphaSpeed = -0.5
+        motes.particleScale = 0.15
+        motes.particleScaleRange = 0.05
+        motes.particleScaleSpeed = -0.03
         // Above the cultivated ground (1.5), below the actors — so they layer
         // onto the soil they're rising out of.
         motes.particleZPosition = 2
@@ -350,6 +367,21 @@ final class PlayerNode: SKNode {
         motes.targetNode = parent           // motes stay in the world, not on Spark
         addChild(motes)
         nourishMotes = motes
+
+        // A soft halo under Spark. The motes alone were legible but easy to
+        // miss against his own glow (Brandon's device read) — the halo makes
+        // "standing on your ground" readable at a glance, and gives the Tree's
+        // later tiers something to intensify.
+        let halo = SKShapeNode(circleOfRadius: GameConfig.Player.visualRadius * 2.1)
+        halo.fillColor = SKColor(hex: 0x5FCF62, alpha: 0.20)
+        halo.strokeColor = SKColor(hex: 0xC9D96F, alpha: 0.45)
+        halo.lineWidth = 1.5
+        halo.glowWidth = 3
+        halo.blendMode = .add
+        halo.zPosition = -2                 // beneath Spark, above the ground
+        halo.alpha = 0
+        addChild(halo)
+        nourishHalo = halo
     }
 
     func grantLevel() {

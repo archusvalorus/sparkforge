@@ -103,6 +103,16 @@ enum GameConfig {
         /// How often ground effects tick (seconds). Damage is per-tick, so the
         /// DPS on a card means what it says.
         static let tickInterval: TimeInterval = 1.0
+
+        /// Terra's baseline nourishment: Spark regains this much HP for every
+        /// `regenInterval` seconds spent standing on cultivated ground.
+        ///
+        /// Deliberately a trickle. It has to be felt without stepping on the
+        /// Tree capstone's T3 "Shelter" tier, whose whole job is to make the
+        /// ground genuinely restorative — T3 must scale clearly above this or
+        /// the capstone rung stops landing.
+        static let baseRegenHP: Int = 1
+        static let regenInterval: TimeInterval = 10.0
     }
 
     // MARK: - Card Drafting (v2.0 Phase C)
