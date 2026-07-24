@@ -113,6 +113,15 @@ enum GameConfig {
         /// the capstone rung stops landing.
         static let baseRegenHP: Int = 1
         static let regenInterval: TimeInterval = 10.0
+
+        /// Path A: every Growth card AFTER Terra grows the garden by this
+        /// fraction of its current radius. The expansion is the universal
+        /// Growth heartbeat — structure cards add their payload on top.
+        static let expansionPerCard: CGFloat = 0.16
+        /// The garden is capped at this fraction of the arena radius. If it
+        /// could swallow the whole floor, "leaving cultivated ground stays a
+        /// real decision" (handoff §8) dies — the tension IS the tradeoff.
+        static let maxZoneRadiusFactor: CGFloat = 0.55
     }
 
     // MARK: - Card Drafting (v2.0 Phase C)

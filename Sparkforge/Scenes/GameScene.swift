@@ -23,6 +23,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case paused    // v1.4: Pause menu
         case removeAdsPrompt  // v1.8 (E4): in-run value-prop modal is up
         case synergyReveal    // v1.8 (Unit 6): synergy-unlock modal is up
+        case placingZone      // v2.0 Phase C: choosing where to plant Terra
     }
     
     private(set) var gameState: GameState = .playing
@@ -223,6 +224,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // deliberately the minimum that makes Terra a real card rather than a key.
     private var cultivatedZones: [CultivatedZoneNode] = []
     private var groundTickAccumulator: TimeInterval = 0
+    /// Terra was just chosen and is waiting to be PLACED. Deferred out of the
+    /// pick so the world can freeze and the player can choose the spot — RNG
+    /// owns when Terra arrives, so placement is the agency we can give.
+    private var pendingTerraPlacement = false
+    /// The ghost preview shown during placement, following the finger.
+    private var terraGhost: CultivatedZoneNode?
     /// Seconds Spark has spent standing on cultivated ground. Only advances
     /// while he's actually on it, and deliberately NOT reset when he steps off
     /// — the ground is feeding him, so stepping out to dodge shouldn't erase
@@ -1724,6 +1731,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .synergyReveal:
             advanceSynergy()
 
+        case .placingZone:
+            // Start aiming the ghost wherever the finger lands.
+            moveTerraGhost(to: touch.location(in: worldNode))
+
         case .dead:
             handleDeathScreenTap(touch)
             
@@ -1765,6 +1776,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             return
         }
+        if gameState == .placingZone {
+            if let touch = touches.first {
+                moveTerraGhost(to: touch.location(in: worldNode))
+            }
+            return
+        }
         guard gameState == .playing else { return }
         for touch in touches {
             joystick.handleTouchMoved(touch, in: self)
@@ -1776,6 +1793,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let touch = touches.first {
                 pauseMenu.handleTouchEnded(at: touch.location(in: pauseMenu))
             }
+            return
+        }
+        if gameState == .placingZone {
+            // Release plants it. A tap with no drag plants under Spark, which is
+            // a fine default — the ghost started there.
+            commitTerraPlacement()
             return
         }
         for touch in touches {
@@ -2150,10 +2173,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let tierBefore = upgradeManager.tier(of: card.id)
         upgradeManager.pickCard(card, stats: playerStats)
 
-        // v2.0 Phase C: Terra plants cultivated ground the moment it's taken.
-        // No-op for every other card, and idempotent if Terra is somehow
-        // re-applied.
-        plantTerraGroundIfNeeded()
+        // v2.0 Phase C: Growth's territory logic on a chosen pick.
+        //   • Terra (the first Growth card, zones still empty) — DEFER to the
+        //     placement beat. RNG owns when Terra arrives; letting the player
+        //     choose where is the agency we can give.
+        //   • any later Growth card — grow the existing garden (Path A).
+        if card.tag == .growth {
+            if playerStats.terraZoneRadius > 0, cultivatedZones.isEmpty {
+                pendingTerraPlacement = true       // planted after placement
+            } else {
+                expandGarden()
+            }
+        }
 
         // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
@@ -2368,6 +2399,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Resume play after the pick (and any synergy reveals) — the post-pick
     /// invulnerability buffer so the player can reorient.
     private func completeLevelUp() {
+        // v2.0 Phase C: Terra was chosen — take the placement beat before
+        // resuming. Its tap calls resumeAfterLevelUp() to continue the flow,
+        // so draft-opener sequencing and normal resume both stay intact.
+        if pendingTerraPlacement {
+            pendingTerraPlacement = false
+            beginTerraPlacement()
+            return
+        }
+        resumeAfterLevelUp()
+    }
+
+    /// The single resume point after a level-up (and any placement/reveal beat):
+    /// deal the next draft round, or hand control back to the player.
+    private func resumeAfterLevelUp() {
         // v2.0: the gauntlet's DRAFT opener is a sequence of granted level-ups.
         // Every pick funnels through here, so this is where the next round is
         // dealt — and where the sequence hands off to boss 1.
@@ -2382,6 +2427,81 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ])
         player.run(SKAction.repeat(blink, count: 4), withKey: "invulnBlink")
         gameState = .playing
+    }
+
+    // MARK: - v2.0 Phase C: Terra placement + garden expansion
+
+    /// Grow every cultivated zone by the per-card fraction, capped so the garden
+    /// can never swallow the arena (that would kill the leave-the-zone tension).
+    private func expandGarden() {
+        guard !cultivatedZones.isEmpty else { return }
+        let cap = GameConfig.Arena.radius * GameConfig.Growth.maxZoneRadiusFactor
+        for zone in cultivatedZones {
+            let grown = min(cap, zone.radius * (1 + GameConfig.Growth.expansionPerCard))
+            zone.setRadius(grown)
+        }
+        // Keep the stored Terra radius in step so a later re-plant (a fresh run)
+        // starts from the base, not the grown size — growth is per-run state.
+        showBuildHint("🌱 Your ground spreads")
+    }
+
+    /// Enter the placement beat: freeze into `.placingZone`, raise a ghost
+    /// preview and a prompt. The level-up overlay has already faded, so the
+    /// board is clear behind it.
+    private func beginTerraPlacement() {
+        gameState = .placingZone
+
+        let ghost = CultivatedZoneNode(radius: playerStats.terraZoneRadius)
+        ghost.alpha = 0.55
+        ghost.position = player.position     // start under Spark; drag to move
+        worldNode.addChild(ghost)
+        terraGhost = ghost
+
+        let prompt = SKLabelNode(fontNamed: "Menlo-Bold")
+        prompt.text = "PLANT YOUR GROUND"
+        prompt.fontSize = 17
+        prompt.fontColor = SKColor(hex: 0x5FCF62)
+        prompt.verticalAlignmentMode = .center
+        prompt.position = CGPoint(x: 0, y: 150)
+        prompt.zPosition = 260
+        prompt.name = "placePrompt"
+        camera?.addChild(prompt)
+
+        let hint = SKLabelNode(fontNamed: "Menlo")
+        hint.text = "drag to aim · release to plant"
+        hint.fontSize = 11
+        hint.fontColor = SKColor(hex: 0x9A8E88)
+        hint.verticalAlignmentMode = .center
+        hint.position = CGPoint(x: 0, y: 128)
+        hint.zPosition = 260
+        hint.name = "placeHint"
+        camera?.addChild(hint)
+        prompt.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.5, duration: 0.7),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.7)
+        ])))
+    }
+
+    /// Move the ghost to a candidate spot, clamped inside the arena so a zone
+    /// can never be planted where the player can't stand.
+    private func moveTerraGhost(to worldPoint: CGPoint) {
+        guard let ghost = terraGhost else { return }
+        let maxDist = GameConfig.Arena.radius - ghost.radius
+        var p = worldPoint
+        if p.length > maxDist { p = p.normalized * maxDist }
+        ghost.position = p
+    }
+
+    /// Commit the plant at the ghost's spot and resume the level-up flow.
+    private func commitTerraPlacement() {
+        let center = terraGhost?.position ?? player.position
+        terraGhost?.removeFromParent(); terraGhost = nil
+        camera?.childNode(withName: "placePrompt")?.removeFromParent()
+        camera?.childNode(withName: "placeHint")?.removeFromParent()
+
+        plantCultivatedGround(at: center, radius: playerStats.terraZoneRadius)
+        showBuildHint("🌱 The ground is yours now")
+        resumeAfterLevelUp()
     }
 
     // MARK: - v1.8 Unit 6 / v1.9 Unit 3: reveal sequence (synergies → capstones)
@@ -5410,6 +5530,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             upgradeManager.pickCard(card, stats: playerStats)
             granted.append(card.name)
 
+            // Granted Growth cards can't take a placement beat (nobody chose
+            // them), so a granted Terra auto-plants at Spark right here, and a
+            // later granted Growth card grows the garden — otherwise a RANDOM
+            // opener heavy in Growth would leave the territory at Terra's base.
+            if card.tag == .growth {
+                if playerStats.terraZoneRadius > 0, cultivatedZones.isEmpty {
+                    plantTerraGroundIfNeeded()
+                } else {
+                    expandGarden()
+                }
+            }
+
             // A capstone maxed by a grant still earns its reveal.
             if card.maxTier > 1, tierBefore < card.maxTier,
                upgradeManager.tier(of: card.id) >= card.maxTier, card.isCapstone {
@@ -5420,10 +5552,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
             synergies.append(contentsOf: upgradeManager.checkSynergies(stats: playerStats))
         }
-
-        // The RANDOM opener grants through pickCard directly, bypassing
-        // commitCard — so a granted Terra has to plant its ground here too.
-        plantTerraGroundIfNeeded()
 
         statHUD.update(from: playerStats)
         refreshKineticGauge()
@@ -8064,6 +8192,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         cultivatedZones.removeAll()
         groundTickAccumulator = 0
         groundRegenAccumulator = 0
+        pendingTerraPlacement = false
+        terraGhost?.removeFromParent(); terraGhost = nil
+        camera?.childNode(withName: "placePrompt")?.removeFromParent()
+        camera?.childNode(withName: "placeHint")?.removeFromParent()
         player.setNourished(false)
         chillTrailPoints.removeAll()
         singularityTimer = 0
