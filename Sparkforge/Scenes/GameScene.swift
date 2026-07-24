@@ -2205,6 +2205,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
         if card.id == "v20_vinewall" { raiseVineWall() }
         if card.id == "v20_tree" { growTree(to: upgradeManager.tier(of: card.id)) }
+        if card.id == "v20_richsoil" { modifyAllCultivatedZones(radiusScale: 1.22) }
 
         // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
@@ -5521,11 +5522,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if groundRegenAccumulator >= GameConfig.Growth.regenInterval {
                 groundRegenAccumulator -= GameConfig.Growth.regenInterval
                 if playerStats.currentHP < playerStats.maxHP {
-                    playerStats.heal(GameConfig.Growth.baseRegenHP)
+                    // Rich Soil (Terra+) + the Growth-5 synergy add to the tick.
+                    playerStats.heal(GameConfig.Growth.baseRegenHP + playerStats.growthRegenBonusHP)
                     hpBar.flashHeal()
                 }
             }
         }
+        // Deeproot (dual-tag Growth+Guard): flat DEF while on cultivated ground.
+        playerStats.groundDefBonus = playerOnGround ? playerStats.deeprootDEF : 0
 
         // Tree capstone tiers, both gated on standing in the garden:
         //   T2 Rootreach — move speed;  T3 Shelter — stronger regen.
@@ -5915,6 +5919,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
             if card.id == "v20_vinewall" { raiseVineWall() }
         if card.id == "v20_tree" { growTree(to: upgradeManager.tier(of: card.id)) }
+        if card.id == "v20_richsoil" { modifyAllCultivatedZones(radiusScale: 1.22) }
 
             // A capstone maxed by a grant still earns its reveal.
             if card.maxTier > 1, tierBefore < card.maxTier,

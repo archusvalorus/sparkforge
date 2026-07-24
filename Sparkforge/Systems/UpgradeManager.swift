@@ -515,6 +515,17 @@ final class UpgradeManager {
             stats.globalEnemySlow += 0.25
             stats.shatterSlowThreshold = 0.3
 
+        // GROWTH (C1.7) — the garden deepens: control → sustain → territory.
+        // All three are universal to any Growth build (every Growth build has
+        // Terra's cultivated ground), so the synergy pays off regardless of
+        // which specific Growth cards were taken.
+        case (.growth, 3):
+            stats.terraSlow += 0.15                  // Rootbound
+        case (.growth, 5):
+            stats.growthRegenBonusHP += 2            // Verdant Rise
+        case (.growth, 7):
+            stats.thornsoilDPS = max(stats.thornsoilDPS, 8)  // Wildwood: the ground bites
+
         default:
             return nil
         }
@@ -568,10 +579,9 @@ final class UpgradeManager {
                     SynergyTier(threshold: 5, title: "Shatter", effect: "Frozen enemies burst when struck"),
                     SynergyTier(threshold: 7, title: "Absolute Zero", effect: "The arena slows; shatters come easy")]
         case .growth:
-            // C1.7 authors these. Empty is correct until then — Growth ships
-            // its cards first and its synergy tiers with the balance pass, so
-            // nothing claims a tier that doesn't fire yet.
-            return []
+            return [SynergyTier(threshold: 3, title: "Rootbound", effect: "Cultivated ground grips harder — enemies on it are slower"),
+                    SynergyTier(threshold: 5, title: "Verdant Rise", effect: "Your ground mends you faster"),
+                    SynergyTier(threshold: 7, title: "Wildwood", effect: "The whole garden bites what stands on it")]
         case .neutral:
             return []
         }
@@ -1052,6 +1062,23 @@ final class UpgradeManager {
         // Defensive Flowers — a 3-tier ladder that maps onto the 3-flower cap:
         // each pick grows one more bloom on your ground. The stat closures are
         // empty; the flower itself is a scene structure the scene grows on pick.
+        // Rich Soil — the Terra+ modifier. Exercises the modify-all-zones path.
+        cards.append(UpgradeCard(
+            id: "v20_richsoil", name: "Rich Soil", tag: .growth,
+            description: "Your cultivated ground spreads wider and mends you harder",
+            apply: { stats in stats.growthRegenBonusHP += 2 },
+            requires: [.growthUnlocked]
+        ))
+
+        // Deeproot — the dual-tag bridge (Growth + Guard). Rooted = sturdy: you
+        // gain DEF while standing on your own ground. Counts toward BOTH totals.
+        cards.append(UpgradeCard(
+            id: "v20_deeproot", name: "Deeproot", tag: .growth, secondaryTag: .guardT,
+            description: "Rooted and sturdy: gain DEF while standing on cultivated ground",
+            apply: { stats in stats.deeprootDEF += 6 },
+            requires: [.growthUnlocked]
+        ))
+
         // THE TREE — Growth's one capstone. Plant a sapling; help it become a
         // problem. Five tiers: sapling → sanctuary → territory → awakened habitat.
         cards.append(UpgradeCard(

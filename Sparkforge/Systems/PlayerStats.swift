@@ -184,6 +184,7 @@ final class PlayerStats {
         let effectiveDefense = defense
             + (groundedCoreBraced ? groundedCoreBonusDEF : 0)
             + (pressureDefActive ? pressureDefBonus : 0)
+            + groundDefBonus   // C1.7 Deeproot: DEF while on cultivated ground
         let reduced = max(1, rawDamage - effectiveDefense)
         currentHP -= reduced
         if currentHP < 0 { currentHP = 0 }
@@ -557,6 +558,14 @@ final class PlayerStats {
     /// Transient: the scene sets this to the Tree move bonus while Spark stands
     /// on cultivated ground, 0 otherwise. Folded into effectiveMoveSpeed.
     var treeGroundMoveBonus: CGFloat = 0
+    /// Rich Soil (Terra+, C1.7): extra HP added to each cultivated-ground regen
+    /// tick. Also boosts the Growth-5 synergy.
+    var growthRegenBonusHP: Int = 0
+    /// Deeproot (dual-tag Growth+Guard, C1.7): flat DEF while on cultivated
+    /// ground. deeprootDEF is the amount; the scene sets groundDefBonus each
+    /// frame from it based on occupancy, and effectiveDefense folds it in.
+    var deeprootDEF: Int = 0
+    var groundDefBonus: Int = 0
 
     var nullBloomChance: CGFloat = 0.0
     var nullBloomRadius: CGFloat = 35.0
@@ -1098,6 +1107,9 @@ final class PlayerStats {
         vineWallTier = 0
         treeTier = 0
         treeGroundMoveBonus = 0
+        growthRegenBonusHP = 0
+        deeprootDEF = 0
+        groundDefBonus = 0
         nullBloomChance = 0.0
         nullBloomRadius = 35.0
         nullBloomSlow = 0.4
