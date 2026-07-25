@@ -242,6 +242,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// The rare mountain-lion pet (T5): roams and mauls for a few seconds.
     private var lionPet: SKLabelNode?
     private var lionPetTimer: TimeInterval = 0
+    private var lionMaulCooldown: TimeInterval = 0
+    /// Nature Canon homing launches in flight (the Fox today; the Panda samurai
+    /// and the Familiar set are meant to reuse the same list).
+    private var natureMissiles: [NatureMissile] = []
+    /// Timed Nature Canon structures (the Hedgehog's barrage today).
+    private var canonTurrets: [CanonTurret] = []
+    /// Live Skunk poison — the propagating one. Capped; see GameConfig.
+    private var poisonClouds: [PoisonCloud] = []
     /// Seconds Spark has spent standing on cultivated ground. Only advances
     /// while he's actually on it, and deliberately NOT reset when he steps off
     /// — the ground is feeding him, so stepping out to dodge shouldn't erase
@@ -2468,25 +2476,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - v2.0 Phase C (C1.6): The Tree (Growth capstone)
 
-    /// PLACEHOLDER ROSTER — Brandon designs the real one (see the
-    /// tree-capstone-animal-pool memory: 5–10 animals, per-animal modifiers, a
-    /// rare pet). The three-part model (base timer · damage mult · per-animal
-    /// modifier) is what's load-bearing; the specific creatures + behaviours are
-    /// meant to be revised. Kept small and legible so the architecture is clear.
-    private struct TreeAnimal {
-        let emoji: String
-        let damageMult: CGFloat   // on top of the global animalDamageMult
-        let radiusMult: CGFloat   // AoE size on arrival
-        let leavesThorns: Bool    // a per-animal BEHAVIOUR, not just a number
-    }
-    private static let treeAnimals: [TreeAnimal] = [
-        TreeAnimal(emoji: "🐰", damageMult: 0.8, radiusMult: 0.8, leavesThorns: false),
-        TreeAnimal(emoji: "🐿️", damageMult: 1.0, radiusMult: 1.0, leavesThorns: false),
-        TreeAnimal(emoji: "🦌", damageMult: 1.4, radiusMult: 1.3, leavesThorns: false),
-        TreeAnimal(emoji: "🦔", damageMult: 1.0, radiusMult: 1.0, leavesThorns: true),
-        TreeAnimal(emoji: "🦊", damageMult: 1.1, radiusMult: 0.9, leavesThorns: false),
-    ]
-
     /// Plant the Tree (T1) or mature it (T2+). Reuses the Terra garden — the
     /// Tree stands in your cultivated ground and grows it as it matures, rather
     /// than minting a separate zone (rooted to Terra). Idempotent per tier.
@@ -2527,6 +2516,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func updateTreeCanopy(_ dt: TimeInterval) {
         guard playerStats.treeTier >= 5 else { return }
         updateLionPet(dt)
+        updateNatureMissiles(dt)
+        updateCanonTurrets(dt)
+        updatePoisonClouds(dt)
 
         treeAnimalTimer += dt
         capstoneTimers.set("tree", label: "🌳 NATURE CANON", colorHex: 0x5FCF62,
@@ -2534,42 +2526,688 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard treeAnimalTimer >= GameConfig.Tree.animalInterval else { return }
         treeAnimalTimer = 0
 
-        // The rare pet — only if one isn't already prowling.
-        if lionPet == nil, CGFloat.random(in: 0...1) < GameConfig.Tree.lionChance {
-            spawnLionPet()
-            return
-        }
+        // The lion is a TIER in the one table now, not a coin-flip taken before
+        // the roll — but only one may prowl at a time, so while it's out its
+        // tier drops from the table and the rest renormalize (rather than the
+        // launch being spent on a lion that can't spawn).
+        guard let animal = NatureCanon.roll(allowLion: lionPet == nil) else { return }
+        if animal.behaviour == .prowl { spawnLionPet(); return }
         guard let target = findPriorityTarget() else { return }
-        launchAnimal(at: target.position)
+        launch(animal, at: target)
     }
 
-    private func launchAnimal(at targetPos: CGPoint) {
-        guard let tree = treeNode, let animal = Self.treeAnimals.randomElement() else { return }
+    // MARK: - v2.0 Phase C part 2: the NATURE CANON roster
+
+    /// Dispatch one launch onto the mark.
+    ///
+    /// The switch is exhaustive on purpose: when a later unit adds a behaviour,
+    /// the compiler points here rather than letting it fall silently into the
+    /// generic pounce.
+    private func launch(_ animal: NatureCanon.Animal, at target: CombatTarget) {
+        switch animal.behaviour {
+        case .ninjaKick:
+            launchNinjaKick(animal, at: target)
+        case .scatter:
+            launchScatter(animal, at: target.position)
+        case .homingBurst:
+            launchHomingBurst(animal, at: target)
+        case .trample:
+            launchTrample(animal, at: target)
+        case .gore:
+            launchGore(animal, at: target)
+        case .needleTurret:
+            launchNeedleTurret(animal, at: target.position)
+        case .eruption:
+            launchEruption(animal, at: target.position)
+        case .devour:
+            launchDevour(animal, at: target.position)
+        case .poisonCloud:
+            launchPoisonCloud(animal, at: target.position)
+        case .prowl:
+            spawnLionPet()
+        }
+    }
+
+    /// One animal's body, mid-launch. PLACEHOLDER ART: an emoji stand-in, as the
+    /// handoff calls for — systems first, then one art pass replaces all ten.
+    private func canonBody(_ animal: NatureCanon.Animal) -> SKLabelNode {
         let label = SKLabelNode(text: animal.emoji)
-        label.fontSize = 26
+        label.fontSize = GameConfig.NatureCanon.bodySize
         label.verticalAlignmentMode = .center
         label.horizontalAlignmentMode = .center
-        label.position = tree.position + CGPoint(x: 0, y: 30)
+        label.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: 30)
         label.zPosition = 9
-        worldNode.addChild(label)
+        return label
+    }
 
-        // An arcing pounce to the target's spot, then it strikes.
-        let flight = SKAction.move(to: targetPos, duration: 0.45)
+    /// The shared flight: leap from the canopy onto the mark, then resolve.
+    /// Every launched animal wears this skeleton so the roster reads as one
+    /// creature family rather than ten special cases.
+    /// `spin` is off for the animals that arrive nose-first (the Deer's antlers,
+    /// the Hedgehog posting up) — tumbling would undercut the pose.
+    private func pounce(_ animal: NatureCanon.Animal,
+                        to point: CGPoint,
+                        duration: TimeInterval = 0.45,
+                        spin: Bool = true,
+                        onArrival: @escaping () -> Void) {
+        guard treeNode != nil else { return }
+        let body = canonBody(animal)
+        body.xScale = point.x < body.position.x ? -1 : 1       // face the mark
+        worldNode.addChild(body)
+
+        let flight = SKAction.move(to: point, duration: duration)
         flight.timingMode = .easeIn
-        label.run(SKAction.sequence([
-            SKAction.group([flight, SKAction.rotate(byAngle: .pi * 2, duration: 0.45)]),
-            SKAction.run { [weak self] in
-                guard let self = self else { return }
-                let dmg = Int(self.playerStats.effectiveAttack
-                              * GameConfig.Tree.animalDamageMult * animal.damageMult)
-                let radius = 46 * DeviceScale.gameplay * animal.radiusMult
-                self.damageEnemiesInRadius(radius, around: targetPos, damage: dmg, bossClassScaled: true)
-                self.showRingPulse(at: targetPos, radius: radius, colorHex: 0x9BE86F)
-                if animal.leavesThorns { self.spawnNullBloom(at: targetPos) }  // brief slow patch
-            },
+        var motion: [SKAction] = [flight]
+        if spin { motion.append(SKAction.rotate(byAngle: .pi * 2, duration: duration)) }
+        body.run(SKAction.sequence([
+            SKAction.group(motion),
+            SKAction.run(onArrival),
             SKAction.fadeOut(withDuration: 0.12),
             SKAction.removeFromParent()
         ]))
+    }
+
+    /// The roster's baseline damage for `mult` — read as a fraction on top of
+    /// the ~150% the launcher already grants.
+    private func canonDamage(_ mult: CGFloat) -> Int {
+        Int(playerStats.effectiveAttack * GameConfig.Tree.animalDamageMult * mult)
+    }
+
+    /// Re-resolve a mark after a flight. Things die mid-air, and a capstone must
+    /// never strike a corpse (or a node already pruned from `enemies`).
+    private func stillValid(_ target: CombatTarget) -> CombatTarget? {
+        switch target {
+        case .boss(let b):
+            guard let live = boss, !live.isDead, (live as SKNode) === (b as SKNode) else { return nil }
+            return target
+        case .enemy(let e):
+            guard !e.isDying, enemies.contains(where: { $0 === e }) else { return nil }
+            return target
+        }
+    }
+
+    /// A plain landing: AoE on the spot, in canopy green.
+    private func launchGenericPounce(_ animal: NatureCanon.Animal, at point: CGPoint) {
+        pounce(animal, to: point) { [weak self] in
+            guard let self = self else { return }
+            let radius = GameConfig.NatureCanon.impactRadius
+            self.damageEnemiesInRadius(radius, around: point,
+                                       damage: self.canonDamage(1.0),
+                                       bossClassScaled: true, includeBoss: true)
+            self.showRingPulse(at: point, radius: radius, colorHex: 0x9BE86F)
+        }
+    }
+
+    // MARK: 🐰 Rabbit — "Ninja Kick"
+
+    /// A rabbit ninja super-kicks ONE target: a forced auto-crit whose crit is
+    /// worth 300% instead of the usual 200%, so the kick lands around 450% of
+    /// Spark's ATK in a single hit. It's meant to be absurd — that's the joke,
+    /// and the roster's whole tone rests on it.
+    ///
+    /// Single-target, so it goes through `strikeCombatTarget` (boss-class
+    /// scaling + kill bookkeeping) rather than an AoE helper.
+    private func launchNinjaKick(_ animal: NatureCanon.Animal, at target: CombatTarget) {
+        pounce(animal, to: target.position,
+               duration: GameConfig.NatureCanon.rabbitFlight) { [weak self] in
+            guard let self = self, let mark = self.stillValid(target) else { return }
+            self.strikeCombatTarget(mark, damage: self.canonDamage(GameConfig.NatureCanon.rabbitCritMult))
+            // Crit grammar: the game's crits are red, so the kick reads as one
+            // even without damage numbers on screen yet.
+            self.showRingPulse(at: mark.position,
+                               radius: GameConfig.NatureCanon.impactRadius * 0.8,
+                               colorHex: 0xFF4444)
+            self.worldNode.shake(intensity: 4, duration: 0.14)
+        }
+    }
+
+    // MARK: 🐿️ Squirrel — "Scatter"
+
+    /// Lands modestly, then flings acorns outward. The squirrel's payload is the
+    /// spread, not the landing — it's the roster's crowd-clearer.
+    private func launchScatter(_ animal: NatureCanon.Animal, at point: CGPoint) {
+        pounce(animal, to: point) { [weak self] in
+            guard let self = self else { return }
+            let radius = GameConfig.NatureCanon.impactRadius * GameConfig.NatureCanon.squirrelRadiusMult
+            self.damageEnemiesInRadius(radius, around: point,
+                                       damage: self.canonDamage(GameConfig.NatureCanon.squirrelImpactMult),
+                                       bossClassScaled: true, includeBoss: true)
+            self.showRingPulse(at: point, radius: radius, colorHex: 0xC9D96F)
+
+            let count = GameConfig.NatureCanon.acornCount
+            let base = CGFloat.random(in: 0..<(2 * .pi))
+            for i in 0..<count {
+                let a = base + CGFloat(i) / CGFloat(count) * 2 * .pi
+                self.fireAcorn(from: point, direction: CGPoint(x: cos(a), y: sin(a)))
+            }
+        }
+    }
+
+    /// One acorn. Rides the standard player-projectile pipeline (the Seed Spore
+    /// fragment precedent) so collision, damage and on-hit effects come free.
+    private func fireAcorn(from position: CGPoint, direction: CGPoint) {
+        let acorn = ProjectileNode(
+            direction: direction,
+            speed: playerStats.effectiveProjectileSpeed * 0.95,
+            range: GameConfig.NatureCanon.acornRange,
+            pierces: 0,
+            damageMultiplier: playerStats.effectiveDamageMultiplier
+                * GameConfig.NatureCanon.acornDamageFraction,
+            isCrit: false,
+            seedStyle: true
+        )
+        acorn.position = position
+        acorn.zPosition = 8
+        projectiles.append(acorn)
+        worldNode.addChild(acorn)
+    }
+
+    // MARK: 🦊 Fox — "Homing Fur-Missile"
+
+    /// A fox in flight, chasing its mark. Stored as scene state rather than
+    /// baked into an SKAction because it must re-aim every frame.
+    ///
+    /// This is the reusable HOMING primitive: the Panda samurai and the banked
+    /// Familiar/Summoner set both need "a thing that chases", and they should
+    /// call `spawnHomingMissile` rather than grow a second copy of this.
+    ///
+    /// It carries the Boar's CHARGE too (N2), because the two are the same
+    /// object with two switches: a charge simply has no mark to steer toward and
+    /// pierces on contact instead of detonating on arrival. One update loop, two
+    /// grammars — cheaper than a second near-identical list.
+    private struct NatureMissile {
+        let body: SKLabelNode
+        /// The thing it chases. `nil` = a straight-line charge (the Boar).
+        weak var mark: SKNode?
+        /// Extra reach so a monument boss's SURFACE counts as arrival — its
+        /// origin can sit far off-body (the same fix that unbroke auto-aim).
+        let markPad: CGFloat
+        var heading: CGPoint
+        var life: TimeInterval
+        let damage: Int
+        let radius: CGFloat
+        /// Barrels THROUGH: damages each foe once on contact and keeps going,
+        /// rather than detonating on the first arrival.
+        let piercing: Bool
+        /// Shoves what it passes, perpendicular to travel (the Boar's "knocks
+        /// them aside"). 0 = no shove.
+        let shoveForce: CGFloat
+        /// Who it has already gored, so one charge can't grind a single enemy
+        /// down frame after frame.
+        var struck: Set<ObjectIdentifier> = []
+    }
+
+    private func launchHomingBurst(_ animal: NatureCanon.Animal, at target: CombatTarget) {
+        guard treeNode != nil else { return }
+        let body = canonBody(animal)
+        worldNode.addChild(body)
+
+        let pad: CGFloat = {
+            if case .boss(let b) = target { return b.targetingRadius }
+            return 0
+        }()
+        let heading = (target.position - body.position).normalized
+        natureMissiles.append(NatureMissile(
+            body: body,
+            mark: target.node,
+            markPad: pad,
+            heading: heading == .zero ? CGPoint(x: 0, y: 1) : heading,
+            life: GameConfig.NatureCanon.foxLifetime,
+            damage: canonDamage(GameConfig.NatureCanon.foxImpactMult),
+            radius: GameConfig.NatureCanon.impactRadius * GameConfig.NatureCanon.foxRadiusMult,
+            piercing: false,
+            shoveForce: 0
+        ))
+    }
+
+    /// Steer every live missile, and detonate the ones that arrived (or ran out
+    /// of flight). Steering, not snapping: the heading BLENDS toward the mark,
+    /// so the fox visibly arcs after a runner instead of tracking on a rail.
+    private func updateNatureMissiles(_ dt: TimeInterval) {
+        guard !natureMissiles.isEmpty else { return }
+        let speed = GameConfig.NatureCanon.foxSpeed
+        let turn = GameConfig.NatureCanon.foxTurnRate * CGFloat(dt)
+        let arrival = GameConfig.NatureCanon.foxImpactDistance
+        let strayLimit = GameConfig.Arena.radius * 1.2
+
+        var detonations: [(point: CGPoint, damage: Int, radius: CGFloat)] = []
+        for i in natureMissiles.indices.reversed() {
+            var missile = natureMissiles[i]
+            missile.life -= dt
+
+            // A mark still in the scene steers us; one that died mid-flight
+            // doesn't — the fox coasts on its last heading and detonates on its
+            // failsafe, which is better than it vanishing mid-air.
+            if let mark = missile.mark, mark.parent != nil {
+                let desired = (mark.position - missile.body.position).normalized
+                let blended = missile.heading + desired * turn
+                if blended != .zero { missile.heading = blended.normalized }
+            }
+            let travel = missile.piercing ? GameConfig.NatureCanon.boarSpeed : speed
+            missile.body.position += missile.heading * travel * CGFloat(dt)
+            missile.body.xScale = missile.heading.x < 0 ? -1 : 1   // face travel
+
+            // A charge gores what it passes and keeps going; a missile detonates
+            // on its mark.
+            if missile.piercing {
+                goreAlongPath(&missile)
+                if missile.life <= 0 || missile.body.position.length > strayLimit {
+                    missile.body.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.15),
+                                                        SKAction.removeFromParent()]))
+                    natureMissiles.remove(at: i)
+                } else {
+                    natureMissiles[i] = missile
+                }
+                continue
+            }
+
+            let reached: Bool = {
+                guard let mark = missile.mark, mark.parent != nil else { return false }
+                return missile.body.position.distance(to: mark.position) < arrival + missile.markPad
+            }()
+
+            if reached || missile.life <= 0 || missile.body.position.length > strayLimit {
+                detonations.append((missile.body.position, missile.damage, missile.radius))
+                missile.body.removeFromParent()
+                natureMissiles.remove(at: i)
+            } else {
+                natureMissiles[i] = missile
+            }
+        }
+
+        // Detonate outside the loop — damage can kill, and killing mutates
+        // `enemies` (and can cascade into more spawns).
+        for hit in detonations {
+            damageEnemiesInRadius(hit.radius, around: hit.point, damage: hit.damage,
+                                  bossClassScaled: true, includeBoss: true)
+            showRingPulse(at: hit.point, radius: hit.radius, colorHex: 0xE08A3C)  // fox orange
+            showRingPulse(at: hit.point, radius: hit.radius * 0.6, colorHex: 0xF5F0E6)  // white belly
+        }
+    }
+
+    // MARK: 🦌 Deer — "Trample"
+
+    /// Antlers-first, no spin — it doesn't tumble in, it RUNS you down. Heavy
+    /// single-target (~220% of Spark's ATK) plus a knockback, so it also buys
+    /// breathing room rather than only dealing damage.
+    private func launchTrample(_ animal: NatureCanon.Animal, at target: CombatTarget) {
+        let origin = treeNode?.position ?? player.position
+        pounce(animal, to: target.position, spin: false) { [weak self] in
+            guard let self = self, let mark = self.stillValid(target) else { return }
+            self.strikeCombatTarget(mark, damage: self.canonDamage(GameConfig.NatureCanon.deerDamageMult))
+            // Knockback is an enemy-only verb — bosses hold their ground (the
+            // same line the Vine Wall draws: a wall for the swarm, not titans).
+            if case .enemy(let e) = mark {
+                e.applyKnockback(from: origin, force: GameConfig.NatureCanon.deerKnockback)
+            }
+            self.showRingPulse(at: mark.position,
+                               radius: GameConfig.NatureCanon.impactRadius,
+                               colorHex: 0xC8A165)   // antler bone
+            self.worldNode.shake(intensity: 3, duration: 0.12)
+        }
+    }
+
+    // MARK: 🦫 Boar — "BOAR GORE!"
+
+    /// Charges a straight line from the canopy THROUGH the mark and out the far
+    /// side, goring everything it touches once and shoving the rest aside. It is
+    /// supposed to be cartoonish; the shout is the point.
+    private func launchGore(_ animal: NatureCanon.Animal, at target: CombatTarget) {
+        guard treeNode != nil else { return }
+        let body = canonBody(animal)
+        worldNode.addChild(body)
+
+        var heading = (target.position - body.position).normalized
+        if heading == .zero { heading = CGPoint(x: 1, y: 0) }
+        natureMissiles.append(NatureMissile(
+            body: body,
+            mark: nil,                       // no steering: it commits to the line
+            markPad: 0,
+            heading: heading,
+            life: GameConfig.NatureCanon.boarLifetime,
+            damage: canonDamage(GameConfig.NatureCanon.boarDamageMult),
+            radius: GameConfig.NatureCanon.boarGoreRadius,
+            piercing: true,
+            shoveForce: GameConfig.NatureCanon.boarShove
+        ))
+        showCanonShout(animal.move, at: body.position)
+    }
+
+    /// Everything the charge touches this frame: gore it once, shove it aside.
+    /// Aside means PERPENDICULAR to travel — being bulldozed sideways reads very
+    /// differently from being blasted backward, and keeps the lane it just
+    /// cleared open.
+    private func goreAlongPath(_ missile: inout NatureMissile) {
+        let point = missile.body.position
+        let side = CGPoint(x: -missile.heading.y, y: missile.heading.x)  // left normal
+
+        var killed: [EnemyNode] = []
+        for e in enemies where !e.isDying {
+            let id = ObjectIdentifier(e)
+            guard !missile.struck.contains(id),
+                  e.position.distance(to: point) < missile.radius else { continue }
+            missile.struck.insert(id)
+
+            // Shove toward whichever side it already sits on, so nothing gets
+            // dragged across the boar's face.
+            let rel = e.position - point
+            let sign: CGFloat = (rel.x * side.x + rel.y * side.y) < 0 ? -1 : 1
+            e.position += side * sign * missile.shoveForce
+
+            if e.takeDamage(GameConfig.BossClass.scaledDamage(missile.damage,
+                                                              isBossClass: e.isMiniBoss)) {
+                killed.append(e)
+            }
+        }
+        for e in killed {
+            if let idx = enemies.firstIndex(where: { $0 === e }) {
+                let pos = e.position, xp = e.xpValue
+                enemies.remove(at: idx)
+                onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+            }
+        }
+
+        // A boss gets gored once too — it just doesn't budge.
+        if let b = boss, !b.isDead {
+            let id = ObjectIdentifier(b as SKNode)
+            if !missile.struck.contains(id),
+               b.position.distance(to: point) - b.targetingRadius < missile.radius {
+                missile.struck.insert(id)
+                b.takeDamage(GameConfig.BossClass.scaledDamage(missile.damage, isBossClass: true))
+            }
+        }
+    }
+
+    /// A cartoon shout that rides along above a launch. Deliberately loud and
+    /// deliberately rare — only the Boar uses it today, and it would stop being
+    /// funny if every animal announced itself every 4.5 seconds.
+    private func showCanonShout(_ text: String, at point: CGPoint) {
+        let shout = SKLabelNode(fontNamed: "Menlo-Bold")
+        shout.text = text
+        shout.fontSize = 15
+        shout.fontColor = SKColor(hex: 0xFFDD55)
+        shout.verticalAlignmentMode = .center
+        shout.position = point + CGPoint(x: 0, y: 26)
+        shout.zPosition = 12
+        shout.setScale(0.4)
+        worldNode.addChild(shout)
+        shout.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.0, duration: 0.18),
+                            SKAction.moveBy(x: 0, y: 22, duration: 0.9)]),
+            SKAction.fadeOut(withDuration: 0.35),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    // MARK: 🦔 Hedgehog — "Needle Barrage"
+
+    /// A TIMED turret: the hedgehog posts up where it lands and machine-guns
+    /// needles for a few seconds at five times Spark's fire rate. More spectacle
+    /// than damage on purpose (65% per needle) — it should feel like a delight,
+    /// not like the build's damage suddenly comes from a hedgehog.
+    ///
+    /// The generic timed-structure primitive: the Defensive Flower's aim-and-fire
+    /// loop, but on a clock instead of permanent-up-to-cap.
+    private struct CanonTurret {
+        let body: SKLabelNode
+        var life: TimeInterval
+        var cooldown: TimeInterval
+    }
+
+    private func launchNeedleTurret(_ animal: NatureCanon.Animal, at point: CGPoint) {
+        pounce(animal, to: point, spin: false) { [weak self] in
+            guard let self = self else { return }
+            let body = SKLabelNode(text: animal.emoji)
+            body.fontSize = GameConfig.NatureCanon.bodySize
+            body.verticalAlignmentMode = .center
+            body.horizontalAlignmentMode = .center
+            body.position = point
+            body.zPosition = 9
+            self.worldNode.addChild(body)
+            // A bristling quiver, so a posted hedgehog reads as ARMED rather
+            // than as a stray emoji sitting on the floor.
+            body.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.scale(to: 1.12, duration: 0.09),
+                SKAction.scale(to: 1.0, duration: 0.09)
+            ])))
+            self.canonTurrets.append(CanonTurret(
+                body: body,
+                life: GameConfig.NatureCanon.hedgehogDuration,
+                cooldown: 0
+            ))
+        }
+    }
+
+    // MARK: 🐦 Bluebird — "WTFROFLSTOMP"
+
+    /// A tiny bird that lands like an artillery shell: ~350% of Spark's ATK
+    /// across roughly three times the area of a starting Terra zone. The joy is
+    /// the mismatch between the body and the boom, so the telegraph is loud —
+    /// stacked rings and a real shake — while staying clearly short of an
+    /// Everglow eruption, which has to remain the biggest thing in the game.
+    private func launchEruption(_ animal: NatureCanon.Animal, at point: CGPoint) {
+        pounce(animal, to: point) { [weak self] in
+            guard let self = self else { return }
+            let radius = GameConfig.NatureCanon.bluebirdRadius
+            self.damageEnemiesInRadius(radius, around: point,
+                                       damage: self.canonDamage(GameConfig.NatureCanon.bluebirdDamageMult),
+                                       bossClassScaled: true, includeBoss: true)
+            self.showRingPulse(at: point, radius: radius, colorHex: 0x4FA8E8)          // bluebird
+            self.showRingPulse(at: point, radius: radius * 0.65, colorHex: 0xEAF6FF)   // shock core
+            self.showRingPulse(at: point, radius: radius * 0.3, colorHex: 0xFFDD55)    // flash
+            self.worldNode.shake(intensity: 7, duration: 0.22)
+        }
+    }
+
+    // MARK: 🦡 Badger — "Thief"
+
+    /// The honey badger takes what it wants: it eats up to three foes around the
+    /// impact and heals Spark for their HP.
+    ///
+    /// Two canon rules shape it. First, the heal is BOSS-CLASS SCALED — full off
+    /// normal mobs, halved off elites/minibosses/bosses — so a gauntlet can't be
+    /// heal-cheesed off the one big target in the room. Second, boss-class isn't
+    /// *devoured*: swallowing a miniboss whole is an execute, and the BossClass
+    /// canon only allows a capstone finisher to execute boss-class at or below
+    /// `executeThreshold`. Above it the badger takes a savage BITE instead and
+    /// heals off the damage it actually dealt.
+    private func launchDevour(_ animal: NatureCanon.Animal, at point: CGPoint) {
+        pounce(animal, to: point) { [weak self] in
+            guard let self = self else { return }
+            let radius = GameConfig.NatureCanon.badgerRadius
+            var healed = 0
+            var meals = 0
+
+            // Nearest first — it eats what's in its face, not what's convenient.
+            let prey = self.enemies
+                .filter { !$0.isDying && $0.position.distance(to: point) < radius }
+                .sorted { $0.position.distance(to: point) < $1.position.distance(to: point) }
+
+            for e in prey {
+                guard meals < GameConfig.NatureCanon.badgerMeals else { break }
+                meals += 1
+                if e.isMiniBoss && e.healthPercent > GameConfig.BossClass.executeThreshold {
+                    let bite = GameConfig.BossClass.scaledDamage(
+                        self.canonDamage(GameConfig.NatureCanon.badgerBiteMult), isBossClass: true)
+                    let dealt = min(bite, e.health)
+                    self.dealDirectDamage(bite, toEnemy: e)
+                    healed += Int(CGFloat(dealt) * GameConfig.BossClass.debuffScale)
+                } else {
+                    let worth = e.health
+                    let scale = e.isMiniBoss ? GameConfig.BossClass.debuffScale : 1.0
+                    self.dealDirectDamage(worth, toEnemy: e)      // devoured whole
+                    healed += Int(CGFloat(worth) * scale * GameConfig.NatureCanon.badgerHealFraction)
+                }
+                self.showRingPulse(at: e.position,
+                                   radius: GameConfig.NatureCanon.impactRadius * 0.6,
+                                   colorHex: 0xF5F0E6)           // badger stripe
+            }
+
+            // A boss in reach gets bitten if the badger still has an appetite —
+            // never devoured, and never for more than half the heal.
+            if meals < GameConfig.NatureCanon.badgerMeals,
+               let b = self.boss, !b.isDead,
+               b.position.distance(to: point) - b.targetingRadius < radius {
+                let bite = GameConfig.BossClass.scaledDamage(
+                    self.canonDamage(GameConfig.NatureCanon.badgerBiteMult), isBossClass: true)
+                let dealt = min(bite, b.health)
+                b.takeDamage(bite)
+                healed += Int(CGFloat(dealt) * GameConfig.BossClass.debuffScale)
+            }
+
+            guard healed > 0 else { return }
+            self.playerStats.heal(healed)
+            self.hpBar.flashHeal()
+            self.showRingPulse(at: self.player.position,
+                               radius: GameConfig.NatureCanon.impactRadius,
+                               colorHex: 0x5FCF62)
+        }
+    }
+
+    // MARK: 🦨 Skunk — "Persist" (and the Decay tree's foundation)
+
+    /// A poison cloud that REPRODUCES: anything that dies inside one leaves a
+    /// smaller cloud where it fell, which can go on to kill and seed again. In a
+    /// packed room the poison walks itself across the floor, which is the whole
+    /// fantasy — the thing that persists.
+    ///
+    /// BUILT WITH A LEASH, on purpose. Uncapped propagation is both a balance
+    /// problem and a frame-rate one (Growth already stacks zones, structures and
+    /// particles — the handoff warns about exactly this). Two independent caps:
+    /// a GENERATION depth, and a hard ceiling on live clouds. The Decay tree is
+    /// the one that later takes the leash off; this is where it will start, so
+    /// the caps are single constants rather than logic to unpick.
+    private struct PoisonCloud {
+        let node: SKShapeNode
+        let radius: CGFloat
+        var life: TimeInterval
+        var tick: TimeInterval
+        /// 0 = the skunk's own cloud; each child is one deeper.
+        let generation: Int
+    }
+
+    private func launchPoisonCloud(_ animal: NatureCanon.Animal, at point: CGPoint) {
+        pounce(animal, to: point) { [weak self] in
+            self?.spawnPoisonCloud(at: point, generation: 0)
+        }
+    }
+
+    private func spawnPoisonCloud(at point: CGPoint, generation: Int) {
+        guard poisonClouds.count < GameConfig.NatureCanon.skunkMaxClouds else { return }
+
+        let shrink = pow(GameConfig.NatureCanon.skunkChildRadiusFactor, CGFloat(generation))
+        let radius = GameConfig.NatureCanon.skunkRadius * shrink
+        let life = GameConfig.NatureCanon.skunkDuration
+            * pow(GameConfig.NatureCanon.skunkChildLifeFactor, TimeInterval(generation))
+
+        // Sickly chartreuse, NOT purple: purple is reserved for danger (ranged
+        // enemies, enemy projectiles) and this is the player's poison.
+        let node = SKShapeNode(circleOfRadius: radius)
+        node.fillColor = SKColor(hex: 0x7A9A2E, alpha: 0.20)
+        node.strokeColor = SKColor(hex: 0xA8C64A, alpha: 0.45)
+        node.lineWidth = 1.5
+        node.position = point
+        node.zPosition = 2
+        worldNode.addChild(node)
+        node.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.65, duration: 0.9),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.9)
+        ])))
+
+        poisonClouds.append(PoisonCloud(node: node, radius: radius,
+                                        life: life, tick: 0, generation: generation))
+    }
+
+    /// Tick every cloud, and seed a child wherever the poison itself made a kill.
+    private func updatePoisonClouds(_ dt: TimeInterval) {
+        guard !poisonClouds.isEmpty else { return }
+        let damage = Int(playerStats.effectiveAttack * GameConfig.NatureCanon.skunkTickFraction)
+        var seeds: [(point: CGPoint, generation: Int)] = []
+
+        for i in poisonClouds.indices.reversed() {
+            var cloud = poisonClouds[i]
+            cloud.life -= dt
+            if cloud.life <= 0 {
+                cloud.node.removeAllActions()
+                cloud.node.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.4),
+                                                  SKAction.removeFromParent()]))
+                poisonClouds.remove(at: i)
+                continue
+            }
+
+            cloud.tick -= dt
+            if cloud.tick <= 0 {
+                cloud.tick = GameConfig.NatureCanon.skunkTickInterval
+                let centre = cloud.node.position
+
+                var killed: [EnemyNode] = []
+                for e in enemies where !e.isDying
+                    && e.position.distance(to: centre) < cloud.radius {
+                    if e.takeDamage(GameConfig.BossClass.scaledDamage(damage,
+                                                                      isBossClass: e.isMiniBoss)) {
+                        killed.append(e)
+                    }
+                }
+                for e in killed {
+                    if let idx = enemies.firstIndex(where: { $0 === e }) {
+                        let pos = e.position, xp = e.xpValue
+                        enemies.remove(at: idx)
+                        onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+                        // THE propagation rule — and the leash on it.
+                        if cloud.generation < GameConfig.NatureCanon.skunkMaxGeneration {
+                            seeds.append((pos, cloud.generation + 1))
+                        }
+                    }
+                }
+
+                // The boss stands in it too; it just can't seed a child.
+                if let b = boss, !b.isDead,
+                   b.position.distance(to: centre) - b.targetingRadius < cloud.radius {
+                    b.takeDamage(GameConfig.BossClass.scaledDamage(damage, isBossClass: true))
+                }
+            }
+            poisonClouds[i] = cloud
+        }
+
+        // Seeded outside the walk so a new cloud can't be ticked into existence
+        // and then immediately ticked again in the same frame.
+        for seed in seeds { spawnPoisonCloud(at: seed.point, generation: seed.generation) }
+    }
+
+    private func updateCanonTurrets(_ dt: TimeInterval) {
+        guard !canonTurrets.isEmpty else { return }
+        // 500% of Spark's CURRENT attack speed — it rides his fire rate, so an
+        // attack-speed build makes the barrage genuinely absurd.
+        let interval = max(0.02, playerStats.effectiveFireInterval
+                           / GameConfig.NatureCanon.hedgehogFireRateMult)
+
+        for i in canonTurrets.indices.reversed() {
+            var turret = canonTurrets[i]
+            turret.life -= dt
+            if turret.life <= 0 {
+                turret.body.removeAllActions()
+                turret.body.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.25),
+                                                   SKAction.removeFromParent()]))
+                canonTurrets.remove(at: i)
+                continue
+            }
+
+            turret.cooldown -= dt
+            if turret.cooldown <= 0,
+               let mark = findPriorityTarget(from: turret.body.position,
+                                             maxRange: GameConfig.NatureCanon.hedgehogRange,
+                                             usePlayer: false) {
+                turret.cooldown = interval
+                let dir = (mark.position - turret.body.position).normalized
+                // Modifiers OFF, exactly like a flower: a needle must not echo,
+                // split, or get absorbed into a Glacial icicle.
+                fireProjectile(direction: dir,
+                               originOffset: turret.body.position - player.position,
+                               damageScale: GameConfig.NatureCanon.hedgehogNeedleDamage,
+                               allowModifiers: false)
+            }
+            canonTurrets[i] = turret
+        }
     }
 
     /// The rare mountain-lion pet: roams toward the nearest enemy, mauling on
@@ -2597,23 +3235,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             lionPet = nil
             return
         }
-        // Stalk the nearest enemy; maul on contact.
-        guard let prey = enemies.filter({ !$0.isDying })
-            .min(by: { lion.position.distance(to: $0.position) < lion.position.distance(to: $1.position) })
-        else { return }
+        if lionMaulCooldown > 0 { lionMaulCooldown -= dt }
+
+        // Stalk, then maul on contact.
+        //
+        // Two corrections to the C1.6 prototype, both of which made the jackpot
+        // behave wrongly rather than merely badly:
+        //   • it hunted `enemies` only, so the rarest thing in the roster simply
+        //     ignored the boss — the exact fight you want a lion for;
+        //   • it dealt its maul EVERY FRAME of contact, so `lionMaulMult` (named
+        //     "damage per maul") was really ~60× that per second and the lion
+        //     deleted whatever it brushed against. Now it's on a cooldown, which
+        //     is what "per maul" always meant.
+        guard let prey = findPriorityTarget(from: lion.position, usePlayer: false) else { return }
+        let pad: CGFloat = { if case .boss(let b) = prey { return b.targetingRadius }; return 0 }()
         let dir = (prey.position - lion.position).normalized
         lion.position += dir * GameConfig.Tree.lionSpeed * CGFloat(dt)
         lion.xScale = dir.x < 0 ? -1 : 1   // face travel
-        if lion.position.distance(to: prey.position) < 26 {
-            let dmg = Int(playerStats.effectiveAttack * GameConfig.Tree.lionMaulMult)
-            if prey.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: prey.isMiniBoss)) {
-                if let idx = enemies.firstIndex(where: { $0 === prey }) {
-                    let p = prey.position, xp = prey.xpValue
-                    enemies.remove(at: idx)
-                    onEnemyKilled(at: p, xpValue: xp, enemy: prey)
-                }
-            }
-        }
+
+        guard lionMaulCooldown <= 0,
+              lion.position.distance(to: prey.position) < GameConfig.Tree.lionMaulReach + pad
+        else { return }
+        lionMaulCooldown = GameConfig.Tree.lionMaulInterval
+        strikeCombatTarget(prey, damage: Int(playerStats.effectiveAttack * GameConfig.Tree.lionMaulMult))
+
+        // A claw-swipe punch so each maul reads as a discrete hit rather than a
+        // continuous grind.
+        lion.removeAction(forKey: "maul")
+        lion.run(SKAction.sequence([SKAction.scale(to: 1.35, duration: 0.07),
+                                    SKAction.scale(to: 1.0, duration: 0.1)]), withKey: "maul")
+        showRingPulse(at: prey.position,
+                      radius: GameConfig.NatureCanon.impactRadius * 0.55,
+                      colorHex: 0xD9A441)   // lion tawny
     }
 
     // MARK: - v2.0 Phase C (C1.5): Vine Wall — the garden's thorny hedge
@@ -5248,8 +5901,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// `bossClassScaled` halves damage on miniboss targets via the BossClass canon
     /// — set it for capstone AoEs (Everglow pulse, Iron Maiden burst), leave it
     /// off for non-capstone pulses (Aegis, Static Crown, etc.).
+    ///
+    /// `includeBoss` also reaches the ARENA/MONUMENT boss. This helper only ever
+    /// walked `enemies`, so every AoE routed through it quietly did nothing to a
+    /// boss — Nature Canon needs it to land in a gauntlet, and the Rift Cannon
+    /// had already hand-rolled the same boss arm inline. Opt-in, so existing
+    /// callers keep their exact behaviour until each is reviewed on its own.
+    /// Measured to the boss's SURFACE (`targetingRadius`), since a monument's
+    /// origin can be far off-body.
     private func damageEnemiesInRadius(_ radius: CGFloat, around position: CGPoint,
-                                       damage: Int, bossClassScaled: Bool = false) {
+                                       damage: Int, bossClassScaled: Bool = false,
+                                       includeBoss: Bool = false) {
+        if includeBoss, let b = boss, !b.isDead,
+           b.position.distance(to: position) - b.targetingRadius < radius {
+            b.takeDamage(bossClassScaled
+                         ? GameConfig.BossClass.scaledDamage(damage, isBossClass: true)
+                         : damage)
+        }
         var killed: [EnemyNode] = []
         for enemy in enemies where enemy.position.distance(to: position) < radius {
             let dmg = bossClassScaled
@@ -8626,6 +9294,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         treeGroundRegenAccumulator = 0
         lionPet?.removeFromParent(); lionPet = nil
         lionPetTimer = 0
+        lionMaulCooldown = 0
+        natureMissiles.forEach { $0.body.removeFromParent() }
+        natureMissiles.removeAll()
+        canonTurrets.forEach { $0.body.removeFromParent() }
+        canonTurrets.removeAll()
+        poisonClouds.forEach { $0.node.removeFromParent() }
+        poisonClouds.removeAll()
         groundTickAccumulator = 0
         groundRegenAccumulator = 0
         pendingTerraPlacement = false

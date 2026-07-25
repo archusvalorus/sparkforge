@@ -184,6 +184,133 @@ enum GameConfig {
         static var lionSpeed: CGFloat { 210 * DeviceScale.gameplay }
         /// Lion contact damage per maul, as a fraction of Spark's ATK.
         static let lionMaulMult: CGFloat = 0.6
+        /// Seconds between mauls. Before this existed the lion dealt its maul on
+        /// EVERY frame of contact — "per maul" was ~60× per second. If the pet
+        /// now feels toothless, raise `lionMaulMult`; don't remove the cooldown.
+        static let lionMaulInterval: TimeInterval = 0.45
+        /// Contact reach (a boss's targetingRadius is added on top).
+        static var lionMaulReach: CGFloat { 26 * DeviceScale.gameplay }
+    }
+
+    // MARK: - Nature Canon (the Tree T5 roster — v2.0 Phase C part 2)
+    /// Per-animal tuning for the launcher's roster. The BASE machine stays in
+    /// `Tree` above (cadence, the ~150% damage mult, the lion's own numbers);
+    /// everything here is what makes one animal differ from another.
+    ///
+    /// Read the multipliers as "on top of Tree.animalDamageMult", so a mult of
+    /// 1.0 is the roster's baseline ~150% of Spark's ATK.
+    enum NatureCanon {
+        // --- Tier weights (Brandon, locked) ---
+        // Normalized at roll time, so these are RATIOS, not percentages that
+        // must sum to 1.
+        static let weightCommon: CGFloat   = 0.50
+        static let weightUncommon: CGFloat = 0.25
+        static let weightRare: CGFloat     = 0.15
+        static let weightLion: CGFloat     = 0.05
+
+        /// The emoji stand-in's size. PLACEHOLDER ART — the sprite pass replaces
+        /// every launched body at once, on purpose, after the systems are proven.
+        static let bodySize: CGFloat = 26
+
+        // --- 🐰 Rabbit "Ninja Kick" ---
+        /// The rabbit AUTO-CRITS, and its crit is worth 300% rather than the
+        /// normal 200% — so the kick lands at 1.5 × 3.0 ≈ 450% of Spark's ATK on
+        /// a single target. Deliberately ridiculous (a ninja assassin rabbit);
+        /// this is the number NOT to quietly balance away.
+        static let rabbitCritMult: CGFloat = 3.0
+        /// A shorter flight than the rest of the roster — an assassin snaps in.
+        static let rabbitFlight: TimeInterval = 0.28
+
+        // --- 🐿️ Squirrel "Scatter" ---
+        /// The squirrel's own landing is modest; its payload is the acorns.
+        static let squirrelImpactMult: CGFloat = 0.7
+        static let squirrelRadiusMult: CGFloat = 0.9
+        static let acornCount: Int = 5
+        /// An acorn as a fraction of a normal player shot (the Seed Spore
+        /// fragment precedent — it rides the same projectile pipeline).
+        static let acornDamageFraction: CGFloat = 0.35
+        static var acornRange: CGFloat { 165 * DeviceScale.gameplay }
+
+        // --- 🦊 Fox "Homing Fur-Missile" ---
+        /// It stays a fox: it doesn't arc to a spot, it CHASES. The steering
+        /// blend below is the reusable homing primitive (Panda samurai next).
+        static var foxSpeed: CGFloat { 300 * DeviceScale.gameplay }
+        /// How hard it turns toward its mark each second. High enough to catch a
+        /// runner, low enough that it visibly arcs instead of snapping.
+        static let foxTurnRate: CGFloat = 7.0
+        /// How close counts as arrival (added to a boss's targetingRadius, so a
+        /// monument's surface counts rather than its far-off origin).
+        static var foxImpactDistance: CGFloat { 26 * DeviceScale.gameplay }
+        /// Failsafe: a missile whose mark dies mid-flight detonates instead of
+        /// flying forever.
+        static let foxLifetime: TimeInterval = 3.0
+        static let foxImpactMult: CGFloat = 1.1
+        static let foxRadiusMult: CGFloat = 1.2
+
+        // --- 🦌 Deer "Trample" ---
+        /// ~220% of Spark's ATK once the launcher's 1.5× is applied.
+        static let deerDamageMult: CGFloat = 1.47
+        static var deerKnockback: CGFloat { 54 * DeviceScale.gameplay }
+
+        // --- 🦫 Boar "BOAR GORE!" ---
+        /// Per-enemy damage as it barrels through. Lower than the Deer's single
+        /// hit because a good charge line collects a whole crowd.
+        static let boarDamageMult: CGFloat = 0.9
+        static var boarSpeed: CGFloat { 460 * DeviceScale.gameplay }
+        /// How wide the charge's goring band is.
+        static var boarGoreRadius: CGFloat { 34 * DeviceScale.gameplay }
+        /// Sideways shove per enemy gored (applied once, not per frame).
+        static var boarShove: CGFloat { 40 * DeviceScale.gameplay }
+        /// Long enough to cross the arena and exit the far side.
+        static let boarLifetime: TimeInterval = 2.2
+
+        // --- 🦔 Hedgehog "Needle Barrage" ---
+        static let hedgehogDuration: TimeInterval = 3.0
+        /// Fires at this multiple of Spark's CURRENT attack speed.
+        static let hedgehogFireRateMult: TimeInterval = 5.0
+        /// Each needle as a fraction of a normal shot — spectacle over damage.
+        static let hedgehogNeedleDamage: CGFloat = 0.65
+        static var hedgehogRange: CGFloat { 260 * DeviceScale.gameplay }
+
+        // --- 🐦 Bluebird "WTFROFLSTOMP" ---
+        /// ~350% of Spark's ATK once the launcher's 1.5× is applied.
+        static let bluebirdDamageMult: CGFloat = 2.33
+        /// ~3× the AREA of a starting Terra zone — so √3 × its radius. Big, and
+        /// deliberately still short of an Everglow eruption.
+        static var bluebirdRadius: CGFloat { Growth.terraRadius * 1.732 }
+
+        // --- 🦡 Badger "Thief" ---
+        static let badgerMeals: Int = 3
+        static var badgerRadius: CGFloat { 120 * DeviceScale.gameplay }
+        /// Heal as a fraction of a devoured normal mob's HP. THE tuning lever if
+        /// a dense crowd turns the badger into a full heal — drop this, not the
+        /// meal count (three is the flavour).
+        static let badgerHealFraction: CGFloat = 1.0
+        /// What a bite costs a boss-class target it can't swallow.
+        static let badgerBiteMult: CGFloat = 1.6
+
+        // --- 🦨 Skunk "Persist" — the propagating poison ---
+        static var skunkRadius: CGFloat { 82 * DeviceScale.gameplay }
+        static let skunkDuration: TimeInterval = 6.0
+        static let skunkTickInterval: TimeInterval = 0.5
+        /// Damage per tick as a fraction of Spark's ATK. At a 0.5s tick this is
+        /// ~60% ATK per second — potent, and clearly above burn or bleed, which
+        /// is what the poison is supposed to be. THE damage lever.
+        static let skunkTickFraction: CGFloat = 0.30
+        /// Propagation leash #1 — how many generations deep a chain may go.
+        /// 0 is the skunk's own cloud, so 3 means three inherited hops.
+        static let skunkMaxGeneration: Int = 3
+        /// Propagation leash #2 — a hard ceiling on live clouds, the frame-rate
+        /// backstop independent of depth.
+        static let skunkMaxClouds: Int = 12
+        /// Children are smaller and shorter-lived than their parent, so a chain
+        /// visibly runs out of steam even before it hits the caps.
+        static let skunkChildRadiusFactor: CGFloat = 0.72
+        static let skunkChildLifeFactor: TimeInterval = 0.75
+
+        // --- Shared impact ---
+        /// Baseline AoE footprint of a landing animal, before its radius mult.
+        static var impactRadius: CGFloat { 46 * DeviceScale.gameplay }
     }
 
     // MARK: - Card Drafting (v2.0 Phase C)

@@ -110,3 +110,77 @@ reskin it onto FamiliarNode/Apex summon framework.
 10 bespoke sprites + animations: 9 launched animals (launch + impact anims) and
 the lion pet (idle/prowl/maul). Built alongside the Panda kaiju/samurai and the
 skin roster in one art sprint.
+
+---
+
+# BUILD STATUS — Jul 25 2026
+
+**All ten animals are BUILT and building clean** (zero new warnings; static sim
+launch clean at 60fps). **Not committed** — awaiting Brandon's feel pass.
+
+## Where it lives
+- **`Sparkforge/Systems/NatureCanon.swift`** (new) — the roster: identity, tier,
+  behaviour, and the weighted roll. `TreeAnimal` (the C1.6 tuple) is gone.
+- **`GameScene`** — the behaviours. Each is one `launchX` function under the
+  `NATURE CANON roster` mark, dispatched from `launch(_:at:)`.
+- **`GameConfig.NatureCanon`** — every number, per-animal.
+
+`NatureCanon.Animal.isLive` staged the tiers unit by unit; all ten are `true`
+now, so **that field has done its job and can be deleted** in a later cleanup.
+
+## Units, as built
+1. **N1** — behaviour model + weighted tier roll + Commons (Rabbit/Squirrel/Fox)
+2. **N2** — Uncommons (Deer/Boar/Hedgehog)
+3. **N3** — Rares (Bluebird/Badger)
+4. **N4** — Skunk propagation (capped)
+5. **N5** — lion refinement
+
+## Reusable primitives this sprint produced
+- **`NatureMissile`** — homing *and* straight-line piercing charges in one list
+  (Fox + Boar). **The Panda samurai should call this, not grow a second copy.**
+- **`CanonTurret`** — the timed structure (Hedgehog), i.e. a Defensive Flower on
+  a clock.
+- **`PoisonCloud`** — the propagating DoT. **The Decay tree starts here.**
+- **`damageEnemiesInRadius(includeBoss:)`** — see the defect note below.
+
+## Decisions made during the build (Brandon to confirm)
+- **Tier weights normalize.** The locked table sums to 0.95; the roll normalizes
+  by the live total, so the *ratios* are exactly as locked.
+- **The lion is a tier**, not a pre-roll coin-flip. While one prowls its tier
+  drops out and the rest renormalize.
+- **The Badger does not devour boss-class above `executeThreshold`.** Swallowing
+  a miniboss whole is an execute, and BossClass canon reserves that for ≤10% HP.
+  Above it, the badger takes a savage bite and heals off the damage dealt.
+  Below it, it eats — a rare "holy shit" finish, exactly as the canon describes.
+- **Skunk's leash is two caps**: generation depth (3) and a hard ceiling on live
+  clouds (12). Children also shrink and shorten, so a chain visibly runs out of
+  steam before it hits either. Decay removes the leash later.
+- **Poison is chartreuse, not purple** — purple stays reserved for danger.
+
+## Defects found and fixed en route
+- **`damageEnemiesInRadius` never touched the boss.** It only ever walked
+  `enemies`, so every AoE routed through it did *nothing* to an arena or
+  monument boss. Added an opt-in `includeBoss:` (surface-aware). **Existing
+  callers were left untouched on purpose — several of them are probably wrong
+  too and deserve their own review pass.**
+- **The lion mauled every frame of contact.** `lionMaulMult` is documented as
+  "damage per maul" but had no cooldown, so it was ~60× that per second and the
+  pet deleted whatever it brushed. Now on `lionMaulInterval`. *This makes the
+  lion weaker — if it now feels toothless, raise the mult, don't remove the
+  cooldown.*
+- **The lion ignored the boss entirely** (hunted `enemies` only). Now uses
+  `findPriorityTarget`.
+
+## OPEN — needs a call, not a build
+- **Kill accounting.** Kills from `damageEnemiesInRadius` spawn XP directly and
+  bypass `onEnemyKilled`, so they don't count toward `killCount` — which is now
+  the per-run arena-boss gate. Pre-existing (the Ember Burst precedent), but
+  Nature Canon does a *lot* of AoE killing, so a Growth build may notice the
+  boss taking longer to answer. Left alone deliberately: routing it through
+  `onEnemyKilled` risks double XP orbs and is a balance decision, not a fix.
+- **Launch targeting origin.** `findPriorityTarget()` still resolves "nearest"
+  from **Spark**, not from the Tree. Boss-first priority makes this moot most of
+  the time, and changing it is a feel call — left as shipped.
+- **Tuning to feel:** Rabbit's ~450% (intended-absurd), Badger heal in a dense
+  crowd (`badgerHealFraction` is the lever), Skunk `skunkTickFraction`, and
+  whether the Bluebird's radius reads as huge without eclipsing Everglow.
