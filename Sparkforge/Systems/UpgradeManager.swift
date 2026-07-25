@@ -331,12 +331,30 @@ final class UpgradeManager {
         }
 
         // v2.0 (C2): the panda takes its slot LAST, so nothing can displace it —
-        // not gateway pity, not a capstone guarantee. You cannot reroll the
-        // panda. It claims the front slot; capstones fill from the back, so the
-        // two only collide in a 1-card spread.
+        // not gateway pity, not a capstone guarantee. You cannot reroll the panda.
+        //
+        // It sits in the MIDDLE. Gateway pity claims the front (`drawn[0]`) and
+        // the capstone guarantee fills from the back, so the middle is the only
+        // seat nobody else has a claim on. Taking the front instead would have
+        // quietly suppressed Terra's pity for the whole level 2–5 window on any
+        // panda-eligible run — a gateway you can't find is a tree that doesn't
+        // exist, and the panda would have been eating exactly that guarantee.
         if allowSecret, let panda = pandaOffer(atLevel: level),
            !drawn.contains(where: { $0.id == panda.id }) {
-            if drawn.isEmpty { drawn.append(panda) } else { drawn[0] = panda }
+            if drawn.isEmpty {
+                drawn.append(panda)
+            } else {
+                let capstoneIDs = Set(inProgress.map { $0.id })
+                let middle = drawn.count / 2
+                // If the middle happens to hold a guaranteed capstone, step to
+                // any other non-front, non-capstone seat. Only a spread too
+                // small to have one falls back to the front: the panda always
+                // gets a seat, it just stops taking someone else's first.
+                let seat = capstoneIDs.contains(drawn[middle].id)
+                    ? (drawn.indices.first { $0 != 0 && !capstoneIDs.contains(drawn[$0].id) } ?? 0)
+                    : middle
+                drawn[seat] = panda
+            }
         }
 
         #if DEBUG
