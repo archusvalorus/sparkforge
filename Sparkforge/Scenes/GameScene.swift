@@ -250,6 +250,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var canonTurrets: [CanonTurret] = []
     /// Live Skunk poison — the propagating one. Capped; see GameConfig.
     private var poisonClouds: [PoisonCloud] = []
+    /// v2.0 (C2): pandas currently in the arena, and the clock until the next
+    /// one wanders in.
+    private var pandas: [Panda] = []
+    private var pandaArrivalTimer: TimeInterval = 0
+    private var napHealAccumulator: TimeInterval = 0
+    /// T5: the cadence clock, and the seconds left of actually being a kaiju.
+    private var pandaKaijuTimer: TimeInterval = 0
+    private var kaijuRemaining: TimeInterval = 0
+    private var kaijuHitTimer: TimeInterval = 0
+    var kaijuActive: Bool { kaijuRemaining > 0 }
     /// Seconds Spark has spent standing on cultivated ground. Only advances
     /// while he's actually on it, and deliberately NOT reset when he steps off
     /// — the ground is feeding him, so stepping out to dodge shouldn't erase
@@ -976,7 +986,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Account for Dynamic Island / notch — push further down
         let safeTop = view.bounds.height / 2 - 80
         let safeLeft = -view.bounds.width / 2 + 20
-        
+
+        #if DEBUG
+        // A dev seam left switched on is indistinguishable from a bug. Panda's
+        // seam in particular hides inside a 9.27% roll, so a stale flag would
+        // look exactly like "the mutation fired again" — say so on screen.
+        if GameConfig.Panda.debugAlwaysEligible {
+            let seam = SKLabelNode(fontNamed: "Menlo-Bold")
+            seam.text = "⚠︎ DEBUG — panda always eligible"
+            seam.fontSize = 9
+            seam.fontColor = SKColor(hex: 0xFFCC44)
+            seam.horizontalAlignmentMode = .left
+            seam.verticalAlignmentMode = .center
+            seam.position = CGPoint(x: safeLeft, y: -view.bounds.height / 2 + 30)
+            seam.zPosition = 300
+            camera.addChild(seam)
+        }
+        #endif
+
         // Timer — top center, most prominent
         timerLabel.fontSize = 20
         timerLabel.fontColor = SKColor(hex: 0xAAAAAA)
@@ -2191,7 +2218,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         AudioManager.shared.play(.cardSelect)
         let card = selectedNode.card
         let tierBefore = upgradeManager.tier(of: card.id)
-        upgradeManager.pickCard(card, stats: playerStats)
+        upgradeManager.pickCard(card, stats: playerStats, level: player.currentLevel)
 
         // v2.0 Phase C: Growth's territory logic on a chosen pick.
         //   • Terra (the first Growth card, zones still empty) — DEFER to the
@@ -2230,6 +2257,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 pendingCapstones.append(CardMaxReveal(
                     tag: card.tag, cardName: card.name,
                     effect: card.description(forTier: card.maxTier), isCapstone: true))
+            } else if card.id == GameConfig.Panda.cardID {
+                // v2.0 (C2): PANDA gets the grand reveal without being flagged
+                // `isCapstone` — that flag drives the draft's focus-and-finish
+                // lockout, and a secret tree must never block a player's real
+                // capstone or eat its guaranteed slot. So: the modal, by hand.
+                // Title PANDA, effect `???`, and it stays `???` forever.
+                pendingCapstones.append(CardMaxReveal(
+                    tag: card.tag, cardName: card.name(forTier: card.maxTier),
+                    effect: "???", isCapstone: true))
+                beginKaiju()
             } else {
                 showBuildHint("★ \(card.name) maxed")
             }
@@ -2456,6 +2493,687 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ])
         player.run(SKAction.repeat(blink, count: 4), withKey: "invulnBlink")
         gameState = .playing
+    }
+
+    // MARK: - v2.0 (C2): Panda.
+
+    /// The one thing a panda has come to do.
+    ///
+    /// Note what this enum is NOT: it is not chosen by need, threat, build, or
+    /// any reading of the board. A panda arrives, picks something, does it, and
+    /// leaves. Kind of helpful. Never disciplined. If a future pass makes this
+    /// selection clever, the joke dies — the pandas have to be pandas.
+    private enum PandaAct: CaseIterable {
+        // T1 "Pandas." — one mildly useful thing
+        case roll       // barrels through whatever happens to be there
+        case sit        // sits down; shots hit the panda instead of you
+        case aggro      // becomes briefly, inexplicably interesting
+        case bamboo     // leaves bamboo behind
+        case pleased    // occupies space, looking pleased
+
+        // T2 "Panda!" — more proactive
+        case bodyCheck  // shoulder-checks something, hard
+
+        // T3 "Panda...?" — raises questions
+        case portal     // leaves via a portal that was not there before
+        case stack      // a second panda arrives and climbs on. no reason given
+        case follow     // shadows an elite. does not attack it. just follows
+        case rain       // bamboo falls from above
+        case hat        // wears a tiny hat, then leaves
+
+        // T4 "Panda." — meaningfully, inconsistently helpful
+        case pin        // holds something still
+        case nap        // sleeps. the sleeping is somehow restorative
+        case avalanche  // several pandas tumble through. badly coordinated
+
+        /// Not in the random pool at all — the samurai has its own roll.
+        case samurai
+
+        /// The rung at which this becomes possible. Nothing is ever removed from
+        /// the pool — a T5 run can still get a panda that just looks pleased,
+        /// which is important.
+        var minTier: Int {
+            switch self {
+            case .roll, .sit, .aggro, .bamboo, .pleased: return 1
+            case .bodyCheck: return 2
+            case .portal, .stack, .follow, .rain, .hat: return 3
+            case .pin, .nap, .avalanche: return 4
+            case .samurai: return .max     // never drawn; rolled separately
+            }
+        }
+    }
+
+    private enum PandaPhase {
+        case approaching
+        case acting
+        case lingering
+    }
+
+    private struct Panda {
+        let node: PandaNode
+        let act: PandaAct
+        var phase: PandaPhase
+        var timer: TimeInterval
+        var destination: CGPoint
+        var rollDir: CGPoint = .zero
+        var rollTravelled: CGFloat = 0
+        var struck: Set<ObjectIdentifier> = []
+        var leaving = false
+        /// The thing a `follow` (or `pin`) panda has decided is its business.
+        /// Weak: it is under no obligation to outlive its subject.
+        weak var followMark: EnemyNode?
+        /// The samurai's mark, refreshed while it walks. Held as a CombatTarget
+        /// because it may be the boss.
+        var samuraiMark: CombatTarget?
+    }
+
+    /// Arrivals and departures. Runs only when a run has pandas at all, which is
+    /// 9.27% of runs that then also took the card.
+    private func updatePandas(_ dt: TimeInterval) {
+        guard playerStats.pandaTier >= 1 else { return }
+
+        pandaArrivalTimer += dt
+        if pandaArrivalTimer >= GameConfig.Panda.arrivalInterval(tier: playerStats.pandaTier) {
+            pandaArrivalTimer = 0
+            spawnPanda()
+        }
+
+        for i in pandas.indices.reversed() {
+            var panda = pandas[i]
+            // A panda on its way out is running an SKAction and is no longer
+            // simulated; its completion removes it from the list.
+            guard panda.node.parent != nil else { pandas.remove(at: i); continue }
+            guard !panda.leaving else { continue }
+
+            switch panda.phase {
+            case .approaching:
+                // The samurai walks CALMLY, and keeps walking to wherever its
+                // mark has got to. If the mark dies on the way, it simply bows
+                // and leaves — which is funnier than reacquiring.
+                var speed = GameConfig.Panda.walkSpeed
+                if panda.act == .samurai {
+                    speed = GameConfig.Panda.samuraiWalkSpeed
+                    if let mark = panda.samuraiMark, let live = stillValid(mark) {
+                        panda.samuraiMark = live
+                        panda.destination = live.position
+                    } else {
+                        panda.samuraiMark = nil
+                        panda.node.bow()
+                        panda.phase = .lingering
+                        panda.timer = 1.0
+                        pandas[i] = panda
+                        continue
+                    }
+                }
+                if panda.node.waddle(toward: panda.destination, speed: speed, dt: dt) {
+                    panda.phase = .acting
+                    panda.timer = GameConfig.Panda.lingerDuration
+                    beginPandaAct(&panda)
+                }
+
+            case .acting:
+                panda.timer -= dt
+                let done = runPandaAct(&panda, dt: dt)
+                if done || panda.timer <= 0 {
+                    endPandaAct(&panda)
+                    panda.phase = .lingering
+                    panda.timer = TimeInterval.random(in: 0.8...2.0)
+                }
+
+            case .lingering:
+                panda.timer -= dt
+                if panda.timer <= 0 {
+                    panda.leaving = true
+                    let node = panda.node
+                    node.leave { [weak self] in
+                        self?.pandas.removeAll { $0.node === node }
+                    }
+                }
+            }
+            pandas[i] = panda
+        }
+    }
+
+    /// A panda wanders in from off the rim and heads roughly toward the action —
+    /// "roughly" being load-bearing.
+    private func spawnPanda() {
+        guard pandas.count < GameConfig.Panda.maxPandas else { return }
+
+        let angle = CGFloat.random(in: 0..<(2 * .pi))
+        let entry = CGPoint(x: cos(angle), y: sin(angle)) * (GameConfig.Arena.radius * 0.98)
+
+        // Somewhere near something. Not the nearest threat, not the biggest — a
+        // random enemy if any exist, otherwise a spot near Spark.
+        let anchor = enemies.filter { !$0.isDying }.randomElement()?.position ?? player.position
+        let jitter = CGPoint(x: CGFloat.random(in: -70...70), y: CGFloat.random(in: -70...70))
+            * DeviceScale.gameplay
+        var destination = anchor + jitter
+        let limit = GameConfig.Arena.radius * 0.9
+        if destination.length > limit { destination = destination.normalized * limit }
+
+        let node = PandaNode()
+        node.position = entry
+        worldNode.addChild(node)
+
+        // The samurai. It is 5%. That is the entire trigger, and it is never
+        // going to be anything else — the community can theorise for as long as
+        // it likes.
+        let tier = playerStats.pandaTier
+        var act: PandaAct
+        var mark: CombatTarget?
+        if tier >= GameConfig.Panda.samuraiMinTier,
+           CGFloat.random(in: 0..<1) < GameConfig.Panda.samuraiChance,
+           let target = findSamuraiTarget() {
+            act = .samurai
+            mark = target
+            destination = target.position
+            node.equipSword()
+        } else {
+            // Otherwise: uniform across everything unlocked. No weighting by
+            // usefulness, no reading of the board — a panda in a boss fight is
+            // exactly as likely to sit down as to charge.
+            act = PandaAct.allCases.filter { $0.minTier <= tier }.randomElement() ?? .pleased
+        }
+
+        var panda = Panda(node: node,
+                          act: act,
+                          phase: .approaching,
+                          timer: 0,
+                          destination: destination)
+        panda.samuraiMark = mark
+        pandas.append(panda)
+    }
+
+    /// The samurai's own priority: elite > miniboss > boss > highest-HP normal.
+    ///
+    /// Deliberately NOT `findPriorityTarget` — that rule is boss-first-nearest,
+    /// and the samurai does not care what is nearest or what is winning. This
+    /// codebase treats elite and miniboss as one class (`isMiniBoss`), so in
+    /// practice the ladder resolves miniboss → boss → the healthiest normal.
+    ///
+    /// It will never be explained in-game.
+    private func findSamuraiTarget() -> CombatTarget? {
+        if let elite = enemies.filter({ $0.isMiniBoss && !$0.isDying })
+            .max(by: { $0.health < $1.health }) {
+            return .enemy(elite)
+        }
+        if let boss = boss, !boss.isDead { return .boss(boss) }
+        if let fattest = enemies.filter({ !$0.isDying })
+            .max(by: { $0.health < $1.health }) {
+            return .enemy(fattest)
+        }
+        return nil
+    }
+
+    /// One strike. Whatever it was, it is not there any more.
+    private func resolveSamuraiStrike(_ panda: inout Panda) {
+        guard let mark = panda.samuraiMark, let live = stillValid(mark) else { return }
+
+        switch live {
+        case .enemy(let e):
+            if e.isMiniBoss, e.healthPercent > GameConfig.BossClass.executeThreshold {
+                // Boss-class above the execute floor can't be deleted (canon) —
+                // so it takes something catastrophic instead.
+                dealDirectDamage(GameConfig.BossClass.scaledDamage(
+                    Int(playerStats.effectiveAttack * GameConfig.Panda.samuraiCatastrophicMult),
+                    isBossClass: true), toEnemy: e)
+            } else {
+                dealDirectDamage(e.health, toEnemy: e)      // deleted
+            }
+        case .boss(let b):
+            if b.healthPercent <= GameConfig.BossClass.executeThreshold {
+                b.takeDamage(b.health)                      // a rare, earned finish
+            } else {
+                b.takeDamage(GameConfig.BossClass.scaledDamage(
+                    Int(playerStats.effectiveAttack * GameConfig.Panda.samuraiCatastrophicMult),
+                    isBossClass: true))
+            }
+        }
+
+        // A clean horizontal cut. No colour of any tree — this belongs to nobody.
+        let cut = SKShapeNode(rectOf: CGSize(width: 90 * DeviceScale.gameplay, height: 2))
+        cut.fillColor = SKColor(hex: 0xF2F0EA, alpha: 0.95)
+        cut.strokeColor = .clear
+        cut.glowWidth = 3
+        cut.position = live.position
+        cut.zPosition = 12
+        worldNode.addChild(cut)
+        cut.run(SKAction.sequence([
+            SKAction.group([SKAction.scaleX(to: 1.5, duration: 0.18),
+                            SKAction.fadeOut(withDuration: 0.28)]),
+            SKAction.removeFromParent()
+        ]))
+        worldNode.shake(intensity: 5, duration: 0.16)
+    }
+
+    /// The second panda in a `stack`. Arrives already on top, having skipped the
+    /// walking-over part entirely.
+    private func spawnStackedPanda(on base: PandaNode) {
+        guard pandas.count < GameConfig.Panda.maxPandas else { return }
+        let node = PandaNode()
+        node.setBodyScale(0.85)
+        node.position = base.position + CGPoint(x: 0, y: 16 * DeviceScale.gameplay)
+        node.zPosition = base.zPosition + 0.1
+        node.alpha = 0
+        worldNode.addChild(node)
+        node.run(SKAction.fadeIn(withDuration: 0.25))
+        node.lookPleased()
+
+        pandas.append(Panda(node: node,
+                            act: .pleased,
+                            phase: .lingering,
+                            timer: GameConfig.Panda.stackLinger,
+                            destination: node.position))
+    }
+
+    private func beginPandaAct(_ panda: inout Panda) {
+        switch panda.act {
+        case .roll:
+            // It rolls the way it happens to be facing-ish: toward some enemy,
+            // chosen without ceremony.
+            let mark = enemies.filter { !$0.isDying }.randomElement()?.position
+            let dir = ((mark ?? player.position) - panda.node.position).normalized
+            panda.rollDir = dir == .zero ? CGPoint(x: 1, y: 0) : dir
+            panda.node.startRolling()
+        case .sit:
+            panda.node.sit()
+        case .aggro:
+            panda.timer = min(panda.timer, GameConfig.Panda.aggroDuration)
+        case .bamboo:
+            dropBamboo(at: panda.node.position)
+            panda.node.bounce()
+        case .pleased:
+            panda.node.lookPleased()
+
+        case .bodyCheck:
+            // Squares up with something and commits. The only panda act with
+            // anything resembling intent.
+            let mark = enemies.filter { !$0.isDying }
+                .min(by: { panda.node.position.distance(to: $0.position)
+                         < panda.node.position.distance(to: $1.position) })
+            guard let target = mark else { panda.node.lookPleased(); return }
+            let dir = (target.position - panda.node.position).normalized
+            panda.rollDir = dir == .zero ? CGPoint(x: 1, y: 0) : dir
+            panda.node.run(SKAction.sequence([
+                SKAction.move(by: CGVector(dx: -dir.x * 10, dy: -dir.y * 10), duration: 0.12),
+                SKAction.move(by: CGVector(dx: dir.x * 34, dy: dir.y * 34), duration: 0.09)
+            ]))
+            let damage = Int(playerStats.effectiveAttack * GameConfig.Panda.bodyCheckDamageMult)
+            dealDirectDamage(GameConfig.BossClass.scaledDamage(damage,
+                                                               isBossClass: target.isMiniBoss),
+                             toEnemy: target)
+            target.applyKnockback(from: panda.node.position,
+                                  force: GameConfig.Panda.bodyCheckKnockback)
+            panda.node.bounce()
+
+        case .portal:
+            let node = panda.node
+            panda.leaving = true
+            node.enterPortal { [weak self] in
+                self?.pandas.removeAll { $0.node === node }
+            }
+
+        case .stack:
+            spawnStackedPanda(on: panda.node)
+            panda.node.sit()
+
+        case .follow:
+            // Prefers something important. Does nothing to it.
+            panda.followMark = enemies.first { $0.isMiniBoss && !$0.isDying }
+                ?? enemies.filter { !$0.isDying }.randomElement()
+            panda.timer = GameConfig.Panda.followDuration
+
+        case .hat:
+            panda.node.wearHat()
+            panda.node.lookPleased()
+
+        case .rain:
+            // Bamboo falls from above. Most of it is just bamboo.
+            for i in 0..<GameConfig.Panda.rainStalks {
+                let offset = CGPoint(x: CGFloat.random(in: -60...60),
+                                     y: CGFloat.random(in: -50...50)) * DeviceScale.gameplay
+                let landing = panda.node.position + offset
+                let real = (i == 0)   // exactly one stalk is worth anything
+                dropFallingBamboo(at: landing, isPickup: real)
+            }
+            panda.node.lookPleased()
+
+        case .pin:
+            // Sits on something. It cannot leave. Nobody is enjoying this.
+            if let victim = enemies.filter({ !$0.isDying && !$0.isMiniBoss })
+                .min(by: { panda.node.position.distance(to: $0.position)
+                         < panda.node.position.distance(to: $1.position) }) {
+                panda.followMark = victim
+                panda.timer = GameConfig.Panda.pinDuration
+                panda.node.position = victim.position
+                panda.node.sit()
+            } else {
+                panda.node.lookPleased()
+            }
+
+        case .nap:
+            panda.node.sit()
+            panda.timer = GameConfig.Panda.napDuration
+            let zone = SKShapeNode(circleOfRadius: GameConfig.Panda.napRadius)
+            zone.name = "napZone"
+            zone.fillColor = SKColor(hex: 0x4F7FBF, alpha: 0.12)
+            zone.strokeColor = SKColor(hex: 0x8FB6E8, alpha: 0.35)
+            zone.lineWidth = 1
+            zone.zPosition = -1
+            panda.node.addChild(zone)
+            zone.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.55, duration: 1.2),
+                SKAction.fadeAlpha(to: 1.0, duration: 1.2)
+            ])))
+
+        case .avalanche:
+            // Several pandas tumble through in a rough line. "Rough" is the
+            // operative word: the spacing is wrong and one of them is late.
+            let dir = (player.position - panda.node.position).normalized
+            let heading = dir == .zero ? CGPoint(x: 1, y: 0) : dir
+            panda.rollDir = heading
+            panda.node.startRolling()
+            for i in 1..<GameConfig.Panda.avalanchePandas {
+                let lateral = CGPoint(x: -heading.y, y: heading.x)
+                    * CGFloat.random(in: -34...34) * DeviceScale.gameplay
+                let start = panda.node.position + lateral
+                    - heading * CGFloat(i) * 26 * DeviceScale.gameplay
+                spawnAvalanchePanda(at: start, heading: heading,
+                                    delay: TimeInterval(i) * TimeInterval.random(in: 0.1...0.35))
+            }
+
+        case .samurai:
+            let node = panda.node
+            node.strike { [weak self] in
+                guard let self = self else { return }
+                guard let idx = self.pandas.firstIndex(where: { $0.node === node }) else { return }
+                var live = self.pandas[idx]
+                self.resolveSamuraiStrike(&live)
+                live.node.bow()
+                self.pandas[idx] = live
+            }
+        }
+    }
+
+    /// One more tumbling panda in an avalanche. Its own little roll, on its own
+    /// slightly wrong schedule.
+    private func spawnAvalanchePanda(at start: CGPoint, heading: CGPoint, delay: TimeInterval) {
+        guard pandas.count < GameConfig.Panda.maxPandas else { return }
+        let node = PandaNode()
+        node.position = start
+        node.alpha = 0
+        worldNode.addChild(node)
+        node.run(SKAction.sequence([SKAction.wait(forDuration: delay),
+                                    SKAction.fadeIn(withDuration: 0.15),
+                                    SKAction.run { node.startRolling() }]))
+
+        var panda = Panda(node: node,
+                          act: .roll,
+                          phase: .acting,
+                          timer: GameConfig.Panda.lingerDuration,
+                          destination: start)
+        panda.rollDir = heading
+        pandas.append(panda)
+    }
+
+    // MARK: PANDA. (T5)
+
+    /// The kaiju cadence. On a long clock, Spark stops being Spark.
+    ///
+    /// It reads out on the CapstoneTimerHUD as `???` — the player gets to learn
+    /// the RHYTHM (which is real agency: you can bank a fight for it) without
+    /// ever being told what the rhythm is for. That's the line this tree walks
+    /// everywhere: legible cadence, illegible cause.
+    private func updatePandaKaiju(_ dt: TimeInterval) {
+        guard playerStats.pandaTier >= 5 else { return }
+
+        if kaijuRemaining > 0 {
+            kaijuRemaining -= dt
+            capstoneTimers.set("panda", label: "??? ", colorHex: 0xFF8A3C,
+                               remaining: kaijuRemaining)
+            kaijuHitTimer -= dt
+            if kaijuHitTimer <= 0 {
+                kaijuHitTimer = GameConfig.Panda.kaijuHitInterval
+                kaijuMaul()
+            }
+            if kaijuRemaining <= 0 { endKaiju() }
+            return
+        }
+
+        pandaKaijuTimer += dt
+        capstoneTimers.set("panda", label: "???", colorHex: 0x9A8E88,
+                           remaining: GameConfig.Panda.kaijuInterval - pandaKaijuTimer)
+        if pandaKaijuTimer >= GameConfig.Panda.kaijuInterval {
+            pandaKaijuTimer = 0
+            beginKaiju()
+        }
+    }
+
+    private func beginKaiju() {
+        guard kaijuRemaining <= 0 else { return }
+        kaijuRemaining = GameConfig.Panda.kaijuDuration
+        kaijuHitTimer = 0
+        player.setKaiju(true)
+        worldNode.shake(intensity: 9, duration: 0.4)
+        AudioManager.shared.play(.bossEntrance)
+    }
+
+    /// Everything near the kaiju has a bad moment. Boss-class takes repeated
+    /// heavy STAGGER rather than deletion — the canon holds even here, and a
+    /// boss that could be one-shot by a joke tree would cheapen both.
+    private func kaijuMaul() {
+        let reach = GameConfig.Panda.kaijuReach
+        let damage = Int(playerStats.effectiveAttack * GameConfig.Panda.kaijuContactMult)
+
+        var killed: [EnemyNode] = []
+        for e in enemies where !e.isDying
+            && e.position.distance(to: player.position) < reach {
+            e.applyKnockback(from: player.position, force: GameConfig.Panda.kaijuKnockback)
+            if e.takeDamage(GameConfig.BossClass.scaledDamage(damage, isBossClass: e.isMiniBoss)) {
+                killed.append(e)
+            }
+        }
+        for e in killed {
+            if let idx = enemies.firstIndex(where: { $0 === e }) {
+                let pos = e.position, xp = e.xpValue
+                enemies.remove(at: idx)
+                onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+            }
+        }
+        if let b = boss, !b.isDead,
+           b.position.distance(to: player.position) - b.targetingRadius < reach {
+            b.takeDamage(GameConfig.BossClass.scaledDamage(
+                Int(playerStats.effectiveAttack * GameConfig.Panda.kaijuStaggerMult),
+                isBossClass: true))
+        }
+
+        showRingPulse(at: player.position, radius: reach, colorHex: 0xFF7A2A)
+        worldNode.shake(intensity: 3, duration: 0.1)
+    }
+
+    /// It ends the way it should end: not with a flourish.
+    private func endKaiju() {
+        kaijuRemaining = 0
+        player.setKaiju(false)
+
+        // Collapses to embers.
+        for _ in 0..<14 {
+            let ember = SKShapeNode(circleOfRadius: CGFloat.random(in: 1.5...3.5))
+            ember.fillColor = SKColor(hex: 0xFF8A3C, alpha: 0.9)
+            ember.strokeColor = .clear
+            ember.glowWidth = 2
+            ember.position = player.position
+            ember.zPosition = 8
+            worldNode.addChild(ember)
+            let drift = CGPoint(x: CGFloat.random(in: -60...60),
+                                y: CGFloat.random(in: -40...70)) * DeviceScale.gameplay
+            ember.run(SKAction.sequence([
+                SKAction.group([
+                    SKAction.moveBy(x: drift.x, y: drift.y, duration: TimeInterval.random(in: 0.6...1.1)),
+                    SKAction.fadeOut(withDuration: 1.0)
+                ]),
+                SKAction.removeFromParent()
+            ]))
+        }
+
+        // And the arena is left with pandas doing vaguely supportive things.
+        // One of them is eating bamboo and will not be acknowledging any of this.
+        let witness = PandaNode()
+        witness.position = player.position + CGPoint(x: CGFloat.random(in: 40...70)
+                                                     * (Bool.random() ? 1 : -1), y: -10)
+        worldNode.addChild(witness)
+        witness.sit()
+        witness.bounce()
+        var chewing = Panda(node: witness, act: .pleased, phase: .lingering,
+                            timer: GameConfig.Panda.witnessLinger,
+                            destination: witness.position)
+        chewing.followMark = nil
+        pandas.append(chewing)
+        dropBamboo(at: witness.position + CGPoint(x: 14, y: 0))
+
+        for _ in 0..<GameConfig.Panda.afterKaijuPandas { spawnPanda() }
+    }
+
+    /// A bamboo pickup. Rides HealthOrbNode, so it stays non-magnetized — walking
+    /// over to it is still a positioning decision (design canon).
+    private func dropBamboo(at point: CGPoint) {
+        let orb = HealthOrbNode()
+        orb.position = point
+        orb.zPosition = 4
+        healthOrbs.append(orb)
+        worldNode.addChild(orb)
+    }
+
+    /// A stalk falling from off-screen. `isPickup` decides whether anything is
+    /// actually there when it lands.
+    private func dropFallingBamboo(at landing: CGPoint, isPickup: Bool) {
+        let s = DeviceScale.gameplay
+        let stalk = SKShapeNode(rectOf: CGSize(width: 3 * s, height: 22 * s), cornerRadius: 1.5 * s)
+        stalk.fillColor = SKColor(hex: 0x6FA83C)
+        stalk.strokeColor = SKColor(hex: 0x3E6B22, alpha: 0.9)
+        stalk.lineWidth = 1
+        stalk.position = landing + CGPoint(x: 0, y: 220 * s)
+        stalk.zPosition = 6
+        stalk.zRotation = CGFloat.random(in: -0.4...0.4)
+        worldNode.addChild(stalk)
+
+        let fall = SKAction.move(to: landing, duration: TimeInterval.random(in: 0.45...0.75))
+        fall.timingMode = .easeIn
+        stalk.run(SKAction.sequence([
+            fall,
+            SKAction.run { [weak self] in
+                if isPickup { self?.dropBamboo(at: landing) }
+            },
+            SKAction.group([SKAction.fadeOut(withDuration: 0.25),
+                            SKAction.scaleY(to: 0.2, duration: 0.25)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// Returns true when the act has finished early (the roll runs out of road).
+    private func runPandaAct(_ panda: inout Panda, dt: TimeInterval) -> Bool {
+        switch panda.act {
+        case .roll:
+            let step = GameConfig.Panda.rollSpeed * CGFloat(dt)
+            panda.node.position += panda.rollDir * step
+            panda.rollTravelled += step
+
+            let damage = Int(playerStats.effectiveAttack * GameConfig.Panda.rollDamageMult)
+            var killed: [EnemyNode] = []
+            for e in enemies where !e.isDying {
+                let id = ObjectIdentifier(e)
+                guard !panda.struck.contains(id),
+                      e.position.distance(to: panda.node.position) < GameConfig.Panda.rollRadius
+                else { continue }
+                panda.struck.insert(id)
+                e.applyKnockback(from: panda.node.position, force: 30 * DeviceScale.gameplay)
+                if e.takeDamage(GameConfig.BossClass.scaledDamage(damage,
+                                                                  isBossClass: e.isMiniBoss)) {
+                    killed.append(e)
+                }
+            }
+            for e in killed {
+                if let idx = enemies.firstIndex(where: { $0 === e }) {
+                    let pos = e.position, xp = e.xpValue
+                    enemies.remove(at: idx)
+                    onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+                }
+            }
+            // Rolling out of the arena is not a panda's problem, but it is ours.
+            let out = panda.node.position.length > GameConfig.Arena.radius * 0.95
+            return panda.rollTravelled >= GameConfig.Panda.rollDistance || out
+
+        case .sit:
+            // Shots that reach a sitting panda simply stop existing. The panda
+            // does not react to this.
+            let here = panda.node.position
+            enemyProjectiles.removeAll { proj in
+                guard proj.position.distance(to: here) < GameConfig.Panda.sitRadius else { return false }
+                proj.removeFromParent()
+                panda.node.bounce()
+                return true
+            }
+            return false
+
+        case .aggro:
+            let here = panda.node.position
+            for e in enemies where !e.isDying
+                && e.position.distance(to: here) < GameConfig.Panda.aggroRadius {
+                let pull = (here - e.position).normalized * GameConfig.Panda.aggroPull * CGFloat(dt)
+                e.position += pull
+            }
+            return false
+
+        case .follow:
+            // Shadows it. Never attacks it. This is the entire behaviour, and
+            // it is the most unsettling thing in the tree.
+            guard let mark = panda.followMark, !mark.isDying,
+                  enemies.contains(where: { $0 === mark }) else { return true }
+            let offset = CGPoint(x: 0, y: -22 * DeviceScale.gameplay)
+            panda.node.waddle(toward: mark.position + offset,
+                              speed: GameConfig.Panda.walkSpeed * 1.35, dt: dt)
+            return false
+
+        case .pin:
+            // Holds it in place by the simple method of being on top of it.
+            guard let victim = panda.followMark, !victim.isDying,
+                  enemies.contains(where: { $0 === victim }) else { return true }
+            victim.applyStun(0.3)
+            victim.position = panda.node.position
+            return false
+
+        case .nap:
+            // Sleeping is restorative. Somehow this extends to bystanders.
+            napHealAccumulator += dt
+            if napHealAccumulator >= GameConfig.Panda.napHealInterval {
+                napHealAccumulator = 0
+                if player.position.distance(to: panda.node.position) < GameConfig.Panda.napRadius,
+                   playerStats.currentHP < playerStats.maxHP {
+                    playerStats.heal(GameConfig.Panda.napHealHP)
+                    hpBar.flashHeal()
+                }
+            }
+            return false
+
+        case .bamboo, .pleased, .bodyCheck, .portal, .stack, .hat, .rain,
+             .avalanche, .samurai:
+            return false
+        }
+    }
+
+    private func endPandaAct(_ panda: inout Panda) {
+        switch panda.act {
+        case .roll, .avalanche:
+            panda.node.stopRolling()
+            panda.node.bounce()
+        case .nap:
+            panda.node.childNode(withName: "napZone")?
+                .run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.4),
+                                        SKAction.removeFromParent()]))
+            panda.node.bounce()
+        default:
+            break
+        }
     }
 
     // MARK: - v2.0 Phase C: Terra placement + garden expansion
@@ -3558,6 +4276,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateFlowers(dt)
         updateVineWall(dt)
         updateTreeCanopy(dt)
+        updatePandas(dt)
+        updatePandaKaiju(dt)
         updateFalseOpening(dt)
 
         let spawnEvent = waveManager.update(deltaTime: dt)
@@ -4487,6 +5207,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         dr = min(dr, GameConfig.ForgePath.drCap)
         if dr > 0 { dmg *= (1 - dr) }
+
+        // v2.0 (C2): while Spark is a kaiju, most of what hits him doesn't
+        // matter. Applied AFTER the DR cap on purpose — this is a transformation,
+        // not another entry in the mitigation bucket, and capping it would make
+        // the biggest moment in the tree feel like a Forge Path node.
+        if kaijuActive { dmg *= (1 - GameConfig.Panda.kaijuDamageReduction) }
 
         // A hit resets the undamaged clock (Steady Pulse / Slipstream) + Defiant.
         forgeTimeSinceDamage = 0
@@ -6567,10 +7293,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Draw one at a time: each pick changes what's eligible next, so a
             // single batch draw could hand out a card the previous grant just
             // made redundant.
-            guard let card = upgradeManager.drawCards(count: 1, level: player.currentLevel).first
+            guard let card = upgradeManager.drawCards(count: 1, level: player.currentLevel,
+                                                      allowSecret: false).first
             else { break }
             let tierBefore = upgradeManager.tier(of: card.id)
-            upgradeManager.pickCard(card, stats: playerStats)
+            upgradeManager.pickCard(card, stats: playerStats, level: player.currentLevel)
             granted.append(card.name)
 
             // Granted Growth cards can't take a placement beat (nobody chose
@@ -9301,6 +10028,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         canonTurrets.removeAll()
         poisonClouds.forEach { $0.node.removeFromParent() }
         poisonClouds.removeAll()
+        pandas.forEach { $0.node.removeFromParent() }
+        pandas.removeAll()
+        pandaArrivalTimer = 0
+        napHealAccumulator = 0
+        pandaKaijuTimer = 0
+        kaijuRemaining = 0
+        kaijuHitTimer = 0
+        player.setKaiju(false)
         groundTickAccumulator = 0
         groundRegenAccumulator = 0
         pendingTerraPlacement = false

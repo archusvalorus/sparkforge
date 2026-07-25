@@ -86,6 +86,26 @@ final class UpgradeManager {
         /// Unmet ⇒ hard-gated out of the draw entirely.
         var requires: Set<Capability> = []
 
+        // MARK: v2.0 (C2) — outside the taxonomy
+
+        /// A SECRET card. It is not part of the normal game: never in the random
+        /// pool, never a bonus draw, never a gateway-pity candidate, no synergy
+        /// contribution, and its Codex entry stays masked forever. It reaches a
+        /// spread only because a scheduler put it there.
+        ///
+        /// Built for Panda, whose whole premise is that it is never fully
+        /// legible — but the flag itself is generic, so any future "this isn't in
+        /// the taxonomy" card rides it rather than growing a second path.
+        var isSecret: Bool = false
+
+        /// Per-tier NAME, index i = tier i+1. nil → `name` at every tier.
+        ///
+        /// Normally a card's name is fixed and only its copy changes per rung.
+        /// Panda inverts that: the punctuation ladder (`Pandas.` → `Panda!` →
+        /// `Panda...?` → `Panda.` → `PANDA.`) is the only information the player
+        /// ever gets, and the ability text stays `???` at every tier.
+        var tierNames: [String]? = nil
+
         var maxTier: Int { 1 + higherTiers.count }
 
         /// Copy for a tier (1-based); falls back to `description`.
@@ -94,6 +114,12 @@ final class UpgradeManager {
                 return description
             }
             return lines[tier - 1]
+        }
+
+        /// Name for a tier (1-based); falls back to `name`.
+        func name(forTier tier: Int) -> String {
+            guard let names = tierNames, tier >= 1, tier <= names.count else { return name }
+            return names[tier - 1]
         }
     }
     
@@ -145,6 +171,32 @@ final class UpgradeManager {
         pickedCardIDs.compactMap { id in allCards.first { $0.id == id } }
     }
 
+    // MARK: - v2.0 (C2) — the Panda run mutation
+    //
+    // Panda is not a tree you can go looking for; it is something that happens
+    // to a run. The rules below are LOCKED (Brandon + Lyra) and are the only
+    // part of Panda that is allowed to be legible — to us, not to the player.
+    //
+    //   • At run start, a 9.27% roll decides whether this run is even eligible.
+    //     The number is arbitrary on purpose. Not 10%. Not 9%.
+    //   • If eligible, the offer appears in an EARLY window, so a player who
+    //     commits can still reach T5 before the run ends.
+    //   • ACTIVATION IS TAKING THE CARD, not seeing it. Passing costs nothing.
+    //   • Once active, every OTHER level-up guarantees a Panda slot, climbing
+    //     T2→T5 deterministically. Passing a rung isn't punished — it comes back
+    //     at the next scheduled offering. Waiting. Judging.
+    //   • You cannot reroll the panda: the schedule keys off the LEVEL, so a
+    //     reroll of the same level re-offers it. By the same token it can never
+    //     appear *because* you rerolled.
+
+    /// Did this run roll Panda-eligible? Decided once, at reset.
+    private(set) var pandaEligible = false
+    /// Has the player TAKEN the first Panda card? The commitment point.
+    private(set) var pandaActive = false
+    /// The level at which activation happened — anchors the every-other-level
+    /// parity from then on.
+    private var pandaActivationLevel = 0
+
     /// Tag counts for synergy tracking
     private(set) var tagCounts: [Tag: Int] = [:]
     
@@ -160,6 +212,7 @@ final class UpgradeManager {
         // v1.9 Unit 3: signature ladders now live in the release pool
         // (buildCardPool); the Unit 1 DEBUG proof ladder is retired.
         allCards = UpgradeManager.buildCardPool()
+        rollRunMutations()
     }
     
     // MARK: - Draw
@@ -171,7 +224,11 @@ final class UpgradeManager {
     /// v1.9: eligibility is "not maxed", not "never picked" — owned cards
     /// with rungs left re-appear and level up. Owned non-maxed cards draw
     /// with the same weight as new ones (locked Fork B).
-    func drawCards(count: Int = 3, level: Int = 0) -> [UpgradeCard] {
+    /// `allowSecret` exists for one caller: the gauntlet's RANDOM opener, which
+    /// GRANTS whatever it draws. Panda's activation rule is that the player must
+    /// TAKE the first card — being handed one is not taking it — so the secret
+    /// scheduler stands down for granted draws.
+    func drawCards(count: Int = 3, level: Int = 0, allowSecret: Bool = true) -> [UpgradeCard] {
         // v1.9 capstone offering rules (Brandon, Jul 20) — "focus & finish":
         //  • A committed-but-unmaxed capstone is the ONLY capstone offered, and
         //    only via the guarantee below — no OTHER capstone appears until it
@@ -195,6 +252,9 @@ final class UpgradeManager {
             // Growth cards before Terra would be dead picks, and a dead pick in
             // a 3-card spread is a wasted level-up.
             guard card.requires.isSubset(of: capabilities) else { return false }
+            // v2.0 (C2): a secret card is never in the random pool. It arrives
+            // only when its own scheduler puts it there.
+            if card.isSecret { return false }
             // Capstones never come from the random pool once one is in progress —
             // the in-progress one(s) are injected by parity; others are locked out.
             if card.isCapstone && hasInProgress { return false }
@@ -240,7 +300,7 @@ final class UpgradeManager {
         // it's a discoverability floor for cards that gate content.
         let isNewLevel = (level != lastDrawLevel)
         lastDrawLevel = level
-        for gateway in allCards where !gateway.provides.isEmpty {
+        for gateway in allCards where !gateway.provides.isEmpty && !gateway.isSecret {
             // Only unowned gateways whose own requirements are met.
             guard tier(of: gateway.id) == 0,
                   gateway.requires.isSubset(of: capabilities) else {
@@ -270,6 +330,15 @@ final class UpgradeManager {
             else { drawn.append(cap) }
         }
 
+        // v2.0 (C2): the panda takes its slot LAST, so nothing can displace it —
+        // not gateway pity, not a capstone guarantee. You cannot reroll the
+        // panda. It claims the front slot; capstones fill from the back, so the
+        // two only collide in a 1-card spread.
+        if allowSecret, let panda = pandaOffer(atLevel: level),
+           !drawn.contains(where: { $0.id == panda.id }) {
+            if drawn.isEmpty { drawn.append(panda) } else { drawn[0] = panda }
+        }
+
         #if DEBUG
         // Dev force-slot (see debugForcedCardID): keep the card-under-test in
         // the spread until it maxes, so the tier/max/capstone loop is quick to
@@ -286,13 +355,35 @@ final class UpgradeManager {
         return drawn
     }
 
+    /// Should a Panda card be on the table at this level, and which rung?
+    ///
+    /// Returns nil for the overwhelming majority of runs — that's the point.
+    private func pandaOffer(atLevel level: Int) -> UpgradeCard? {
+        guard pandaEligible,
+              let panda = allCards.first(where: { $0.id == GameConfig.Panda.cardID }) else { return nil }
+        let owned = tier(of: panda.id)
+        guard owned < panda.maxTier else { return nil }
+
+        if !pandaActive {
+            // Before the commitment point: it sits in the early window, every
+            // level, until taken or the window closes. Insistent, never forced.
+            // (The 9.27% gate is already the rarity; making the player also win
+            // a single-offer coin-flip would make the whole tree unseeable.)
+            return GameConfig.Panda.firstOfferWindow.contains(level) ? panda : nil
+        }
+        // After: every other level, anchored to the level it was taken.
+        guard level > pandaActivationLevel,
+              (level - pandaActivationLevel) % 2 == 0 else { return nil }
+        return panda
+    }
+
     /// v1.6: Draw one bonus card (Extra Card ad reward). Avoids the cards
     /// already on the table and prefers a tree that isn't represented yet.
     func drawBonusCard(excluding displayed: [UpgradeCard]) -> UpgradeCard? {
         let displayedIDs = displayed.map { $0.id }
         let displayedTags = Set(displayed.map { $0.tag })
         let available = allCards.filter {
-            tier(of: $0.id) < $0.maxTier && !displayedIDs.contains($0.id)
+            tier(of: $0.id) < $0.maxTier && !displayedIDs.contains($0.id) && !$0.isSecret
         }
 
         if let freshTree = available.filter({ !displayedTags.contains($0.tag) }).randomElement() {
@@ -307,12 +398,19 @@ final class UpgradeManager {
     /// ORTHOGONALITY GUARANTEE (locked): tag counts advance on the FIRST
     /// pick only. Leveling a card never feeds synergies — breadth (distinct
     /// cards per tree) and depth (card tiers) stay separate axes.
-    func pickCard(_ card: UpgradeCard, stats: PlayerStats) {
+    func pickCard(_ card: UpgradeCard, stats: PlayerStats, level: Int = 0) {
         let current = tier(of: card.id)
 
         // Capabilities are granted on the FIRST pick — re-picking to level a
         // card can't re-unlock what it already opened.
         if current == 0 { capabilities.formUnion(card.provides) }
+
+        // v2.0 (C2): the commitment point. Seeing the panda does nothing;
+        // TAKING it is the first domino, and the schedule anchors here.
+        if current == 0, card.id == GameConfig.Panda.cardID {
+            pandaActive = true
+            pandaActivationLevel = level
+        }
 
         if current == 0 {
             pickedCardIDs.append(card.id)
@@ -436,6 +534,23 @@ final class UpgradeManager {
         tagCounts.removeAll()
         appliedSynergies.removeAll()
         shownBuildHints.removeAll()
+
+        rollRunMutations()
+    }
+
+    /// v2.0 (C2): decide what this run IS, before a single card is drawn.
+    ///
+    /// Called from both `init` and `reset` on purpose: `reset()` only runs on a
+    /// RESTART, so rolling solely there would mean the first run after every app
+    /// launch could never be Panda-eligible — a silent, invisible bug, in the one
+    /// system whose whole design makes silence look intentional.
+    private func rollRunMutations() {
+        pandaActive = false
+        pandaActivationLevel = 0
+        pandaEligible = CGFloat.random(in: 0..<1) < GameConfig.Panda.eligibilityChance
+        #if DEBUG
+        if GameConfig.Panda.debugAlwaysEligible { pandaEligible = true }
+        #endif
     }
     
     // MARK: - Synergy Application
@@ -1100,6 +1215,33 @@ final class UpgradeManager {
             ],
             isCapstone: true,
             requires: [.growthUnlocked]
+        ))
+
+        // MARK: v2.0 (C2) — Panda.
+        //
+        // Everything about this card is deliberate. The name ladder is the ONLY
+        // information the player ever receives, and it is punctuation. The
+        // ability text is `???` at every rung, forever, including the capstone
+        // reveal. It carries the neutral tag so it can never feed a synergy, and
+        // `isSecret` keeps it out of every pool, so the scheduler is the only
+        // thing that can put it in front of you.
+        //
+        // Do not "improve" this by writing real descriptions. The moment we
+        // explain why the panda samurai selects a target, we have wounded the
+        // panda.
+        cards.append(UpgradeCard(
+            id: GameConfig.Panda.cardID, name: "Pandas.", tag: .neutral,
+            description: "???",
+            apply: { stats in stats.pandaTier = 1 },
+            higherTiers: [
+                { stats in stats.pandaTier = 2 },
+                { stats in stats.pandaTier = 3 },
+                { stats in stats.pandaTier = 4 },
+                { stats in stats.pandaTier = 5 }
+            ],
+            tierDescriptions: ["???", "???", "???", "???", "???"],
+            isSecret: true,
+            tierNames: ["Pandas.", "Panda!", "Panda...?", "Panda.", "PANDA."]
         ))
 
         cards.append(UpgradeCard(

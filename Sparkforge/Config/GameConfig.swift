@@ -313,6 +313,119 @@ enum GameConfig {
         static var impactRadius: CGFloat { 46 * DeviceScale.gameplay }
     }
 
+    // MARK: - Panda. (v2.0 C2)
+    /// The secret tree. Numbers only — nothing here explains anything, and the
+    /// player never sees any of it.
+    enum Panda {
+        static let cardID = "v20_panda"
+
+        /// The run-mutation roll. LOCKED at 9.27% (Brandon): erratic on purpose.
+        /// Not 10%. Not 9%. Do not round it.
+        static let eligibilityChance: CGFloat = 0.0927
+        /// Levels at which the first offer may appear. Early enough that a
+        /// player who commits can still climb all the way to T5.
+        static let firstOfferWindow: ClosedRange<Int> = 2...5
+
+        #if DEBUG
+        /// DEV SEAM — force every run Panda-eligible. Iterating against a 9.27%
+        /// roll is not iterating. An active seam paints a badge in the run HUD;
+        /// remember to reinstall the sim after switching it back off, or you'll
+        /// be feel-testing a stale build. (Release never compiles this.)
+        static let debugAlwaysEligible: Bool = false
+        #endif
+
+        // --- T1 "Pandas." — a panda wanders in and does one mildly useful thing
+        /// Seconds between arrivals, per tier. Long at T1: a panda is an event,
+        /// not a pet. Tightens as the rungs climb — "more frequent, more
+        /// proactive" is most of what T2 actually is.
+        static func arrivalInterval(tier: Int) -> TimeInterval {
+            switch tier {
+            case ...1: return 9.0
+            case 2:    return 6.5
+            case 3:    return 5.5
+            case 4:    return 4.5
+            default:   return 4.0
+            }
+        }
+        /// How long a panda hangs around after doing its one thing.
+        static let lingerDuration: TimeInterval = 3.5
+        static var walkSpeed: CGFloat { 74 * DeviceScale.gameplay }
+        /// Ceiling on live pandas, per tier growth and for frame rate.
+        static let maxPandas: Int = 6
+
+        /// A roll's damage as a fraction of Spark's ATK, and how far it travels.
+        static let rollDamageMult: CGFloat = 0.55
+        static var rollRadius: CGFloat { 30 * DeviceScale.gameplay }
+        static var rollDistance: CGFloat { 150 * DeviceScale.gameplay }
+        static var rollSpeed: CGFloat { 320 * DeviceScale.gameplay }
+        /// A sitting panda eats enemy shots that hit it.
+        static var sitRadius: CGFloat { 26 * DeviceScale.gameplay }
+        /// A briefly-interesting panda pulls nearby enemies toward it.
+        static var aggroRadius: CGFloat { 170 * DeviceScale.gameplay }
+        static let aggroDuration: TimeInterval = 2.2
+        static var aggroPull: CGFloat { 60 * DeviceScale.gameplay }
+
+        // --- T2 "Panda!" ---
+        static let bodyCheckDamageMult: CGFloat = 0.9
+        static var bodyCheckKnockback: CGFloat { 70 * DeviceScale.gameplay }
+
+        // --- T3 "Panda...?" ---
+        /// How long the second panda in a stack stays up there.
+        static let stackLinger: TimeInterval = 4.0
+        /// How long a panda shadows an elite without doing anything about it.
+        static let followDuration: TimeInterval = 6.0
+        /// Stalks per bamboo shower. Exactly one of them is a real pickup — the
+        /// rest are set dressing, which is the joke.
+        static let rainStalks: Int = 5
+
+        // --- T4 "Panda." ---
+        static let pinDuration: TimeInterval = 3.5
+        static let napDuration: TimeInterval = 6.0
+        static var napRadius: CGFloat { 92 * DeviceScale.gameplay }
+        static let napHealInterval: TimeInterval = 1.5
+        static let napHealHP: Int = 2
+        /// How many pandas are in a badly-coordinated avalanche, including the
+        /// one that started it.
+        static let avalanchePandas: Int = 4
+
+        // --- The Panda Samurai ---
+        /// It appears at T4. It is 5%. That is the whole trigger, it is not
+        /// conditional on anything, and if the Internet works it out we change
+        /// the backend logic rather than confirm it.
+        static let samuraiMinTier: Int = 4
+        static let samuraiChance: CGFloat = 0.05
+        /// It never hurries.
+        static var samuraiWalkSpeed: CGFloat { 46 * DeviceScale.gameplay }
+        /// What a strike does to something the execute rules won't let it
+        /// delete. Catastrophic, not fatal.
+        static let samuraiCatastrophicMult: CGFloat = 14.0
+
+        // --- T5 "PANDA." — the kaiju ---
+        /// How long Spark stops being Spark.
+        static let kaijuDuration: TimeInterval = 10.0
+        /// The clock between transformations. Long: it has to stay an event.
+        static let kaijuInterval: TimeInterval = 45.0
+        /// How much bigger. This is a visual + reach change only — the physics
+        /// body is untouched, so the collision world never shifts underfoot.
+        static let kaijuScale: CGFloat = 2.3
+        /// Contact reach while transformed.
+        static var kaijuReach: CGFloat { 96 * DeviceScale.gameplay }
+        static let kaijuHitInterval: TimeInterval = 0.4
+        /// Contact damage per hit interval, as a fraction of ATK.
+        static let kaijuContactMult: CGFloat = 1.8
+        /// What boss-class takes per interval — heavy STAGGER, never deletion.
+        static let kaijuStaggerMult: CGFloat = 2.6
+        static var kaijuKnockback: CGFloat { 90 * DeviceScale.gameplay }
+        /// Incoming damage is mostly irrelevant while transformed. Applied
+        /// outside the Forge Path DR cap on purpose.
+        static let kaijuDamageReduction: CGFloat = 0.85
+
+        /// How long the panda that witnessed the revert stays, eating.
+        static let witnessLinger: TimeInterval = 6.0
+        /// Ordinary pandas left milling around afterwards.
+        static let afterKaijuPandas: Int = 3
+    }
+
     // MARK: - Card Drafting (v2.0 Phase C)
     enum Drafting {
         /// A GATEWAY card (one that unlocks a whole pool — Terra) is guaranteed

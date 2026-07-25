@@ -151,7 +151,9 @@ final class UpgradeCardNode: SKNode {
 
         // Card name — auto-shrink to fit within card width
         let nameLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-        nameLabel.text = card.name
+        // v2.0 (C2): a card may rename itself per rung. Only Panda does — the
+        // punctuation ladder is the sole information it ever gives up.
+        nameLabel.text = card.name(forTier: max(1, currentTier + 1))
         nameLabel.fontColor = UpgradeCardNode.brightColor(for: card.tag)
         nameLabel.verticalAlignmentMode = .center
         nameLabel.horizontalAlignmentMode = .center

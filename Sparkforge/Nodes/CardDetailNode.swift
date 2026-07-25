@@ -47,6 +47,11 @@ final class CardDetailNode: SKNode {
         /// (multi-tier cards), the ladder replaces the single `effect` line —
         /// rung 1 IS the base effect. nil/empty → 1-tier card, show `effect`.
         var cardLadder: [CardTierLine]? = nil
+        /// v2.0 (C2): a SECRET card. Its family is not disclosed — the chip
+        /// reads `???` instead of naming a tree. Everything else about the entry
+        /// is already useless by construction (every rung's effect is `???`),
+        /// which is the intended state, not an oversight.
+        var masked: Bool = false
     }
 
     // MARK: - Layout constants
@@ -98,7 +103,12 @@ final class CardDetailNode: SKNode {
         let totalW = CGFloat(tags.count) * chipW + CGFloat(tags.count - 1) * gap
         var chipX = -totalW / 2 + chipW / 2
         for tag in tags {
-            body.addChild(Self.tagChip(tag: tag, at: CGPoint(x: chipX, y: y - chipH / 2), size: CGSize(width: chipW, height: chipH)))
+            let chip = Self.tagChip(tag: tag, at: CGPoint(x: chipX, y: y - chipH / 2),
+                                    size: CGSize(width: chipW, height: chipH))
+            if content.masked {
+                (chip.childNode(withName: "tagName") as? SKLabelNode)?.text = "???"
+            }
+            body.addChild(chip)
             chipX += chipW + gap
         }
         y -= chipH + 14
@@ -265,6 +275,7 @@ final class CardDetailNode: SKNode {
         chip.addChild(emoji)
 
         let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        label.name = "tagName"      // so a masked entry can overwrite just this
         label.text = tag.rawValue.uppercased()
         label.fontSize = 10
         label.fontColor = UpgradeCardNode.brightColor(for: tag)

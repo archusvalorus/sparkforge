@@ -47,6 +47,7 @@ final class PlayerNode: SKNode {
     private var eyeOffset: CGPoint = .zero   // current directional slide (smoothed)
     private var apexFeatures: SKNode?        // v1.9 Apex (The Hunter): fixed horns + wings
     private var apexFangs: SKNode?           // v1.9 Apex: fangs — ride the eyesNode so they travel
+    private var kaijuFeatures: SKNode?       // v2.0 (C2): PANDA. ears, patches, fire
     private var polarFeatures: SKNode?       // v1.9 Polar Vortex (T5): santa hat (fixed on head)
     private var polarBeard: SKNode?          // v1.9 Polar Vortex: beard — rides eyesNode, seated low
 
@@ -621,6 +622,72 @@ final class PlayerNode: SKNode {
             SKAction.fadeAlpha(to: 0.0, duration: 0.15)
         ])
         run(flash)
+    }
+
+    /// v2.0 (C2) — PANDA.
+    ///
+    /// Spark becomes a flaming panda kaiju. Rides the same creature-morph vector
+    /// Apex opened (`setApexFeatures`), just very much larger and on fire: an
+    /// overlay child for the panda features plus a scale-up of the whole node.
+    ///
+    /// The physics body is deliberately NOT resized. The kaiju's reach is its own
+    /// radius check in the scene, so nothing about the collision world changes
+    /// under the player's feet for ten seconds and then changes back.
+    func setKaiju(_ on: Bool) {
+        if !on {
+            kaijuFeatures?.removeFromParent(); kaijuFeatures = nil
+            removeAction(forKey: "kaijuScale")
+            run(SKAction.scale(to: 1.0, duration: 0.3), withKey: "kaijuScale")
+            return
+        }
+        guard kaijuFeatures == nil else { return }
+        let R = GameConfig.Player.visualRadius
+        let container = SKNode()
+        container.zPosition = 15
+
+        // Ears.
+        for side in [CGFloat(-1), 1] {
+            let ear = SKShapeNode(circleOfRadius: R * 0.34)
+            ear.fillColor = SKColor(hex: 0x14100E)
+            ear.strokeColor = SKColor(hex: 0xFF7A2A, alpha: 0.8)
+            ear.lineWidth = 1.5
+            ear.glowWidth = 3
+            ear.position = CGPoint(x: side * R * 0.68, y: R * 0.78)
+            container.addChild(ear)
+        }
+
+        // Eye patches — the one feature that has to read at a glance.
+        for side in [CGFloat(-1), 1] {
+            let patch = SKShapeNode(ellipseOf: CGSize(width: R * 0.42, height: R * 0.56))
+            patch.fillColor = SKColor(hex: 0x14100E)
+            patch.strokeColor = .clear
+            patch.position = CGPoint(x: side * R * 0.34, y: R * 0.18)
+            patch.zRotation = side * -0.3
+            container.addChild(patch)
+        }
+
+        // On fire.
+        let flame = SKShapeNode(circleOfRadius: R * 1.25)
+        flame.fillColor = SKColor(hex: 0xFF6A1A, alpha: 0.22)
+        flame.strokeColor = SKColor(hex: 0xFFB347, alpha: 0.85)
+        flame.lineWidth = 2.5
+        flame.glowWidth = 10
+        flame.zPosition = -1
+        flame.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.12, duration: 0.28),
+                            SKAction.fadeAlpha(to: 0.75, duration: 0.28)]),
+            SKAction.group([SKAction.scale(to: 1.0, duration: 0.24),
+                            SKAction.fadeAlpha(to: 1.0, duration: 0.24)])
+        ])))
+        container.addChild(flame)
+
+        addChild(container)
+        kaijuFeatures = container
+
+        removeAction(forKey: "kaijuScale")
+        let grow = SKAction.scale(to: GameConfig.Panda.kaijuScale, duration: 0.35)
+        grow.timingMode = .easeOut
+        run(grow, withKey: "kaijuScale")
     }
 
     /// v1.9 Apex (The Hunter): Spark sprouts tiny black horns, white fangs, and

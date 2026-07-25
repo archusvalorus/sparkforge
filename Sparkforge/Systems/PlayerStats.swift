@@ -561,6 +561,13 @@ final class PlayerStats {
     /// Rich Soil (Terra+, C1.7): extra HP added to each cultivated-ground regen
     /// tick. Also boosts the Growth-5 synergy.
     var growthRegenBonusHP: Int = 0
+
+    /// v2.0 (C2) — Panda. 0..5.
+    ///
+    /// Deliberately just a number here. The scene reads it and decides what a
+    /// panda does; nothing about the panda is expressed as a stat, because
+    /// nothing about the panda is supposed to be legible.
+    var pandaTier: Int = 0
     /// Deeproot (dual-tag Growth+Guard, C1.7): flat DEF while on cultivated
     /// ground. deeprootDEF is the amount; the scene sets groundDefBonus each
     /// frame from it based on occupancy, and effectiveDefense folds it in.
@@ -1106,6 +1113,7 @@ final class PlayerStats {
         seedReembed = false
         vineWallTier = 0
         treeTier = 0
+        pandaTier = 0
         treeGroundMoveBonus = 0
         growthRegenBonusHP = 0
         deeprootDEF = 0
