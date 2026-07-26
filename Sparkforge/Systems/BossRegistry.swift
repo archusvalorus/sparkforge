@@ -74,6 +74,21 @@ final class BossRegistry {
 
     func entry(_ id: String) -> BossEntry? { all.first { $0.id == id } }
 
+    /// The boss an arena answers with, if one is authored yet.
+    func entry(forArena arenaID: Int) -> BossEntry? { all.first { $0.arenaID == arenaID } }
+
+    /// How an arena PACES: taken from its boss's grammar rather than from the
+    /// arena itself (Brandon, "build once and reuse forever").
+    ///
+    /// A monument is a chunky anchored set-piece, so the run wants more levels
+    /// banked before it lands; a mobile arena boss doesn't. Keying pacing to the
+    /// grammar means a new arena inherits the right feel the moment its boss is
+    /// registered — no second per-arena table to keep in sync with this one.
+    /// Arenas with no authored boss fall back to arena pacing.
+    func grammar(forArena arenaID: Int) -> BossGrammar {
+        entry(forArena: arenaID)?.grammar ?? .arena
+    }
+
     /// The roster Boss Mode can actually offer.
     var unlocked: [BossEntry] {
         #if DEBUG

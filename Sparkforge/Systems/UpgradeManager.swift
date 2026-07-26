@@ -189,6 +189,52 @@ final class UpgradeManager {
     //     reroll of the same level re-offers it. By the same token it can never
     //     appear *because* you rerolled.
 
+    // MARK: - v2.0 (E1) — active colour families
+    //
+    // THE PROBLEM (Brandon, felt in play): with seven tagged trees plus Neutral,
+    // a 3-card spread spreads too thin. Terra surfaced once in a whole run, and
+    // a tree you can't find is a tree that doesn't exist. Every tree we ship
+    // makes it worse, so the fix has to be structural rather than a re-weighting.
+    //
+    // THE RULE: a run runs on `activeColorFamilies` COLOURS plus Neutral, which
+    // is always in and is not a colour. Everything outside that set is absent
+    // from the draw entirely — not down-weighted, absent, the same hard gate the
+    // eligibility layer already uses for `requires`.
+    //
+    // Why one ban and not more (Brandon): one ban lets a player dodge the tree
+    // they'll never play; two starts letting them ENGINEER the run, and the
+    // tension being protected is the first thing optimization kills.
+    //
+    // This rides the existing eligibility layer on purpose. The banked guidance
+    // was explicit: arena tree-gating and element omission extend that layer
+    // rather than growing a second gating system.
+
+    /// The colours this run draws from, plus Neutral. Decided once, at reset.
+    private(set) var activeFamilies: Set<Tag> = []
+
+    /// The player's single banned colour, supplied by the sticky setting (E2).
+    /// nil = no ban, which is also what RANDOM means: nothing is excluded by
+    /// hand, the roll simply decides.
+    var bannedFamily: Tag? = nil
+
+    /// Colours this save has actually unlocked. E3 narrows this by arena
+    /// progress (Growth arriving with Arena 5); until then every colour is in.
+    /// Kept as its own step so the cap can degrade gracefully — a player with
+    /// fewer colours unlocked than the cap simply plays with all of them.
+    private var unlockedFamilies: [Tag] {
+        Tag.allCases.filter { $0 != .neutral }
+    }
+
+    /// Roll this run's palette: drop the banned colour, take the cap at random,
+    /// and Neutral is always there.
+    private func rollActiveFamilies() {
+        var candidates = unlockedFamilies
+        if let banned = bannedFamily { candidates.removeAll { $0 == banned } }
+        let cap = min(GameConfig.Drafting.activeColorFamilies, candidates.count)
+        activeFamilies = Set(candidates.shuffled().prefix(cap))
+        activeFamilies.insert(.neutral)   // non-negotiable, and not a colour
+    }
+
     /// Did this run roll Panda-eligible? Decided once, at reset.
     private(set) var pandaEligible = false
     /// Has the player TAKEN the first Panda card? The commitment point.
@@ -255,6 +301,16 @@ final class UpgradeManager {
             // v2.0 (C2): a secret card is never in the random pool. It arrives
             // only when its own scheduler puts it there.
             if card.isSecret { return false }
+            // v2.0 (E1): a dormant colour is ABSENT this run, not unlucky.
+            // Neutral is always in `activeFamilies`, so neutral cards are
+            // unaffected — including the one the panda hides behind.
+            guard activeFamilies.contains(card.tag) else { return false }
+            // A dual-tag BRIDGE needs BOTH colours live (Brandon). A bridge into
+            // a tree that isn't in the run would hand out synergy progress in a
+            // family with no other cards to pair it with. It makes bridges
+            // rarer on purpose — the intended answer is MORE bridge cards in the
+            // v2.1 family pass, not a looser rule here.
+            if let second = card.secondaryTag, !activeFamilies.contains(second) { return false }
             // Capstones never come from the random pool once one is in progress —
             // the in-progress one(s) are injected by parity; others are locked out.
             if card.isCapstone && hasInProgress { return false }
@@ -302,7 +358,11 @@ final class UpgradeManager {
         lastDrawLevel = level
         for gateway in allCards where !gateway.provides.isEmpty && !gateway.isSecret {
             // Only unowned gateways whose own requirements are met.
+            // v2.0 (E1): a gateway in a DORMANT colour gets no pity — forcing
+            // Terra into a slot on a run where Growth isn't playable would
+            // hand the player a card whose whole pool is absent.
             guard tier(of: gateway.id) == 0,
+                  activeFamilies.contains(gateway.tag),
                   gateway.requires.isSubset(of: capabilities) else {
                 levelsSinceGatewayOffer[gateway.id] = 0
                 continue
@@ -402,6 +462,8 @@ final class UpgradeManager {
         let displayedTags = Set(displayed.map { $0.tag })
         let available = allCards.filter {
             tier(of: $0.id) < $0.maxTier && !displayedIDs.contains($0.id) && !$0.isSecret
+                && activeFamilies.contains($0.tag)
+                && $0.requires.isSubset(of: capabilities)
         }
 
         if let freshTree = available.filter({ !displayedTags.contains($0.tag) }).randomElement() {
@@ -563,6 +625,7 @@ final class UpgradeManager {
     /// launch could never be Panda-eligible — a silent, invisible bug, in the one
     /// system whose whole design makes silence look intentional.
     private func rollRunMutations() {
+        rollActiveFamilies()
         pandaActive = false
         pandaActivationLevel = 0
         pandaEligible = CGFloat.random(in: 0..<1) < GameConfig.Panda.eligibilityChance

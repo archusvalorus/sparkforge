@@ -256,7 +256,12 @@ final class CardDetailNode: SKNode {
 
     // MARK: - Tag chip
 
-    private static func tagChip(tag: UpgradeManager.Tag, at position: CGPoint, size: CGSize) -> SKNode {
+    /// The tree chip — emoji + name in the tree's colour.
+    ///
+    /// Promoted from private in v2.0 (E1) so the run-start family reveal wears
+    /// exactly this chip rather than a lookalike. One chip, every surface: the
+    /// player should recognise "a tree" on sight wherever it appears.
+    static func tagChip(tag: UpgradeManager.Tag, at position: CGPoint, size: CGSize) -> SKNode {
         let chip = SKNode()
         chip.position = position
         let colorHex = UpgradeCardNode.color(for: tag)

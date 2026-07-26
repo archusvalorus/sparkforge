@@ -437,6 +437,17 @@ enum GameConfig {
         /// tree was effectively unreachable. A gateway you can't find is a tree
         /// that doesn't exist.
         static let gatewayPityLevels: Int = 3
+
+        /// v2.0 (E1, Brandon): COLOURS per run. Neutral is always in and is not
+        /// a colour, so a run draws from this many trees + Neutral.
+        ///
+        /// Seven tagged trees plus Neutral spread a 3-card spread too thin —
+        /// Terra surfaced once in a whole run, which is a tree that effectively
+        /// doesn't exist. This is the structural fix, and it's the lever that
+        /// keeps working as more trees ship: expressed as ACTIVE COLOURS rather
+        /// than as "how many we exclude", so the pool stays the size it was
+        /// tuned at no matter how many trees exist to exclude from.
+        static let activeColorFamilies: Int = 5
     }
 
     // MARK: - Arena
@@ -898,6 +909,33 @@ enum GameConfig {
         /// boss the same run. Replaces the old lifetime `<arena>Unlocked` gates,
         /// which let a grind-heavy save skip straight through.
         static let bossSpawnKills: Int = 100
+
+        /// v2.0 (E4, Brandon): the boss now needs BOTH gates — the mob count
+        /// AND a minimum elapsed time.
+        ///
+        /// Kills alone made arrival a function of build strength: a strong build
+        /// hit 100 kills at ~2:00 and a stronger one earlier, so the run kept
+        /// getting shorter exactly when it was going best. The floor buys the
+        /// levels back and makes "the boss answers at 2:30" mean 2:30.
+        ///
+        /// It also PROTECTS a feeling rather than smoothing one. Spawning stops
+        /// the moment the boss lands, but whatever is already on the floor stays
+        /// — so a fast player who cleared the kill gate early spends the
+        /// remaining seconds still being swarmed, and meets the boss with a
+        /// dirty field. That "boss AND forty mobs" moment is the good outcome,
+        /// not an accident to tune out.
+        ///
+        /// Keyed to BOSS GRAMMAR, not to the arena: a monument is an anchored
+        /// set-piece worth banking more levels for, a mobile arena boss isn't.
+        /// New arenas inherit the right pacing from whichever grammar their boss
+        /// registers with — there is deliberately no per-arena table here to
+        /// drift out of sync with BossRegistry.
+        static func bossTimeFloor(for grammar: BossGrammar) -> TimeInterval {
+            switch grammar {
+            case .arena:    return 120   // 2:00 — matches the feel it already had
+            case .monument: return 155   // 2:35 — the chunky set-piece wants room
+            }
+        }
     }
 
     // MARK: - Ashling splitter (v1.6; v1.8 B2 shard protection)

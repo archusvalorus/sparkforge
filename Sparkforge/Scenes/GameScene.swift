@@ -419,6 +419,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // definition reached only by players who have already felled a boss.
         if !isGauntlet { showTutorialHintIfNeeded() }
 
+        showActiveFamilyReveal()
+
         // v2.0: the gauntlet doesn't wait for a bell. The opener runs first,
         // then it hands the field to boss 1.
         if isGauntlet { beginGauntletOpener() }
@@ -2495,6 +2497,65 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameState = .playing
     }
 
+    // MARK: - v2.0 (E1): the run's colours
+
+    /// Flash which colour families this run actually draws from.
+    ///
+    /// Without it, a dormant tree is indistinguishable from bad luck — a player
+    /// waits all run for a Fire card that was never in the pool, and reads a
+    /// RULE as an unfair roll. One quiet beat at the start turns that into
+    /// information you can plan around, without becoming another permanent HUD
+    /// element competing with the things you watch mid-fight.
+    ///
+    /// Wears the same tree chip the card detail uses — a tree should look like
+    /// itself everywhere it appears.
+    private func showActiveFamilyReveal() {
+        let colors = UpgradeManager.Tag.allCases
+            .filter { $0 != .neutral && upgradeManager.activeFamilies.contains($0) }
+        guard !colors.isEmpty, let camera = camera, let view = view else { return }
+
+        let holder = SKNode()
+        holder.zPosition = 260
+        holder.alpha = 0
+        // Camera origin IS Spark, so a centred reveal lands on top of him.
+        // Sit it in the gap between the stat HUD and the player, as a FRACTION
+        // of screen height rather than a fixed offset — a fixed one collapses
+        // onto Spark on shorter devices.
+        holder.position = CGPoint(x: 0, y: view.bounds.height * 0.13)
+        camera.addChild(holder)
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "THIS RUN"
+        title.fontSize = 12
+        title.fontColor = SKColor(hex: 0x9A8E88)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: 26)
+        holder.addChild(title)
+
+        // Two rows if the roster is wide, so the chips never run off a phone.
+        let chipW: CGFloat = 78, chipH: CGFloat = 20, gap: CGFloat = 8
+        let perRow = min(colors.count, 3)
+        for (i, tag) in colors.enumerated() {
+            let row = i / perRow
+            let col = i % perRow
+            let inRow = min(perRow, colors.count - row * perRow)
+            let rowW = CGFloat(inRow) * chipW + CGFloat(inRow - 1) * gap
+            let x = -rowW / 2 + chipW / 2 + CGFloat(col) * (chipW + gap)
+            let y = -CGFloat(row) * (chipH + gap)
+            holder.addChild(CardDetailNode.tagChip(tag: tag, at: CGPoint(x: x, y: y),
+                                                   size: CGSize(width: chipW, height: chipH)))
+        }
+
+        // Long enough to read, short enough that it never delays the first move.
+        holder.run(SKAction.sequence([
+            SKAction.wait(forDuration: 0.35),
+            SKAction.fadeIn(withDuration: 0.3),
+            SKAction.wait(forDuration: 2.0),
+            SKAction.fadeOut(withDuration: 0.5),
+            SKAction.removeFromParent()
+        ]))
+    }
+
     // MARK: - v2.0 (C2): Panda.
 
     /// The one thing a panda has come to do.
@@ -4298,9 +4359,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // "mob count + boss kill" and replaces the old lifetime unlock gates.
         // Waits for any 90s mini-boss to fall first, so the two never overlap —
         // mini-boss is the escalation, then the boss arrives.
+        // v2.0 (E4): BOTH gates. The kill count still says "you've earned it";
+        // the time floor says "the run has had room to breathe." Whichever the
+        // player satisfies second is the one that matters, so a strong build
+        // keeps fighting the swarm instead of short-circuiting the arena, and a
+        // slow one is never ambushed early.
         let miniBossAlive = enemies.contains { $0.isMiniBoss && !$0.isDying }
+        let timeFloor = GameConfig.Wave.bossTimeFloor(
+            for: BossRegistry.shared.grammar(forArena: arenaConfig.id))
         if !arenaBossSpawnedThisRun, boss == nil, !miniBossAlive,
-           killCount >= GameConfig.Wave.bossSpawnKills {
+           killCount >= GameConfig.Wave.bossSpawnKills,
+           waveManager.elapsedTime >= timeFloor {
             spawnCurrentArenaBoss()
             arenaBossSpawnedThisRun = true
             if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
@@ -10151,6 +10220,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera?.position = .zero
 
         gameState = .playing
+
+        // A restart is a NEW run, so it rolled a new palette — show it again.
+        showActiveFamilyReveal()
 
         // v2.0 (B2a): restarting a gauntlet starts a NEW gauntlet from stage 1
         // rather than resuming where it ended — the mode's whole proposition is
