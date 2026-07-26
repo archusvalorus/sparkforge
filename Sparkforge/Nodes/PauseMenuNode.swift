@@ -130,6 +130,17 @@ final class PauseMenuNode: SKNode {
     private func rebuildBuildViewer(upgradeManager: UpgradeManager) {
         buildViewer.removeAllChildren()
 
+        // v2.0 (E1): the run's PALETTE, always drawn — before the no-cards
+        // early-out, because which colours are live matters most at the start of
+        // a run, which is exactly when you own no cards.
+        //
+        // The run-start reveal is a flash; this is the reference. Without a
+        // place to check it, a player who missed the flash spends the run
+        // waiting on a tree that was never in the pool and reads a RULE as an
+        // unfair roll. Same strip they already read for synergy progress, so
+        // it's one surface rather than another modal to go find.
+        buildFamilyStrip(upgradeManager: upgradeManager)
+
         let cards = upgradeManager.pickedCards
         guard !cards.isEmpty else {
             let empty = SKLabelNode(fontNamed: "Menlo")
@@ -140,48 +151,6 @@ final class PauseMenuNode: SKNode {
             buildViewer.addChild(empty)
             return
         }
-
-        // Synergy strip — one entry per tree: emoji, count, tier dots
-        let strip = SKNode()
-        strip.position = CGPoint(x: 0, y: 136)
-        var entries: [(emoji: String, count: Int, colorHex: UInt32)] = []
-        for tag in UpgradeManager.Tag.allCases {
-            guard let count = upgradeManager.tagCounts[tag], count > 0 else { continue }
-            entries.append((UpgradeCardNode.emoji(for: tag), count, UpgradeCardNode.color(for: tag)))
-        }
-        let spacing: CGFloat = 46
-        let startX = -CGFloat(entries.count - 1) * spacing / 2
-        for (i, entry) in entries.enumerated() {
-            let x = startX + CGFloat(i) * spacing
-            let emoji = SKLabelNode(text: entry.emoji)
-            emoji.fontSize = 13
-            emoji.verticalAlignmentMode = .center
-            emoji.horizontalAlignmentMode = .right
-            emoji.position = CGPoint(x: x + 2, y: 0)
-            strip.addChild(emoji)
-
-            let count = SKLabelNode(fontNamed: "Menlo-Bold")
-            count.text = "\(entry.count)"
-            count.fontSize = 13
-            count.fontColor = SKColor(hex: entry.colorHex)
-            count.verticalAlignmentMode = .center
-            count.horizontalAlignmentMode = .left
-            count.position = CGPoint(x: x + 5, y: 0)
-            strip.addChild(count)
-
-            // Tier dots under the count: ● per synergy tier hit (3/5/7)
-            let tiersHit = entry.count >= 7 ? 3 : entry.count >= 5 ? 2 : entry.count >= 3 ? 1 : 0
-            if tiersHit > 0 {
-                let dots = SKLabelNode(fontNamed: "Menlo")
-                dots.text = String(repeating: "●", count: tiersHit)
-                dots.fontSize = 6
-                dots.fontColor = SKColor(hex: entry.colorHex, alpha: 0.8)
-                dots.verticalAlignmentMode = .center
-                dots.position = CGPoint(x: x, y: -13)
-                strip.addChild(dots)
-            }
-        }
-        buildViewer.addChild(strip)
 
         // Card chips — two columns, pick order, capped with "+N more"
         let maxChips = Self.maxChipRows * 2
@@ -207,6 +176,73 @@ final class PauseMenuNode: SKNode {
             more.position = CGPoint(x: x, y: 105 - CGFloat(i / 2) * Self.chipRowHeight)
             buildViewer.addChild(more)
         }
+    }
+
+    /// Every colour family LIVE this run: emoji, count, tier dots.
+    ///
+    /// Live-but-unpicked families are drawn dimmed rather than omitted — that
+    /// distinction is the whole point. "Dimmed" says *available, you haven't
+    /// touched it*; absent says *not in this run at all*. Collapsing the two is
+    /// precisely the blindspot this exists to close.
+    ///
+    /// Neutral is deliberately not shown: it is always live, it isn't a colour,
+    /// and it never counts toward a synergy, so a slot for it would be noise
+    /// that never changes.
+    private func buildFamilyStrip(upgradeManager: UpgradeManager) {
+        let colors = UpgradeManager.Tag.allCases.filter {
+            $0 != .neutral && upgradeManager.activeFamilies.contains($0)
+        }
+        guard !colors.isEmpty else { return }
+
+        let strip = SKNode()
+        strip.position = CGPoint(x: 0, y: 136)
+
+        let header = SKLabelNode(fontNamed: "Menlo")
+        header.text = "THIS RUN"
+        header.fontSize = 8
+        header.fontColor = SKColor(hex: 0x666666)
+        header.verticalAlignmentMode = .center
+        header.position = CGPoint(x: 0, y: 17)
+        strip.addChild(header)
+
+        let spacing: CGFloat = 46
+        let startX = -CGFloat(colors.count - 1) * spacing / 2
+        for (i, tag) in colors.enumerated() {
+            let x = startX + CGFloat(i) * spacing
+            let picked = upgradeManager.tagCounts[tag] ?? 0
+            let live = picked > 0
+            let colorHex = UpgradeCardNode.color(for: tag)
+
+            let emoji = SKLabelNode(text: UpgradeCardNode.emoji(for: tag))
+            emoji.fontSize = 13
+            emoji.alpha = live ? 1.0 : 0.35
+            emoji.verticalAlignmentMode = .center
+            emoji.horizontalAlignmentMode = .right
+            emoji.position = CGPoint(x: x + 2, y: 0)
+            strip.addChild(emoji)
+
+            let count = SKLabelNode(fontNamed: "Menlo-Bold")
+            count.text = "\(picked)"
+            count.fontSize = 13
+            count.fontColor = SKColor(hex: colorHex, alpha: live ? 1.0 : 0.3)
+            count.verticalAlignmentMode = .center
+            count.horizontalAlignmentMode = .left
+            count.position = CGPoint(x: x + 5, y: 0)
+            strip.addChild(count)
+
+            // Tier dots under the count: ● per synergy tier hit (3/5/7)
+            let tiersHit = picked >= 7 ? 3 : picked >= 5 ? 2 : picked >= 3 ? 1 : 0
+            if tiersHit > 0 {
+                let dots = SKLabelNode(fontNamed: "Menlo")
+                dots.text = String(repeating: "●", count: tiersHit)
+                dots.fontSize = 6
+                dots.fontColor = SKColor(hex: colorHex, alpha: 0.8)
+                dots.verticalAlignmentMode = .center
+                dots.position = CGPoint(x: x, y: -13)
+                strip.addChild(dots)
+            }
+        }
+        buildViewer.addChild(strip)
     }
 
     /// Mini tree-tinted card: dark plate, translucent tag wash, emoji + name.
