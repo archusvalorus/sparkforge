@@ -1263,6 +1263,11 @@ enum GameConfig {
 
     // MARK: - Spark Visuals (v1.7)
     enum Spark {
+        /// How large a SPRITE skin renders relative to Spark's visual diameter.
+        /// Slightly over 1.0 so art reads at 32pt without implying a bigger
+        /// hitbox — skins are cosmetic only (studio canon).
+        static let skinSpriteScale: CGFloat = 1.06
+
         /// White-hot inner core color
         static let innerCoreColorHex: UInt32 = 0xFFF6E0
         /// Inner core radius as a fraction of the player's visualRadius

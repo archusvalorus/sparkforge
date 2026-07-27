@@ -35,6 +35,15 @@ struct SkinAppearance {
     let flareRingColorHex: UInt32   // level-up corona ring
     let glowBoost: CGFloat          // outer-glow intensity multiplier (1.0 = base)
 
+    /// v2.0 art pass: an imageset that REPLACES Spark's procedural body.
+    ///
+    /// nil for every palette skin, which is all of them until the Panda family
+    /// — those recolour the layered nodes and stay fully procedural. A sprite
+    /// skin instead hides the ember/eyes and draws art in their place, the same
+    /// swap the kaiju performs. Purely cosmetic either way: skins never touch
+    /// the hitbox (studio canon).
+    var spriteName: String? = nil
+
     /// The stock Spark — pulls straight from GameConfig so base stays canonical.
     static let base = SkinAppearance(
         coreColorHex: GameConfig.Player.coreColorHex,
@@ -155,7 +164,8 @@ final class SkinManager {
             appearance: SkinAppearance(
                 coreColorHex: 0xF2F2F2, glowColorHex: 0x888888,
                 innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0x0A0A0A,
-                trailColorHex: 0xCCCCCC, flareRingColorHex: 0xFFFFFF, glowBoost: 1.0),
+                trailColorHex: 0xCCCCCC, flareRingColorHex: 0xFFFFFF, glowBoost: 1.0,
+                spriteName: "skin_panda_mask"),
             iapProductID: nil),
 
         SkinDefinition(
@@ -165,7 +175,8 @@ final class SkinManager {
             appearance: SkinAppearance(
                 coreColorHex: 0xFF7733, glowColorHex: 0xFF3300,
                 innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0x0A0A0A,
-                trailColorHex: 0xFF5522, flareRingColorHex: 0xFFAA44, glowBoost: 1.4),
+                trailColorHex: 0xFF5522, flareRingColorHex: 0xFFAA44, glowBoost: 1.4,
+                spriteName: "skin_panda_kaiju"),
             iapProductID: premiumPandaProductID),
     ]
 

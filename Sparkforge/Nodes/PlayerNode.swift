@@ -50,6 +50,9 @@ final class PlayerNode: SKNode {
     private var kaijuFeatures: SKNode?       // v2.0 (C2): PANDA. sprite + fire
     private var kaijuBody: SKSpriteNode?     // the sprite itself, for walk/facing
     private var kaijuWalkPhase: CGFloat = 0
+    /// v2.0 art pass: a SPRITE skin's body, when the selected skin has art.
+    /// Palette skins leave this nil and stay fully procedural.
+    private var skinSprite: SKSpriteNode?
 
     /// v2.0 art pass — the kaiju's frame sets.
     ///
@@ -141,10 +144,42 @@ final class PlayerNode: SKNode {
 
     // MARK: - v2.0 Unit 1: Skins (procedural re-tint of the layered Spark)
 
-    /// Re-paint every Spark layer from a skin palette. Purely cosmetic — no
-    /// stat/hitbox/ability effect. Stores the palette so subsequent color
-    /// restores (damage flash, level-up FX) stay on-skin.
+    /// One place decides whether Spark's procedural body is visible.
+    ///
+    /// Two things can replace it — a sprite skin and the kaiju — and they must
+    /// not fight: the kaiju always wins for its ten seconds, then the skin
+    /// takes over again. Splitting this across both call sites is how you end
+    /// up with an invisible Spark after a transformation ends.
+    private func refreshBodyVisibility() {
+        let kaiju = kaijuFeatures != nil
+        skinSprite?.isHidden = kaiju
+        let replaced = kaiju || skinSprite != nil
+        emberWrap.alpha = replaced ? 0 : 1
+        eyesNode.alpha = replaced ? 0 : 1
+    }
+
+    /// Wear a skin. Purely cosmetic — no stat, hitbox or ability effect. Stores
+    /// the palette so subsequent colour restores (damage flash, level-up FX)
+    /// stay on-skin, and swaps in sprite art when the skin has any.
     func applyAppearance(_ a: SkinAppearance) {
+        // A sprite skin swaps Spark's body for art; a palette skin re-tints the
+        // procedural layers as before. Rebuilt rather than mutated so switching
+        // skins mid-session can't leave the previous one's art behind.
+        skinSprite?.removeFromParent()
+        skinSprite = nil
+        if let name = a.spriteName {
+            let texture = SKTexture(imageNamed: name)
+            if texture.size().width > 1 {
+                let sprite = SKSpriteNode(texture: texture)
+                let aspect = texture.size().height / max(texture.size().width, 1)
+                let w = GameConfig.Player.visualRadius * 2 * GameConfig.Spark.skinSpriteScale
+                sprite.size = CGSize(width: w, height: w * aspect)
+                sprite.zPosition = 12
+                addChild(sprite)
+                skinSprite = sprite
+            }
+        }
+        refreshBodyVisibility()
         appearance = a
         coreNode.fillColor = SKColor(hex: a.coreColorHex)
         innerCoreNode.fillColor = SKColor(hex: a.innerCoreColorHex)
@@ -760,8 +795,7 @@ final class PlayerNode: SKNode {
             kaijuFeatures?.removeFromParent(); kaijuFeatures = nil
             kaijuBody = nil
             kaijuWalkPhase = 0
-            emberWrap.alpha = 1
-            eyesNode.alpha = 1
+            refreshBodyVisibility()
             removeAction(forKey: "kaijuScale")
             run(SKAction.scale(to: 1.0, duration: 0.3), withKey: "kaijuScale")
             return
@@ -826,10 +860,9 @@ final class PlayerNode: SKNode {
             SKAction.scaleY(to: 1.0, duration: 0.75)
         ])), withKey: "kaijuBreathe")
 
-        // Spark's own ember body would show THROUGH the panda, so it stands
-        // down for the duration. Restored in the `!on` branch above.
-        emberWrap.alpha = 0
-        eyesNode.alpha = 0
+        // Spark's own body (procedural or skin sprite) would show THROUGH the
+        // panda, so it stands down for the duration.
+        refreshBodyVisibility()
 
         // On fire — but HUGGING the body, not haloing it.
         //
