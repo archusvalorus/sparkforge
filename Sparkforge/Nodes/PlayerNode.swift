@@ -908,10 +908,6 @@ final class PlayerNode: SKNode {
             SKAction.scaleY(to: 1.0, duration: 0.75)
         ])), withKey: "kaijuBreathe")
 
-        // Spark's own body (procedural or skin sprite) would show THROUGH the
-        // panda, so it stands down for the duration.
-        refreshBodyVisibility()
-
         // On fire — but HUGGING the body, not haloing it.
         //
         // The first pass was a circle of R*1.25 with a 10pt glow, and both get
@@ -937,6 +933,20 @@ final class PlayerNode: SKNode {
 
         addChild(container)
         kaijuFeatures = container
+
+        // AFTER kaijuFeatures is assigned, not before.
+        //
+        // `refreshBodyVisibility` derives everything from state, so calling it
+        // while `kaijuFeatures` is still nil makes it conclude there's no kaiju
+        // and leave Spark's eyes switched on — which is exactly what happened:
+        // two black dots floating on the panda's belly, because the eyes sit at
+        // Spark's scale inside a 3x body.
+        //
+        // The old code set `eyesNode.alpha = 0` inline here and was immune to
+        // ordering. Deriving from state is still the right call — it's what
+        // stops the skin and the kaiju fighting — but it trades an ordering
+        // hazard for a duplication one. Assign state first, then refresh.
+        refreshBodyVisibility()
 
         removeAction(forKey: "kaijuScale")
         let grow = SKAction.scale(to: GameConfig.Panda.kaijuScale, duration: 0.35)
