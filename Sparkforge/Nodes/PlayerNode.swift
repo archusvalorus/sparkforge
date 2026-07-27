@@ -666,6 +666,8 @@ final class PlayerNode: SKNode {
     func setKaiju(_ on: Bool) {
         if !on {
             kaijuFeatures?.removeFromParent(); kaijuFeatures = nil
+            emberWrap.alpha = 1
+            eyesNode.alpha = 1
             removeAction(forKey: "kaijuScale")
             run(SKAction.scale(to: 1.0, duration: 0.3), withKey: "kaijuScale")
             return
@@ -675,26 +677,28 @@ final class PlayerNode: SKNode {
         let container = SKNode()
         container.zPosition = 15
 
-        // Ears.
-        for side in [CGFloat(-1), 1] {
-            let ear = SKShapeNode(circleOfRadius: R * 0.34)
-            ear.fillColor = SKColor(hex: 0x14100E)
-            ear.strokeColor = SKColor(hex: 0xFF7A2A, alpha: 0.8)
-            ear.lineWidth = 1.5
-            ear.glowWidth = 3
-            ear.position = CGPoint(x: side * R * 0.68, y: R * 0.78)
-            container.addChild(ear)
-        }
+        // THE BODY — the game's first raster sprite.
+        //
+        // Sized in POINTS from the config ladder, never from the texture's own
+        // pixel dimensions: the asset can be re-exported at any resolution and
+        // the creature stays exactly as big as it was tuned to be. Its local
+        // width is `R * 2` because the whole node is then scaled by
+        // `kaijuScale`, so the on-screen result is the ladder's 96pt.
+        //
+        // Only the BODY is raster. The fire below stays procedural — it has to
+        // pulse, and drawing it in code keeps the glow language identical to
+        // every other lit thing in the game, which is what stops a sprite from
+        // reading as pasted in.
+        let body = SKSpriteNode(imageNamed: "panda_kaiju")
+        let aspect = body.texture.map { $0.size().height / max($0.size().width, 1) } ?? 1.156
+        body.size = CGSize(width: R * 2, height: R * 2 * aspect)
+        body.zPosition = 1
+        container.addChild(body)
 
-        // Eye patches — the one feature that has to read at a glance.
-        for side in [CGFloat(-1), 1] {
-            let patch = SKShapeNode(ellipseOf: CGSize(width: R * 0.42, height: R * 0.56))
-            patch.fillColor = SKColor(hex: 0x14100E)
-            patch.strokeColor = .clear
-            patch.position = CGPoint(x: side * R * 0.34, y: R * 0.18)
-            patch.zRotation = side * -0.3
-            container.addChild(patch)
-        }
+        // Spark's own ember body would show THROUGH the panda, so it stands
+        // down for the duration. Restored in the `!on` branch above.
+        emberWrap.alpha = 0
+        eyesNode.alpha = 0
 
         // On fire.
         let flame = SKShapeNode(circleOfRadius: R * 1.25)
