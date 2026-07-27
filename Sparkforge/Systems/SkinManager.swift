@@ -26,6 +26,14 @@ enum SkinTier {
 /// flags. Applied over PlayerNode's layered nodes (glow / ember / inner-core /
 /// eyes / trail). `.base` reproduces the stock Spark exactly, so the base Spark
 /// is itself "just a skin" — the framework has no special-cased default path.
+/// Procedural decorations a skin can wear over the stock Spark.
+enum SkinOverlay {
+    /// Two black ears and two eye patches. Spark's ember shows through as the
+    /// face, which is the joke: he is not a panda, he is Spark WEARING a mask,
+    /// and nothing else about him has changed.
+    case pandaMask
+}
+
 struct SkinAppearance {
     let coreColorHex: UInt32        // ember body (the readable mass)
     let glowColorHex: UInt32        // soft outer aura
@@ -34,6 +42,15 @@ struct SkinAppearance {
     let trailColorHex: UInt32       // ember-fleck trail
     let flareRingColorHex: UInt32   // level-up corona ring
     let glowBoost: CGFloat          // outer-glow intensity multiplier (1.0 = base)
+
+    /// v2.0 art pass: a procedural OVERLAY drawn on top of Spark.
+    ///
+    /// Preferred over a sprite whenever the skin is still SPARK. An overlay
+    /// keeps every reactive behaviour — eyes tracking travel, the ember
+    /// breathing, damage flash, the level-up corona, the trail — and composes
+    /// with the other overlays (Apex horns, the Polar hat). A sprite keeps none
+    /// of that. Reach for a sprite only when the skin is a different creature.
+    var overlay: SkinOverlay? = nil
 
     /// v2.0 art pass: an imageset that REPLACES Spark's procedural body.
     ///
@@ -165,7 +182,7 @@ final class SkinManager {
                 coreColorHex: 0xF2F2F2, glowColorHex: 0x888888,
                 innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0x0A0A0A,
                 trailColorHex: 0xCCCCCC, flareRingColorHex: 0xFFFFFF, glowBoost: 1.0,
-                spriteName: "skin_panda_mask"),
+                overlay: .pandaMask),
             iapProductID: nil),
 
         SkinDefinition(

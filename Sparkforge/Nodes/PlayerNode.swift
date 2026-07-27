@@ -53,6 +53,9 @@ final class PlayerNode: SKNode {
     /// v2.0 art pass: a SPRITE skin's body, when the selected skin has art.
     /// Palette skins leave this nil and stay fully procedural.
     private var skinSprite: SKSpriteNode?
+    /// A procedural skin overlay (the panda mask). Kept separate from the
+    /// sprite path because an overlay ADDS to Spark rather than replacing him.
+    private var skinOverlay: SKNode?
 
     /// v2.0 art pass — the kaiju's frame sets.
     ///
@@ -144,6 +147,43 @@ final class PlayerNode: SKNode {
 
     // MARK: - v2.0 Unit 1: Skins (procedural re-tint of the layered Spark)
 
+    /// Build a procedural skin overlay.
+    ///
+    /// Deliberately drawn rather than drawn-by-Lyra: at 32pt a panda mask is two
+    /// ears and two eye patches, which shapes render perfectly — and staying
+    /// procedural is what lets it keep Spark's tracking eyes, his breathing and
+    /// his damage flash. Art would have bought detail nobody can see at this
+    /// size and cost every reactive behaviour he has.
+    private static func makeOverlay(_ kind: SkinOverlay) -> SKNode {
+        let container = SKNode()
+        container.zPosition = 14        // above the eyes (13), below the kaiju (15)
+        switch kind {
+        case .pandaMask:
+            let R = GameConfig.Player.visualRadius
+            let ink = SKColor(hex: 0x141414)
+            for side in [CGFloat(-1), 1] {
+                let ear = SKShapeNode(circleOfRadius: R * 0.32)
+                ear.fillColor = ink
+                ear.strokeColor = SKColor(hex: 0x000000, alpha: 0.6)
+                ear.lineWidth = 1
+                ear.position = CGPoint(x: side * R * 0.66, y: R * 0.74)
+                container.addChild(ear)
+
+                // The patch rings Spark's own eye rather than covering it — his
+                // eyes still track travel, right through the mask.
+                let patch = SKShapeNode(ellipseOf: CGSize(width: R * 0.50, height: R * 0.62))
+                patch.fillColor = ink
+                patch.strokeColor = .clear
+                patch.position = CGPoint(x: side * R * 0.34,
+                                         y: R * GameConfig.Spark.eyeBaseYFactor)
+                patch.zRotation = side * -0.28
+                patch.zPosition = -1     // behind the eyes, so they read on top
+                container.addChild(patch)
+            }
+        }
+        return container
+    }
+
     /// One place decides whether Spark's procedural body is visible.
     ///
     /// Two things can replace it — a sprite skin and the kaiju — and they must
@@ -153,6 +193,7 @@ final class PlayerNode: SKNode {
     private func refreshBodyVisibility() {
         let kaiju = kaijuFeatures != nil
         skinSprite?.isHidden = kaiju
+        skinOverlay?.isHidden = kaiju
         let replaced = kaiju || skinSprite != nil
         emberWrap.alpha = replaced ? 0 : 1
         eyesNode.alpha = replaced ? 0 : 1
@@ -167,6 +208,13 @@ final class PlayerNode: SKNode {
         // skins mid-session can't leave the previous one's art behind.
         skinSprite?.removeFromParent()
         skinSprite = nil
+        skinOverlay?.removeFromParent()
+        skinOverlay = nil
+        if let overlay = a.overlay {
+            let node = Self.makeOverlay(overlay)
+            addChild(node)
+            skinOverlay = node
+        }
         if let name = a.spriteName {
             let texture = SKTexture(imageNamed: name)
             if texture.size().width > 1 {
