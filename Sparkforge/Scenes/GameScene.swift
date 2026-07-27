@@ -3967,6 +3967,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.fadeAlpha(to: 1.0, duration: 0.9)
         ])))
 
+        // THE TELL (Brandon, from a feel pass). A chartreuse circle did not read
+        // as POISON — he designed this mechanic and still had to work out what
+        // the spreading circles were mid-run, which means a player meeting it
+        // cold has no chance at all. Propagation is the best idea in the roster
+        // and it was invisible as a concept.
+        //
+        // A skull means hazard in every game ever made, so it needs no teaching,
+        // and on this tree it's also just funny. One node per cloud, capped at
+        // `skunkMaxClouds`, wafting rather than static so it reads as fumes.
+        let skull = SKLabelNode(text: "☠️")
+        skull.fontSize = max(12, radius * 0.5)
+        skull.verticalAlignmentMode = .center
+        skull.horizontalAlignmentMode = .center
+        skull.zPosition = 1
+        node.addChild(skull)
+        skull.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.group([SKAction.moveBy(x: 0, y: 5, duration: 1.2),
+                            SKAction.fadeAlpha(to: 0.5, duration: 1.2)]),
+            SKAction.group([SKAction.moveBy(x: 0, y: -5, duration: 1.2),
+                            SKAction.fadeAlpha(to: 0.95, duration: 1.2)])
+        ])))
+
         poisonClouds.append(PoisonCloud(node: node, radius: radius,
                                         life: life, tick: 0, generation: generation))
     }
@@ -4067,6 +4089,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// contact, for a few seconds. A self-contained placeholder — a future pass
     /// can reskin it onto the FamiliarNode/Apex summon framework.
     private func spawnLionPet() {
+        // Only one may prowl. The roll already drops the lion tier while one is
+        // out, so this is currently unreachable — this guards a FUTURE caller,
+        // not a bug anyone hit. `lionPet` is a single slot, and overwriting it
+        // would strand the previous lion forever: still on the field, no longer
+        // updated, never despawned.
+        guard lionPet == nil else { return }
         let lion = SKLabelNode(text: "🦁")
         lion.fontSize = GameConfig.Tree.lionSize
         lion.verticalAlignmentMode = .center
