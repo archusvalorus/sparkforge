@@ -82,6 +82,37 @@ its size.
 4. **Look at it at display resolution before committing.** Downsample, magnify
    with no smoothing, and check what actually survived.
 
+### ⚠️ Animation frames crop to a SHARED box, never individually
+
+The single-sprite rule ("crop to content bounds") is **wrong for a frame set**
+and will produce a bug that looks like broken art.
+
+Frames drawn independently land in different places on the canvas. Measured
+across the kaiju's nine:
+
+| Frame | Content | Position on canvas |
+|---|---|---|
+| Front 1 | 898×1150 | (63, 164) |
+| Right 1 | 674×1216 | (201, 140) |
+| Right attack | 965×901 | (21, 317) |
+
+Cropping each to its own bounds re-centres every frame differently, so the
+character **teleports between frames** — a walk cycle jitters because frame 2's
+feet land where frame 1's head was.
+
+**Always compute the UNION box across the whole set and crop every frame to it.**
+Relative position is preserved, and poses that extend past the standing
+silhouette (an outstretched arm) still get their room.
+
+Two consequences:
+
+- **The union box is wider than the body**, so sizing the sprite to the ladder's
+  point width would render the body slightly small. Size the box so the STANDING
+  BODY hits the ladder number, and let action poses spill into the margin.
+- **Ask the artist to anchor frames deliberately** (same ground contact, same
+  body centre). A shared crop box compensates, but it can't recover registration
+  the art never had.
+
 ### Style note
 
 A "pixel art" source is usually not chunky pixels — the kaiju's finest features
