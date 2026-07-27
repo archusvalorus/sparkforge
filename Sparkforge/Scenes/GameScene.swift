@@ -244,7 +244,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var treeGroundRegenAccumulator: TimeInterval = 0
     private var treeAnimalTimer: TimeInterval = 0
     /// The rare mountain-lion pet (T5): roams and mauls for a few seconds.
-    private var lionPet: SKLabelNode?
+    private var lionPet: LionNode?
     private var lionPetTimer: TimeInterval = 0
     private var lionMaulCooldown: TimeInterval = 0
     /// Nature Canon homing launches in flight (the Fox today; the Panda samurai
@@ -4098,10 +4098,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // would strand the previous lion forever: still on the field, no longer
         // updated, never despawned.
         guard lionPet == nil else { return }
-        let lion = SKLabelNode(text: "🦁")
-        lion.fontSize = GameConfig.Tree.lionSize
-        lion.verticalAlignmentMode = .center
-        lion.horizontalAlignmentMode = .center
+        let lion = LionNode()
         lion.position = (treeNode?.position ?? player.position)
             + CGPoint(x: 0, y: (treeNode?.crownHeight ?? 24) * 0.8)
         lion.zPosition = 9
@@ -4136,7 +4133,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let pad: CGFloat = { if case .boss(let b) = prey { return b.targetingRadius }; return 0 }()
         let dir = (prey.position - lion.position).normalized
         lion.position += dir * GameConfig.Tree.lionSpeed * CGFloat(dt)
-        lion.xScale = dir.x < 0 ? -1 : 1   // face travel
+        lion.setMoving(true)
+        lion.face(dir.x)
 
         guard lionMaulCooldown <= 0,
               lion.position.distance(to: prey.position) < GameConfig.Tree.lionMaulReach + pad
@@ -4146,9 +4144,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // A claw-swipe punch so each maul reads as a discrete hit rather than a
         // continuous grind.
-        lion.removeAction(forKey: "maul")
-        lion.run(SKAction.sequence([SKAction.scale(to: 1.35, duration: 0.07),
-                                    SKAction.scale(to: 1.0, duration: 0.1)]), withKey: "maul")
+        lion.maul()
         showRingPulse(at: prey.position,
                       radius: GameConfig.NatureCanon.impactRadius * 0.55,
                       colorHex: 0xD9A441)   // lion tawny

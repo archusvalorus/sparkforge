@@ -184,6 +184,8 @@ enum GameConfig {
         /// How wide the pet renders. The jackpot should read as a BEAST next to
         /// the launched animals, not as another one of them.
         static let lionSize: CGFloat = 76
+        /// Union-box width ÷ standing-body width across the lion's frames.
+        static let lionFrameBoxRatio: CGFloat = 1.053
         static var lionSpeed: CGFloat { 210 * DeviceScale.gameplay }
         /// Lion contact damage per maul, as a fraction of Spark's ATK.
         static let lionMaulMult: CGFloat = 0.6
