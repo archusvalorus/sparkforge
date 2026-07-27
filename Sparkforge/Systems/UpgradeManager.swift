@@ -212,10 +212,13 @@ final class UpgradeManager {
     /// The colours this run draws from, plus Neutral. Decided once, at reset.
     private(set) var activeFamilies: Set<Tag> = []
 
-    /// The player's single banned colour, supplied by the sticky setting (E2).
-    /// nil = no ban, which is also what RANDOM means: nothing is excluded by
-    /// hand, the roll simply decides.
-    var bannedFamily: Tag? = nil
+    /// The colour this run honoured as banned, recorded when the palette rolled.
+    ///
+    /// Read from the sticky setting at roll time rather than pushed in by a
+    /// caller — one source of truth, and nothing to forget to wire. It also
+    /// means changing the ban mid-run can't reshape the run you're in: the
+    /// palette is already decided, and the new ban applies from the next one.
+    private(set) var bannedFamily: Tag? = nil
 
     /// Colours this save has actually unlocked. E3 narrows this by arena
     /// progress (Growth arriving with Arena 5); until then every colour is in.
@@ -228,8 +231,15 @@ final class UpgradeManager {
     /// Roll this run's palette: drop the banned colour, take the cap at random,
     /// and Neutral is always there.
     private func rollActiveFamilies() {
+        bannedFamily = SettingsManager.shared.bannedFamily
         var candidates = unlockedFamilies
-        if let banned = bannedFamily { candidates.removeAll { $0 == banned } }
+        // A ban only bites while there are still enough colours left to fill a
+        // run without it. If a player somehow has exactly the cap unlocked,
+        // honouring the ban would shrink the pool below the tuned size, so the
+        // cap wins — a ban is a preference, not a promise to play short.
+        if let banned = bannedFamily, candidates.count > GameConfig.Drafting.activeColorFamilies {
+            candidates.removeAll { $0 == banned }
+        }
         let cap = min(GameConfig.Drafting.activeColorFamilies, candidates.count)
         activeFamilies = Set(candidates.shuffled().prefix(cap))
         activeFamilies.insert(.neutral)   // non-negotiable, and not a colour
