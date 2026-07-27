@@ -624,6 +624,36 @@ final class PlayerNode: SKNode {
         run(flash)
     }
 
+    /// v2.0: the run ended and Spark WON — he stays lit.
+    ///
+    /// The counterpart to `die()`, and the reason it exists: a cleared gauntlet
+    /// and a cleared arena both used to route through `die()` for the result
+    /// screen, so the game blinked Spark out of existence and then congratulated
+    /// you. He swells and burns brighter instead. Still ends the run — controls
+    /// stop, the result screen takes over — but the last thing you see is the
+    /// forge holding, not going out.
+    func survive() {
+        isDead = true                    // ends input/collision, same as die()
+        physicsBody?.categoryBitMask = 0
+        run(SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 1.35, duration: 0.35),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.2)
+            ]),
+            SKAction.scale(to: 1.15, duration: 0.5)
+        ]))
+        glowNode.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 1.8, duration: 0.4),
+                SKAction.fadeAlpha(to: 0.9, duration: 0.4)
+            ]),
+            SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.55, duration: 0.9),
+                SKAction.fadeAlpha(to: 0.9, duration: 0.9)
+            ]))
+        ]))
+    }
+
     /// v2.0 (C2) — PANDA.
     ///
     /// Spark becomes a flaming panda kaiju. Rides the same creature-morph vector

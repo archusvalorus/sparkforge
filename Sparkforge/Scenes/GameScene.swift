@@ -9729,10 +9729,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                          currentHP: playerStats.currentHP,
                          maxHP: playerStats.maxHP)
 
-        player.die()
-        
-        // Big screen shake on death
-        worldNode.shake(intensity: 12, duration: 0.35)
+        // v2.0: a WON run doesn't kill Spark. Both victory endings (a cleared
+        // gauntlet, a cleared arena) route through here for the shared result
+        // screen, and both used to blink him out and then congratulate you.
+        let won = arenaCleared || gauntletWon
+        if won {
+            player.survive()
+        } else {
+            player.die()
+            worldNode.shake(intensity: 12, duration: 0.35)   // the death slam
+        }
         
         // Record high scores — but NOT for a gauntlet. Boss Mode is sandbox-
         // isolated: survival time is meaningless there (the mode has no clock to
