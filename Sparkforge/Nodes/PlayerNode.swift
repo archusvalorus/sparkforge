@@ -47,7 +47,9 @@ final class PlayerNode: SKNode {
     private var eyeOffset: CGPoint = .zero   // current directional slide (smoothed)
     private var apexFeatures: SKNode?        // v1.9 Apex (The Hunter): fixed horns + wings
     private var apexFangs: SKNode?           // v1.9 Apex: fangs — ride the eyesNode so they travel
-    private var kaijuFeatures: SKNode?       // v2.0 (C2): PANDA. ears, patches, fire
+    private var kaijuFeatures: SKNode?       // v2.0 (C2): PANDA. sprite + fire
+    private var kaijuBody: SKSpriteNode?     // the sprite itself, for walk/facing
+    private var kaijuWalkPhase: CGFloat = 0
     private var polarFeatures: SKNode?       // v1.9 Polar Vortex (T5): santa hat (fixed on head)
     private var polarBeard: SKNode?          // v1.9 Polar Vortex: beard — rides eyesNode, seated low
 
@@ -236,6 +238,37 @@ final class PlayerNode: SKNode {
         position += displacement
 
         clampToArena()
+        updateKaijuGait(direction: direction, deltaTime: deltaTime)
+    }
+
+    /// The kaiju's walk: a heavy bob, a lean into travel, and facing.
+    ///
+    /// Three separate channels on purpose — facing owns `xScale`, the gait owns
+    /// `position.y` and `zRotation`, and the idle breathe owns `yScale`. Nothing
+    /// overlaps, so none of them can stomp another mid-animation.
+    ///
+    /// The bob eases back to rest rather than snapping, because something this
+    /// size should take a moment to settle. That single detail does more for the
+    /// sense of weight than the slower move speed does.
+    private func updateKaijuGait(direction: CGPoint, deltaTime: TimeInterval) {
+        guard let body = kaijuBody else { return }
+        let moving = direction.length > 0.15
+
+        if moving {
+            kaijuWalkPhase += CGFloat(deltaTime) * 7.5
+            let bob = abs(sin(kaijuWalkPhase)) * GameConfig.Player.visualRadius * 0.09
+            body.position.y = bob
+            // Lean into the direction of travel, capped so it never tips over.
+            let lean = max(-0.09, min(0.09, -direction.x * 0.09))
+            body.zRotation += (lean - body.zRotation) * min(1, CGFloat(deltaTime) * 8)
+            if direction.x < -0.05 { body.xScale = -1 }
+            else if direction.x > 0.05 { body.xScale = 1 }
+        } else {
+            // Settle.
+            let ease = min(1, CGFloat(deltaTime) * 6)
+            body.position.y += (0 - body.position.y) * ease
+            body.zRotation += (0 - body.zRotation) * ease
+        }
     }
 
     /// The eyes drift toward the travel direction — the spark looks where it
@@ -666,6 +699,8 @@ final class PlayerNode: SKNode {
     func setKaiju(_ on: Bool) {
         if !on {
             kaijuFeatures?.removeFromParent(); kaijuFeatures = nil
+            kaijuBody = nil
+            kaijuWalkPhase = 0
             emberWrap.alpha = 1
             eyesNode.alpha = 1
             removeAction(forKey: "kaijuScale")
@@ -694,18 +729,35 @@ final class PlayerNode: SKNode {
         body.size = CGSize(width: R * 2, height: R * 2 * aspect)
         body.zPosition = 1
         container.addChild(body)
+        kaijuBody = body
+
+        // A still sprite reads as a decal; a breathing one reads as a creature.
+        // Deliberately scaleY only — facing owns xScale and the walk owns
+        // position/rotation, so none of the three can fight each other.
+        body.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.scaleY(to: 1.035, duration: 0.75),
+            SKAction.scaleY(to: 1.0, duration: 0.75)
+        ])), withKey: "kaijuBreathe")
 
         // Spark's own ember body would show THROUGH the panda, so it stands
         // down for the duration. Restored in the `!on` branch above.
         emberWrap.alpha = 0
         eyesNode.alpha = 0
 
-        // On fire.
-        let flame = SKShapeNode(circleOfRadius: R * 1.25)
-        flame.fillColor = SKColor(hex: 0xFF6A1A, alpha: 0.22)
-        flame.strokeColor = SKColor(hex: 0xFFB347, alpha: 0.85)
-        flame.lineWidth = 2.5
-        flame.glowWidth = 10
+        // On fire — but HUGGING the body, not haloing it.
+        //
+        // The first pass was a circle of R*1.25 with a 10pt glow, and both get
+        // multiplied by the 3.0 kaiju scale: a ~120pt disc of light around a
+        // 96pt sprite. It read as a panda standing in a spotlight rather than a
+        // panda that is on fire, and it washed out the art we'd just committed.
+        // Now an ellipse matched to the sprite's own proportions, dimmer fill,
+        // tighter glow — the sprite is the hero, the fire is its outline.
+        let flame = SKShapeNode(ellipseOf: CGSize(width: R * 2 * 0.98,
+                                                  height: R * 2 * aspect * 0.94))
+        flame.fillColor = SKColor(hex: 0xFF6A1A, alpha: 0.10)
+        flame.strokeColor = SKColor(hex: 0xFFB347, alpha: 0.8)
+        flame.lineWidth = 2.0
+        flame.glowWidth = 5
         flame.zPosition = -1
         flame.run(SKAction.repeatForever(SKAction.sequence([
             SKAction.group([SKAction.scale(to: 1.12, duration: 0.28),
