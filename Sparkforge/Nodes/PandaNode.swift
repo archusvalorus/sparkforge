@@ -51,10 +51,21 @@ final class PandaNode: SKNode {
     /// the BODY, not the poses.
     private var idleFrames: [SKTexture] = []
     private var walkFrames: [SKTexture] = []
+    private var strikeFrames: [SKTexture] = []
+    private var bowFrames: [SKTexture] = []
     private var sprite: SKSpriteNode?
     private var currentClip = ""
 
-    override init() {
+    /// Which panda this is. Same puppet, different frame set — the samurai has
+    /// its own art (sword included, so `equipSword` becomes a no-op) plus clips
+    /// the ordinary panda has no use for.
+    enum Variant { case ordinary, samurai }
+    private let variant: Variant
+
+    convenience override init() { self.init(variant: .ordinary) }
+
+    init(variant: Variant) {
+        self.variant = variant
         super.init()
         zPosition = 7
         let s = DeviceScale.gameplay
@@ -99,14 +110,26 @@ final class PandaNode: SKNode {
         // v2.0 art pass: the drawn shapes above become the FALLBACK. If the art
         // is present the sprite covers them; if an imageset is ever missing, a
         // recognisable panda still walks around instead of nothing at all.
-        idleFrames = [1, 2, 1, 3].map { SKTexture(imageNamed: "panda_ordinary_idle_\($0)") }
-        walkFrames = (1...4).map { SKTexture(imageNamed: "panda_ordinary_walk_\($0)") }
+        switch variant {
+        case .ordinary:
+            idleFrames = [1, 2, 1, 3].map { SKTexture(imageNamed: "panda_ordinary_idle_\($0)") }
+            walkFrames = (1...4).map { SKTexture(imageNamed: "panda_ordinary_walk_\($0)") }
+        case .samurai:
+            // Its idle IS the upright bow pose — a samurai at rest stands, it
+            // doesn't amble. Approach is a measured 3-frame walk.
+            idleFrames = [SKTexture(imageNamed: "panda_samurai_bow_1")]
+            walkFrames = (1...3).map { SKTexture(imageNamed: "panda_samurai_walk_\($0)") }
+            strikeFrames = (1...3).map { SKTexture(imageNamed: "panda_samurai_strike_\($0)") }
+            bowFrames = (1...2).map { SKTexture(imageNamed: "panda_samurai_bow_\($0)") }
+        }
         if let first = idleFrames.first {
             let art = SKSpriteNode(texture: first)
             let aspect = first.size().height / max(first.size().width, 1)
             // Local width in the node's own units; `setBodyScale` then puts the
             // whole thing on the size ladder, exactly as the shapes were.
-            let w = Self.naturalWidth * GameConfig.Panda.frameBoxRatio
+            let w = Self.naturalWidth * (variant == .samurai
+                                         ? GameConfig.Panda.samuraiFrameBoxRatio
+                                         : GameConfig.Panda.frameBoxRatio)
             art.size = CGSize(width: w, height: w * aspect)
             art.zPosition = 1
             addChild(art)
@@ -210,7 +233,9 @@ final class PandaNode: SKNode {
     /// A bamboo sword, held at the side. The only visual tell the samurai gives,
     /// and by the time you've noticed it the strike has usually happened.
     func equipSword() {
-        guard childNode(withName: "sword") == nil else { return }
+        // The samurai's art is drawn holding its sword; only the fallback
+        // shapes need one bolted on.
+        guard variant != .samurai, childNode(withName: "sword") == nil else { return }
         let s = DeviceScale.gameplay
         let sword = SKShapeNode(rectOf: CGSize(width: 2.4 * s, height: 26 * s), cornerRadius: 1.2 * s)
         sword.name = "sword"
@@ -226,6 +251,21 @@ final class PandaNode: SKNode {
     /// One strike. Wind up, cut, hold the follow-through.
     func strike(completion: @escaping () -> Void) {
         removeAction(forKey: "pose")
+
+        // With art: raise → cut → settle, on the same slow-fast-slow rhythm the
+        // kaiju uses. Even spacing is what makes a swing read as a slideshow.
+        if let sprite = sprite, strikeFrames.count == 3 {
+            currentClip = "strike"
+            sprite.removeAction(forKey: "anim")
+            sprite.run(.sequence([
+                .setTexture(strikeFrames[0], resize: false), .wait(forDuration: 0.30),
+                .setTexture(strikeFrames[1], resize: false), .wait(forDuration: 0.10),
+                .setTexture(strikeFrames[2], resize: false), .wait(forDuration: 0.22)
+            ]), withKey: "anim")
+            run(.sequence([.wait(forDuration: 0.40), .run(completion)]))
+            return
+        }
+
         let sword = childNode(withName: "sword")
         sword?.run(SKAction.sequence([
             SKAction.rotate(toAngle: -1.5, duration: 0.28),          // raised
@@ -240,6 +280,16 @@ final class PandaNode: SKNode {
 
     /// Bows. Not to you.
     func bow() {
+        // With art the bow IS a frame — no need to fake it by squashing.
+        if let sprite = sprite, bowFrames.count == 2 {
+            currentClip = "bow"
+            sprite.removeAction(forKey: "anim")
+            sprite.run(.sequence([
+                .setTexture(bowFrames[1], resize: false), .wait(forDuration: 0.65),
+                .setTexture(bowFrames[0], resize: false)
+            ]), withKey: "anim")
+            return
+        }
         removeAction(forKey: "pose")
         run(SKAction.sequence([
             SKAction.scaleY(to: bodyScale * 0.7, duration: 0.25),

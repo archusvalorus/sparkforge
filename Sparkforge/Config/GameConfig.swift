@@ -388,6 +388,9 @@ enum GameConfig {
         /// Frames share one crop box so nothing shifts between them; the box is
         /// wider than the body, so scale by this and the BODY lands on 76pt.
         static let frameBoxRatio: CGFloat = 1.040
+        /// Same idea for the samurai, whose union box is wider because the
+        /// overhead sword raise reaches well past the standing silhouette.
+        static let samuraiFrameBoxRatio: CGFloat = 1.198
         /// Ceiling on live pandas, per tier growth and for frame rate.
         static let maxPandas: Int = 6
 

@@ -2752,13 +2752,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let limit = GameConfig.Arena.radius * 0.9
         if destination.length > limit { destination = destination.normalized * limit }
 
-        let node = PandaNode()
-        node.position = entry
-        worldNode.addChild(node)
-
         // The samurai. It is 5%. That is the entire trigger, and it is never
         // going to be anything else — the community can theorise for as long as
         // it likes.
+        //
+        // Decided BEFORE the node exists: the samurai has its own art, so the
+        // variant has to be known at construction rather than bolted on after.
         let tier = playerStats.pandaTier
         var act: PandaAct
         var mark: CombatTarget?
@@ -2768,13 +2767,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             act = .samurai
             mark = target
             destination = target.position
-            node.equipSword()
         } else {
             // Otherwise: uniform across everything unlocked. No weighting by
             // usefulness, no reading of the board — a panda in a boss fight is
             // exactly as likely to sit down as to charge.
             act = PandaAct.allCases.filter { $0.minTier <= tier }.randomElement() ?? .pleased
         }
+
+        let node = PandaNode(variant: act == .samurai ? .samurai : .ordinary)
+        node.position = entry
+        worldNode.addChild(node)
+        if act == .samurai { node.equipSword() }   // no-op with art; arms the fallback
 
         var panda = Panda(node: node,
                           act: act,
