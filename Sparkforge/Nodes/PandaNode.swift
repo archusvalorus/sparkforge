@@ -34,6 +34,15 @@ final class PandaNode: SKNode {
     private let white = SKColor(hex: 0xF2F0EA)
     private let black = SKColor(hex: 0x1A1A1A)
 
+    /// The panda's drawn width in points before any scaling — the body ellipse
+    /// spans -11…11. Kept explicit so the size ladder in GameConfig can be
+    /// expressed in POINTS ACROSS rather than in an opaque multiplier, and so it
+    /// survives the swap from these shapes to a sprite unchanged.
+    static let naturalWidth: CGFloat = 22
+
+    /// Scale that renders a panda at `GameConfig.Panda.bodyWidth`.
+    static var baseScale: CGFloat { GameConfig.Panda.bodyWidth / naturalWidth }
+
     override init() {
         super.init()
         zPosition = 7
@@ -75,6 +84,8 @@ final class PandaNode: SKNode {
         muzzle.strokeColor = .clear
         muzzle.position = CGPoint(x: 0, y: -3 * s)
         body.addChild(muzzle)
+
+        setBodyScale(Self.baseScale)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

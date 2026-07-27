@@ -2852,7 +2852,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func spawnStackedPanda(on base: PandaNode) {
         guard pandas.count < GameConfig.Panda.maxPandas else { return }
         let node = PandaNode()
-        node.setBodyScale(0.85)
+        node.setBodyScale(PandaNode.baseScale * 0.85)   // the one on top is smaller
         node.position = base.position + CGPoint(x: 0, y: 16 * DeviceScale.gameplay)
         node.zPosition = base.zPosition + 0.1
         node.alpha = 0
@@ -4065,7 +4065,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// can reskin it onto the FamiliarNode/Apex summon framework.
     private func spawnLionPet() {
         let lion = SKLabelNode(text: "🦁")
-        lion.fontSize = 30
+        lion.fontSize = GameConfig.Tree.lionSize
         lion.verticalAlignmentMode = .center
         lion.horizontalAlignmentMode = .center
         lion.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: 24)

@@ -181,6 +181,9 @@ enum GameConfig {
         /// Chance a launch is the RARE mountain-lion PET instead of a projectile.
         static let lionChance: CGFloat = 0.06
         static let lionDuration: TimeInterval = 10.0
+        /// How wide the pet renders. The jackpot should read as a BEAST next to
+        /// the launched animals, not as another one of them.
+        static let lionSize: CGFloat = 76
         static var lionSpeed: CGFloat { 210 * DeviceScale.gameplay }
         /// Lion contact damage per maul, as a fraction of Spark's ATK.
         static let lionMaulMult: CGFloat = 0.6
@@ -189,7 +192,14 @@ enum GameConfig {
         /// now feels toothless, raise `lionMaulMult`; don't remove the cooldown.
         static let lionMaulInterval: TimeInterval = 0.45
         /// Contact reach (a boss's targetingRadius is added on top).
-        static var lionMaulReach: CGFloat { 26 * DeviceScale.gameplay }
+        /// Contact reach (a boss's targetingRadius is added on top).
+        ///
+        /// Tracks `lionSize`: at 76pt across the pet's body radius is ~38, so a
+        /// 26pt reach meant enemies could stand visibly ON the lion without
+        /// being mauled. When a body grows, what it can touch has to grow with
+        /// it — a hitbox that disagrees with the art reads as a bug, not as
+        /// balance.
+        static var lionMaulReach: CGFloat { 44 * DeviceScale.gameplay }
     }
 
     // MARK: - Nature Canon (the Tree T5 roster — v2.0 Phase C part 2)
@@ -208,9 +218,18 @@ enum GameConfig {
         static let weightRare: CGFloat     = 0.15
         static let weightLion: CGFloat     = 0.05
 
-        /// The emoji stand-in's size. PLACEHOLDER ART — the sprite pass replaces
-        /// every launched body at once, on purpose, after the systems are proven.
-        static let bodySize: CGFloat = 26
+        /// How wide a launched animal renders.
+        ///
+        /// v2.0 art pass (Brandon, Jul 27): 26 -> 50. Comically oversized next to
+        /// a 32pt Spark, which is the joke, and — more practically — 26pt is
+        /// roughly 78 pixels at @3x, which cannot carry enough silhouette for a
+        /// player to tell a rabbit from a badger. The size ladder is deliberately
+        /// set BEFORE any art is drawn, so the sprites are commissioned against a
+        /// footprint that's already been felt in play.
+        ///
+        /// Ladder (points across, iPhone): Spark 32 · animal 50 · lion and
+        /// ordinary panda 76 · kaiju 96.
+        static let bodySize: CGFloat = 50
 
         // --- 🐰 Rabbit "Ninja Kick" ---
         /// The rabbit AUTO-CRITS, and its crit is worth 300% rather than the
@@ -361,16 +380,24 @@ enum GameConfig {
         /// How long a panda hangs around after doing its one thing.
         static let lingerDuration: TimeInterval = 3.5
         static var walkSpeed: CGFloat { 74 * DeviceScale.gameplay }
+        /// How wide an ordinary panda renders. Same footprint as the mountain
+        /// lion: both are "a large animal has wandered in", and both are more
+        /// than twice Spark, which is most of the comedy.
+        static let bodyWidth: CGFloat = 76
         /// Ceiling on live pandas, per tier growth and for frame rate.
         static let maxPandas: Int = 6
 
         /// A roll's damage as a fraction of Spark's ATK, and how far it travels.
         static let rollDamageMult: CGFloat = 0.55
-        static var rollRadius: CGFloat { 30 * DeviceScale.gameplay }
+        /// Tracks `bodyWidth`: a 76pt panda has a ~38pt body radius, so these
+        /// contact radii scale with it. A panda that visibly rolls THROUGH an
+        /// enemy without touching it looks broken, however correct the number
+        /// was before the body grew.
+        static var rollRadius: CGFloat { 38 * DeviceScale.gameplay }
         static var rollDistance: CGFloat { 150 * DeviceScale.gameplay }
         static var rollSpeed: CGFloat { 320 * DeviceScale.gameplay }
         /// A sitting panda eats enemy shots that hit it.
-        static var sitRadius: CGFloat { 26 * DeviceScale.gameplay }
+        static var sitRadius: CGFloat { 36 * DeviceScale.gameplay }
         /// A briefly-interesting panda pulls nearby enemies toward it.
         static var aggroRadius: CGFloat { 170 * DeviceScale.gameplay }
         static let aggroDuration: TimeInterval = 2.2
@@ -418,7 +445,7 @@ enum GameConfig {
         static let kaijuInterval: TimeInterval = 45.0
         /// How much bigger. This is a visual + reach change only — the physics
         /// body is untouched, so the collision world never shifts underfoot.
-        static let kaijuScale: CGFloat = 2.3
+        static let kaijuScale: CGFloat = 3.0
         /// Contact reach while transformed.
         static var kaijuReach: CGFloat { 96 * DeviceScale.gameplay }
 
