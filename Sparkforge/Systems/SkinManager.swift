@@ -172,7 +172,11 @@ final class SkinManager {
                 coreColorHex: 0x3B3170,        // deep indigo/midnight body
                 glowColorHex: 0x5A3AC8,        // violet-indigo halo
                 innerCoreColorHex: 0xFFFFFF,   // white-hot star center
-                eyeColorHex: 0xE0E0FF,         // star-white eyes
+                // Soft pale yellow, NOT star-white. White eyes vanished against
+                // the white-hot inner core they sit over — pale gold separates
+                // from BOTH backgrounds: warmer and darker than the core,
+                // far lighter than the indigo body.
+                eyeColorHex: 0xF2E3A1,
                 trailColorHex: 0x9A7AE8,
                 flareRingColorHex: 0xC8B0FF, glowBoost: 1.2),
             iapProductID: nil),
@@ -184,7 +188,7 @@ final class SkinManager {
             tier: .premium,
             appearance: SkinAppearance(
                 coreColorHex: 0x2E2668, glowColorHex: 0x6A3AE0,
-                innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0xF0F0FF,
+                innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0xF2E3A1,
                 trailColorHex: 0xB088FF, flareRingColorHex: 0xE0C8FF, glowBoost: 1.3,
                 trailBoost: 1.9, overlay: .constellation),
             iapProductID: premiumStarCrossedProductID),
