@@ -113,6 +113,28 @@ Two consequences:
   body centre). A shared crop box compensates, but it can't recover registration
   the art never had.
 
+### ⚠️ Animated sprites do not render at the size the arithmetic predicts
+
+**Verify size by LOOKING, not by computing.** The kaiju's sizing math nominally
+produces ~105pt on screen; what actually renders is roughly **triple** that.
+
+The jump appeared when the sprite moved from `SKSpriteNode(imageNamed:)` to
+`SKSpriteNode(texture:)` driven by a frame array. The single-image path
+rendered at the nominal size. Root cause unidentified — every link reads correct
+in isolation, `size` is set explicitly, and `resize: false` on the animate
+action should preserve it.
+
+Consequences for the next character:
+
+- **Budget an on-device size check as a step**, not as a formality. §1's
+  ladder still decides what you WANT; it just doesn't guarantee what you get
+  once frames are involved.
+- **Don't "fix" a size that looks right but contradicts the constant.** On the
+  kaiju the oversized result was the one Brandon signed off; the code now
+  carries a LOCKED-APPEARANCE warning so nobody helpfully shrinks it later.
+- If the same tripling shows up on the next animated character, that's the
+  confirmation needed to chase the root cause properly.
+
 ### Style note
 
 A "pixel art" source is usually not chunky pixels — the kaiju's finest features

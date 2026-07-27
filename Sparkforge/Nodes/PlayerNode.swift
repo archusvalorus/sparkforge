@@ -794,6 +794,23 @@ final class PlayerNode: SKNode {
         // The union box is wider than the standing body, so scale the BOX up by
         // that ratio and the body itself lands on the ladder's 96pt. Action
         // poses then spill into the margin instead of being squeezed.
+        // ⚠️ LOCKED APPEARANCE — DO NOT "CORRECT" THIS (Brandon, Jul 27).
+        //
+        // The arithmetic here nominally yields ~105pt on screen (16 × 2 ×
+        // 1.089 local, then × kaijuScale 3.0). What actually RENDERS is
+        // substantially larger — roughly triple — and that is the size Brandon
+        // signed off as the intended kaiju: "it might have started as a bug,
+        // but it's now a feature. THIS IS THE ONE."
+        //
+        // The discrepancy appeared when this switched from
+        // SKSpriteNode(imageNamed:) to SKSpriteNode(texture:) with an animation
+        // frame array; the single-image path rendered at the nominal size. Root
+        // cause not identified — every link reads correct in isolation, and
+        // `resize: false` on the animate action should preserve `size`.
+        //
+        // So: the number below is NOT a reliable predictor of on-screen size.
+        // Tune the kaiju by LOOKING at it on a device, and expect the same
+        // surprise on the next animated character — see the playbook.
         let boxW = R * 2 * GameConfig.Panda.kaijuFrameBoxRatio
         body.size = CGSize(width: boxW, height: boxW * aspect)
         body.zPosition = 1
