@@ -942,6 +942,30 @@ enum GameConfig {
     
     // MARK: - Enemy
     enum Enemy {
+        /// Global multiplier on every spawned enemy's HP (Brandon, Jul 27).
+        ///
+        /// Enemies ramp on hardcoded time brackets in each arena's spawn table,
+        /// and past ~1:45 they were reading as too chunky — Arena 5's Anvilborn
+        /// elite arrives at 90s carrying baseHP + 3, so a fifth of spawns were
+        /// 5 HP while normals were 2. The pressure Brandon wants comes from
+        /// SPAWN FREQUENCY, not from bodies that take longer to chew through.
+        ///
+        /// One dial instead of editing five per-arena tables — those brackets
+        /// are scattered magic numbers that would drift apart the moment anyone
+        /// tuned one of them in isolation. Applied centrally in EnemyNode.init,
+        /// so subclasses (Anvilborn, Gravemote, Star Needle, Ashling…) inherit
+        /// it without touching their spawners.
+        ///
+        /// Mini-bosses are EXEMPT — they scale on their own curve and weren't
+        /// part of the complaint.
+        static let healthScale: CGFloat = 0.75
+
+        /// Apply the scale, never below 1 — a 0 HP enemy would die to nothing
+        /// and break every on-kill path that assumes a real kill happened.
+        static func scaledHealth(_ base: Int) -> Int {
+            max(1, Int((CGFloat(base) * healthScale).rounded()))
+        }
+
         /// Base enemy speed — must be slower than player
         static let baseSpeed: CGFloat = 130
         /// Base enemy visual radius

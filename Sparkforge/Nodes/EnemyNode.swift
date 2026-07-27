@@ -86,12 +86,17 @@ class EnemyNode: SKNode {
     
     // MARK: - Init
     
+    /// Health is scaled by `GameConfig.Enemy.healthScale` HERE, centrally, so
+    /// every arena's spawn table and every subclass inherits the dial without
+    /// being edited. Signature deliberately unchanged — subclasses override this
+    /// initializer, and adding a parameter breaks the override chain.
     init(health: Int = GameConfig.Enemy.baseHealth,
          moveSpeed: CGFloat = GameConfig.Enemy.baseSpeed,
          xpValue: Int = GameConfig.Leveling.baseEnemyXP) {
-        
-        self.health = health
-        self.maxHealth = health
+
+        let hp = GameConfig.Enemy.scaledHealth(health)
+        self.health = hp
+        self.maxHealth = hp
         self.moveSpeed = moveSpeed
         self.xpValue = xpValue
         

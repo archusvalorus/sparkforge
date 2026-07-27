@@ -8271,8 +8271,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let bossHP = 10 + Int(elapsed / 30) * 3
         let bossXP = bossHP
         
+        // Divided out because EnemyNode scales health centrally and the
+        // mini-boss rides its own curve — it wasn't part of the "too chunky"
+        // complaint, so it should land exactly where it always has.
         let boss = EnemyNode(
-            health: bossHP,
+            health: Int((CGFloat(bossHP) / GameConfig.Enemy.healthScale).rounded()),
             moveSpeed: GameConfig.Enemy.baseSpeed * 0.65,
             xpValue: bossXP
         )
