@@ -136,7 +136,7 @@ final class UpgradeManager {
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
     /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
-    static let debugForcedCardID: String? = "v20_terra"
+    static let debugForcedCardID: String? = "v20_tree"
     #endif
 
     // MARK: - State

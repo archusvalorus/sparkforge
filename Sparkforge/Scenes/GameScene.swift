@@ -3425,7 +3425,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         label.fontSize = GameConfig.NatureCanon.bodySize
         label.verticalAlignmentMode = .center
         label.horizontalAlignmentMode = .center
-        label.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: 30)
+        // Out of the CROWN. A fixed +30pt was fine when the Tree was a shrub;
+        // at redwood scale it fires animals out of the trunk's midsection.
+        let launchY = treeNode?.crownHeight ?? 30
+        label.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: launchY)
         label.zPosition = 9
         return label
     }
@@ -4068,7 +4071,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         lion.fontSize = GameConfig.Tree.lionSize
         lion.verticalAlignmentMode = .center
         lion.horizontalAlignmentMode = .center
-        lion.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: 24)
+        lion.position = (treeNode?.position ?? player.position)
+            + CGPoint(x: 0, y: (treeNode?.crownHeight ?? 24) * 0.8)
         lion.zPosition = 9
         worldNode.addChild(lion)
         lionPet = lion
