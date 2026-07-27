@@ -220,12 +220,18 @@ final class UpgradeManager {
     /// palette is already decided, and the new ban applies from the next one.
     private(set) var bannedFamily: Tag? = nil
 
-    /// Colours this save has actually unlocked. E3 narrows this by arena
-    /// progress (Growth arriving with Arena 5); until then every colour is in.
-    /// Kept as its own step so the cap can degrade gracefully — a player with
-    /// fewer colours unlocked than the cap simply plays with all of them.
+    /// Colours this save has earned, by arena progress (E3).
+    ///
+    /// Kept as its own step from the cap so the whole thing degrades gracefully:
+    /// a save with fewer colours unlocked than `activeColorFamilies` simply
+    /// plays with all of them, and the run is smaller rather than broken. That
+    /// matters most for a brand-new save, which is exactly when a crash or an
+    /// empty draft would be least forgivable.
     private var unlockedFamilies: [Tag] {
-        Tag.allCases.filter { $0 != .neutral }
+        let arenas = ProgressionManager.shared.arenasUnlocked
+        return Tag.allCases.filter {
+            $0 != .neutral && arenas >= GameConfig.Drafting.unlockArena(for: $0)
+        }
     }
 
     /// Roll this run's palette: drop the banned colour, take the cap at random,
@@ -233,14 +239,19 @@ final class UpgradeManager {
     private func rollActiveFamilies() {
         bannedFamily = SettingsManager.shared.bannedFamily
         var candidates = unlockedFamilies
-        // A ban only bites while there are still enough colours left to fill a
-        // run without it. If a player somehow has exactly the cap unlocked,
-        // honouring the ban would shrink the pool below the tuned size, so the
-        // cap wins — a ban is a preference, not a promise to play short.
-        if let banned = bannedFamily, candidates.count > GameConfig.Drafting.activeColorFamilies {
-            candidates.removeAll { $0 == banned }
-        }
-        let cap = min(GameConfig.Drafting.activeColorFamilies, candidates.count)
+        // The ban is a PROMISE — "one tree, never offered" — so it is honoured
+        // whenever the tree is unlocked at all. Quietly ignoring it when the
+        // pool is small would be the worse betrayal.
+        if let banned = bannedFamily { candidates.removeAll { $0 == banned } }
+
+        // ALWAYS leave at least one colour out, so the palette can never become
+        // deterministic. Without this, a new save (six trees) that bans one has
+        // exactly five candidates for five slots and draws the identical palette
+        // every single run until Arena 5 unlocks Growth — the variety this whole
+        // system exists to protect, gone, for the players least equipped to
+        // notice why. The cost is a 4-colour run in that narrow case, and it
+        // self-corrects the moment another tree unlocks.
+        let cap = min(GameConfig.Drafting.activeColorFamilies, max(1, candidates.count - 1))
         activeFamilies = Set(candidates.shuffled().prefix(cap))
         activeFamilies.insert(.neutral)   // non-negotiable, and not a colour
     }

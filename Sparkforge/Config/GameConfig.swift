@@ -459,6 +459,27 @@ enum GameConfig {
         /// than as "how many we exclude", so the pool stays the size it was
         /// tuned at no matter how many trees exist to exclude from.
         static let activeColorFamilies: Int = 5
+
+        /// v2.0 (E3, Brandon): how many arenas a save must have unlocked before
+        /// a tree joins the draft at all.
+        ///
+        /// Two jobs. It PACES the game — a new player meets six trees, not
+        /// nine, and each new arena hands them something genuinely new to learn.
+        /// And it keeps the colour cap meaningful as the roster grows: without
+        /// unlocks, every future tree would dilute the early game it was never
+        /// designed for.
+        ///
+        /// Growth goes first (Brandon): it arrives with Arena 5, the version it
+        /// shipped in. The original six are the game you learn on and stay at 1.
+        ///
+        /// A tree gated here is invisible, not greyed — it should be a discovery,
+        /// not a locked door you stare at for ten hours.
+        static func unlockArena(for tag: UpgradeManager.Tag) -> Int {
+            switch tag {
+            case .growth:  return 5
+            case .fire, .shock, .bleed, .guardT, .voidT, .chill, .neutral: return 1
+            }
+        }
     }
 
     // MARK: - Arena
