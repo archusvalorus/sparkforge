@@ -656,6 +656,19 @@ enum GameConfig {
         static let pullDuration: TimeInterval = 1.8
         static let pullStrength: CGFloat = 95
 
+        // Accretion ORBIT (2c.2) — the orbiting fragments are a moving hazard,
+        // not scenery. They were built decorative with a note that this unit
+        // would arm them, and that unit never landed: the monument's most
+        // visible moving parts were the only ones that couldn't hurt you.
+        //
+        // Contact damage is modest on purpose. These sweep continuously and are
+        // easy to brush, so they're a POSITIONING tax that shapes where you can
+        // stand — the sharp punishment stays with the telegraphed abilities.
+        // Player i-frames throttle repeat contacts, so this can safely fire on
+        // every frame of overlap.
+        static let orbitFragmentDamage: Int = 12
+        static var orbitFragmentRadius: CGFloat { 22 * DeviceScale.gameplay }
+
         // Accretion fragment strikes — orbital fragments break off and descend.
         static let fragmentInterval: TimeInterval = 5.0
         static let fragmentDelay: TimeInterval = 0.9

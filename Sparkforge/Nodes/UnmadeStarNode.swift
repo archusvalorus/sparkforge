@@ -148,8 +148,10 @@ final class UnmadeStarNode: MonumentBossNode {
             seams.append(seam)
         }
 
-        // Orbiting star fragments — decorative in 2c.1; they become the
-        // Accretion Orbit threat paths in 2c.2.
+        // Orbiting star fragments — ARMED as of 2c.2 (see updateAccretionOrbit).
+        // Now that they hurt, they have to look like they hurt: a slow heat
+        // pulse so they read as live moving hazards rather than as trim. An
+        // unsignalled hazard isn't difficulty, it's an unexplained hit.
         for i in 0..<6 {
             let frag = SKShapeNode(circleOfRadius: R * 0.055)
             frag.fillColor = SKColor(hex: 0xFFE8B0)
@@ -157,6 +159,12 @@ final class UnmadeStarNode: MonumentBossNode {
             frag.glowWidth = 6
             frag.blendMode = .add
             frag.zPosition = 3
+            frag.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.group([SKAction.scale(to: 1.22, duration: 0.55),
+                                SKAction.fadeAlpha(to: 1.0, duration: 0.55)]),
+                SKAction.group([SKAction.scale(to: 1.0, duration: 0.55),
+                                SKAction.fadeAlpha(to: 0.82, duration: 0.55)])
+            ])))
             let orbit = SKNode()
             orbit.zPosition = 3
             orbit.addChild(frag)
@@ -172,6 +180,27 @@ final class UnmadeStarNode: MonumentBossNode {
 
     // MARK: - Behaviour (the axis: inevitability)
 
+    /// ACCRETION ORBIT: the fragments sweeping around the monument are live.
+    ///
+    /// Routed through `onHazardDamage` like every other boss hazard, so player
+    /// i-frames, Silver Skin and Phase Skin all apply exactly as they do to a
+    /// Collapse Mark — a new damage source must never quietly bypass the
+    /// defences the player built.
+    ///
+    /// Compared in the monument's PARENT space: the fragments hang off rotating
+    /// child nodes, and `playerPosition` arrives in world space.
+    private func updateAccretionOrbit(playerPosition: CGPoint) {
+        guard !isDead, let space = parent else { return }
+        let reach = GameConfig.UnmadeStar.orbitFragmentRadius
+        for frag in fragments where frag.parent != nil {
+            let world = frag.convert(CGPoint.zero, to: space)
+            if world.distance(to: playerPosition) < reach {
+                onHazardDamage?(GameConfig.UnmadeStar.orbitFragmentDamage)
+                return          // one fragment's worth per frame, not six
+            }
+        }
+    }
+
     override func updateBehavior(deltaTime dt: TimeInterval, playerPosition: CGPoint) {
         let C = GameConfig.UnmadeStar.self
         // The star's cadence tightens as it comes apart.
@@ -182,6 +211,7 @@ final class UnmadeStarNode: MonumentBossNode {
         let step = dt / TimeInterval(cadence)   // shorter cadence → timers run hotter
 
         resolvePending(dt: dt, playerPosition: playerPosition)
+        updateAccretionOrbit(playerPosition: playerPosition)
 
         // Phase 1+: Collapse Marks — it marks where you ARE, so keep moving.
         collapseTimer -= step

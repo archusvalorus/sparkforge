@@ -2502,6 +2502,41 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameState = .playing
     }
 
+    // MARK: - v2.0: monuments are solid
+
+    /// Keep Spark out of the monument.
+    ///
+    /// A monument is a set-piece you fight AROUND, not a big enemy you stand
+    /// inside — walking through the Unmade Star made the arena's centrepiece
+    /// read as a backdrop, and it cost the fight its only real spatial pressure.
+    ///
+    /// Enforced by displacement rather than by the physics solver, because
+    /// `PlayerNode.move` assigns position directly and SpriteKit's collision
+    /// resolution never sees it. Runs immediately after the move, so a frame
+    /// never renders with Spark inside the body.
+    private func pushPlayerOutOfMonument() {
+        guard let monument = boss as? MonumentBossNode, !monument.isDead else { return }
+        let solid = monument.solidRadius + playerStats.effectiveCollisionRadius
+        let delta = player.position - monument.position
+        let dist = delta.length
+        guard dist < solid else { return }
+
+        // Out along the surface normal. Dead-centre is degenerate, so it pushes
+        // DOWN — into the play space, never further up behind the monument.
+        let out = dist > 0.01 ? delta.normalized : CGPoint(x: 0, y: -1)
+        var resolved = monument.position + out * solid
+
+        // The monument's crown sits close to the arena wall, so in that narrow
+        // band the two constraints disagree. The arena wins, and we accept a
+        // little overlap rather than teleporting Spark to the far side of the
+        // body — a sudden jump across the field reads as a bug far louder than
+        // clipping does, and standing pressed against a monument should hurt
+        // anyway (contact damage still applies).
+        let maxDist = GameConfig.Arena.radius - playerStats.effectiveCollisionRadius
+        if resolved.length > maxDist { resolved = resolved.normalized * maxDist }
+        player.position = resolved
+    }
+
     // MARK: - v2.0 (E1): the run's colours
 
     /// Flash which colour families this run actually draws from.
@@ -4351,6 +4386,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         let preMovePosition = player.position
         player.move(direction: joystick.direction, deltaTime: dt)
+        pushPlayerOutOfMonument()
         if joystick.direction != .zero {
             lastMoveDirection = joystick.direction.normalized
         }

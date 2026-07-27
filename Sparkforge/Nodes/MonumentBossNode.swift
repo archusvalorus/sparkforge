@@ -91,6 +91,20 @@ class MonumentBossNode: SKNode, ArenaBossNode {
         physicsBody = body
     }
 
+    /// The radius Spark cannot walk into. A monument is TERRAIN, not a mob.
+    ///
+    /// Every monument gets this for free by declaring its body radius, so
+    /// solidity is a property of the grammar rather than something each new
+    /// set-piece has to remember to implement (the same reasoning that put
+    /// pacing on BossGrammar).
+    ///
+    /// The scene enforces it by displacement rather than through the physics
+    /// solver: the player moves by direct position assignment, so SpriteKit's
+    /// collision resolution never gets a say. `collisionBitMask` stays 0 for
+    /// exactly that reason — a body that participates in contacts but not in
+    /// collisions is intentional here, not an oversight.
+    var solidRadius: CGFloat { targetingRadius }
+
     // MARK: - Anchoring
 
     /// Monument bosses sit high: the player keeps the lower two-thirds as a
