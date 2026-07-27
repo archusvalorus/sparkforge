@@ -421,10 +421,28 @@ enum GameConfig {
         static let kaijuScale: CGFloat = 2.3
         /// Contact reach while transformed.
         static var kaijuReach: CGFloat { 96 * DeviceScale.gameplay }
-        static let kaijuHitInterval: TimeInterval = 0.4
-        /// Contact damage per hit interval, as a fraction of ATK.
-        static let kaijuContactMult: CGFloat = 1.8
-        /// What boss-class takes per interval — heavy STAGGER, never deletion.
+
+        // --- The rampage (Brandon, Jul 26) ---
+        // A kaiju does not fire a gun. While transformed, Spark STOPS shooting
+        // and commits entirely to melee: an ambient fire aura for everything
+        // standing too close, and a heavy periodic strike that's the actual
+        // punch. Two rhythms instead of one uniform tick, so it reads as a
+        // rampage rather than a damage field with a big sprite on it.
+
+        /// The aura: ambient, frequent, low per-tick. This is the cost of being
+        /// NEAR a kaiju, not the reason to fear one.
+        static let kaijuAuraInterval: TimeInterval = 0.5
+        static let kaijuAuraMult: CGFloat = 1.5
+        /// How much a kaiju SLOWS. Something this size sprinting at Spark's
+        /// normal pace looks like a scaling bug, not a monster.
+        static let kaijuMoveScale: CGFloat = 0.7
+        /// The strike: rare, telegraphed, enormous. This is the reason.
+        static let kaijuMeleeInterval: TimeInterval = 2.5
+        static let kaijuMeleeMult: CGFloat = 3.5
+        /// A swipe lands across an arc, not on one target — a kaiju connecting
+        /// with exactly one enemy would look absurd.
+        static var kaijuMeleeReach: CGFloat { 108 * DeviceScale.gameplay }
+        /// What boss-class takes from a strike — heavy STAGGER, never deletion.
         static let kaijuStaggerMult: CGFloat = 2.6
         static var kaijuKnockback: CGFloat { 90 * DeviceScale.gameplay }
         /// Incoming damage is mostly irrelevant while transformed. Applied

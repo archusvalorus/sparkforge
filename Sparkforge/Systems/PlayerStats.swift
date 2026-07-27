@@ -682,8 +682,18 @@ final class PlayerStats {
     
     /// Effective move speed (+ Forge Path temp buffs: Read the Room / Slipstream)
     var effectiveMoveSpeed: CGFloat {
-        return GameConfig.Player.speed * (moveSpeedMultiplier + forgeMoveBonus + treeGroundMoveBonus)
+        // v2.0 (C2): a kaiju LUMBERS. Something that size moving at normal Spark
+        // speed reads as a big sprite rather than a big creature — the weight is
+        // most of what sells the transformation. Applied as a multiplier on the
+        // whole result rather than folded into the additive bonus stack, so it
+        // scales a speed build down proportionally instead of erasing it.
+        GameConfig.Player.speed
+            * (moveSpeedMultiplier + forgeMoveBonus + treeGroundMoveBonus)
+            * kaijuMoveScale
     }
+
+    /// Transient: the scene sets this while Spark is a kaiju, 1.0 otherwise.
+    var kaijuMoveScale: CGFloat = 1.0
     
     /// Effective projectile speed
     var effectiveProjectileSpeed: CGFloat {
@@ -1114,6 +1124,7 @@ final class PlayerStats {
         vineWallTier = 0
         treeTier = 0
         pandaTier = 0
+        kaijuMoveScale = 1.0
         treeGroundMoveBonus = 0
         growthRegenBonusHP = 0
         deeprootDEF = 0

@@ -720,6 +720,53 @@ final class PlayerNode: SKNode {
         run(grow, withKey: "kaijuScale")
     }
 
+    /// A kaiju melee swing: lunge into it, and rake a claw arc across the
+    /// direction of the blow.
+    ///
+    /// Deliberately a LUNGE and not a teleport — the body committing to the
+    /// swing is most of what sells a rampage. The arc is drawn as a stroked
+    /// wedge rather than a ring so it reads as a swipe with a direction, not
+    /// another pulse.
+    func kaijuStrike(toward heading: CGPoint) {
+        guard kaijuFeatures != nil else { return }
+        let R = GameConfig.Player.visualRadius
+
+        let lunge = SKAction.sequence([
+            SKAction.move(by: CGVector(dx: -heading.x * R * 0.25,
+                                       dy: -heading.y * R * 0.25), duration: 0.08),
+            SKAction.move(by: CGVector(dx: heading.x * R * 0.55,
+                                       dy: heading.y * R * 0.55), duration: 0.07),
+            SKAction.move(by: CGVector(dx: -heading.x * R * 0.30,
+                                       dy: -heading.y * R * 0.30), duration: 0.14)
+        ])
+        run(lunge, withKey: "kaijuLunge")
+
+        // Claw arc — three raking lines fanned across the swing.
+        let claw = SKNode()
+        claw.zRotation = atan2(heading.y, heading.x)
+        claw.zPosition = 20
+        addChild(claw)
+        for i in -1...1 {
+            let spread = CGFloat(i) * 0.34
+            let arc = SKShapeNode()
+            let path = CGMutablePath()
+            path.addArc(center: .zero, radius: R * (1.15 + CGFloat(abs(i)) * 0.12),
+                        startAngle: -0.5 + spread, endAngle: 0.5 + spread, clockwise: false)
+            arc.path = path
+            arc.strokeColor = SKColor(hex: 0xFFF0D0, alpha: 0.95)
+            arc.lineWidth = 3
+            arc.glowWidth = 4
+            arc.fillColor = .clear
+            claw.addChild(arc)
+        }
+        claw.setScale(0.6)
+        claw.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.25, duration: 0.18),
+                            SKAction.fadeOut(withDuration: 0.22)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
     /// v1.9 Apex (The Hunter): Spark sprouts tiny black horns, white fangs, and
     /// flapping wings — beginning to resemble the familiar (they don't fuse).
     /// Toggled on at T5. Reusable creature-morph vector for future sets.

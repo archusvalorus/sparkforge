@@ -263,6 +263,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var pandaKaijuTimer: TimeInterval = 0
     private var kaijuRemaining: TimeInterval = 0
     private var kaijuHitTimer: TimeInterval = 0
+    private var kaijuMeleeTimer: TimeInterval = 0
     var kaijuActive: Bool { kaijuRemaining > 0 }
     /// Seconds Spark has spent standing on cultivated ground. Only advances
     /// while he's actually on it, and deliberately NOT reset when he steps off
@@ -2996,11 +2997,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             kaijuRemaining -= dt
             capstoneTimers.set("panda", label: "??? ", colorHex: 0xFF8A3C,
                                remaining: kaijuRemaining)
+
+            // Two rhythms: the aura ticks constantly, the strike lands rarely.
             kaijuHitTimer -= dt
             if kaijuHitTimer <= 0 {
-                kaijuHitTimer = GameConfig.Panda.kaijuHitInterval
-                kaijuMaul()
+                kaijuHitTimer = GameConfig.Panda.kaijuAuraInterval
+                kaijuAuraPulse()
             }
+            kaijuMeleeTimer -= dt
+            if kaijuMeleeTimer <= 0 {
+                kaijuMeleeTimer = GameConfig.Panda.kaijuMeleeInterval
+                kaijuStrike()
+            }
+
             if kaijuRemaining <= 0 { endKaiju() }
             return
         }
@@ -3018,21 +3027,41 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard kaijuRemaining <= 0 else { return }
         kaijuRemaining = GameConfig.Panda.kaijuDuration
         kaijuHitTimer = 0
+        kaijuMeleeTimer = 0
+        playerStats.kaijuMoveScale = GameConfig.Panda.kaijuMoveScale
         player.setKaiju(true)
         worldNode.shake(intensity: 9, duration: 0.4)
         AudioManager.shared.play(.bossEntrance)
     }
 
-    /// Everything near the kaiju has a bad moment. Boss-class takes repeated
-    /// heavy STAGGER rather than deletion — the canon holds even here, and a
-    /// boss that could be one-shot by a joke tree would cheapen both.
-    private func kaijuMaul() {
+    /// The fire aura: standing near a kaiju simply costs you. Frequent, modest,
+    /// and it asks nothing of the player — it's ambience with teeth.
+    private func kaijuAuraPulse() {
         let reach = GameConfig.Panda.kaijuReach
-        let damage = Int(playerStats.effectiveAttack * GameConfig.Panda.kaijuContactMult)
+        damageEnemiesInRadius(reach, around: player.position,
+                              damage: Int(playerStats.effectiveAttack
+                                          * GameConfig.Panda.kaijuAuraMult),
+                              bossClassScaled: true, includeBoss: true)
+        showRingPulse(at: player.position, radius: reach, colorHex: 0xFF7A2A)
+    }
 
+    /// The strike: a paw swipe, a bite, a kick — it lands across an ARC in the
+    /// direction of whatever most deserves it, and it is the reason to be
+    /// afraid. Boss-class takes heavy STAGGER rather than deletion; the canon
+    /// holds even here, and a boss one-shot by a joke tree would cheapen both.
+    private func kaijuStrike() {
+        // Something to hit, or the rampage swings at air.
+        guard let mark = findPriorityTarget(from: player.position, usePlayer: false) else { return }
+        let dir = (mark.position - player.position).normalized
+        let heading = dir == .zero ? lastMoveDirection : dir
+        let reach = GameConfig.Panda.kaijuMeleeReach
+        // Land the arc between Spark and the mark, so the swipe visibly connects
+        // instead of detonating on top of him.
+        let impact = player.position + heading * (reach * 0.55)
+
+        let damage = Int(playerStats.effectiveAttack * GameConfig.Panda.kaijuMeleeMult)
         var killed: [EnemyNode] = []
-        for e in enemies where !e.isDying
-            && e.position.distance(to: player.position) < reach {
+        for e in enemies where !e.isDying && e.position.distance(to: impact) < reach {
             e.applyKnockback(from: player.position, force: GameConfig.Panda.kaijuKnockback)
             if e.takeDamage(GameConfig.BossClass.scaledDamage(damage, isBossClass: e.isMiniBoss)) {
                 killed.append(e)
@@ -3046,19 +3075,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         if let b = boss, !b.isDead,
-           b.position.distance(to: player.position) - b.targetingRadius < reach {
+           b.position.distance(to: impact) - b.targetingRadius < reach {
             b.takeDamage(GameConfig.BossClass.scaledDamage(
                 Int(playerStats.effectiveAttack * GameConfig.Panda.kaijuStaggerMult),
                 isBossClass: true))
         }
 
-        showRingPulse(at: player.position, radius: reach, colorHex: 0xFF7A2A)
-        worldNode.shake(intensity: 3, duration: 0.1)
+        player.kaijuStrike(toward: heading)
+        showRingPulse(at: impact, radius: reach, colorHex: 0xFFB347)
+        worldNode.shake(intensity: 7, duration: 0.18)
+        AudioManager.shared.play(.bossExecute)
     }
 
     /// It ends the way it should end: not with a flourish.
     private func endKaiju() {
         kaijuRemaining = 0
+        playerStats.kaijuMoveScale = 1.0
         player.setKaiju(false)
 
         // Collapses to embers.
@@ -4662,6 +4694,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Auto-Attack System
     
     private func updateAutoAttack(_ dt: TimeInterval) {
+        // v2.0 (C2): a kaiju does not fire a gun. While transformed Spark drops
+        // the auto-attack entirely and commits to the aura and the swipe —
+        // leaving projectiles running would undercut the whole transformation,
+        // and it's the difference between "a big Spark" and a rampage.
+        guard !kaijuActive else { return }
         timeSinceLastShot += dt
         
         var effectiveInterval = playerStats.effectiveFireInterval
@@ -10170,6 +10207,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pandaKaijuTimer = 0
         kaijuRemaining = 0
         kaijuHitTimer = 0
+        kaijuMeleeTimer = 0
+        playerStats.kaijuMoveScale = 1.0
         player.setKaiju(false)
         groundTickAccumulator = 0
         groundRegenAccumulator = 0
