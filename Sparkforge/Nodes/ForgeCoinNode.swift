@@ -117,6 +117,29 @@ final class ForgeCoinNode: SKNode {
 
     // MARK: - Collection
 
+    /// Fly to a point, then pop — the monument's auto-gather.
+    ///
+    /// Monuments don't get the scramble (that gimmick belongs to arenas that
+    /// keep going), so the payout is handed over instead. Making it VISIBLE is
+    /// the point: banking the XP silently meant the biggest reward in the game
+    /// arrived as a number changing off-screen.
+    ///
+    /// `delay` staggers the flock so it reads as a gather rather than every
+    /// coin teleporting at once.
+    func flyTo(_ point: CGPoint, delay: TimeInterval) {
+        physicsBody = nil
+        removeAllActions()
+        let travel = SKAction.move(to: point, duration: 0.40)
+        travel.timingMode = .easeIn
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: delay),
+            SKAction.group([travel, SKAction.scale(to: 0.65, duration: 0.40)]),
+            SKAction.group([SKAction.scale(to: 1.5, duration: 0.10),
+                            SKAction.fadeOut(withDuration: 0.10)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
     func collect() {
         physicsBody = nil
         removeAllActions()  // stop the spin so the pop reads cleanly

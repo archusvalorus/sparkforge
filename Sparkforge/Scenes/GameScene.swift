@@ -7923,10 +7923,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// uses — scores, stats, and a way out.
     private func resolveFalseEnding() {
         guard gameState == .playing, !killedByMote, mote == nil else { return }
+        // Gather first, THEN end the run. Without the pause the coins fly home
+        // underneath the result overlay fading in, and the payout you just
+        // earned is invisible at the exact moment it's handed to you.
         sweepUncollectedForgeCoins()
         arenaCleared = true
-        playerStats.currentHP = 0
-        playerDied()
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.FalseEnding.gatherHold),
+            SKAction.run { [weak self] in
+                guard let self = self else { return }
+                // Zeroed HERE, not before the wait — the result screen reads HP
+                // to draw the bar, and setting it early would empty Spark's
+                // health for the whole gather. You just WON; your bar shouldn't
+                // drain while you watch the payout come in.
+                self.playerStats.currentHP = 0
+                self.playerDied()
+            }
+        ]), withKey: "falseEndingResolve")
     }
 
     /// Pay out every coin still on the floor when a monument run resolves.
@@ -7945,13 +7958,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func sweepUncollectedForgeCoins() {
         guard !forgeCoins.isEmpty else { return }
         var swept = 0
-        for coin in forgeCoins {
+        let target = player.position
+        for (i, coin) in forgeCoins.enumerated() {
+            // XP banks IMMEDIATELY, the animation is just the telling of it —
+            // so nothing is lost if the scene tears down mid-flight.
             ProgressionManager.shared.addForgeXP(coin.forgeXPValue)
             swept += coin.forgeXPValue
-            coin.collect()
+            coin.flyTo(target, delay: Double(i) * GameConfig.FalseEnding.coinStagger)
         }
         forgeCoins.removeAll()
-        if swept > 0 { showBuildHint("✦ \(swept) forge XP recovered") }
+        if swept > 0 { showBuildHint("✦ \(swept) forge XP gathered") }
     }
 
     /// Understated and reverent — NOT a fanfare. It should read as "the forge is
@@ -10378,6 +10394,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossDefeatedThisRun = false
         arenaBossSpawnedThisRun = false
         monumentFightActive = false
+        // Cancel any in-flight false-ending beats. `falseEndingResolve` carries
+        // a deferred playerDied(); left running, a restart during the coin
+        // gather would kill the player a second into their NEXT run.
+        removeAction(forKey: "falseEnding")
+        removeAction(forKey: "falseEndingResolve")
         falseEndingActive = false
         killedByMote = false
         arenaCleared = false

@@ -361,6 +361,10 @@ enum GameConfig {
         /// it never becomes the limbo it used to be, where the card hung forever
         /// waiting for a Mote that 10,000 kills hadn't earned yet.
         static let cardHold: TimeInterval = 3.2
+        /// Gap between coins in the auto-gather, so the flock staggers.
+        static let coinStagger: TimeInterval = 0.04
+        /// How long the gather gets before the result screen arrives.
+        static let gatherHold: TimeInterval = 0.9
     }
 
     // MARK: - Panda. (v2.0 C2)
