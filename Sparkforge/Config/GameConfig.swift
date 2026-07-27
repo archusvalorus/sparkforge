@@ -446,6 +446,14 @@ enum GameConfig {
         /// How much bigger. This is a visual + reach change only — the physics
         /// body is untouched, so the collision world never shifts underfoot.
         static let kaijuScale: CGFloat = 3.0
+        /// Union-box width ÷ standing-body width across the frame set.
+        ///
+        /// Animation frames are cropped to a SHARED box so nothing shifts
+        /// between them, and that box is wider than the body because action
+        /// poses reach past the standing silhouette. Scaling the box by this
+        /// ratio puts the BODY on the ladder's 96pt instead of the box, so the
+        /// creature is the size it was tuned to be and the swing gets its room.
+        static let kaijuFrameBoxRatio: CGFloat = 1.089
         /// Contact reach while transformed.
         static var kaijuReach: CGFloat { 96 * DeviceScale.gameplay }
 

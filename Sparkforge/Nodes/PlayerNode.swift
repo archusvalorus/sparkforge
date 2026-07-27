@@ -50,6 +50,18 @@ final class PlayerNode: SKNode {
     private var kaijuFeatures: SKNode?       // v2.0 (C2): PANDA. sprite + fire
     private var kaijuBody: SKSpriteNode?     // the sprite itself, for walk/facing
     private var kaijuWalkPhase: CGFloat = 0
+
+    /// v2.0 art pass — the kaiju's frame sets.
+    ///
+    /// Idle plays 1 → 2 → 1 → 3 (Lyra): neutral BRIDGES inhale and exhale, which
+    /// reads as breathing rather than as a cycle. The frames are deliberately
+    /// restrained because `kaijuBreathe` still contributes scale on top.
+    private enum KaijuAnim { case idle, walk, attack }
+    private var kaijuIdleFrames: [SKTexture] = []
+    private var kaijuWalkFrames: [SKTexture] = []
+    private var kaijuAttackFrames: [SKTexture] = []
+    private var kaijuAnim: KaijuAnim = .idle
+    private var kaijuAttacking = false
     private var polarFeatures: SKNode?       // v1.9 Polar Vortex (T5): santa hat (fixed on head)
     private var polarBeard: SKNode?          // v1.9 Polar Vortex: beard — rides eyesNode, seated low
 
@@ -250,9 +262,56 @@ final class PlayerNode: SKNode {
     /// The bob eases back to rest rather than snapping, because something this
     /// size should take a moment to settle. That single detail does more for the
     /// sense of weight than the slower move speed does.
+    /// Switch frame sets. Idle and walk loop; attack plays once and hands back.
+    ///
+    /// Guarded on the CURRENT state so this can be called every frame from the
+    /// gait without restarting the loop each time — restarting is what makes
+    /// sprite animation stutter, and it's invisible in code review.
+    private func playKaiju(_ anim: KaijuAnim) {
+        guard let body = kaijuBody, anim != kaijuAnim || anim == .attack else { return }
+        kaijuAnim = anim
+        body.removeAction(forKey: "kaijuAnim")
+
+        switch anim {
+        case .idle:
+            guard !kaijuIdleFrames.isEmpty else { return }
+            body.run(.repeatForever(.animate(with: kaijuIdleFrames,
+                                             timePerFrame: 0.42, resize: false, restore: false)),
+                     withKey: "kaijuAnim")
+        case .walk:
+            guard !kaijuWalkFrames.isEmpty else { return }
+            body.run(.repeatForever(.animate(with: kaijuWalkFrames,
+                                             timePerFrame: 0.15, resize: false, restore: false)),
+                     withKey: "kaijuAnim")
+        case .attack:
+            guard !kaijuAttackFrames.isEmpty else { return }
+            kaijuAttacking = true
+            // Uneven timing on purpose: a slow coil, a fast strike, a settle.
+            // Even frame timing is what makes a swing read as a slideshow.
+            let windUp = SKAction.setTexture(kaijuAttackFrames[0], resize: false)
+            let strike = SKAction.setTexture(kaijuAttackFrames[1], resize: false)
+            let settle = SKAction.setTexture(kaijuAttackFrames[2], resize: false)
+            body.run(.sequence([
+                windUp, .wait(forDuration: 0.20),
+                strike, .wait(forDuration: 0.12),
+                settle, .wait(forDuration: 0.20),
+                .run { [weak self] in
+                    self?.kaijuAttacking = false
+                    self?.kaijuAnim = .idle          // force the next gait tick to re-apply
+                }
+            ]), withKey: "kaijuAnim")
+        }
+    }
+
+    /// The scene calls this when the kaiju swings.
+    func kaijuPlayAttack() { playKaiju(.attack) }
+
     private func updateKaijuGait(direction: CGPoint, deltaTime: TimeInterval) {
         guard let body = kaijuBody else { return }
         let moving = direction.length > 0.15
+        // The swing owns the sprite until it finishes — the gait may still move
+        // and turn the body, it just doesn't get to change the frame set.
+        if !kaijuAttacking { playKaiju(moving ? .walk : .idle) }
 
         if moving {
             kaijuWalkPhase += CGFloat(deltaTime) * 7.5
@@ -724,12 +783,27 @@ final class PlayerNode: SKNode {
         // pulse, and drawing it in code keeps the glow language identical to
         // every other lit thing in the game, which is what stops a sprite from
         // reading as pasted in.
-        let body = SKSpriteNode(imageNamed: "panda_kaiju")
-        let aspect = body.texture.map { $0.size().height / max($0.size().width, 1) } ?? 1.156
-        body.size = CGSize(width: R * 2, height: R * 2 * aspect)
+        // Frame sets, cut to a shared union box so nothing shifts between them.
+        kaijuIdleFrames = [1, 2, 1, 3].map { SKTexture(imageNamed: "panda_kaiju_idle_\($0)") }
+        kaijuWalkFrames = (1...4).map { SKTexture(imageNamed: "panda_kaiju_walk_\($0)") }
+        // Attack is wind-up → strike → recovery. The recovery art didn't make
+        // this batch, so the neutral side stance stands in: it genuinely reads
+        // as "settling back", and swapping the real frame in later is one line.
+        kaijuAttackFrames = [SKTexture(imageNamed: "panda_kaiju_attack_1"),
+                             SKTexture(imageNamed: "panda_kaiju_attack_2"),
+                             SKTexture(imageNamed: "panda_kaiju_walk_1")]
+
+        let body = SKSpriteNode(texture: kaijuIdleFrames.first)
+        let aspect = body.texture.map { $0.size().height / max($0.size().width, 1) } ?? 1.268
+        // The union box is wider than the standing body, so scale the BOX up by
+        // that ratio and the body itself lands on the ladder's 96pt. Action
+        // poses then spill into the margin instead of being squeezed.
+        let boxW = R * 2 * GameConfig.Panda.kaijuFrameBoxRatio
+        body.size = CGSize(width: boxW, height: boxW * aspect)
         body.zPosition = 1
         container.addChild(body)
         kaijuBody = body
+        playKaiju(.idle)
 
         // A still sprite reads as a decal; a breathing one reads as a creature.
         // Deliberately scaleY only — facing owns xScale and the walk owns
@@ -786,6 +860,10 @@ final class PlayerNode: SKNode {
     func kaijuStrike(toward heading: CGPoint) {
         guard kaijuFeatures != nil else { return }
         let R = GameConfig.Player.visualRadius
+        // Frames are drawn right-facing, so the body turns to the blow first —
+        // otherwise the swing plays backwards when striking to the left.
+        if abs(heading.x) > 0.05 { kaijuBody?.xScale = heading.x < 0 ? -1 : 1 }
+        kaijuPlayAttack()
 
         let lunge = SKAction.sequence([
             SKAction.move(by: CGVector(dx: -heading.x * R * 0.25,
