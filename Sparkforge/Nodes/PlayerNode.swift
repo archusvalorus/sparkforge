@@ -231,7 +231,7 @@ final class PlayerNode: SKNode {
         updateEyes(direction: direction, deltaTime: deltaTime)
         guard !isDead else { return }
 
-        let speed = stats?.effectiveMoveSpeedWithBoosts ?? GameConfig.Player.speed
+        let speed = stats?.effectiveMoveSpeed ?? GameConfig.Player.speed
         let displacement = direction * speed * CGFloat(deltaTime)
         position += displacement
 

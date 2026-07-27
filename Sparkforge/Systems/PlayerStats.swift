@@ -681,15 +681,30 @@ final class PlayerStats {
     }
     
     /// Effective move speed (+ Forge Path temp buffs: Read the Room / Slipstream)
+    /// How fast Spark actually moves. THE single source of truth.
+    ///
+    /// v2.0 fix: this used to be one of two competing move-speed properties, and
+    /// it was the one nobody read. `PlayerNode.move` used
+    /// `effectiveMoveSpeedWithBoosts`, which knew about the multiplier and the
+    /// timed boosts but not the additive bonuses — so everything below was dead:
+    ///
+    ///   • `forgeMoveBonus` — every Forge Path move node (Read the Room,
+    ///     Slipstream…), shipped in v1.9
+    ///   • `treeGroundMoveBonus` — the Tree capstone's T2 "Rootreach", a whole
+    ///     capstone TIER, shipped in v2.0
+    ///
+    /// Both were computed every frame and thrown away. The two properties are
+    /// now one; nothing can drift out of the movement path again by being added
+    /// to the wrong formula.
     var effectiveMoveSpeed: CGFloat {
-        // v2.0 (C2): a kaiju LUMBERS. Something that size moving at normal Spark
-        // speed reads as a big sprite rather than a big creature — the weight is
-        // most of what sells the transformation. Applied as a multiplier on the
-        // whole result rather than folded into the additive bonus stack, so it
-        // scales a speed build down proportionally instead of erasing it.
-        GameConfig.Player.speed
+        var speed = GameConfig.Player.speed
             * (moveSpeedMultiplier + forgeMoveBonus + treeGroundMoveBonus)
-            * kaijuMoveScale
+        if magneticCoreBoostTimer > 0 { speed *= (1.0 + magneticCoreSpeedBoost) }
+        if overclockTimer > 0 { speed *= (1.0 + overclockBoost) }
+        // v2.0 (C2): a kaiju LUMBERS. Applied as a multiplier over the whole
+        // result rather than folded into the additive stack, so it scales a
+        // speed build down proportionally instead of erasing it.
+        return speed * kaijuMoveScale
     }
 
     /// Transient: the scene sets this while Spark is a kaiju, 1.0 otherwise.
@@ -901,17 +916,16 @@ final class PlayerStats {
         if overclockTimer > 0 { overclockTimer -= dt }
     }
 
-    /// Effective move speed including boosts
-    var effectiveMoveSpeedWithBoosts: CGFloat {
-        var speed = GameConfig.Player.speed * moveSpeedMultiplier
-        if magneticCoreBoostTimer > 0 {
-            speed *= (1.0 + magneticCoreSpeedBoost)
-        }
-        if overclockTimer > 0 {
-            speed *= (1.0 + overclockBoost)
-        }
-        return speed
-    }
+    /// Deprecated alias — every caller should use `effectiveMoveSpeed`, which is
+    /// now the single source of truth for how fast Spark actually moves.
+    ///
+    /// There used to be two: this one (multiplier + timed boosts) and
+    /// `effectiveMoveSpeed` (multiplier + Forge Path + Tree). `PlayerNode.move`
+    /// read THIS one, and nothing anywhere read the other — so every additive
+    /// move bonus in the game was computed, displayed in comments as "folded
+    /// into effectiveMoveSpeed", and then silently discarded. See the merged
+    /// property for what that cost.
+    var effectiveMoveSpeedWithBoosts: CGFloat { effectiveMoveSpeed }
     
     // MARK: - Unstable Core
     
