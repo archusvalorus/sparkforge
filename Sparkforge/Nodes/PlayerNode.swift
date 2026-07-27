@@ -149,15 +149,106 @@ final class PlayerNode: SKNode {
 
     /// Build a procedural skin overlay.
     ///
-    /// Deliberately drawn rather than drawn-by-Lyra: at 32pt a panda mask is two
-    /// ears and two eye patches, which shapes render perfectly — and staying
-    /// procedural is what lets it keep Spark's tracking eyes, his breathing and
-    /// his damage flash. Art would have bought detail nobody can see at this
-    /// size and cost every reactive behaviour he has.
+    /// A tapered tongue of flame — wide at the base, pinched to a tip, with the
+    /// sides bowed so it reads as fire rather than as a triangle.
+    private static func flamePath(height h: CGFloat, width w: CGFloat) -> CGPath {
+        let p = CGMutablePath()
+        p.move(to: CGPoint(x: -w / 2, y: 0))
+        p.addQuadCurve(to: CGPoint(x: 0, y: h), control: CGPoint(x: -w * 0.62, y: h * 0.62))
+        p.addQuadCurve(to: CGPoint(x: w / 2, y: 0), control: CGPoint(x: w * 0.62, y: h * 0.62))
+        p.closeSubpath()
+        return p
+    }
+
+    /// A cut-gem outline: an n-gon, so light reads as facets rather than a ring.
+    private static func facetPath(radius: CGFloat, sides: Int) -> CGPath {
+        let p = CGMutablePath()
+        for i in 0..<sides {
+            let a = CGFloat(i) / CGFloat(sides) * 2 * .pi - .pi / 2
+            let pt = CGPoint(x: cos(a) * radius, y: sin(a) * radius)
+            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        }
+        p.closeSubpath()
+        return p
+    }
+
+    /// Build a procedural skin overlay.
+    ///
+    /// All of this is drawn rather than commissioned, and that's the point: at
+    /// 32pt these read perfectly as shapes, they cost no art, and staying
+    /// procedural keeps Spark's tracking eyes, his breathing and his damage
+    /// flash — every reactive behaviour a sprite would have thrown away.
+    ///
+    /// TIER RULE (Brandon, WoW-style): earned skins RE-TINT; premium skins add
+    /// FORM and FIRE. A recolour can't justify a price when the free tier
+    /// already recolours.
     private static func makeOverlay(_ kind: SkinOverlay) -> SKNode {
         let container = SKNode()
         container.zPosition = 14        // above the eyes (13), below the kaiju (15)
         switch kind {
+        case .emberFlames:
+            // Tongues of fire, each on its OWN phase and duration. Flames that
+            // share a rhythm read as a pulsing light; flames that don't read as
+            // burning. That desynchronisation is the whole trick.
+            let R = GameConfig.Player.visualRadius
+            let tongues = 7
+            for i in 0..<tongues {
+                let angle = CGFloat(i) / CGFloat(tongues) * 2 * .pi - .pi / 2
+                let flame = SKShapeNode(path: Self.flamePath(height: R * 1.05, width: R * 0.42))
+                flame.fillColor = SKColor(hex: i % 2 == 0 ? 0xFFB44D : 0xFF6A1A,
+                                          alpha: 0.85)
+                flame.strokeColor = .clear
+                flame.blendMode = .add            // self-lit, like everything else here
+                flame.glowWidth = 3
+                flame.zRotation = angle + .pi / 2
+                flame.position = CGPoint(x: cos(angle) * R * 0.72, y: sin(angle) * R * 0.72)
+                flame.zPosition = -1              // behind the ember body
+                let up = 0.22 + Double(i % 3) * 0.06
+                let dn = 0.20 + Double((i + 1) % 3) * 0.07
+                flame.run(.repeatForever(.sequence([
+                    .group([.scaleY(to: 1.35, duration: up),
+                            .fadeAlpha(to: 1.0, duration: up)]),
+                    .group([.scaleY(to: 0.75, duration: dn),
+                            .fadeAlpha(to: 0.55, duration: dn)])
+                ])))
+                container.addChild(flame)
+            }
+            // Jewel-cut facet ring — the blurb has been promising this all along.
+            let facets = SKShapeNode(path: Self.facetPath(radius: R * 1.14, sides: 8))
+            facets.strokeColor = SKColor(hex: 0xFFD9A0, alpha: 0.55)
+            facets.lineWidth = 1.5
+            facets.fillColor = .clear
+            facets.glowWidth = 2
+            facets.zPosition = 1
+            facets.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 14)))
+            container.addChild(facets)
+
+        case .constellation:
+            let R = GameConfig.Player.visualRadius
+            let ring = SKNode()
+            ring.zPosition = 1
+            let stars = 6
+            for i in 0..<stars {
+                let angle = CGFloat(i) / CGFloat(stars) * 2 * .pi
+                let orbit = R * (1.18 + CGFloat(i % 3) * 0.13)
+                let star = SKShapeNode(circleOfRadius: R * (0.075 + CGFloat(i % 2) * 0.03))
+                star.fillColor = SKColor(hex: 0xFFFFFF)
+                star.strokeColor = SKColor(hex: 0xC8B0FF, alpha: 0.9)
+                star.lineWidth = 0.5
+                star.glowWidth = 4
+                star.blendMode = .add
+                star.position = CGPoint(x: cos(angle) * orbit, y: sin(angle) * orbit)
+                // Twinkle out of sync, so it never strobes as a unit.
+                let t = 0.5 + Double(i) * 0.17
+                star.run(.repeatForever(.sequence([
+                    .fadeAlpha(to: 0.35, duration: t),
+                    .fadeAlpha(to: 1.0, duration: t * 0.8)
+                ])))
+                ring.addChild(star)
+            }
+            ring.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 11)))
+            container.addChild(ring)
+
         case .pandaMask:
             let R = GameConfig.Player.visualRadius
             let ink = SKColor(hex: 0x141414)
@@ -233,6 +324,12 @@ final class PlayerNode: SKNode {
         innerCoreNode.fillColor = SKColor(hex: a.innerCoreColorHex)
         glowNode.fillColor = SKColor(hex: a.glowColorHex, alpha: min(0.3 * a.glowBoost, 0.6))
         trailEmitter.particleColor = SKColor(hex: a.trailColorHex)
+        // Premium trails throw bigger, longer-lived sparks. Birth rate is
+        // boosted separately in the movement update, since it's recomputed
+        // every frame from speed and level.
+        trailEmitter.particleScale = 0.45 * a.trailBoost
+        trailEmitter.particleScaleRange = 0.2 * a.trailBoost
+        trailEmitter.particleLifetime = GameConfig.Spark.trailLifetime * a.trailBoost
         for eye in [leftEye, rightEye] where eye.strokeColor == .clear {
             eye.fillColor = SKColor(hex: a.eyeColorHex)
         }
@@ -277,7 +374,8 @@ final class PlayerNode: SKNode {
         }
         // Trail gains flecks with level — confident by mid-game
         let levelBoost = min(1.0 + CGFloat(currentLevel) * 0.06, 1.8)
-        trailEmitter.particleBirthRate = GameConfig.Spark.trailMaxBirthRate * magnitude * levelBoost
+        trailEmitter.particleBirthRate =
+            GameConfig.Spark.trailMaxBirthRate * magnitude * levelBoost * appearance.trailBoost
         trailEmitter.emissionAngle = atan2(-direction.y, -direction.x)
     }
 

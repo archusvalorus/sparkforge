@@ -28,6 +28,14 @@ enum SkinTier {
 /// is itself "just a skin" — the framework has no special-cased default path.
 /// Procedural decorations a skin can wear over the stock Spark.
 enum SkinOverlay {
+    /// PREMIUM — Prime Ember. Flame tongues that flicker around the body, on
+    /// their own phases so it burns rather than pulses, plus a jewel-cut facet
+    /// ring. Its blurb promises "jewel-cut"; this is the promise delivered.
+    case emberFlames
+    /// PREMIUM — Star-Crossed Prime. A slow constellation: star motes orbiting
+    /// on a ring, twinkling out of sync.
+    case constellation
+
     /// Two black ears and two eye patches. Spark's ember shows through as the
     /// face, which is the joke: he is not a panda, he is Spark WEARING a mask,
     /// and nothing else about him has changed.
@@ -42,6 +50,12 @@ struct SkinAppearance {
     let trailColorHex: UInt32       // ember-fleck trail
     let flareRingColorHex: UInt32   // level-up corona ring
     let glowBoost: CGFloat          // outer-glow intensity multiplier (1.0 = base)
+
+    /// v2.0: trail intensity multiplier (1.0 = base). Premium skins throw a
+    /// heavier, longer-lived, larger spark trail — the WoW-tier logic Brandon
+    /// asked for: earned RE-TINTS, premium adds FORM and FIRE. A recolour alone
+    /// can't justify a price when the free tier already recolours.
+    var trailBoost: CGFloat = 1.0
 
     /// v2.0 art pass: a procedural OVERLAY drawn on top of Spark.
     ///
@@ -144,7 +158,8 @@ final class SkinManager {
             appearance: SkinAppearance(
                 coreColorHex: 0xFF9E4D, glowColorHex: 0xFF4D1A,
                 innerCoreColorHex: 0xFFF2D8, eyeColorHex: 0x0A0A0A,
-                trailColorHex: 0xFF7A2E, flareRingColorHex: 0xFFB870, glowBoost: 1.15),
+                trailColorHex: 0xFF7A2E, flareRingColorHex: 0xFFB870, glowBoost: 1.15,
+                trailBoost: 2.1, overlay: .emberFlames),
             iapProductID: premiumSparkProductID),
 
         // ── Starforged family (Arena 5 payoff) ─────────────────────────────
@@ -170,7 +185,8 @@ final class SkinManager {
             appearance: SkinAppearance(
                 coreColorHex: 0x2E2668, glowColorHex: 0x6A3AE0,
                 innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0xF0F0FF,
-                trailColorHex: 0xB088FF, flareRingColorHex: 0xE0C8FF, glowBoost: 1.3),
+                trailColorHex: 0xB088FF, flareRingColorHex: 0xE0C8FF, glowBoost: 1.3,
+                trailBoost: 1.9, overlay: .constellation),
             iapProductID: premiumStarCrossedProductID),
 
         // ── Panda family (SECRET — masked ??? until revealed) ──────────────
@@ -193,7 +209,7 @@ final class SkinManager {
                 coreColorHex: 0xFF7733, glowColorHex: 0xFF3300,
                 innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0x0A0A0A,
                 trailColorHex: 0xFF5522, flareRingColorHex: 0xFFAA44, glowBoost: 1.4,
-                spriteName: "skin_panda_kaiju"),
+                trailBoost: 2.4, spriteName: "skin_panda_kaiju"),
             iapProductID: premiumPandaProductID),
     ]
 
