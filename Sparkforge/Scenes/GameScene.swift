@@ -3421,19 +3421,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    /// One animal's body, mid-launch. PLACEHOLDER ART: an emoji stand-in, as the
-    /// handoff calls for — systems first, then one art pass replaces all ten.
-    private func canonBody(_ animal: NatureCanon.Animal) -> SKLabelNode {
-        let label = SKLabelNode(text: animal.emoji)
-        label.fontSize = GameConfig.NatureCanon.bodySize
-        label.verticalAlignmentMode = .center
-        label.horizontalAlignmentMode = .center
+    /// One animal's body, mid-launch.
+    ///
+    /// Sized PER ANIMAL rather than uniformly — see
+    /// `GameConfig.NatureCanon.bodyWidth`. Falls back to the emoji when an
+    /// animal has no art yet, which is what lets the roster stay playable while
+    /// the set lands piecemeal.
+    private func canonBody(_ animal: NatureCanon.Animal) -> SKNode {
+        let width = GameConfig.NatureCanon.bodyWidth(for: animal.id)
+        let node: SKNode
+        let texture = SKTexture(imageNamed: "canon_\(animal.id)")
+        if texture.size().width > 1 {
+            let sprite = SKSpriteNode(texture: texture)
+            let aspect = texture.size().height / max(texture.size().width, 1)
+            sprite.size = CGSize(width: width, height: width * aspect)
+            node = sprite
+        } else {
+            let label = SKLabelNode(text: animal.emoji)
+            label.fontSize = width
+            label.verticalAlignmentMode = .center
+            label.horizontalAlignmentMode = .center
+            node = label
+        }
         // Out of the CROWN. A fixed +30pt was fine when the Tree was a shrub;
         // at redwood scale it fires animals out of the trunk's midsection.
         let launchY = treeNode?.crownHeight ?? 30
-        label.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: launchY)
-        label.zPosition = 9
-        return label
+        node.position = (treeNode?.position ?? player.position) + CGPoint(x: 0, y: launchY)
+        node.zPosition = 9
+        return node
     }
 
     /// The shared flight: leap from the canopy onto the mark, then resolve.
@@ -3572,7 +3587,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// pierces on contact instead of detonating on arrival. One update loop, two
     /// grammars — cheaper than a second near-identical list.
     private struct NatureMissile {
-        let body: SKLabelNode
+        let body: SKNode
         /// The thing it chases. `nil` = a straight-line charge (the Boar).
         weak var mark: SKNode?
         /// Extra reach so a monument boss's SURFACE counts as arrival — its
@@ -3805,7 +3820,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// The generic timed-structure primitive: the Defensive Flower's aim-and-fire
     /// loop, but on a clock instead of permanent-up-to-cap.
     private struct CanonTurret {
-        let body: SKLabelNode
+        let body: SKNode
         var life: TimeInterval
         var cooldown: TimeInterval
     }
@@ -3813,15 +3828,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func launchNeedleTurret(_ animal: NatureCanon.Animal, at point: CGPoint) {
         pounce(animal, to: point, spin: false) { [weak self] in
             guard let self = self else { return }
-            let body = SKLabelNode(text: animal.emoji)
-            body.fontSize = GameConfig.NatureCanon.bodySize
-            body.verticalAlignmentMode = .center
-            body.horizontalAlignmentMode = .center
+            // Reuse canonBody so the posted hedgehog is the same sprite that
+            // just flew in, rather than reverting to an emoji on landing.
+            let body = self.canonBody(animal)
             body.position = point
-            body.zPosition = 9
             self.worldNode.addChild(body)
             // A bristling quiver, so a posted hedgehog reads as ARMED rather
-            // than as a stray emoji sitting on the floor.
+            // than as something that happened to stop there.
             body.run(SKAction.repeatForever(SKAction.sequence([
                 SKAction.scale(to: 1.12, duration: 0.09),
                 SKAction.scale(to: 1.0, duration: 0.09)

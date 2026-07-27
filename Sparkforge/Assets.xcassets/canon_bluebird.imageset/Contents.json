@@ -1,0 +1,8 @@
+{
+  "images" : [
+    { "filename" : "canon_bluebird.png", "idiom" : "universal", "scale" : "1x" },
+    { "filename" : "canon_bluebird@2x.png", "idiom" : "universal", "scale" : "2x" },
+    { "filename" : "canon_bluebird@3x.png", "idiom" : "universal", "scale" : "3x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

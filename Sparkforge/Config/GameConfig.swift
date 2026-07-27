@@ -233,6 +233,24 @@ enum GameConfig {
         /// ordinary panda 76 · kaiju 96.
         static let bodySize: CGFloat = 50
 
+        /// Per-animal width. Sized RELATIVE to each other around the 50pt
+        /// average rather than uniformly (Brandon): a boar and a bluebird at
+        /// identical width would flatten the roster, and the bluebird's entire
+        /// gag is that the smallest body delivers the biggest blast. Same total
+        /// presence, much funnier distribution.
+        static func bodyWidth(for id: String) -> CGFloat {
+            switch id {
+            case "bluebird": return 34
+            case "squirrel", "hedgehog": return 44
+            case "skunk", "rabbit": return 46
+            case "badger": return 52
+            case "fox": return 58
+            case "deer": return 62
+            case "boar": return 64
+            default: return bodySize
+            }
+        }
+
         // --- 🐰 Rabbit "Ninja Kick" ---
         /// The rabbit AUTO-CRITS, and its crit is worth 300% rather than the
         /// normal 200% — so the kick lands at 1.5 × 3.0 ≈ 450% of Spark's ATK on
