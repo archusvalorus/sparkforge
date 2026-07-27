@@ -313,6 +313,17 @@ enum GameConfig {
         static var impactRadius: CGFloat { 46 * DeviceScale.gameplay }
     }
 
+    // MARK: - The false ending (v2.0, Arena 5)
+    enum FalseEnding {
+        /// How long "THE FORGE IS QUIET" holds after Mote has had his chance,
+        /// before the run resolves into the standard result screen.
+        ///
+        /// Long enough that the silence still lands as a beat; short enough that
+        /// it never becomes the limbo it used to be, where the card hung forever
+        /// waiting for a Mote that 10,000 kills hadn't earned yet.
+        static let cardHold: TimeInterval = 3.2
+    }
+
     // MARK: - Panda. (v2.0 C2)
     /// The secret tree. Numbers only — nothing here explains anything, and the
     /// player never sees any of it.

@@ -59,6 +59,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// offer (a revive would break the bit) and rewrites the death copy.
     private var killedByMote = false
     private var mote: MoteNode?
+    /// v2.0: the run ended in VICTORY — the monument fell and the false ending
+    /// resolved without Mote claiming it. Drives the result title and suppresses
+    /// the revive offer.
+    private var arenaCleared = false
 
     // MARK: - v2.0 (B2a): Boss Mode — the Gauntlet
 
@@ -7782,8 +7786,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.wait(forDuration: 2.6),
             SKAction.run { [weak self] in self?.showFalseEndingCard() },
             SKAction.wait(forDuration: GameConfig.Mote.dreadDelay),
-            SKAction.run { [weak self] in self?.tryMoteEntrance() }
+            SKAction.run { [weak self] in self?.tryMoteEntrance() },
+            SKAction.wait(forDuration: GameConfig.FalseEnding.cardHold),
+            SKAction.run { [weak self] in self?.resolveFalseEnding() }
         ]), withKey: "falseEnding")
+    }
+
+    /// The silence has to END.
+    ///
+    /// The false-ending card was written to hang there forever because Mote was
+    /// always going to interrupt it. But Mote is gated on 10,000 lifetime kills,
+    /// so for every player who hasn't earned that — which is very nearly all of
+    /// them — nothing ever came, the arena stayed quiet, and the run simply
+    /// never resolved. You beat the deepest fight in the game and the game said
+    /// nothing back.
+    ///
+    /// So: if Mote claimed the moment, it's his. Otherwise the beat lands and
+    /// the run finishes properly, through the same result screen every other run
+    /// uses — scores, stats, and a way out.
+    private func resolveFalseEnding() {
+        guard gameState == .playing, !killedByMote, mote == nil else { return }
+        arenaCleared = true
+        playerStats.currentHP = 0
+        playerDied()
     }
 
     /// Understated and reverent — NOT a fanfare. It should read as "the forge is
@@ -9824,6 +9849,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             } else if isGauntlet {
                 title.text = "THE GAUNTLET WINS"
                 title.fontColor = SKColor(hex: 0xE0554C)
+            } else if arenaCleared {
+                // You didn't lose. Monument gold, matching GAUNTLET CLEARED —
+                // the game's existing grammar for "you finished it".
+                title.text = "ARENA CLEARED"
+                title.fontColor = SKColor(hex: 0xFFD98A)
             } else {
                 title.text = killedByMote ? "MOTE FOUND YOU" : "SPARK EXTINGUISHED"
                 title.fontColor = SKColor(hex: killedByMote ? 0xC77BFF : 0xFF4444)
@@ -9875,7 +9905,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // scripted assassination breaks the joke (handoff canon).
             // v2.0 (B2a): Boss Mode death is FINAL — no ads, no revives. It's
             // pure boss mode, and the mode is worth nothing if it has an undo.
-            reviveBtn.alpha = (adReviveManager.canRevive && !killedByMote && !isGauntlet) ? 1.0 : 0.0
+            // v2.0: no revive on an ending you WON — you didn't die, and
+            // offering a second chance at nothing reads as a bug (and would be
+            // a rewarded ad sold against a non-problem).
+            reviveBtn.alpha = (adReviveManager.canRevive && !killedByMote
+                               && !isGauntlet && !arenaCleared) ? 1.0 : 0.0
             
             // Update label for IAP users
             if adReviveManager.adsRemoved {
@@ -10192,6 +10226,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         monumentFightActive = false
         falseEndingActive = false
         killedByMote = false
+        arenaCleared = false
         mote?.removeFromParent()
         mote = nil
         falseEndingCard?.removeFromParent()
