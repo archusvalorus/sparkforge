@@ -7806,9 +7806,35 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// uses — scores, stats, and a way out.
     private func resolveFalseEnding() {
         guard gameState == .playing, !killedByMote, mote == nil else { return }
+        sweepUncollectedForgeCoins()
         arenaCleared = true
         playerStats.currentHP = 0
         playerDied()
+    }
+
+    /// Pay out every coin still on the floor when a monument run resolves.
+    ///
+    /// A normal arena keeps going until Spark dies, so the coin scatter is a
+    /// SCRAMBLE — grabbing them under escalating pressure is the whole gimmick.
+    /// Monuments deliberately don't get that gimmick (Brandon), which left the
+    /// biggest payout in the game on a floor the player had ~7 seconds to cross,
+    /// in the one arena that's twice the size. Beating the hardest fight paid the
+    /// least, which is exactly backwards.
+    ///
+    /// So on a monument you simply get paid. Remove the scramble, keep the
+    /// reward. Flat forge XP, matching the pickup path — never routed through
+    /// `pendingForgeXP`, which the XP Boost ad doubles; coins bank immediately
+    /// and are never boosted.
+    private func sweepUncollectedForgeCoins() {
+        guard !forgeCoins.isEmpty else { return }
+        var swept = 0
+        for coin in forgeCoins {
+            ProgressionManager.shared.addForgeXP(coin.forgeXPValue)
+            swept += coin.forgeXPValue
+            coin.collect()
+        }
+        forgeCoins.removeAll()
+        if swept > 0 { showBuildHint("✦ \(swept) forge XP recovered") }
     }
 
     /// Understated and reverent — NOT a fanfare. It should read as "the forge is
