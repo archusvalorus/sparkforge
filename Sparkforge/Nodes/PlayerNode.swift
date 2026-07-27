@@ -786,12 +786,8 @@ final class PlayerNode: SKNode {
         // Frame sets, cut to a shared union box so nothing shifts between them.
         kaijuIdleFrames = [1, 2, 1, 3].map { SKTexture(imageNamed: "panda_kaiju_idle_\($0)") }
         kaijuWalkFrames = (1...4).map { SKTexture(imageNamed: "panda_kaiju_walk_\($0)") }
-        // Attack is wind-up → strike → recovery. The recovery art didn't make
-        // this batch, so the neutral side stance stands in: it genuinely reads
-        // as "settling back", and swapping the real frame in later is one line.
-        kaijuAttackFrames = [SKTexture(imageNamed: "panda_kaiju_attack_1"),
-                             SKTexture(imageNamed: "panda_kaiju_attack_2"),
-                             SKTexture(imageNamed: "panda_kaiju_walk_1")]
+        // Wind-up → strike → recovery, all three real frames.
+        kaijuAttackFrames = (1...3).map { SKTexture(imageNamed: "panda_kaiju_attack_\($0)") }
 
         let body = SKSpriteNode(texture: kaijuIdleFrames.first)
         let aspect = body.texture.map { $0.size().height / max($0.size().width, 1) } ?? 1.268
