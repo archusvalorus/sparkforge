@@ -384,6 +384,10 @@ enum GameConfig {
         /// lion: both are "a large animal has wandered in", and both are more
         /// than twice Spark, which is most of the comedy.
         static let bodyWidth: CGFloat = 76
+        /// Union-box width ÷ standing-body width for the ordinary panda frames.
+        /// Frames share one crop box so nothing shifts between them; the box is
+        /// wider than the body, so scale by this and the BODY lands on 76pt.
+        static let frameBoxRatio: CGFloat = 1.040
         /// Ceiling on live pandas, per tier growth and for frame rate.
         static let maxPandas: Int = 6
 

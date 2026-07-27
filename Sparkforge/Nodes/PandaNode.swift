@@ -43,6 +43,17 @@ final class PandaNode: SKNode {
     /// Scale that renders a panda at `GameConfig.Panda.bodyWidth`.
     static var baseScale: CGFloat { GameConfig.Panda.bodyWidth / naturalWidth }
 
+    /// v2.0 art pass — the ordinary panda's frames.
+    ///
+    /// Idle plays `1 → 2 → 1 → 3` (neutral bridges inhale and exhale), the same
+    /// loop that worked on the kaiju. Frames stay restrained because `sit`,
+    /// `lookPleased` and the rest still layer scale on top — the sprite replaces
+    /// the BODY, not the poses.
+    private var idleFrames: [SKTexture] = []
+    private var walkFrames: [SKTexture] = []
+    private var sprite: SKSpriteNode?
+    private var currentClip = ""
+
     override init() {
         super.init()
         zPosition = 7
@@ -85,8 +96,45 @@ final class PandaNode: SKNode {
         muzzle.position = CGPoint(x: 0, y: -3 * s)
         body.addChild(muzzle)
 
+        // v2.0 art pass: the drawn shapes above become the FALLBACK. If the art
+        // is present the sprite covers them; if an imageset is ever missing, a
+        // recognisable panda still walks around instead of nothing at all.
+        idleFrames = [1, 2, 1, 3].map { SKTexture(imageNamed: "panda_ordinary_idle_\($0)") }
+        walkFrames = (1...4).map { SKTexture(imageNamed: "panda_ordinary_walk_\($0)") }
+        if let first = idleFrames.first {
+            let art = SKSpriteNode(texture: first)
+            let aspect = first.size().height / max(first.size().width, 1)
+            // Local width in the node's own units; `setBodyScale` then puts the
+            // whole thing on the size ladder, exactly as the shapes were.
+            let w = Self.naturalWidth * GameConfig.Panda.frameBoxRatio
+            art.size = CGSize(width: w, height: w * aspect)
+            art.zPosition = 1
+            addChild(art)
+            sprite = art
+            body.isHidden = true
+            leftEar.isHidden = true
+            rightEar.isHidden = true
+            playIdle()
+        }
+
         setBodyScale(Self.baseScale)
     }
+
+    // MARK: - Frame animation
+
+    /// Guarded on the current clip so callers can fire this every frame without
+    /// restarting the loop — restarting each tick is the classic sprite stutter
+    /// and it's invisible in review.
+    private func play(_ name: String, _ frames: [SKTexture], timePerFrame: TimeInterval) {
+        guard let sprite = sprite, !frames.isEmpty, currentClip != name else { return }
+        currentClip = name
+        sprite.removeAction(forKey: "anim")
+        sprite.run(.repeatForever(.animate(with: frames, timePerFrame: timePerFrame,
+                                           resize: false, restore: false)), withKey: "anim")
+    }
+
+    private func playIdle() { play("idle", idleFrames, timePerFrame: 0.5) }
+    private func playWalk() { play("walk", walkFrames, timePerFrame: 0.18) }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -96,7 +144,8 @@ final class PandaNode: SKNode {
     @discardableResult
     func waddle(toward point: CGPoint, speed: CGFloat, dt: TimeInterval) -> Bool {
         let delta = point - position
-        if delta.length < 4 * DeviceScale.gameplay { return true }
+        if delta.length < 4 * DeviceScale.gameplay { playIdle(); return true }
+        playWalk()
         let dir = delta.normalized
         position += dir * speed * CGFloat(dt)
 
@@ -123,17 +172,18 @@ final class PandaNode: SKNode {
         zRotation = 0
         run(SKAction.repeatForever(SKAction.rotate(byAngle: -.pi * 2, duration: 0.4)),
             withKey: "roll")
-        body.run(SKAction.scaleY(to: 0.9, duration: 0.1))
+        (sprite ?? body).run(SKAction.scaleY(to: 0.9, duration: 0.1))
     }
 
     func stopRolling() {
         removeAction(forKey: "roll")
         run(SKAction.rotate(toAngle: 0, duration: 0.15), withKey: "pose")
-        body.run(SKAction.scaleY(to: 1.0, duration: 0.1))
+        (sprite ?? body).run(SKAction.scaleY(to: 1.0, duration: 0.1))
     }
 
     /// Sit down. Squashes slightly and stops moving. That's the whole pose.
     func sit() {
+        playIdle()
         removeAction(forKey: "pose")
         zRotation = 0
         run(SKAction.group([SKAction.scaleY(to: bodyScale * 0.86, duration: 0.2),
@@ -143,6 +193,7 @@ final class PandaNode: SKNode {
 
     /// Look pleased. Does nothing else. This is a complete implementation.
     func lookPleased() {
+        playIdle()
         removeAction(forKey: "pose")
         run(SKAction.repeatForever(SKAction.sequence([
             SKAction.scaleY(to: bodyScale * 1.06, duration: 0.5),
