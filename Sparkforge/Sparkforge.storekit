@@ -1,0 +1,130 @@
+{
+  "identifier" : "6A92DE8C-8207-4FCD-8BF4-43479A115C11",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "40114AFF-D48A-4B3D-AAD0-713A1F03D22E",
+      "localizations" : [
+        {
+          "description" : "Removes all ads. The optional rewarded ads stay available if you want them.",
+          "displayName" : "Remove Ads",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.brandon.Sparkforge.removeads",
+      "referenceName" : "Remove Ads",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "8945DC26-DD67-4C35-9DB3-68066106CD24",
+      "localizations" : [
+        {
+          "description" : "A refined, jewel-cut ember. Support the forge.",
+          "displayName" : "Spark - Prime Ember",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.brandon.Sparkforge.skin.primeember",
+      "referenceName" : "Skin — Core Spark — Prime Ember",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "063D3084-E938-48F1-A0CE-DD70B4E21E57",
+      "localizations" : [
+        {
+          "description" : "The constellation, deepened. Support the forge.",
+          "displayName" : "Spark - Star-Crossed Prime",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.brandon.Sparkforge.skin.starcrossedprime",
+      "referenceName" : "Skin — Starforged — Star-Crossed Prime",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "8BD40330-0957-4CD8-A1B0-5126C2C0B024",
+      "localizations" : [
+        {
+          "description" : "A cosmetic skin for Spark.",
+          "displayName" : "Spark - Flame Panda",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.brandon.Sparkforge.skin.flamepanda",
+      "referenceName" : "Skin — Panda — Flame Panda",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}
