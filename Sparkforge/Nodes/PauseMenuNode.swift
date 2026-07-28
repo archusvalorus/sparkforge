@@ -44,6 +44,12 @@ final class PauseMenuNode: SKNode {
     private var codexTouchBeganOnPage = false
     /// v1.9: the shared Settings modal (SFX/BGM). No Erase button in pause.
     private var settingsMenu: SettingsMenuNode?
+    /// v2.0: the "leave this run?" gate. MENU sits directly under RESUME and
+    /// SETTINGS in the same 240×42 column, so a fat-fingered or doubled tap used
+    /// to throw away a good run instantly, with nothing to catch it. One gate,
+    /// not the erase flow's three — ending a run is recoverable by playing
+    /// again; erasing everything is not.
+    private var quitConfirm: SKNode?
     /// Captured on show() so a chip tap can resolve its card + tag counts.
     private weak var upgradeManager: UpgradeManager?
 
@@ -75,6 +81,7 @@ final class PauseMenuNode: SKNode {
         dismissCodex()
         dismissCodexHub()
         dismissSettingsMenu()
+        dismissQuitConfirm()
         rebuildBuildViewer(upgradeManager: upgradeManager)
         mainPane.isHidden = false
         run(SKAction.fadeIn(withDuration: 0.15))
@@ -85,6 +92,7 @@ final class PauseMenuNode: SKNode {
         dismissCodex()
         dismissCodexHub()
         dismissSettingsMenu()
+        dismissQuitConfirm()
         run(SKAction.fadeOut(withDuration: 0.15))
     }
 
@@ -343,6 +351,20 @@ final class PauseMenuNode: SKNode {
     }
 
     func handleTap(at location: CGPoint) {
+        // v2.0: the quit gate outranks everything. It swallows EVERY tap, hit or
+        // miss — the one thing it must never do is let a stray tap through to
+        // the MENU button sitting directly underneath it. And unlike the detail
+        // modal, a tap-anywhere dismiss would be wrong here: a destructive
+        // choice should cost a deliberate press either way.
+        if let confirm = quitConfirm {
+            switch Self.buttonHit(in: confirm, at: location)?.name {
+            case "quitConfirmYes": onReturnToMenu?()
+            case "quitConfirmNo":  dismissQuitConfirm()
+            default:               break
+            }
+            return
+        }
+
         // The detail modal is topmost and informational — any tap closes it.
         if detailNode != nil {
             dismissDetail()
@@ -365,7 +387,7 @@ final class PauseMenuNode: SKNode {
         case "settingsButton":
             presentSettingsMenu()
         case "pauseMenuButton":
-            onReturnToMenu?()
+            presentQuitConfirm()
         default:
             break
         }
@@ -495,6 +517,100 @@ final class PauseMenuNode: SKNode {
         let menu = SettingsMenuNode(showErase: false)
         menu.present(in: self)
         settingsMenu = menu
+    }
+
+    // MARK: - v2.0: Leave-the-run confirmation
+
+    /// What quitting actually costs, stated accurately.
+    ///
+    /// `returnToTitle()` never reaches `playerDied()`, so the end-of-run Forge XP
+    /// award, the high-score entry and the analytics record are all skipped. But
+    /// Forge XP from coins is banked the moment each coin is COLLECTED, so that
+    /// part genuinely survives. Say both — a warning that overstates the loss
+    /// trains players to ignore warnings.
+    private static let quitConfirmLines = [
+        "This run ends now. Your build,",
+        "level and score are lost.",
+        "",
+        "Forge XP you've already banked",
+        "from coins is kept."
+    ]
+
+    private func presentQuitConfirm() {
+        guard quitConfirm == nil else { return }
+        let node = SKNode()
+        node.zPosition = 50            // above mainPane, inside the pause overlay
+
+        let dim = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
+        dim.fillColor = SKColor(hex: 0x000000, alpha: 0.72)
+        dim.strokeColor = .clear
+        node.addChild(dim)
+
+        // The panel MEASURES its contents rather than guessing a height. The
+        // first cut hardcoded one, got it 21pt short, and the closing line of
+        // copy printed straight through the QUIT RUN button. Laying it out as a
+        // single top-down cursor means the panel grows with the copy, so editing
+        // a line — or adding one — can never collide with the buttons again.
+        let topPad: CGFloat = 30, titleH: CGFloat = 20, afterTitle: CGFloat = 22
+        let lineH: CGFloat = 20, afterText: CGFloat = 20
+        let btn = CGSize(width: 240, height: 42), btnGap: CGFloat = 10
+        let bottomPad: CGFloat = 22
+
+        let textBlock = CGFloat(Self.quitConfirmLines.count) * lineH
+        let panelH = topPad + titleH + afterTitle + textBlock + afterText
+                   + btn.height + btnGap + btn.height + bottomPad
+
+        let panel = SKShapeNode(rectOf: CGSize(width: 292, height: panelH), cornerRadius: 14)
+        panel.fillColor = SKColor(hex: 0x141018)
+        panel.strokeColor = SKColor(hex: 0xB566FF, alpha: 0.75)   // MENU's own violet
+        panel.lineWidth = 1.5
+        panel.glowWidth = 4
+        node.addChild(panel)
+
+        var cursor = panelH / 2 - topPad          // walk DOWN the panel
+
+        let title = SKLabelNode(fontNamed: "Menlo-Bold")
+        title.text = "⚠︎  LEAVE THIS RUN?"
+        title.fontSize = 16
+        title.fontColor = SKColor(hex: 0xD9A6FF)
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: cursor - titleH / 2)
+        node.addChild(title)
+        cursor -= titleH + afterTitle
+
+        for line in Self.quitConfirmLines {
+            if !line.isEmpty {                    // an empty entry is a paragraph break
+                let l = SKLabelNode(fontNamed: "Menlo")
+                l.text = line
+                l.fontSize = 11
+                l.fontColor = SKColor(hex: 0xC8BFB2)
+                l.verticalAlignmentMode = .center
+                l.position = CGPoint(x: 0, y: cursor - lineH / 2)
+                node.addChild(l)
+            }
+            cursor -= lineH
+        }
+        cursor -= afterText
+
+        node.addChild(Self.button(name: "quitConfirmYes", text: "QUIT RUN",
+                                  size: btn,
+                                  position: CGPoint(x: 0, y: cursor - btn.height / 2),
+                                  fillHex: 0x2A1140, strokeHex: 0xB566FF,
+                                  textHex: 0xFFFFFF, fontSize: 14, bold: true))
+        cursor -= btn.height + btnGap
+        node.addChild(Self.button(name: "quitConfirmNo", text: "KEEP PLAYING",
+                                  size: btn,
+                                  position: CGPoint(x: 0, y: cursor - btn.height / 2),
+                                  fillHex: 0x334433, strokeHex: 0x66AA66,
+                                  textHex: 0xFFFFFF, fontSize: 14, bold: true))
+
+        addChild(node)
+        quitConfirm = node
+    }
+
+    private func dismissQuitConfirm() {
+        quitConfirm?.removeFromParent()
+        quitConfirm = nil
     }
 
     private func handleSettingsAction(_ action: SettingsMenuNode.Action?) {
