@@ -33,7 +33,7 @@ Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store; latest
 ## Technical conventions
 
 - All tuning values live in `GameConfig.swift` — never scatter magic numbers.
-- Physics categories are a bitmask ladder; **next free bit is `0x1 << 8`**. Update the App Portfolio Registry in Notion when claiming a bit.
+- Physics categories are a bitmask ladder; **next free bit is `0x1 << 9`** (`0x1 << 8` is `forgeCoin`, claimed in v1.8). `GameConfig.PhysicsCategory` is the source of truth — check it before claiming, and update the App Portfolio Registry in Notion when you do.
 - Always fully qualify `BossNode.slagTitan` (never `.slagTitan` shorthand) — codified in iOS Patterns & Gotchas.
 - Singleton managers (`ProgressionManager.shared`, etc.) persist via `UserDefaults` with `sf_`/`sparkforge_` key prefixes. Never rename existing keys (live-player data).
 - AdMob: publisher `ca-app-pub-3734133983597932`; ad unit IDs must match the App Portfolio Registry in Notion (registry is canonical).
