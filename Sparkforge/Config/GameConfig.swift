@@ -1328,6 +1328,90 @@ enum GameConfig {
         static let eyeFollowRate: CGFloat = 12
     }
 
+    // MARK: - Skin overlay FX (v2.0)
+
+    /// Feel dials for the procedural skin overlays in `PlayerNode.makeOverlay`.
+    ///
+    /// A premium skin earns its price in MOTION, not hue (skin tier canon), and
+    /// motion is the one thing that cannot be judged by reasoning about the
+    /// numbers — every value here should be set by WATCHING it. See
+    /// `docs/character-art-playbook.md`.
+    enum SkinFX {
+
+        // ── Prime Ember — the tongues must DANCE, not pulse ──────────────
+        /// Tongues ringing the body. More tongues read as a denser fire.
+        static let emberTongues: Int = 9
+        /// Peak / trough of the vertical lick.
+        static let emberStretchHigh: CGFloat = 1.50
+        static let emberStretchLow: CGFloat = 0.62
+        /// How far a tongue sways off its anchor, radians each way. `flamePath`
+        /// is BASE-anchored, so rotation pivots at the root the way real fire
+        /// bends — this is the single biggest contributor to "burning".
+        static let emberSway: CGFloat = 0.30
+        /// Sway half-period. Deliberately NOT a multiple of the stretch timings
+        /// below, so a tongue never returns to the same pose on a beat.
+        static let emberSwayPeriod: TimeInterval = 0.53
+        /// Per-tongue stretch timing spread (index-derived, keeps them desynced).
+        static let emberStretchUpBase: TimeInterval = 0.20
+        static let emberStretchDownBase: TimeInterval = 0.18
+
+        // ── Star-Crossed Prime — falling mini-stars ──────────────────────
+        /// Motes per second. Deliberately sparse: this should read as a quiet
+        /// drift, not weather.
+        static let starFallBirthRate: CGFloat = 7
+        static let starFallLifetime: CGFloat = 1.25
+        /// Downward drift (points/sec). Slow — these are falling stars, not rain.
+        static let starFallSpeed: CGFloat = 34
+        static let starFallScale: CGFloat = 0.16
+        /// Half-width of the strip motes fall from (× visualRadius).
+        static let starFallSpreadFactor: CGFloat = 1.45
+        /// Height above center that motes spawn at (× visualRadius).
+        static let starFallHeightFactor: CGFloat = 1.30
+
+        // ── Panda mask — fur AROUND the eye, never a second pair of eyes ──
+        //
+        // GEOMETRY WARNING, learned the hard way. Spark is 16pt of radius and
+        // his eyes sit only 0.26R apart from centre with a 0.17R radius — so
+        // there is barely 0.09R of room INWARD of each eye. A patch big enough
+        // to frame an eye concentrically spills past the centre line, the two
+        // patches merge, and the face reads as a bandit's band rather than a
+        // panda. Do not "improve" this by enlarging it symmetrically.
+        //
+        // The patch is therefore offset OUTWARD of the eye and grows up-and-out,
+        // which is both what fits and what a real panda's patch actually does.
+        // Motion, not size, is what makes it read as fur — see `applyPandaFace`.
+        /// Patch centre, outward of Spark's centreline (× visualRadius). Must
+        /// stay ≥ ~0.32 or the pair merges.
+        static let pandaPatchOutFactor: CGFloat = 0.34
+        /// Trimmed from 0.56×0.72 once the nose and grin arrived — at that size
+        /// the patches' lower inner edge collided with the nose, and since both
+        /// are the same ink they merged into one blob. The muzzle does the
+        /// panda-signalling now, so the fur doesn't have to carry it alone.
+        static let pandaPatchWidthFactor: CGFloat = 0.54
+        static let pandaPatchHeightFactor: CGFloat = 0.62
+        /// Outward cant, radians — gives the face its scowl. Note this WIDENS
+        /// the effective footprint, so it trades against the gap above.
+        static let pandaPatchTilt: CGFloat = 0.24
+
+        // Nose + grin. All Y values are LOCAL to eyesNode, which already sits
+        // eyeBaseYFactor above centre — so these are negative (below the eyes).
+        /// Inverted triangle: flat on top, apex pointing down.
+        static let pandaNoseWidthFactor: CGFloat = 0.30
+        static let pandaNoseHeightFactor: CGFloat = 0.18
+        /// Top edge of the nose. Must clear the BOTTOM of the patches, not just
+        /// the eyes — the patches hang lower than the eyes do, and this sat too
+        /// high at first and fused the nose to the fur.
+        static let pandaNoseTopFactor: CGFloat = -0.28
+        /// Grin endpoints — the corners of the mouth.
+        static let pandaGrinHalfWidthFactor: CGFloat = 0.21
+        static let pandaGrinYFactor: CGFloat = -0.52
+        /// How far the smile dips below its corners. The curve reaches exactly
+        /// HALF this (a quad curve's low point is drop/2), which is also where
+        /// the muzzle line is told to stop so the two meet without a seam.
+        static let pandaGrinDropFactor: CGFloat = 0.20
+        static let pandaGrinLineWidth: CGFloat = 1.6
+    }
+
     // MARK: - Analytics (v1.7)
     enum Analytics {
         /// Max runs kept in the on-disk ring buffer

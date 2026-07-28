@@ -70,6 +70,8 @@ final class PlayerNode: SKNode {
     private var kaijuAttacking = false
     private var polarFeatures: SKNode?       // v1.9 Polar Vortex (T5): santa hat (fixed on head)
     private var polarBeard: SKNode?          // v1.9 Polar Vortex: beard — rides eyesNode, seated low
+    private var pandaFace: SKNode?           // v2.0 Panda skin: fur + nose + grin — rides eyesNode, like the fangs
+    private var fallingStars: SKEmitterNode? // v2.0 Star-Crossed Prime: held so the frame path never searches for it
 
     // v2.0 Unit 1: the active skin's palette. `.base` reproduces stock Spark, so
     // every color-restore (damage flash, reset, level-up ring) reads from here
@@ -147,6 +149,21 @@ final class PlayerNode: SKNode {
 
     // MARK: - v2.0 Unit 1: Skins (procedural re-tint of the layered Spark)
 
+    /// The soft white dot every procedural emitter here stamps.
+    ///
+    /// Built once and shared — an SKTexture is immutable, and a skin can be
+    /// swapped repeatedly from the picker, so rebuilding this per application
+    /// would redraw the same 10×10 bitmap on every tap.
+    private static let moteTexture: SKTexture = {
+        let size = CGSize(width: 10, height: 10)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let dot = renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+        }
+        return SKTexture(image: dot)
+    }()
+
     /// Build a procedural skin overlay.
     ///
     /// A tapered tongue of flame — wide at the base, pinched to a tip, with the
@@ -190,8 +207,15 @@ final class PlayerNode: SKNode {
             // Tongues of fire, each on its OWN phase and duration. Flames that
             // share a rhythm read as a pulsing light; flames that don't read as
             // burning. That desynchronisation is the whole trick.
+            //
+            // Stretching alone still reads as a THROB, though — a fire is only
+            // convincing once its tongues also BEND. `flamePath` is anchored at
+            // the base, so rotating a tongue pivots it at the root exactly the
+            // way real fire leans. Sway runs on its own clock, deliberately not
+            // a multiple of the stretch clock, so the two never phase-lock into
+            // a visible beat. That pairing is what sells "burning" over "pulsing".
             let R = GameConfig.Player.visualRadius
-            let tongues = 7
+            let tongues = GameConfig.SkinFX.emberTongues
             for i in 0..<tongues {
                 let angle = CGFloat(i) / CGFloat(tongues) * 2 * .pi - .pi / 2
                 let flame = SKShapeNode(path: Self.flamePath(height: R * 1.05, width: R * 0.42))
@@ -199,18 +223,34 @@ final class PlayerNode: SKNode {
                                           alpha: 0.85)
                 flame.strokeColor = .clear
                 flame.blendMode = .add            // self-lit, like everything else here
-                flame.glowWidth = 3
                 flame.zRotation = angle + .pi / 2
                 flame.position = CGPoint(x: cos(angle) * R * 0.72, y: sin(angle) * R * 0.72)
                 flame.zPosition = -1              // behind the ember body
-                let up = 0.22 + Double(i % 3) * 0.06
-                let dn = 0.20 + Double((i + 1) % 3) * 0.07
+                flame.glowWidth = 3
+
+                let up = GameConfig.SkinFX.emberStretchUpBase + Double(i % 3) * 0.06
+                let dn = GameConfig.SkinFX.emberStretchDownBase + Double((i + 1) % 3) * 0.07
                 flame.run(.repeatForever(.sequence([
-                    .group([.scaleY(to: 1.35, duration: up),
+                    .group([.scaleY(to: GameConfig.SkinFX.emberStretchHigh, duration: up),
                             .fadeAlpha(to: 1.0, duration: up)]),
-                    .group([.scaleY(to: 0.75, duration: dn),
+                    .group([.scaleY(to: GameConfig.SkinFX.emberStretchLow, duration: dn),
                             .fadeAlpha(to: 0.55, duration: dn)])
                 ])))
+
+                // The dance. Every OTHER tongue leads the opposite way, so the
+                // ring never leans as one body — that would read as the whole
+                // Spark tilting rather than as fire moving over him.
+                let sway = GameConfig.SkinFX.emberSway
+                let lead: CGFloat = i % 2 == 0 ? 1 : -1
+                let half = GameConfig.SkinFX.emberSwayPeriod + Double(i % 4) * 0.05
+                // Ease each leg individually — timingMode on a sequence is
+                // ignored (same reason the Apex wings set it per-action).
+                let outA = SKAction.rotate(byAngle: sway * lead, duration: half)
+                let across = SKAction.rotate(byAngle: -sway * 2 * lead, duration: half * 2)
+                let outB = SKAction.rotate(byAngle: sway * lead, duration: half)
+                for leg in [outA, across, outB] { leg.timingMode = .easeInEaseOut }
+                flame.run(.repeatForever(.sequence([outA, across, outB])))
+
                 container.addChild(flame)
             }
             // Jewel-cut facet ring — the blurb has been promising this all along.
@@ -249,30 +289,133 @@ final class PlayerNode: SKNode {
             ring.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 11)))
             container.addChild(ring)
 
+            // Falling mini-stars. The orbiting ring says "he HAS a
+            // constellation"; motes shedding off him say "he IS one". Sparse on
+            // purpose — a quiet drift, not weather.
+            //
+            // These are parented here but re-homed to world space on the first
+            // update (see `updateTrail`), so they fall and stay put instead of
+            // riding along with Spark, which would kill the whole illusion.
+            let fall = SKEmitterNode()
+            fall.name = "skinFallingStars"
+            fall.particleTexture = Self.moteTexture
+            fall.particleBlendMode = .add
+            fall.particleColor = SKColor(hex: 0xFFFFFF)
+            fall.particleColorBlendFactor = 1.0
+            fall.particleBirthRate = GameConfig.SkinFX.starFallBirthRate
+            fall.particleLifetime = GameConfig.SkinFX.starFallLifetime
+            fall.particleLifetimeRange = GameConfig.SkinFX.starFallLifetime * 0.5
+            fall.particleAlpha = 0.95
+            fall.particleAlphaSpeed = -0.7          // wink out rather than clip
+            fall.particleScale = GameConfig.SkinFX.starFallScale
+            fall.particleScaleRange = GameConfig.SkinFX.starFallScale * 0.6
+            fall.particleScaleSpeed = -0.05
+            fall.particleSpeed = GameConfig.SkinFX.starFallSpeed
+            fall.particleSpeedRange = GameConfig.SkinFX.starFallSpeed * 0.45
+            fall.emissionAngle = -.pi / 2           // straight down
+            fall.emissionAngleRange = 0.35          // a little wander
+            fall.particlePositionRange = CGVector(
+                dx: R * GameConfig.SkinFX.starFallSpreadFactor * 2, dy: R * 0.2)
+            fall.position = CGPoint(x: 0, y: R * GameConfig.SkinFX.starFallHeightFactor)
+            fall.particleZPosition = 9
+            container.addChild(fall)
+
         case .pandaMask:
+            // EARS ONLY. The rest of the face — fur, nose, grin — deliberately
+            // does NOT live in this container; it rides `eyesNode` instead (see
+            // `applyPandaFace`). Ears are fixed to the head, so they belong
+            // here; anything that reads as part of the FACE does not.
             let R = GameConfig.Player.visualRadius
-            let ink = SKColor(hex: 0x141414)
             for side in [CGFloat(-1), 1] {
                 let ear = SKShapeNode(circleOfRadius: R * 0.32)
-                ear.fillColor = ink
+                ear.fillColor = SKColor(hex: 0x141414)
                 ear.strokeColor = SKColor(hex: 0x000000, alpha: 0.6)
                 ear.lineWidth = 1
                 ear.position = CGPoint(x: side * R * 0.66, y: R * 0.74)
                 container.addChild(ear)
-
-                // The patch rings Spark's own eye rather than covering it — his
-                // eyes still track travel, right through the mask.
-                let patch = SKShapeNode(ellipseOf: CGSize(width: R * 0.50, height: R * 0.62))
-                patch.fillColor = ink
-                patch.strokeColor = .clear
-                patch.position = CGPoint(x: side * R * 0.34,
-                                         y: R * GameConfig.Spark.eyeBaseYFactor)
-                patch.zRotation = side * -0.28
-                patch.zPosition = -1     // behind the eyes, so they read on top
-                container.addChild(patch)
             }
         }
         return container
+    }
+
+    /// The panda's eye patches — black fur AROUND each eye, riding `eyesNode`.
+    ///
+    /// These are NOT in the skin-overlay container, and that's the whole fix. A
+    /// panda's patch is fur on the face, not a feature in its own right, so it
+    /// has to travel with the eye it surrounds. Held still under a darting eye
+    /// it stopped reading as fur and started reading as a second, dead pair of
+    /// eyes — two sets of eyes on one face, which is the uncanny note rather
+    /// than the charming one. Same parent and same reasoning as the Apex fangs
+    /// and the Polar beard: anything that belongs to the FACE rides `eyesNode`.
+    ///
+    /// The patches are only modestly larger than before — deliberately. At a
+    /// 16pt radius there is no room to frame the eye concentrically without the
+    /// two merging into one band (see the geometry warning in
+    /// `GameConfig.SkinFX`). Size can't carry this at that scale; motion can.
+    ///
+    /// The nose and grin are what turn the result from "Spark wearing marks"
+    /// into an actual face — a muzzle gives the patches something to be
+    /// arranged AROUND, which is most of why the mask reads as a panda at all.
+    private func applyPandaFace() {
+        let R = GameConfig.Player.visualRadius
+        let fx = GameConfig.SkinFX.self
+        let ink = SKColor(hex: 0x141414)
+        let face = SKNode()
+
+        // Fur — outward of each eye, so the pair never merges.
+        for side in [CGFloat(-1), 1] {
+            let patch = SKShapeNode(ellipseOf: CGSize(
+                width: R * fx.pandaPatchWidthFactor,
+                height: R * fx.pandaPatchHeightFactor))
+            patch.fillColor = ink
+            patch.strokeColor = .clear
+            // LOCAL to eyesNode. The eye itself is at (±eyeSpacingHalfFactor, 0).
+            patch.position = CGPoint(x: side * R * fx.pandaPatchOutFactor, y: 0)
+            patch.zRotation = side * -fx.pandaPatchTilt
+            // Above the inner core (absolute 12) so fur covers the white-hot
+            // centre, below the eyes (absolute 26) so the pupils always read.
+            patch.zPosition = 5
+            face.addChild(patch)
+        }
+
+        // Nose — an inverted triangle: flat on top, apex pointing down.
+        let noseTop = R * fx.pandaNoseTopFactor
+        let noseBottom = noseTop - R * fx.pandaNoseHeightFactor
+        let halfNose = R * fx.pandaNoseWidthFactor / 2
+        let nose = SKShapeNode()
+        let np = CGMutablePath()
+        np.move(to: CGPoint(x: -halfNose, y: noseTop))
+        np.addLine(to: CGPoint(x: halfNose, y: noseTop))
+        np.addLine(to: CGPoint(x: 0, y: noseBottom))
+        np.closeSubpath()
+        nose.path = np
+        nose.fillColor = ink
+        nose.strokeColor = .clear
+        nose.zPosition = 5
+        face.addChild(nose)
+
+        // Grin — the muzzle line dropping from the nose, then the smile. One
+        // stroked path so the two never show a seam where they meet.
+        let grinY = R * fx.pandaGrinYFactor
+        let grinHalf = R * fx.pandaGrinHalfWidthFactor
+        let drop = R * fx.pandaGrinDropFactor
+        let grin = SKShapeNode()
+        let gp = CGMutablePath()
+        gp.move(to: CGPoint(x: 0, y: noseBottom))
+        gp.addLine(to: CGPoint(x: 0, y: grinY - drop / 2))   // meets the curve's low point
+        gp.move(to: CGPoint(x: -grinHalf, y: grinY))
+        gp.addQuadCurve(to: CGPoint(x: grinHalf, y: grinY),
+                        control: CGPoint(x: 0, y: grinY - drop))
+        grin.path = gp
+        grin.strokeColor = ink
+        grin.fillColor = .clear
+        grin.lineWidth = fx.pandaGrinLineWidth
+        grin.lineCap = .round
+        grin.zPosition = 5
+        face.addChild(grin)
+
+        eyesNode.addChild(face)
+        pandaFace = face
     }
 
     /// One place decides whether Spark's procedural body is visible.
@@ -301,10 +444,19 @@ final class PlayerNode: SKNode {
         skinSprite = nil
         skinOverlay?.removeFromParent()
         skinOverlay = nil
+        pandaFace?.removeFromParent()
+        pandaFace = nil
+        fallingStars = nil
         if let overlay = a.overlay {
             let node = Self.makeOverlay(overlay)
             addChild(node)
             skinOverlay = node
+            // Resolve the emitter ONCE, here, rather than searching for it by
+            // name every frame — skins change on a tap, not on a tick.
+            fallingStars = node.childNode(withName: "skinFallingStars") as? SKEmitterNode
+            // The one overlay piece that can't be built statically: it needs
+            // `eyesNode`, which is an instance.
+            if case .pandaMask = overlay { applyPandaFace() }
         }
         if let name = a.spriteName {
             let texture = SKTexture(imageNamed: name)
@@ -366,6 +518,12 @@ final class PlayerNode: SKNode {
         // Flecks live in world space so they linger behind the spark
         if trailEmitter.targetNode == nil, let parent = parent {
             trailEmitter.targetNode = parent
+        }
+        // Same treatment for the Star-Crossed motes: parented to the overlay so
+        // they're torn down with the skin, but re-homed to the world so they
+        // actually FALL instead of hanging off Spark like a decoration.
+        if let stars = fallingStars, stars.targetNode == nil, let parent = parent {
+            stars.targetNode = parent
         }
         let magnitude = min(direction.length, 1.0)
         guard magnitude > 0.05, !isDead else {

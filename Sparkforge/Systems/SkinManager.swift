@@ -159,7 +159,7 @@ final class SkinManager {
                 coreColorHex: 0xFF9E4D, glowColorHex: 0xFF4D1A,
                 innerCoreColorHex: 0xFFF2D8, eyeColorHex: 0x0A0A0A,
                 trailColorHex: 0xFF7A2E, flareRingColorHex: 0xFFB870, glowBoost: 1.15,
-                trailBoost: 2.1, overlay: .emberFlames),
+                trailBoost: 2.4, overlay: .emberFlames),
             iapProductID: premiumSparkProductID),
 
         // ── Starforged family (Arena 5 payoff) ─────────────────────────────
@@ -190,7 +190,7 @@ final class SkinManager {
                 coreColorHex: 0x2E2668, glowColorHex: 0x6A3AE0,
                 innerCoreColorHex: 0xFFFFFF, eyeColorHex: 0xF2E3A1,
                 trailColorHex: 0xB088FF, flareRingColorHex: 0xE0C8FF, glowBoost: 1.3,
-                trailBoost: 1.9, overlay: .constellation),
+                trailBoost: 2.2, overlay: .constellation),
             iapProductID: premiumStarCrossedProductID),
 
         // ── Panda family (SECRET — masked ??? until revealed) ──────────────
