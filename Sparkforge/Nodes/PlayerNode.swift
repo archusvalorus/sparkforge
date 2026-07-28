@@ -199,7 +199,10 @@ final class PlayerNode: SKNode {
     /// TIER RULE (Brandon, WoW-style): earned skins RE-TINT; premium skins add
     /// FORM and FIRE. A recolour can't justify a price when the free tier
     /// already recolours.
-    private static func makeOverlay(_ kind: SkinOverlay) -> SKNode {
+    /// Internal (not private) so the skin PICKER can render the same overlay it
+    /// will get in play. A preview that shows only the palette sells a premium
+    /// skin as a recolour, which is exactly what the tier rule says it isn't.
+    static func makeOverlay(_ kind: SkinOverlay) -> SKNode {
         let container = SKNode()
         container.zPosition = 14        // above the eyes (13), below the kaiju (15)
         switch kind {
@@ -357,6 +360,17 @@ final class PlayerNode: SKNode {
     /// into an actual face — a muzzle gives the patches something to be
     /// arranged AROUND, which is most of why the mask reads as a panda at all.
     private func applyPandaFace() {
+        let face = Self.makePandaFace()
+        eyesNode.addChild(face)
+        pandaFace = face
+    }
+
+    /// The face pieces, in `eyesNode`-LOCAL coordinates (origin = the eye line).
+    ///
+    /// Static and internal because the skin picker needs the same face: these
+    /// don't live in the overlay container, so a preview built from `makeOverlay`
+    /// alone would show two ears floating over a blank circle.
+    static func makePandaFace() -> SKNode {
         let R = GameConfig.Player.visualRadius
         let fx = GameConfig.SkinFX.self
         let ink = SKColor(hex: 0x141414)
@@ -414,8 +428,7 @@ final class PlayerNode: SKNode {
         grin.zPosition = 5
         face.addChild(grin)
 
-        eyesNode.addChild(face)
-        pandaFace = face
+        return face
     }
 
     /// One place decides whether Spark's procedural body is visible.

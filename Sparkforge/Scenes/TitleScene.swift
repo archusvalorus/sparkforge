@@ -1809,29 +1809,89 @@ final class TitleScene: SKScene {
 
     /// A tiny static Spark, drawn from a skin palette — the wardrobe preview.
     /// Same layered look as PlayerNode, no physics/trail (cheap + self-contained).
+    /// A skin's thumbnail for the picker.
+    ///
+    /// Renders the OVERLAY and the SPRITE, not just the palette. It used to draw
+    /// the palette alone, which made every premium skin look like a recolour of
+    /// its earned sibling at the exact moment a player decides whether to pay —
+    /// and left Flame Panda, a sprite skin, previewing as a plain orange dot.
+    /// Studio canon is that premium adds form and fire; the shop window has to
+    /// show the form and the fire.
     private func makeSkinPreview(_ a: SkinAppearance) -> SKNode {
         let node = SKNode()
         let R: CGFloat = 13
+        // Overlays are authored against the real Spark's radius, so they're
+        // scaled to preview size rather than re-authored at a second scale.
+        let overlayScale = R / GameConfig.Player.visualRadius
+
+        // The glow survives a sprite swap in play, so it survives one here too.
         let glow = SKShapeNode(circleOfRadius: R + 7)
         glow.fillColor = SKColor(hex: a.glowColorHex, alpha: min(0.3 * a.glowBoost, 0.6))
         glow.strokeColor = .clear
         glow.glowWidth = 6
         node.addChild(glow)
-        let core = SKShapeNode(circleOfRadius: R)
-        core.fillColor = SKColor(hex: a.coreColorHex)
-        core.strokeColor = .clear
-        node.addChild(core)
-        let inner = SKShapeNode(circleOfRadius: R * 0.55)
-        inner.fillColor = SKColor(hex: a.innerCoreColorHex)
-        inner.strokeColor = .clear
-        inner.blendMode = .add
-        node.addChild(inner)
-        for side in [CGFloat(-1), 1] {
-            let eye = SKShapeNode(circleOfRadius: R * 0.17)
-            eye.fillColor = SKColor(hex: a.eyeColorHex)
-            eye.strokeColor = .clear
-            eye.position = CGPoint(x: side * R * 0.26, y: R * 0.14)
-            node.addChild(eye)
+
+        // A sprite skin REPLACES the procedural body — mirrors PlayerNode's
+        // refreshBodyVisibility, so the preview can't show art and ember at once.
+        var sprite: SKSpriteNode?
+        if let name = a.spriteName {
+            let texture = SKTexture(imageNamed: name)
+            if texture.size().width > 1 {
+                let s = SKSpriteNode(texture: texture)
+                let aspect = texture.size().height / max(texture.size().width, 1)
+                let w = R * 2 * GameConfig.Spark.skinSpriteScale
+                s.size = CGSize(width: w, height: w * aspect)
+                node.addChild(s)
+                sprite = s
+            }
+        }
+
+        if sprite == nil {
+            let core = SKShapeNode(circleOfRadius: R)
+            core.fillColor = SKColor(hex: a.coreColorHex)
+            core.strokeColor = .clear
+            node.addChild(core)
+            let inner = SKShapeNode(circleOfRadius: R * 0.55)
+            inner.fillColor = SKColor(hex: a.innerCoreColorHex)
+            inner.strokeColor = .clear
+            inner.blendMode = .add
+            node.addChild(inner)
+            for side in [CGFloat(-1), 1] {
+                let eye = SKShapeNode(circleOfRadius: R * 0.17)
+                eye.fillColor = SKColor(hex: a.eyeColorHex)
+                eye.strokeColor = .clear
+                eye.position = CGPoint(x: side * R * 0.26, y: R * 0.14)
+                node.addChild(eye)
+            }
+
+            if let overlay = a.overlay {
+                let o = PlayerNode.makeOverlay(overlay)
+                // Falling motes are KEPT in the thumbnail — they're the best part
+                // of the skin and the reason to buy it. They only needed reining
+                // in: at playfield lifetime a mote falls further than the card is
+                // tall and rains across the modal. Shorter life, same speed, so
+                // it lives and dies inside the chip. Alpha is burned down to
+                // nothing over that life so they wink out instead of popping.
+                if let stars = o.childNode(withName: "skinFallingStars") as? SKEmitterNode {
+                    let life = GameConfig.SkinFX.starFallPreviewLifetime
+                    stars.particleLifetime = life
+                    stars.particleLifetimeRange = life * 0.4
+                    stars.particleBirthRate = GameConfig.SkinFX.starFallPreviewBirthRate
+                    stars.particleAlphaSpeed = -stars.particleAlpha / life
+                }
+                o.setScale(overlayScale)
+                node.addChild(o)
+
+                // The panda's fur, nose and grin ride eyesNode in play, so they
+                // aren't in the overlay container — place them at the eye line.
+                if case .pandaMask = overlay {
+                    let face = PlayerNode.makePandaFace()
+                    face.setScale(overlayScale)
+                    face.position = CGPoint(
+                        x: 0, y: R * GameConfig.Spark.eyeBaseYFactor)
+                    node.addChild(face)
+                }
+            }
         }
         return node
     }
@@ -1987,7 +2047,18 @@ final class TitleScene: SKScene {
         let cy = skinCardCenterY(i, panelTop: top)
         let owned = sm.isUnlocked(def)
         let selected = owned && sm.selectedID == def.id
-        let masked = (sm.family(def.familyID)?.secret ?? false) && !owned
+        // Masking follows the FAMILY's reveal, NOT per-skin ownership.
+        //
+        // Finding the tree is the only gate there should be: take the panda card
+        // once and you see everything in the family, plain and purchasable
+        // alike. Keying this to ownership meant the premium skin stayed masked
+        // until you bought it — so a $9.99 item was sold completely blind, with
+        // a ??? name, a ??? blurb and a "?" where its art should be. You cannot
+        // spoil a secret for someone who has already found it.
+        let masked: Bool = {
+            guard let fam = sm.family(def.familyID) else { return false }
+            return !sm.isFamilyRevealed(fam)
+        }()
 
         let card = SKShapeNode(rectOf: CGSize(width: panelW - 32, height: Self.skinCardH), cornerRadius: 10)
         card.fillColor = SKColor(hex: selected ? 0x241B0E : 0x120D08)

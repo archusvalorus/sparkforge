@@ -1367,6 +1367,13 @@ enum GameConfig {
         static let starFallSpreadFactor: CGFloat = 1.45
         /// Height above center that motes spawn at (× visualRadius).
         static let starFallHeightFactor: CGFloat = 1.30
+        /// PREVIEW ONLY. The picker chip is 74pt tall; at the playfield lifetime
+        /// a mote falls ~75pt and rains straight out of the card and across the
+        /// modal. Same speed, shorter life — they wink out inside the chip
+        /// instead of escaping it. Raise the birth rate to compensate, or a
+        /// shorter life just means fewer stars.
+        static let starFallPreviewLifetime: CGFloat = 0.62
+        static let starFallPreviewBirthRate: CGFloat = 11
 
         // ── Panda mask — fur AROUND the eye, never a second pair of eyes ──
         //
