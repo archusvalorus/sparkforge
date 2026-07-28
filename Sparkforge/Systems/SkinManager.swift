@@ -221,6 +221,8 @@ final class SkinManager {
 
     private let selectedKey = "sparkforge_selected_skin"
     private func unlockKey(_ id: String) -> String { "sparkforge_skin_unlocked_\(id)" }
+    /// v2.0: a secret family can be REVEALED without owning anything in it.
+    private func familyRevealKey(_ id: String) -> String { "sparkforge_skin_family_revealed_\(id)" }
 
     // MARK: - State
 
@@ -255,13 +257,32 @@ final class SkinManager {
         skins(in: familyID).filter { isUnlocked($0) }.count
     }
 
-    /// A secret family stays masked (`???` at the hub) until a member is owned
-    /// (or debug reveals it). Non-secret families are always revealed.
+    /// A secret family stays masked (`???` at the hub) until it is revealed.
+    ///
+    /// Owning a member reveals it — but so does `revealFamily`, and that second
+    /// path is load-bearing. The hub only makes a REVEALED family tappable, so
+    /// "owning a member" alone was a deadlock: the Panda family's premium skin
+    /// could only be bought from inside a family you could only open by already
+    /// owning something in it. Finding the tree now opens the door; earning the
+    /// capstone is still what grants the skin.
     func isFamilyRevealed(_ f: SkinFamily) -> Bool {
         #if DEBUG
         if debugUnlockAll { return true }
         #endif
-        return !f.secret || ownedCount(in: f.id) > 0
+        if !f.secret { return true }
+        if ownedCount(in: f.id) > 0 { return true }
+        return UserDefaults.standard.bool(forKey: familyRevealKey(f.id))
+    }
+
+    /// Reveal a secret family without granting anything in it. Idempotent.
+    /// Returns true if this was a NEW reveal (for a first-time flourish).
+    @discardableResult
+    func revealFamily(_ id: String) -> Bool {
+        guard let f = family(id), f.secret else { return false }
+        let key = familyRevealKey(id)
+        if UserDefaults.standard.bool(forKey: key) { return false }
+        UserDefaults.standard.set(true, forKey: key)
+        return true
     }
 
     /// The appearance to render for the currently selected skin (falls back to
@@ -297,6 +318,13 @@ final class SkinManager {
     /// in Unit 3). Idempotent. Returns true if this was a NEW unlock (for reveal FX).
     @discardableResult
     func unlockEarned(_ id: String) -> Bool {
+        #if DEBUG
+        // This used to fail SILENTLY on a bad id, which is how a missing unlock
+        // hid until someone played the game as a new user. Make it loud in dev.
+        if definition(id) == nil {
+            assertionFailure("[Skins] unlockEarned called with unknown id '\(id)'")
+        }
+        #endif
         guard let def = definition(id), def.tier == .earned else { return false }
         let key = unlockKey(id)
         if UserDefaults.standard.bool(forKey: key) { return false }
@@ -322,6 +350,12 @@ final class SkinManager {
     func resetEarnedProgress() {
         for def in catalog where def.tier == .earned {
             UserDefaults.standard.removeObject(forKey: unlockKey(def.id))
+        }
+        // Secrets go back to being secrets — erasing progress that included
+        // finding the Panda tree should re-mask it, or the reveal survives an
+        // erase and the surprise is spent for good.
+        for f in families where f.secret {
+            UserDefaults.standard.removeObject(forKey: familyRevealKey(f.id))
         }
         selectedID = "spark_base"
         UserDefaults.standard.set(selectedID, forKey: selectedKey)

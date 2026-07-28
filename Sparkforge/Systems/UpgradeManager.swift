@@ -511,6 +511,12 @@ final class UpgradeManager {
         if current == 0, card.id == GameConfig.Panda.cardID {
             pandaActive = true
             pandaActivationLevel = level
+            // Taking it also un-masks the Panda family in the skin hub. NOT the
+            // skin — that's the capstone's job below. The hub only makes a
+            // revealed family tappable, so without this the family's premium
+            // skin was unreachable: buyable only from inside a room you could
+            // only enter by already owning something in it.
+            SkinManager.shared.revealFamily("panda")
         }
 
         if current == 0 {
@@ -534,6 +540,13 @@ final class UpgradeManager {
         }
 
         cardTiers[card.id] = current + 1
+
+        // v2.0: PANDA. (T5) is the capstone, and its keepsake is the panda skin.
+        // Granted at PICK time rather than run end — reaching the capstone earns
+        // it whether or not the run survives what comes after.
+        if card.id == GameConfig.Panda.cardID, current + 1 >= 5 {
+            SkinManager.shared.unlockEarned("spark_panda")
+        }
     }
     
     /// A synergy tier that JUST fired — structured so the reveal modal can

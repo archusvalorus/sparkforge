@@ -7360,6 +7360,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.beginFalseEnding()
             ProgressionManager.shared.recordKill(.boss)
             ProgressionManager.shared.recordBossDefeat("unmade_star")
+            // Clearing Arena 5 earns Star-Crossed Spark, exactly as its own
+            // blurb has always claimed ("Earned in Arena 5"). This used to hang
+            // ONLY off the Mote's scripted kill, which needs 10k lifetime kills
+            // — so beating this boss granted nothing and the skin sat visibly
+            // locked. The Mote still grants it too; unlockEarned is idempotent.
+            SkinManager.shared.unlockEarned("spark_starcrossed")
             for _ in 0..<12 {
                 let offset = CGPoint(x: CGFloat.random(in: -60...60),
                                      y: CGFloat.random(in: -60...60))
