@@ -1,6 +1,10 @@
 # Sparkforge — Claude Code Rules
 
-Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store; latest is **v1.9 "The Deepening"** (live Jul 2026 — six capstone abilities + the Forge Path rework). Bundle `com.brandon.Sparkforge`, App Store ID 6760272178. This file governs every Claude Code session in this repo.
+Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store; latest LIVE is **v1.9 "The Deepening"** (six capstone abilities + the Forge Path rework).
+
+**v2.0 "The Arrival" is BUILT and SUBMITTED, not live.** Tagged `v2.0` at commit `fb2b900`, build 2.0 (6) — archive from that tag, not from `main`. It was submitted in two bundles: the Prime Ember and Star-Crossed Prime skin IAPs were **approved**; the second bundle (the app itself plus the Flame Panda skin) **came back with reviewer feedback and needs changes before resubmission.**
+
+Bundle `com.brandon.Sparkforge`, App Store ID 6760272178. This file governs every Claude Code session in this repo.
 
 ## Workflow (non-negotiable)
 
