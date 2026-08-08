@@ -269,6 +269,11 @@ final class SkinManager {
         #if DEBUG
         if debugUnlockAll { return true }
         #endif
+        // App Review demonstration mode: secrets render revealed while it's
+        // on, WITHOUT persisting — switch it off and the mask comes back.
+        // (Ownership is untouched; buying inside the mode keeps the family
+        // open afterwards via ownedCount, same as any purchase.)
+        if ReviewMode.isActive { return true }
         if !f.secret { return true }
         if ownedCount(in: f.id) > 0 { return true }
         return UserDefaults.standard.bool(forKey: familyRevealKey(f.id))

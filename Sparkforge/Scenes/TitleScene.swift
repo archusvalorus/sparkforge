@@ -107,6 +107,11 @@ final class TitleScene: SKScene {
     // live positions, so they need no offset math. Fixed nodes (background FX,
     // the gear) stay out of `menuScrollNodes`.
     private var menuScrollNodes: [(node: SKNode, baseY: CGFloat)] = []
+
+    // v2.0 (7): App Review demonstration mode — the version label doubles as
+    // the hidden toggle (N deliberate taps; documented only in review notes).
+    private var reviewModeTapCount = 0
+    private var reviewModeLastTap: TimeInterval = 0
     private var menuScrollOffset: CGFloat = 0
     private var menuScrollLastY: CGFloat = 0
     private var menuScrollMovement: CGFloat = 0
@@ -912,6 +917,45 @@ final class TitleScene: SKScene {
         contactEmail.zPosition = 10
         contactEmail.name = "contactEmailButton"
         addChild(contactEmail)
+
+        // v2.0 (7): version footer — also the App Review demonstration-mode
+        // trigger (ReviewMode.tapsToToggle deliberate taps). When the mode is
+        // on it says so right here, per the seams-announce-themselves rule.
+        layoutY -= 26
+        let version = SKLabelNode(fontNamed: "Menlo")
+        version.text = Self.versionFooterText()
+        version.fontSize = 10 * s
+        version.fontColor = SKColor(hex: ReviewMode.isActive ? 0xFFCC44 : 0x555555)
+        version.verticalAlignmentMode = .center
+        version.position = CGPoint(x: 0, y: layoutY)
+        version.zPosition = 10
+        version.name = "versionLabel"
+        addChild(version)
+    }
+
+    private static func versionFooterText() -> String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        let base = "v\(short) (\(build))"
+        return ReviewMode.isActive ? "\(base) · ⚠︎ REVIEW MODE" : base
+    }
+
+    /// The hidden toggle: deliberate consecutive taps on the version label.
+    /// A pause resets the count, so idle footer taps never accumulate.
+    private func handleVersionLabelTap() {
+        let now = Date().timeIntervalSinceReferenceDate
+        reviewModeTapCount = (now - reviewModeLastTap < 2.0) ? reviewModeTapCount + 1 : 1
+        reviewModeLastTap = now
+        guard reviewModeTapCount >= ReviewMode.tapsToToggle else { return }
+        reviewModeTapCount = 0
+        let on = ReviewMode.toggle()
+        if let label = childNode(withName: "versionLabel") as? SKLabelNode {
+            label.text = Self.versionFooterText()
+            label.fontColor = SKColor(hex: on ? 0xFFCC44 : 0x555555)
+            label.run(.sequence([.scale(to: 1.25, duration: 0.1),
+                                 .scale(to: 1.0, duration: 0.1)]))
+        }
     }
     
     // MARK: - Touch Handling
@@ -1122,6 +1166,17 @@ final class TitleScene: SKScene {
                 if let url = URL(string: "mailto:games@hearthandhammer.ai") {
                     UIApplication.shared.open(url)
                 }
+                return
+            }
+        }
+
+        // v2.0 (7): version label — hidden App Review demonstration-mode
+        // toggle. Small hit box on purpose; taps here must be deliberate.
+        if let version = childNode(withName: "versionLabel") {
+            let frame = CGRect(x: version.position.x - 90, y: version.position.y - 12,
+                               width: 180, height: 24)
+            if frame.contains(location) {
+                handleVersionLabelTap()
                 return
             }
         }

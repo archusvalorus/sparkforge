@@ -1011,6 +1011,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         #endif
 
+        // App Review demonstration mode — same rule as the dev seams (an
+        // active seam announces itself), but this one ships in release, so
+        // the badge is the only thing standing between "review mode" and
+        // "the mutation fired again."
+        if ReviewMode.isActive {
+            let seam = SKLabelNode(fontNamed: "Menlo-Bold")
+            seam.text = "⚠︎ REVIEW MODE — panda always eligible"
+            seam.fontSize = 9
+            seam.fontColor = SKColor(hex: 0xFFCC44)
+            seam.horizontalAlignmentMode = .left
+            seam.verticalAlignmentMode = .center
+            seam.position = CGPoint(x: safeLeft, y: -view.bounds.height / 2 + 42)
+            seam.zPosition = 300
+            camera.addChild(seam)
+        }
+
         // Timer — top center, most prominent
         timerLabel.fontSize = 20
         timerLabel.fontColor = SKColor(hex: 0xAAAAAA)

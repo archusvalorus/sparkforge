@@ -666,6 +666,10 @@ final class UpgradeManager {
         #if DEBUG
         if GameConfig.Panda.debugAlwaysEligible { pandaEligible = true }
         #endif
+        // App Review demonstration mode (release-compiled, unlike the seam
+        // above): a reviewer has to be able to draw the panda cards without
+        // winning a 9.27% roll. Announced by the run-HUD badge.
+        if ReviewMode.isActive { pandaEligible = true }
     }
     
     // MARK: - Synergy Application
