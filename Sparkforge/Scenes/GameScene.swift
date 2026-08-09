@@ -24,6 +24,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case removeAdsPrompt  // v1.8 (E4): in-run value-prop modal is up
         case synergyReveal    // v1.8 (Unit 6): synergy-unlock modal is up
         case placingZone      // v2.0 Phase C: choosing where to plant Terra
+        case bossReveal       // v2.0.1 (Unit 2): camera visiting a fresh boss spawn
     }
     
     private(set) var gameState: GameState = .playing
@@ -1835,6 +1836,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if reviveHoldOverlay != nil {
                 resumeFromRevive()
             }
+
+        case .bossReveal:
+            // v2.0.1 (Unit 2): the camera is mid-flight — the moment is the
+            // message. Taps do nothing; play resumes when the camera is home.
+            break
         }
     }
     
@@ -8783,8 +8789,44 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ])
         dim.run(sequence)
         title.run(sequence)
+
+        playBossSpawnReveal()
     }
-    
+
+    /// v2.0.1 (Unit 2): the spawn reveal. Freezes the field — game state AND
+    /// world actions, since boss attack cycles ride SKActions that a state
+    /// guard alone wouldn't stop — then flies the camera to the boss, dwells
+    /// while the banner plays, and comes home. Banner and HUD live on the
+    /// camera, so they travel; the world is the thing that holds still.
+    ///
+    /// Boss Mode calls showBossEntrance twice per stage (spawner + stage
+    /// banner); the gameState guard makes the second call a clean no-op.
+    private func playBossSpawnReveal() {
+        guard gameState == .playing, let camera = camera, let target = boss else { return }
+        gameState = .bossReveal
+        joystick.forceRelease()
+        worldNode.isPaused = true
+
+        let out = SKAction.move(to: target.position,
+                                duration: GameConfig.BossReveal.panOutDuration)
+        out.timingMode = .easeInEaseOut
+        let home = SKAction.move(to: player.position,
+                                 duration: GameConfig.BossReveal.panBackDuration)
+        home.timingMode = .easeInEaseOut
+        camera.run(.sequence([
+            out,
+            .wait(forDuration: GameConfig.BossReveal.holdDuration),
+            home,
+            .run { [weak self] in
+                guard let self = self else { return }
+                self.worldNode.isPaused = false
+                if self.gameState == .bossReveal { self.gameState = .playing }
+                // Same mercy as unpause: a beat to re-grip the stick.
+                self.invulnerableTimer = GameConfig.BossReveal.settleInvulnerability
+            }
+        ]), withKey: "bossReveal")
+    }
+
     private func spawnXPOrb(at position: CGPoint, value: Int) {
         var value = value
         // v2.0 (B2b): Boss Mode has no wave to farm and no clock to survive, so

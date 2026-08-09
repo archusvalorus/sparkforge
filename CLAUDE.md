@@ -2,7 +2,7 @@
 
 Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store; latest LIVE is **v2.0 "The Arrival"** (build 2.0 (7), tag `v2.0-build7` — approved Aug 2026 after the Review Mode resubmission; the 2.1(a) saga is archived in `docs/v2.0-handoff-ship-prep.md`).
 
-**v2.0.1 hotfix sprint IN PROGRESS** (`docs/v2.0.1-kickoff.md`): Arena 5 was un-unlockable in prod — the Faceted Lie's `onDeath` never set `arenasUnlocked = 5`, masked all through dev by a DEBUG force-unlock (now removed; debug builds run the real progression). Unit 1 (unlock + save heal + card text) built + sim-validated; Unit 2 = boss-spawn camera reveal. Ships as 2.0.1 (8).
+**v2.0.1 hotfix sprint IN PROGRESS** (`docs/v2.0.1-kickoff.md`): Arena 5 was un-unlockable in prod — the Faceted Lie's `onDeath` never set `arenasUnlocked = 5`, masked all through dev by a DEBUG force-unlock (now removed; debug builds run the real progression). Both units DONE + Brandon-approved (Unit 1 unlock/heal/card text; Unit 2 boss-spawn camera reveal, timings in `GameConfig.BossReveal`). Tag `v2.0.1-build8` — archive from it, resubmit, then flip this line + Notion chain-of-events, then open the v2.1 kickoff (Unit 0 = arena unlock registry, see memory).
 
 Bundle `com.brandon.Sparkforge`, App Store ID 6760272178. This file governs every Claude Code session in this repo.
 

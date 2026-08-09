@@ -367,6 +367,23 @@ enum GameConfig {
         static let gatherHold: TimeInterval = 0.9
     }
 
+    // MARK: - v2.0.1 (Unit 2): Boss-spawn camera reveal
+    /// The spawn announcement: the field holds its breath, the camera flies
+    /// to the newcomer while the entrance banner plays, dwells a beat, and
+    /// comes home. The player learns THAT it happened, WHERE it happened,
+    /// and has time to plan — no more off-screen steamrolls (Brandon died
+    /// to an unseen Slag Titan on live; this is that fix).
+    enum BossReveal {
+        /// Camera flight out to the boss.
+        static let panOutDuration: TimeInterval = 0.6
+        /// Dwell on the boss. The banner text is readable during this.
+        static let holdDuration: TimeInterval = 0.9
+        /// Flight home to Spark.
+        static let panBackDuration: TimeInterval = 0.5
+        /// Mercy window when play resumes — same idea as the unpause grace.
+        static let settleInvulnerability: TimeInterval = 1.0
+    }
+
     // MARK: - Panda. (v2.0 C2)
     /// The secret tree. Numbers only — nothing here explains anything, and the
     /// player never sees any of it.
