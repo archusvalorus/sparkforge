@@ -1,8 +1,8 @@
 # Sparkforge — Claude Code Rules
 
-Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store; latest LIVE is **v1.9 "The Deepening"** (six capstone abilities + the Forge Path rework).
+Arena survival roguelite. Swift / SpriteKit / iOS. Live on the App Store; latest LIVE is **v2.0 "The Arrival"** (build 2.0 (7), tag `v2.0-build7` — approved Aug 2026 after the Review Mode resubmission; the 2.1(a) saga is archived in `docs/v2.0-handoff-ship-prep.md`).
 
-**v2.0 "The Arrival" is BUILT and SUBMITTED, not live.** Tagged `v2.0` at commit `fb2b900`, build 2.0 (6) — archive from that tag, not from `main`. It was submitted in two bundles: the Prime Ember and Star-Crossed Prime skin IAPs were **approved**; the second bundle (the app itself plus the Flame Panda skin) was **rejected under Guideline 2.1(a)** — the reviewer couldn't reach the panda-gated Flame Panda IAP (no accounts to provide, and the content sits behind the 9.27% secret roll). The fix is **build 2.0 (7)**: a hidden Review Mode demonstration seam (7 taps on the title-footer version label — reveals the panda family + forces run eligibility, grants nothing). **Resubmitted to App Review Aug 8 2026** (tag `v2.0-build7`, commit `3d56de7`) with reviewer instructions in the notes — awaiting verdict. Details: `docs/v2.0-handoff-ship-prep.md`.
+**v2.0.1 hotfix sprint IN PROGRESS** (`docs/v2.0.1-kickoff.md`): Arena 5 was un-unlockable in prod — the Faceted Lie's `onDeath` never set `arenasUnlocked = 5`, masked all through dev by a DEBUG force-unlock (now removed; debug builds run the real progression). Unit 1 (unlock + save heal + card text) built + sim-validated; Unit 2 = boss-spawn camera reveal. Ships as 2.0.1 (8).
 
 Bundle `com.brandon.Sparkforge`, App Store ID 6760272178. This file governs every Claude Code session in this repo.
 

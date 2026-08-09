@@ -145,14 +145,12 @@ final class TitleScene: SKScene {
         let screenHeight = size.height > 100 ? size.height : 667
         layoutY = min(screenHeight * 0.30, 280)
         
-        #if DEBUG
-        // v2.0 Unit 2a dev aid: unlock Arena 5 (Star Anvil) so it's selectable
-        // for testing. Its live "clear Arena 4 → unlock" wiring lands when Unit 2
-        // is complete; release builds are unaffected (Arena 5 stays a teaser).
-        if ProgressionManager.shared.arenasUnlocked < ArenaConfig.all.count {
-            ProgressionManager.shared.arenasUnlocked = ArenaConfig.all.count
-        }
-        #endif
+        // v2.0.1: a DEBUG force-unlock-all-arenas block lived here from v2.0
+        // Unit 2a ("live wiring lands when Unit 2 is complete" — it never
+        // landed). It made every dev build lie about progression and masked
+        // the missing Arena 5 unlock for an entire release cycle. Removed for
+        // good: debug builds run the real progression. Use the Boss Mode
+        // roster or a seeded save to reach late arenas in dev.
 
         displayedArenaIndex = ArenaConfig.current.id
 
@@ -598,7 +596,10 @@ final class TitleScene: SKScene {
             switch displayedArenaIndex {
             case 1:  requirement = "fell \(ProgressionManager.arena1Gate.bossName) to unlock"
             case 2:  requirement = "fell \(ProgressionManager.arena2Gate.bossName) to unlock"
-            default: requirement = "fell \(ProgressionManager.arena3Gate.bossName) to unlock"
+            case 3:  requirement = "fell \(ProgressionManager.arena3Gate.bossName) to unlock"
+            // v2.0.1: this used to be the default, so Arena 5's locked card
+            // named the Dynamo Choir — an arena it has nothing to do with.
+            default: requirement = "fell \(ProgressionManager.arena4Gate.bossName) to unlock"
             }
 
             // Requirement (small) drops to the lower row…
@@ -638,7 +639,11 @@ final class TitleScene: SKScene {
             case 0: return ("The Slag Titan",   "THE QUENCH",     "slag_titan",   0xFFAA33)
             case 1: return ("The Quench Warden","THE COILWORKS",  "quench_warden",0xD8A94A)
             case 2: return ("The Dynamo Choir", "THE MIRRORWOUND","dynamo_choir", 0xF6D36B)
-            case 3: return ("The Faceted Lie",  "",               "faceted_lie",  0x9C748C)
+            // v2.0.1: Arena 4 stopped being the last arena in v2.0, but its
+            // card never learned — restore the next-arena announcement and
+            // give Arena 5 its own gate line.
+            case 3: return ("The Faceted Lie",  "THE STAR ANVIL", "faceted_lie",  0x9C748C)
+            case 4: return ("The Unmade Star",  "",               "unmade_star",  0x9A7AE0)
             default: return nil
             }
         }()
@@ -657,9 +662,10 @@ final class TitleScene: SKScene {
 
             if g.nextArena.isEmpty {
                 // Last live arena — no next to open; just honor the kill.
+                // (v2.0.1: that's the Unmade Star now, not the Lie.)
                 arenaReadyLabel.isHidden = !felled
                 if felled {
-                    arenaReadyLabel.text = "★ THE LIE TAKES SHAPE ★"
+                    arenaReadyLabel.text = "★ THE STAR IS UNMADE ★"
                     arenaReadyLabel.fontSize = 15
                     arenaReadyLabel.fontColor = SKColor(hex: g.accent)
                 }

@@ -8580,6 +8580,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             CodexManager.shared.recordDefeat(.facetedLie)
             ProgressionManager.shared.recordBossDefeat("faceted_lie")
             SkinManager.shared.unlockEarned("spark_ascended")  // v2.0: clearing Arena 4 earns the Ascended skin
+            // v2.0.1: the line every other boss handler had and this one
+            // didn't — felling the Lie opens the Star Anvil. Its absence
+            // shipped in v2.0 masked by a DEBUG force-unlock; Arena 5 was
+            // unreachable in prod.
+            if ProgressionManager.shared.arenasUnlocked < 5 {
+                ProgressionManager.shared.arenasUnlocked = 5
+            }
             for _ in 0..<10 {
                 let offset = CGPoint(
                     x: CGFloat.random(in: -40...40),

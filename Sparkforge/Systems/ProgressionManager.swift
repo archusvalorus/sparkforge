@@ -393,5 +393,13 @@ final class ProgressionManager {
         if wardenKills > 0 && arenasUnlocked < 3 {
             arenasUnlocked = 3
         }
+        // v2.0.1 repair: v2.0 shipped without the Faceted Lie → Arena 5
+        // unlock line, so players who felled the Lie on live earned an
+        // arena they never received. Heal on launch. (Inherits the legacy
+        // kill-based fallback inside hasDefeatedBoss — the same compromise
+        // v2.0 accepted for Boss Mode access.)
+        if hasDefeatedBoss("faceted_lie") && arenasUnlocked < 5 {
+            arenasUnlocked = 5
+        }
     }
 }
