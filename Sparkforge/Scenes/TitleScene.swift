@@ -924,8 +924,9 @@ final class TitleScene: SKScene {
         contactEmail.name = "contactEmailButton"
         addChild(contactEmail)
 
-        // v2.0 (7): version footer — also the App Review demonstration-mode
-        // trigger (ReviewMode.tapsToToggle deliberate taps). When the mode is
+        // v2.0 (7): version footer — pure display, deliberately NOT the
+        // demonstration-mode trigger (that's the subtitle knock; version
+        // labels are the world's most 7-tapped UI element). When the mode is
         // on it says so right here, per the seams-announce-themselves rule.
         layoutY -= 26
         let version = SKLabelNode(fontNamed: "Menlo")
@@ -947,20 +948,39 @@ final class TitleScene: SKScene {
         return ReviewMode.isActive ? "\(base) · ⚠︎ REVIEW MODE" : base
     }
 
-    /// The hidden toggle: deliberate consecutive taps on the version label.
-    /// A pause resets the count, so idle footer taps never accumulate.
-    private func handleVersionLabelTap() {
+    /// The hidden toggle: deliberate consecutive taps on the subtitle.
+    /// A pause resets the count, so idle taps never accumulate.
+    private func handleReviewKnockTap() {
         let now = Date().timeIntervalSinceReferenceDate
         reviewModeTapCount = (now - reviewModeLastTap < 2.0) ? reviewModeTapCount + 1 : 1
         reviewModeLastTap = now
         guard reviewModeTapCount >= ReviewMode.tapsToToggle else { return }
         reviewModeTapCount = 0
         let on = ReviewMode.toggle()
+
+        // The persistent state flag lives in the footer (below the fold from
+        // here), so confirm AT the knock too: a transient banner under the
+        // subtitle the reviewer is already looking at.
+        subtitleLabel.run(.sequence([.scale(to: 1.15, duration: 0.1),
+                                     .scale(to: 1.0, duration: 0.1)]))
+        childNode(withName: "reviewKnockToast")?.removeFromParent()
+        let toast = SKLabelNode(fontNamed: "Menlo-Bold")
+        toast.text = on ? "⚠︎ REVIEW MODE ON" : "review mode off"
+        toast.fontSize = 12
+        toast.fontColor = SKColor(hex: on ? 0xFFCC44 : 0x888888)
+        toast.verticalAlignmentMode = .center
+        toast.position = CGPoint(x: subtitleLabel.position.x,
+                                 y: subtitleLabel.position.y - 22)
+        toast.zPosition = 30
+        toast.name = "reviewKnockToast"
+        addChild(toast)
+        toast.run(.sequence([.wait(forDuration: 1.6),
+                             .fadeOut(withDuration: 0.4),
+                             .removeFromParent()]))
+
         if let label = childNode(withName: "versionLabel") as? SKLabelNode {
             label.text = Self.versionFooterText()
             label.fontColor = SKColor(hex: on ? 0xFFCC44 : 0x555555)
-            label.run(.sequence([.scale(to: 1.25, duration: 0.1),
-                                 .scale(to: 1.0, duration: 0.1)]))
         }
     }
     
@@ -1176,15 +1196,18 @@ final class TitleScene: SKScene {
             }
         }
 
-        // v2.0 (7): version label — hidden App Review demonstration-mode
-        // toggle. Small hit box on purpose; taps here must be deliberate.
-        if let version = childNode(withName: "versionLabel") {
-            let frame = CGRect(x: version.position.x - 90, y: version.position.y - 12,
-                               width: 180, height: 24)
-            if frame.contains(location) {
-                handleVersionLabelTap()
-                return
-            }
+        // v2.0.1: the App Review demonstration-mode knock lives on the
+        // SUBTITLE, not the version label — "tap the version number 7 times"
+        // is a folk gesture Apple taught the world in Settings, and players
+        // try it on principle. Nobody 7-taps a genre tagline. The version
+        // label below stays pure display (and the REVIEW MODE state flag).
+        // Documented only in the ASC review notes.
+        let knockFrame = CGRect(x: subtitleLabel.position.x - 110,
+                                y: subtitleLabel.position.y - 14,
+                                width: 220, height: 28)
+        if knockFrame.contains(location) {
+            handleReviewKnockTap()
+            return
         }
 
         // v2.0 Unit 1.5: ONLY the ignite CTA starts a run. The old "any other
