@@ -202,6 +202,10 @@ final class BestiaryCodexNode: SKNode, CodexPage {
         case .quenchWarden: node = QuenchWardenNode()
         case .dynamoChoir:  node = DynamoChoirNode()
         case .facetedLie:   node = FacetedLieNode()
+        case .gravemote:    node = GravemoteNode(health: 10, xpValue: 0)
+        case .starNeedle:   node = StarNeedleNode(health: 1, xpValue: 0)
+        case .anvilborn:    node = AnvilbornNode(health: 10, xpValue: 0)
+        case .unmadeStar:   node = UnmadeStarNode(arenaRadius: 200)
         case .mote:         return nil
         }
         stripPhysics(node)

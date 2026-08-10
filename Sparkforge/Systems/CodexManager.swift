@@ -169,6 +169,13 @@ enum BestiaryFamily: String, CaseIterable {
     case quenchWarden = "quench_warden"
     case dynamoChoir  = "dynamo_choir"
     case facetedLie   = "faceted_lie"   // v1.8 Unit 13 — Arena 4 boss
+    // v2.0.5 — Star Anvil family (Arena 5). Copy locked by Lyra
+    // (Sparkforge_Arena_5_Bestiary_Copy_Handoff.md); ids are the persistence
+    // ids from the source packet — never rename.
+    case gravemote    = "gravemote"
+    case starNeedle   = "star_needle"
+    case anvilborn    = "anvilborn"
+    case unmadeStar   = "unmade_star"   // Arena 5 monument boss
     /// Reserved v2.0 slot — the hidden nemesis. Present in the schema NOW so it
     /// doesn't churn at v2.0; the bestiary page MUST skip entries where
     /// `hiddenUntilFutureVersion` is true until Mote ships. See
@@ -195,13 +202,17 @@ enum BestiaryFamily: String, CaseIterable {
         case .quenchWarden: return "The Quench Warden"
         case .dynamoChoir:  return "The Dynamo Choir"
         case .facetedLie:   return "The Faceted Lie"
+        case .gravemote:    return "Gravemote"
+        case .starNeedle:   return "Star Needle"
+        case .anvilborn:    return "Anvilborn"
+        case .unmadeStar:   return "The Unmade Star"
         case .mote:         return "????"
         }
     }
 
     var isBoss: Bool {
         switch self {
-        case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie: return true
+        case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie, .unmadeStar: return true
         default: return false
         }
     }
@@ -232,6 +243,12 @@ enum BestiaryFamily: String, CaseIterable {
         case .dynamoChoir:  return "A broken engine singing in circuits. The wrong note is usually you."
         // v1.8 Unit 13 — PROVISIONAL (Claude, in-voice), awaiting Lyra's pass.
         case .facetedLie:   return "It wears five faces and means none of them. The safe path is the one it wants you to trust."
+        // v2.0.5 — Star Anvil flavor, LOCKED by Lyra. Do not edit copy here;
+        // changes go through her.
+        case .gravemote:    return "A failed spark compressed into hunger. It does not chase. It convinces the world to come closer."
+        case .starNeedle:   return "Precision forged into malice. Once it chooses a line, it never reconsiders. You should."
+        case .anvilborn:    return "The forge made a body out of weight and impatience. When it plants its feet, reconsider yours."
+        case .unmadeStar:   return "A star caught between becoming and breaking. The forge keeps striking. It has decided to include you."
         case .mote:         return ""
         }
     }
@@ -256,6 +273,10 @@ enum BestiaryFamily: String, CaseIterable {
         case .quenchWarden: return 0x4499FF
         case .dynamoChoir:  return 0xBB66FF
         case .facetedLie:   return 0x8E44FF   // hostile mirror purple
+        case .gravemote:    return 0x8A6AD0   // gravity violet (its own glow)
+        case .starNeedle:   return 0xFFF0C0   // pale starlight
+        case .anvilborn:    return 0xC98A4B   // struck bronze
+        case .unmadeStar:   return 0xFFD98A   // star gold (entrance banner color)
         case .mote:         return 0x8E44FF
         }
     }

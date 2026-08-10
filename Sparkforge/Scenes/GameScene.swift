@@ -7381,6 +7381,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.monumentFightActive = false
             self.beginFalseEnding()
             ProgressionManager.shared.recordKill(.boss)
+            // v2.0.5: the codex line every other boss had — the Star finally
+            // gets its bestiary card (found in the 2.0.1 pre-archive audit).
+            CodexManager.shared.recordDefeat(.unmadeStar)
             ProgressionManager.shared.recordBossDefeat("unmade_star")
             // Clearing Arena 5 earns Star-Crossed Spark, exactly as its own
             // blurb has always claimed ("Earned in Arena 5"). This used to hang
@@ -9085,6 +9088,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case is ShardTwinNode:   return .shardTwin
         case is PaneStalkerNode: return .paneStalker
         case is EchoLeechNode:   return .echoLeech
+        // v2.0.5 — Star Anvil family (Arena 5 bestiary entries).
+        case is GravemoteNode:   return .gravemote
+        case is StarNeedleNode:  return .starNeedle
+        case is AnvilbornNode:   return .anvilborn
         default:                 return .melee
         }
     }
