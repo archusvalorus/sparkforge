@@ -54,6 +54,24 @@ final class ProgressionManager {
         defeatedBosses = set
     }
 
+    /// v2.1 (Unit 0): THE arena-boss defeat chokepoint. Records the defeat
+    /// AND derives the next-arena unlock from the ArenaConfig registry —
+    /// replacing the per-boss hand-written unlock lines whose absence shipped
+    /// the Arena 5 prod bug. Every arena boss's onDeath calls this; a boss id
+    /// the registry doesn't know (a Boss Mode exotic, some future special)
+    /// records the defeat and unlocks nothing, loudly in debug.
+    func registerArenaBossDefeat(_ bossID: String) {
+        recordBossDefeat(bossID)
+        guard let arena = ArenaConfig.arena(forBossID: bossID) else {
+            #if DEBUG
+            assertionFailure("[Progression] registerArenaBossDefeat: '\(bossID)' is not in the ArenaConfig registry")
+            #endif
+            return
+        }
+        let opens = min(arena.id + 2, ArenaConfig.all.count)
+        if arenasUnlocked < opens { arenasUnlocked = opens }
+    }
+
     /// True if the boss has been felled. Falls back to the legacy per-boss
     /// unlock flags so players who beat these BEFORE v2.0 keep their access
     /// instead of having to re-earn the whole roster.
@@ -393,13 +411,16 @@ final class ProgressionManager {
         if wardenKills > 0 && arenasUnlocked < 3 {
             arenasUnlocked = 3
         }
-        // v2.0.1 repair: v2.0 shipped without the Faceted Lie → Arena 5
-        // unlock line, so players who felled the Lie on live earned an
-        // arena they never received. Heal on launch. (Inherits the legacy
-        // kill-based fallback inside hasDefeatedBoss — the same compromise
-        // v2.0 accepted for Boss Mode access.)
-        if hasDefeatedBoss("faceted_lie") && arenasUnlocked < 5 {
-            arenasUnlocked = 5
+        // v2.1 (Unit 0): registry reconciliation — recompute what the
+        // defeat record has EARNED against the ArenaConfig registry, every
+        // launch. Subsumes the v2.0.1 Faceted Lie heal and permanently
+        // self-repairs any future missed unlock: if a boss is recorded
+        // felled, the next arena is open, whatever some onDeath forgot.
+        // (Inherits hasDefeatedBoss's legacy kill-based fallbacks — the
+        // compromise v2.0 accepted for Boss Mode access.)
+        for arena in ArenaConfig.all where hasDefeatedBoss(arena.bossID) {
+            let opens = min(arena.id + 2, ArenaConfig.all.count)
+            if arenasUnlocked < opens { arenasUnlocked = opens }
         }
     }
 }

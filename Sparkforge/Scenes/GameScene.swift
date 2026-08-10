@@ -7384,7 +7384,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // v2.0.5: the codex line every other boss had — the Star finally
             // gets its bestiary card (found in the 2.0.1 pre-archive audit).
             CodexManager.shared.recordDefeat(.unmadeStar)
-            ProgressionManager.shared.recordBossDefeat("unmade_star")
+            // v2.1 (Unit 0): last arena today, so this unlocks nothing — but
+            // when Arena 6 lands, THIS line is already wired. That's the point.
+            ProgressionManager.shared.registerArenaBossDefeat("unmade_star")
             // Clearing Arena 5 earns Star-Crossed Spark, exactly as its own
             // blurb has always claimed ("Earned in Arena 5"). This used to hang
             // ONLY off the Mote's scripted kill, which needs 10k lifetime kills
@@ -8383,15 +8385,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.slagTitan)
-            ProgressionManager.shared.recordBossDefeat("slag_titan")  // v1.8 Unit 5
-            // v2.0: felling the Titan opens The Quench — consistent with the
-            // Warden→Coilworks and Choir→Mirrorwound unlocks. Was previously a
-            // lifetime-kill check in recordKill, which is what let a grind-heavy
-            // save skip the fight. arenasUnlocked only ever climbs, so already-
-            // unlocked players keep their access (grandfathered).
-            if ProgressionManager.shared.arenasUnlocked < 2 {
-                ProgressionManager.shared.arenasUnlocked = 2
-            }
+            // v2.1 (Unit 0): defeat + next-arena unlock derive from the
+            // ArenaConfig registry — no more hand-written unlock lines.
+            ProgressionManager.shared.registerArenaBossDefeat("slag_titan")
             // Spawn massive XP shower
             for _ in 0..<10 {
                 let offset = CGPoint(
@@ -8445,12 +8441,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.quenchWarden)
-            ProgressionManager.shared.recordBossDefeat("quench_warden")  // v1.8 Unit 5
+            ProgressionManager.shared.registerArenaBossDefeat("quench_warden")  // v2.1 Unit 0: registry-derived unlock
             ProgressionManager.shared.wardenKills += 1
-            // v1.7: felling the Warden opens The Coilworks
-            if ProgressionManager.shared.arenasUnlocked < 3 {
-                ProgressionManager.shared.arenasUnlocked = 3
-            }
             for _ in 0..<10 {
                 let offset = CGPoint(
                     x: CGFloat.random(in: -40...40),
@@ -8535,12 +8527,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.dynamoChoir)
-            ProgressionManager.shared.recordBossDefeat("dynamo_choir")  // v1.8 Unit 5
+            ProgressionManager.shared.registerArenaBossDefeat("dynamo_choir")  // v2.1 Unit 0: registry-derived unlock
             ProgressionManager.shared.choirKills += 1  // banked for Arena 4's gate
-            // v1.8 (Unit 11): felling the Choir opens The Mirrorwound
-            if ProgressionManager.shared.arenasUnlocked < 4 {
-                ProgressionManager.shared.arenasUnlocked = 4
-            }
             for _ in 0..<10 {
                 let offset = CGPoint(
                     x: CGFloat.random(in: -40...40),
@@ -8587,15 +8575,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
             CodexManager.shared.recordDefeat(.facetedLie)
-            ProgressionManager.shared.recordBossDefeat("faceted_lie")
+            // v2.1 (Unit 0): registry-derived unlock — the missing line that
+            // caused the v2.0.1 hotfix can no longer be missing; the registry
+            // derives it from the defeat itself.
+            ProgressionManager.shared.registerArenaBossDefeat("faceted_lie")
             SkinManager.shared.unlockEarned("spark_ascended")  // v2.0: clearing Arena 4 earns the Ascended skin
-            // v2.0.1: the line every other boss handler had and this one
-            // didn't — felling the Lie opens the Star Anvil. Its absence
-            // shipped in v2.0 masked by a DEBUG force-unlock; Arena 5 was
-            // unreachable in prod.
-            if ProgressionManager.shared.arenasUnlocked < 5 {
-                ProgressionManager.shared.arenasUnlocked = 5
-            }
             for _ in 0..<10 {
                 let offset = CGPoint(
                     x: CGFloat.random(in: -40...40),

@@ -30,6 +30,27 @@ struct ArenaConfig {
     // so the extra space earns a longer escalation before the bell.
     let bellTime: TimeInterval
 
+    // v2.1 (Unit 0): the arena↔boss registry — THE single source of truth for
+    // which boss belongs to which arena. Felling an arena's boss opens the
+    // next arena; unlock wiring, title-card copy, and launch reconciliation
+    // all derive from these three fields. Adding an arena = filling them in.
+    // (The Arena 5 prod bug happened because this pairing lived in four
+    // hand-written sites; it lives HERE now.)
+    let bossID: String          // persistence id (defeatedBosses / codex)
+    let bossName: String        // player-facing, e.g. locked-card requirement
+    let bossFelledAccentHex: UInt32  // "★ NEXT OPEN ★" announcement color
+
+    /// The short marquee form of the arena name ("THE STAR ANVIL") — the
+    /// displayName minus its "ARENA N: " prefix. Used by next-arena teasers.
+    var marqueeName: String {
+        displayName.components(separatedBy: ": ").last ?? name.uppercased()
+    }
+
+    /// Registry lookup: the arena whose boss carries this id, or nil.
+    static func arena(forBossID id: String) -> ArenaConfig? {
+        all.first { $0.bossID == id }
+    }
+
     static let crucible = ArenaConfig(
         id: 0,
         name: "The Crucible",
@@ -41,7 +62,10 @@ struct ArenaConfig {
         detailLineHex: 0x252525,
         accentColorHex: 0xFF7722,
         radiusScale: 1.0,
-        bellTime: GameConfig.Wave.miniBossSpawnTime
+        bellTime: GameConfig.Wave.miniBossSpawnTime,
+        bossID: "slag_titan",
+        bossName: "The Slag Titan",
+        bossFelledAccentHex: 0xFFAA33
     )
 
     static let quench = ArenaConfig(
@@ -55,7 +79,10 @@ struct ArenaConfig {
         detailLineHex: 0x272C33,
         accentColorHex: 0xB8B0A4,
         radiusScale: 1.0,
-        bellTime: GameConfig.Wave.miniBossSpawnTime
+        bellTime: GameConfig.Wave.miniBossSpawnTime,
+        bossID: "quench_warden",
+        bossName: "The Quench Warden",
+        bossFelledAccentHex: 0xD8A94A
     )
 
     // v1.7: palette is Lyra canon — static gold reads as pale electrical
@@ -72,7 +99,10 @@ struct ArenaConfig {
         detailLineHex: 0x23231B,
         accentColorHex: 0xF6D36B,
         radiusScale: 1.0,
-        bellTime: GameConfig.Wave.miniBossSpawnTime
+        bellTime: GameConfig.Wave.miniBossSpawnTime,
+        bossID: "dynamo_choir",
+        bossName: "The Dynamo Choir",
+        bossFelledAccentHex: 0xF6D36B
     )
 
     // v1.8 (Unit 11): Arena 4. Palette is Lyra canon — a wound that reflects,
@@ -94,7 +124,10 @@ struct ArenaConfig {
         detailLineHex: 0xD6CCC2,
         accentColorHex: 0x9C948C,
         radiusScale: 1.3,
-        bellTime: 120.0   // larger arena → later bell, a longer escalation
+        bellTime: 120.0,  // larger arena → later bell, a longer escalation
+        bossID: "faceted_lie",
+        bossName: "The Faceted Lie",
+        bossFelledAccentHex: 0x9C748C
     )
 
     // v2.0 (Unit 2a): Arena 5 — The Star Anvil. The hidden heart of the forge,
@@ -118,7 +151,10 @@ struct ArenaConfig {
         detailLineHex: 0x585090,
         accentColorHex: 0x9A7AE0,
         radiusScale: 2.6,
-        bellTime: 160.0   // doubled field → a longer, more ceremonial escalation
+        bellTime: 160.0,  // doubled field → a longer, more ceremonial escalation
+        bossID: "unmade_star",
+        bossName: "The Unmade Star",
+        bossFelledAccentHex: 0x9A7AE0
     )
 
     static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil]

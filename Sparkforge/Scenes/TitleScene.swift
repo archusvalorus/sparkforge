@@ -591,16 +591,11 @@ final class TitleScene: SKScene {
             killProgressLabel.isHidden = true
             survivalCheckLabel.isHidden = true
 
-            // Each locked arena names the boss whose fall opens it.
-            let requirement: String
-            switch displayedArenaIndex {
-            case 1:  requirement = "fell \(ProgressionManager.arena1Gate.bossName) to unlock"
-            case 2:  requirement = "fell \(ProgressionManager.arena2Gate.bossName) to unlock"
-            case 3:  requirement = "fell \(ProgressionManager.arena3Gate.bossName) to unlock"
-            // v2.0.1: this used to be the default, so Arena 5's locked card
-            // named the Dynamo Choir — an arena it has nothing to do with.
-            default: requirement = "fell \(ProgressionManager.arena4Gate.bossName) to unlock"
-            }
+            // Each locked arena names the boss whose fall opens it — derived
+            // from the ArenaConfig registry (v2.1 Unit 0; the old hand-kept
+            // switch here is how Arena 5's card once claimed the Dynamo Choir).
+            let gatekeeper = ArenaConfig.all[max(0, displayedArenaIndex - 1)]
+            let requirement = "fell \(gatekeeper.bossName) to unlock"
 
             // Requirement (small) drops to the lower row…
             arenaFlavorLabel.position.y = arenaReadyRowY
@@ -634,18 +629,14 @@ final class TitleScene: SKScene {
         // kill-progress bars are gone; the card now shows the RULE and, once
         // done, the boss-felled achievement (the true, persistent unlock signal).
         survivalCheckLabel.isHidden = true
+        // v2.1 (Unit 0): boss name, id, accent, and the next-arena marquee all
+        // derive from the ArenaConfig registry — the hand-kept map this used
+        // to be is what let Arena 4's card forget Arena 5 existed.
         let arenaBoss: (boss: String, nextArena: String, bossID: String, accent: UInt32)? = {
-            switch arena.id {
-            case 0: return ("The Slag Titan",   "THE QUENCH",     "slag_titan",   0xFFAA33)
-            case 1: return ("The Quench Warden","THE COILWORKS",  "quench_warden",0xD8A94A)
-            case 2: return ("The Dynamo Choir", "THE MIRRORWOUND","dynamo_choir", 0xF6D36B)
-            // v2.0.1: Arena 4 stopped being the last arena in v2.0, but its
-            // card never learned — restore the next-arena announcement and
-            // give Arena 5 its own gate line.
-            case 3: return ("The Faceted Lie",  "THE STAR ANVIL", "faceted_lie",  0x9C748C)
-            case 4: return ("The Unmade Star",  "",               "unmade_star",  0x9A7AE0)
-            default: return nil
-            }
+            let nextIndex = arena.id + 1
+            let next = ArenaConfig.all.indices.contains(nextIndex)
+                ? ArenaConfig.all[nextIndex].marqueeName : ""
+            return (arena.bossName, next, arena.bossID, arena.bossFelledAccentHex)
         }()
 
         if let g = arenaBoss {
