@@ -43,6 +43,22 @@ extension CGPoint {
         guard len > 0.0001 else { return .zero }
         return CGPoint(x: x / len, y: y / len)
     }
+
+    // MARK: v2.1 (Geometry 1A) — primitives the arena geometry contract needs
+
+    /// Dot product, treating both points as vectors from the origin.
+    func dot(_ other: CGPoint) -> CGFloat { x * other.x + y * other.y }
+
+    /// Rotate about the origin by `angle` radians (counter-clockwise).
+    func rotated(by angle: CGFloat) -> CGPoint {
+        let c = cos(angle), s = sin(angle)
+        return CGPoint(x: x * c - y * s, y: x * s + y * c)
+    }
+
+    /// Linear interpolation toward `other` by `t` in 0...1.
+    func lerp(to other: CGPoint, t: CGFloat) -> CGPoint {
+        CGPoint(x: x + (other.x - x) * t, y: y + (other.y - y) * t)
+    }
 }
 
 // MARK: - CGVector Convenience

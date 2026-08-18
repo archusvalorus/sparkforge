@@ -29,6 +29,14 @@ final class PaneStalkerNode: EnemyNode {
         applyStalkerVisuals()
     }
 
+    /// v2.1 (Geometry 1A): the Stalker phases through space by design — its
+    /// re-entry is fiction, not travel. Exempt from footprint resolution WHILE
+    /// PHASED (0 = exempt); solid while solid, so it can never sit embedded in
+    /// the Fallen Carrier once it re-enters (persistent state is always valid).
+    override var geometryFootprintRadius: CGFloat {
+        phase == .phased ? 0 : super.geometryFootprintRadius
+    }
+
     required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) not implemented")
     }

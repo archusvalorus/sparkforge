@@ -104,6 +104,9 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     /// exactly that reason — a body that participates in contacts but not in
     /// collisions is intentional here, not an oversight.
     var solidRadius: CGFloat { targetingRadius }
+    /// v2.1 (1A): a monument IS solid geometry; it never resolves against
+    /// arena footprints (it lives in the top third, off any authored route).
+    var geometryFootprintRadius: CGFloat { 0 }
 
     // MARK: - Anchoring
 

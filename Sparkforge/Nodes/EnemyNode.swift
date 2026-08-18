@@ -21,6 +21,18 @@ class EnemyNode: SKNode {
     private(set) var isDying = false
     /// v1.6: Mini-bosses deal their configured contact damage instead of generic melee
     var isMiniBoss: Bool = false
+
+    /// v2.1 (Geometry 1A): the radius this enemy occupies for ARENA GEOMETRY —
+    /// resolution against blocked footprints and (1B) route clearance. It is
+    /// EXPLICIT and independent of both the contact physics body (which never
+    /// tracks setScale — a 2.2× mini-boss still has a 12pt body) and the
+    /// visual. Reconciliation §4/§7.2: geometry footprints must never silently
+    /// replace combat hitboxes. Default = visual radius × current scale;
+    /// subclasses that phase or fly set 0 to exempt themselves.
+    var geometryFootprintRadius: CGFloat {
+        geometryFootprintOverride ?? GameConfig.Enemy.visualRadius * xScale
+    }
+    var geometryFootprintOverride: CGFloat? = nil
     
     // MARK: - Status Effects
     

@@ -40,6 +40,19 @@ struct ArenaConfig {
     let bossName: String        // player-facing, e.g. locked-card requirement
     let bossFelledAccentHex: UInt32  // "★ NEXT OPEN ★" announcement color
 
+    // v2.1 (Geometry 1A): everything the arena declares about its shape
+    // beyond the circle. `.open` = the five shipped arenas, byte-identical
+    // behavior. See ArenaGeometry.swift + docs/arena6-geometry-reconciliation.md.
+    //
+    // A BUILDER, not a stored value: authored layouts size themselves off
+    // GameConfig.Arena.radius, which reads ArenaConfig.current — so a stored
+    // geometry inside a `static let` config would recurse into its own
+    // dispatch_once (it did: SIGTRAP at launch). Building on read also means
+    // the layout follows the live radius (device + radiusScale), same fix as
+    // the frozen spawnDistance.
+    var geometryBuilder: () -> ArenaGeometry = { .open }
+    var geometry: ArenaGeometry { geometryBuilder() }
+
     /// The short marquee form of the arena name ("THE STAR ANVIL") — the
     /// displayName minus its "ARENA N: " prefix. Used by next-arena teasers.
     var marqueeName: String {
@@ -157,6 +170,36 @@ struct ArenaConfig {
         bossFelledAccentHex: 0x9A7AE0
     )
 
+    // v2.1 (Geometry 1A): Arena 6 — The Splitworks SHELL. Lyra canon: The
+    // Broken March opens here; a derailed pilgrim carrier cleaves an old
+    // mustering yard into a narrow route and a broad route. This entry is the
+    // Unit 1A shell — geometry + palette only, EXISTING enemies + a placeholder
+    // boss binding, so the foundation can be proven before the roster (Unit 2)
+    // and the Marchwarden (Unit 3) land. Palette per the design lock §9:
+    // charcoal iron, kiln orange, ash-gray stone, oxidized teal signal paint,
+    // pale ceramic route markings, restrained Star Anvil violet inheritance.
+    //
+    // ⚠ NOT REGISTERED in `all` yet — see `splitworksShell` gating below. The
+    // shell is reachable in DEBUG via the geometry proof seam only, so live
+    // progression stays exactly five arenas until Unit 4 registers it.
+    static let splitworksShell = ArenaConfig(
+        id: 5,
+        name: "The Splitworks",
+        displayName: "ARENA 6: THE SPLITWORKS",
+        flavorLine: "the road broke. the march did not.",
+        floorColorHex: 0x151412,       // charcoal iron
+        boundaryColorHex: 0x3F8F8A,    // oxidized teal signal paint
+        dangerGlowHex: 0x5A2A0E,       // kiln-orange ember in the dark
+        detailLineHex: 0xD9D2C4,       // pale ceramic route markings
+        accentColorHex: 0x3F8F8A,
+        radiusScale: 1.15,             // dense, not sprawling (Growth viability)
+        bellTime: GameConfig.Wave.miniBossSpawnTime,
+        bossID: "marchwarden",         // Unit 3 fills the fight; id is canon now
+        bossName: "The Marchwarden",
+        bossFelledAccentHex: 0x3F8F8A,
+        geometryBuilder: { ArenaGeometry.splitworks }
+    )
+
     static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil]
 
     /// v2.0 (B2a): a TRANSIENT arena override for Boss Mode.
@@ -172,9 +215,20 @@ struct ArenaConfig {
     /// ever offers bosses the player has actually felled, so their home arena is
     /// by definition one the player has already stood in.
     static var overrideID: Int? = nil
+    #if DEBUG
+    /// v2.1 (Geometry 1A): sentinel override id for the Splitworks shell —
+    /// deliberately outside `all`'s index range.
+    static let splitworksShellOverrideID = 5_000
+    #endif
 
     /// The currently selected arena, clamped to what's unlocked.
     static var current: ArenaConfig {
+        #if DEBUG
+        // v2.1 (Geometry 1A): the shell is reachable ONLY through the transient
+        // override (set by GameScene under the dev seam) — never via
+        // progression, never persisted. Release compiles this away.
+        if overrideID == splitworksShellOverrideID { return splitworksShell }
+        #endif
         if let id = overrideID, id >= 0, id < all.count { return all[id] }
         let pm = ProgressionManager.shared
         let maxIndex = min(pm.arenasUnlocked, all.count) - 1

@@ -38,7 +38,27 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v1.6: Selected arena's visual identity (resolved at scene creation)
     // v2.0 (B2a): now a var — Boss Mode re-resolves it on every arena swap.
     // Normal play still resolves it exactly once and never touches it again.
-    private var arenaConfig = ArenaConfig.current
+    private var arenaConfig = GameScene.resolveArenaConfig()
+    /// v2.1 (Geometry 1A): resolve/rejection counters + the DEBUG overlay.
+    private let geometryDebug = GeometryDebug()
+
+    /// v2.1 (Geometry 1A): the arena this RUN plays in. Normally
+    /// ArenaConfig.current; under the DEBUG shell seam, the Splitworks shell —
+    /// scoped to the run only, so the title screen / progression / persistence
+    /// never see it (the shell isn't in ArenaConfig.all). Announced by the HUD
+    /// banner; reinstall the sim after switching it back off.
+    private static func resolveArenaConfig() -> ArenaConfig {
+        #if DEBUG
+        if GeometryDebug.forceSplitworksShell {
+            // Ride the transient Boss-Mode override so GameConfig.Arena.radius
+            // (which reads ArenaConfig.current.radiusScale) agrees with the
+            // shell — never persisted, cleared with the run like the gauntlet's.
+            ArenaConfig.overrideID = ArenaConfig.splitworksShellOverrideID
+            return ArenaConfig.splitworksShell
+        }
+        #endif
+        return ArenaConfig.current
+    }
     
     // MARK: - Boss Mechanics
 
@@ -111,7 +131,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Resolve the FIRST boss's home arena before didMove builds anything,
         // so the run opens directly in the right field.
         ArenaConfig.overrideID = run.currentEntry?.arenaID
-        arenaConfig = ArenaConfig.current
+        arenaConfig = GameScene.resolveArenaConfig()
         return true
     }
 
@@ -475,6 +495,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func setupArena() {
         // v1.6: colors + motif come from the selected arena's config
         let radius = GameConfig.Arena.radius
+        // v2.1 (Geometry 1A): materialize this arena's geometry once, here —
+        // radius is final for the run (or until a Boss Mode swap re-runs this).
+        arenaGeometry = arenaConfig.geometry
 
         // v1.8 (Unit 11): the arena sets when its bell rings (Mirrorwound rings
         // later than the standard mark for a longer escalation).
@@ -546,6 +569,47 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 SKAction.fadeAlpha(to: 0.0, duration: 1.7),
                 SKAction.wait(forDuration: Double.random(in: 0.4...1.2))
             ])))
+        }
+
+        // v2.1 (Geometry 1A): solid arena geometry gets a READABLE body — the
+        // painted footprint and the collision footprint must agree (design
+        // lock §4 readability rules). Shell art: a plated iron slab in the
+        // arena's own palette; final Fallen Carrier art lands in Unit 4.
+        buildSolidGeometryVisuals()
+
+        #if DEBUG
+        if GeometryDebug.showOverlay, arenaGeometry.hasBlockedGeometry {
+            arenaLayer.addChild(GeometryDebug.makeOverlay(for: arenaGeometry, arenaRadius: radius))
+        }
+        #endif
+    }
+
+    /// v2.1 (1A): one drawn body per blocked footprint. Sits above the floor
+    /// motif and BELOW actors, so it can never hide an enemy (design lock §4:
+    /// "sprite layering must not allow the carrier to hide enemy bodies").
+    private func buildSolidGeometryVisuals() {
+        for f in arenaGeometry.blockedFootprints {
+            let w = (f.halfExtents.width + f.cornerRadius) * 2
+            let h = (f.halfExtents.height + f.cornerRadius) * 2
+            let body = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: f.cornerRadius)
+            body.fillColor = SKColor(hex: 0x1F1D1B)                       // charcoal iron
+            body.strokeColor = SKColor(hex: arenaConfig.boundaryColorHex, alpha: 0.85)
+            body.lineWidth = 3
+            body.glowWidth = 2
+            body.position = f.center
+            body.zRotation = f.rotation
+            body.zPosition = 1
+            body.name = "solidGeometry_\(f.label)"
+            // Plate seams — three cross-lines in the pale route-marking tint,
+            // so it reads as a built thing (a carrier), not a blank block.
+            for i in -1...1 {
+                let seam = SKShapeNode(rectOf: CGSize(width: w * 0.86, height: 1.5))
+                seam.fillColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.22)
+                seam.strokeColor = .clear
+                seam.position = CGPoint(x: 0, y: CGFloat(i) * h * 0.28)
+                body.addChild(seam)
+            }
+            arenaLayer.addChild(body)
         }
     }
 
@@ -979,7 +1043,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func setupPlayer() {
-        player.position = .zero
+        // v2.1 (Geometry 1A): the origin may be INSIDE an arena's solid
+        // geometry (the Fallen Carrier is near-centre). Enter at the authored
+        // safe anchor when the arena has one; open arenas keep the origin.
+        player.position = arenaGeometry.anchor("player_spawn") ?? .zero
         worldNode.addChild(player)
     }
     
@@ -1027,6 +1094,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             seam.zPosition = 300
             camera.addChild(seam)
         }
+
+        #if DEBUG
+        // v2.1 (Geometry 1A): the geometry seams announce themselves too.
+        if GeometryDebug.forceSplitworksShell || GeometryDebug.showOverlay {
+            let seam = SKLabelNode(fontNamed: "Menlo-Bold")
+            var parts: [String] = []
+            if GeometryDebug.forceSplitworksShell { parts.append("splitworks shell") }
+            if GeometryDebug.showOverlay { parts.append("geometry overlay") }
+            seam.text = "⚠︎ DEBUG — " + parts.joined(separator: " · ")
+            seam.fontSize = 9
+            seam.fontColor = SKColor(hex: 0x9FE0DB)
+            seam.horizontalAlignmentMode = .left
+            seam.verticalAlignmentMode = .center
+            seam.position = CGPoint(x: safeLeft, y: -view.bounds.height / 2 + 54)
+            seam.zPosition = 300
+            seam.name = "geometrySeamBanner"
+            camera.addChild(seam)
+        }
+        #endif
 
         // Timer — top center, most prominent
         timerLabel.fontSize = 20
@@ -2559,6 +2645,63 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         player.position = resolved
     }
 
+    // MARK: - v2.1 (Geometry 1A): solid arena geometry
+
+    /// The active arena's geometry, built ONCE per arena setup (the config
+    /// exposes a builder, since layouts size off the live radius). Open arenas
+    /// → `.open`; every query short-circuits to "clear" for one bool check.
+    private var arenaGeometry: ArenaGeometry = .open
+
+    /// v2.1 (1A): resolve the player out of solid arena geometry — the
+    /// monument push-out, generalized. Called after ordinary movement AND
+    /// after every forced displacement (pulls, shoves), per the
+    /// reconciliation's "persistent state is always valid" principle: no
+    /// frame may end with Spark inside the Fallen Carrier.
+    private func resolvePlayerAgainstGeometry(cause: GeometryDebug.Cause) {
+        guard arenaGeometry.hasBlockedGeometry else { return }
+        let r = playerStats.effectiveCollisionRadius
+        let before = player.position
+        var resolved = arenaGeometry.resolve(before, actorRadius: r)
+        // Arena wall still wins over the footprint in the pinch band (same
+        // compromise as the monument): the field is authored so the two never
+        // truly conflict, but never teleport Spark if they do.
+        let maxDist = GameConfig.Arena.radius - r
+        if resolved.length > maxDist { resolved = resolved.normalized * maxDist }
+        if resolved != before {
+            player.position = resolved
+            geometryDebug.recordResolve(actor: "player", cause: cause)
+        }
+    }
+
+    /// v2.1 (1A): enemies never clamped to anything before — now they can't
+    /// remain embedded in solid geometry either. One pass over the enemy
+    /// array after chase; uses the explicit geometry footprint radius, NOT the
+    /// combat contact body (those are deliberately separate — reconciliation
+    /// §7.2). Ground-bound only; flying/phasing exemptions ride
+    /// `geometryFootprintRadius <= 0`.
+    private func resolveEnemiesAgainstGeometry() {
+        guard arenaGeometry.hasBlockedGeometry else { return }
+        for enemy in enemies where !enemy.isDying {
+            let r = enemy.geometryFootprintRadius
+            guard r > 0 else { continue }
+            let p = enemy.position
+            let q = arenaGeometry.resolve(p, actorRadius: r)
+            if q != p {
+                enemy.position = q
+                geometryDebug.recordResolve(actor: "enemy", cause: .movement)
+            }
+        }
+        // Ground-bound bosses obey too (monuments are their own solid and sit
+        // in the top third; a future arena boss on the field must not embed).
+        if let b = boss, !b.isDead, b.geometryFootprintRadius > 0 {
+            let q = arenaGeometry.resolve(b.position, actorRadius: b.geometryFootprintRadius)
+            if q != b.position {
+                b.position = q
+                geometryDebug.recordResolve(actor: "boss", cause: .movement)
+            }
+        }
+    }
+
     // MARK: - v2.0 (E1): the run's colours
 
     /// Flash which colour families this run actually draws from.
@@ -2773,6 +2916,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var destination = anchor + jitter
         let limit = GameConfig.Arena.radius * 0.9
         if destination.length > limit { destination = destination.normalized * limit }
+        // v2.1 (1A, Ruling 6): pandas may violate geometry as SPECTACLE, not as
+        // save-state corruption — the waddle may cross the Carrier, the panda
+        // may not settle inside it.
+        destination = arenaGeometry.resolve(destination, actorRadius: 20)
 
         // The samurai. It is 5%. That is the entire trigger, and it is never
         // going to be anything else — the community can theorise for as long as
@@ -3296,7 +3443,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let victim = panda.followMark, !victim.isDying,
                   enemies.contains(where: { $0 === victim }) else { return true }
             victim.applyStun(0.3)
-            victim.position = panda.node.position
+            // v2.1 (1A, Ruling 6): the pin may cross geometry; the pinned
+            // actor's resolved destination must be outside the footprint.
+            victim.position = arenaGeometry.resolve(panda.node.position,
+                                                    actorRadius: victim.geometryFootprintRadius)
             return false
 
         case .nap:
@@ -4368,6 +4518,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let maxDist = GameConfig.Arena.radius - ghost.radius
         var p = worldPoint
         if p.length > maxDist { p = p.normalized * maxDist }
+        // v2.1 (Geometry 1A): a zone may not be PLANTED inside solid geometry
+        // (persistent state is always valid). The ghost slides to the nearest
+        // valid spot, so the preview IS the validity indicator — Growth may
+        // visually overlap the Carrier later as it grows (Ruling 2), but its
+        // root can't be inside it.
+        p = arenaGeometry.resolve(p, actorRadius: ghost.radius * 0.5)
         ghost.position = p
     }
 
@@ -4453,6 +4609,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let preMovePosition = player.position
         player.move(direction: joystick.direction, deltaTime: dt)
         pushPlayerOutOfMonument()
+        resolvePlayerAgainstGeometry(cause: .movement)   // v2.1 (1A)
         if joystick.direction != .zero {
             lastMoveDirection = joystick.direction.normalized
         }
@@ -4554,6 +4711,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 if player.position.length > maxDist {
                     player.position = player.position.normalized * maxDist
                 }
+                resolvePlayerAgainstGeometry(cause: .pull)   // v2.1 (1A)
             }
         }
         
@@ -4647,6 +4805,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     if d < GravemoteNode.pullRadius && d > 4 {
                         let dir = (mote.position - player.position).normalized
                         player.position += dir * strength * CGFloat(dt)
+                        resolvePlayerAgainstGeometry(cause: .pull)   // v2.1 (1A)
                     }
                 }
             }
@@ -4712,6 +4871,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             relayArcSources.removeAll()
         }
+
+        // v2.1 (Geometry 1A): after every chase / pull / knockback this frame,
+        // no ground-bound enemy may remain embedded in solid geometry. One
+        // pass, one site — the seam the recon said didn't exist.
+        resolveEnemiesAgainstGeometry()
     }
 
     // MARK: - v1.7: Relay Burn (Fire/Shock bridge card)
@@ -4942,8 +5106,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 SKAction.wait(forDuration: GameConfig.Erasure.echoDelay),
                 SKAction.run { [weak self] in
                     guard let self = self, self.gameState == .playing else { return }
-                    let ang = CGFloat.random(in: 0..<(2 * .pi))
-                    let edge = CGPoint(x: cos(ang), y: sin(ang)) * (GameConfig.Arena.radius * 0.85)
+                    // v2.1 (1A, Ruling 3): a Void origin must be valid; the
+                    // beam/shot itself pierces reality afterwards.
+                    let edge = PlacementSampler.randomPoint(
+                        in: self.arenaGeometry,
+                        minRadius: GameConfig.Arena.radius * 0.85,
+                        maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12)
                     self.fireProjectile(direction: echoDir,
                                         originOffset: edge - self.player.position,
                                         damageScale: GameConfig.Erasure.echoFraction,
@@ -5088,9 +5256,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             singularityTimer += dt
             if singularityTimer >= playerStats.singularityInterval {
                 singularityTimer = 0
-                let angle = CGFloat.random(in: 0...(2 * .pi))
-                let dist = CGFloat.random(in: 0...(GameConfig.Arena.radius * 0.6))
-                let pos = CGPoint(x: cos(angle) * dist, y: sin(angle) * dist)
+                // v2.1 (1A): a well is a persistent ground object — never
+                // inside solid geometry (shared sampler, well-radius margin).
+                let pos = PlacementSampler.randomPoint(
+                    in: arenaGeometry, minRadius: 0,
+                    maxRadius: GameConfig.Arena.radius * 0.6,
+                    margin: playerStats.singularityRadius * 0.5)
                 spawnGravityWell(at: pos,
                                  radius: playerStats.singularityRadius,
                                  duration: playerStats.singularityDuration,
@@ -6453,8 +6624,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// vector, hitting every enemy (and the boss) within the beam's width.
     private func fireRiftCannon() {
         let arenaR = GameConfig.Arena.radius
-        let oAng = CGFloat.random(in: 0..<(2 * .pi))
-        let origin = CGPoint(x: cos(oAng), y: sin(oAng)) * CGFloat.random(in: 0...(arenaR * 0.6))
+        // v2.1 (1A, Ruling 3): the rift's ORIGIN must be valid; the beam it
+        // fires is canonically reality-piercing and crosses anything.
+        let origin = PlacementSampler.randomPoint(in: arenaGeometry, minRadius: 0,
+                                                  maxRadius: arenaR * 0.6, margin: 16)
         let vAng = CGFloat.random(in: 0..<(2 * .pi))
         let dir = CGPoint(x: cos(vAng), y: sin(vAng))
         let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.riftCannonMult))
@@ -6551,6 +6724,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func erasureDisplacement(_ enemy: EnemyNode) {
         let ang = CGFloat.random(in: 0..<(2 * .pi))
         enemy.position += CGPoint(x: cos(ang), y: sin(ang)) * GameConfig.Erasure.displacementDistance
+        // v2.1 (1A): a teleport can't END inside solid geometry.
+        enemy.position = arenaGeometry.resolve(enemy.position, actorRadius: enemy.geometryFootprintRadius)
+        geometryDebug.recordResolve(actor: "enemy", cause: .teleport)
         showRingPulse(at: enemy.position, radius: 24, colorHex: 0x9B59B6)
     }
 
@@ -7363,6 +7539,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard d > 4 else { return }
             let dir = (b.position - self.player.position).normalized
             self.player.position += dir * displacement
+            // v2.1 (1A): a pull can't leave Spark inside geometry OR the
+            // monument (the recon found this pull never re-ran the solid
+            // resolve — now it does both).
+            self.pushPlayerOutOfMonument()
+            self.resolvePlayerAgainstGeometry(cause: .pull)
         }
 
         // 3) The single sanctioned pickup: one HP orb when the star hits 50%.
@@ -7657,7 +7838,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// player back at a legal position for the new field.
     private func swapArena(to arenaID: Int) {
         ArenaConfig.overrideID = arenaID
-        arenaConfig = ArenaConfig.current
+        arenaConfig = GameScene.resolveArenaConfig()
 
         teardownArena()
         setupArena()
@@ -7667,20 +7848,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // the old arena has to be brought inside the new boundary — and the
         // player has to start the fight somewhere survivable.
         waveManager.bellTime = arenaConfig.bellTime
-        player.position = .zero
-        camera?.position = .zero
+        // v2.1 (1A): (0,0) may sit INSIDE an arena's blocked geometry (the
+        // Fallen Carrier is near-centre). Enter at the authored safe anchor
+        // when there is one; open arenas keep the origin.
+        player.position = arenaGeometry.anchor("player_spawn") ?? .zero
+        camera?.position = player.position
         clampLooseNodesToArena()
     }
 
     /// After a swap the new arena may be far smaller than the old one. Pull any
     /// surviving loose object back inside it rather than leaving pickups
     /// stranded outside a boundary the player can't cross.
+    /// v2.1 (1A): …and out of any solid geometry the new arena carries.
     private func clampLooseNodesToArena() {
         let maxDist = GameConfig.Arena.radius - 24
+        let geo = arenaGeometry
         func clamp(_ node: SKNode) {
             if node.position.length > maxDist {
                 node.position = node.position.normalized * maxDist
             }
+            node.position = geo.resolve(node.position, actorRadius: 12)
         }
         healthOrbs.forEach(clamp)
         magnetOrbs.forEach(clamp)

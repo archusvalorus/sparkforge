@@ -145,9 +145,11 @@ final class HealthOrbNode: SKNode {
     
     /// Random position within the arena, away from edges
     static func randomArenaPosition() -> CGPoint {
-        let maxR = GameConfig.Arena.radius * 0.75  // Keep away from arena edge
-        let angle = CGFloat.random(in: 0...(2 * .pi))
-        let distance = CGFloat.random(in: 30...maxR)
-        return CGPoint(x: cos(angle) * distance, y: sin(angle) * distance)
+        // v2.1 (Geometry 1A): the shared sampler — never inside solid geometry.
+        // Health orbs are NON-magnetized by canon, so an unreachable orb is a
+        // real bug, not cosmetic. Margin = orb reach + a step of clearance.
+        PlacementSampler.randomPoint(in: ArenaConfig.current.geometry,
+                                     minRadius: 30, maxRadius: GameConfig.Arena.radius * 0.75,
+                                     margin: 28)
     }
 }

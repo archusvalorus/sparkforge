@@ -1076,8 +1076,13 @@ enum GameConfig {
         static let meleeThinningChance: CGFloat = 0.22
         /// Mini-boss spawn time
         static let miniBossSpawnTime: TimeInterval = 90.0
-        /// Spawn distance from arena center (just outside boundary)
-        static let spawnDistance: CGFloat = Arena.radius + 40
+        /// Spawn distance from arena center (just outside boundary).
+        /// v2.1 (Geometry 1A) FIX: this was a `static let`, evaluated ONCE per
+        /// process and frozen to whichever arena loaded first — it never
+        /// tracked `radiusScale`, so a 2.6× Star Anvil spawned enemies at the
+        /// 1.0× ring, deep inside the field (Arena 5 dodged it by hand). Now a
+        /// computed var, live for every arena. Found in the geometry recon.
+        static var spawnDistance: CGFloat { Arena.radius + 40 }
 
         /// v2.0 (Brandon, Jul 24): the arena's real boss now answers a PER-RUN
         /// mob count, not a lifetime tally. You must clear this many enemies IN

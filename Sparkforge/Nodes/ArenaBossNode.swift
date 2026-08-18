@@ -42,11 +42,21 @@ protocol ArenaBossNode: SKNode {
 
     /// Called each frame with the player's position for AI targeting
     func update(deltaTime: TimeInterval, playerPosition: CGPoint)
+
+    /// v2.1 (Geometry 1A): the radius this boss occupies for ARENA GEOMETRY —
+    /// route clearance and resolution against blocked footprints. Deliberately
+    /// separate from `targetingRadius` and the contact body (reconciliation
+    /// §7.2: routing must never rebalance damage contacts). 0 = exempt (a
+    /// monument IS geometry; it never resolves against other geometry).
+    var geometryFootprintRadius: CGFloat { get }
 }
 
 /// Default: a normal-scale boss's centre is effectively its surface.
 extension ArenaBossNode {
     var targetingRadius: CGFloat { 0 }
+    /// Default: mobile arena bosses are ground-bound and take a body-sized
+    /// footprint; monuments override to 0.
+    var geometryFootprintRadius: CGFloat { max(targetingRadius, 30) }
 
     /// Default: bosses that predate the dials simply ignore them, so adding a
     /// boss never *requires* dial support to compile.

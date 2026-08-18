@@ -164,9 +164,9 @@ final class MagnetOrbNode: SKNode {
     
     /// Random position within the arena, away from edges
     static func randomArenaPosition() -> CGPoint {
-        let maxR = GameConfig.Arena.radius * 0.75
-        let angle = CGFloat.random(in: 0...(2 * .pi))
-        let distance = CGFloat.random(in: 30...maxR)
-        return CGPoint(x: cos(angle) * distance, y: sin(angle) * distance)
+        // v2.1 (Geometry 1A): shared sampler — never inside solid geometry.
+        PlacementSampler.randomPoint(in: ArenaConfig.current.geometry,
+                                     minRadius: 30, maxRadius: GameConfig.Arena.radius * 0.75,
+                                     margin: 28)
     }
 }

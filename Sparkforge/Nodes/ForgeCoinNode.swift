@@ -171,9 +171,12 @@ final class ForgeCoinNode: SKNode {
     /// Random arena-wide target for the boss-death eruption — coins scatter
     /// across the whole arena, not clustered at the corpse.
     static func randomArenaPosition() -> CGPoint {
-        let maxR = GameConfig.Arena.radius * 0.8
-        let angle = CGFloat.random(in: 0...(2 * .pi))
-        let distance = CGFloat.random(in: 40...maxR)
-        return CGPoint(x: cos(angle) * distance, y: sin(angle) * distance)
+        // v2.1 (Geometry 1A): shared sampler — never inside solid geometry.
+        // (The coin's animated toss may still ARC over the Carrier — that is
+        // the falling/arcing family, allowed to pass; only the LANDING must be
+        // valid, which this guarantees.)
+        PlacementSampler.randomPoint(in: ArenaConfig.current.geometry,
+                                     minRadius: 40, maxRadius: GameConfig.Arena.radius * 0.8,
+                                     margin: 24)
     }
 }
