@@ -125,3 +125,37 @@ final class GeometryDebug {
     }
     #endif
 }
+
+#if DEBUG
+/// v2.1 — RUNTIME dev seams, set from the Settings panel's dev rows. Session
+/// only (statics, never persisted); the run HUD announces whichever are
+/// active. Built because a wiped save must still be able to reach any arena
+/// for a device pass — WITHOUT the silent force-unlock that once masked a
+/// prod bug. Progression, persistence, and the title card never see these.
+enum DevSeams {
+    /// nil = off. 0..<ArenaConfig.all.count = that arena; `shellIndex` = the
+    /// Splitworks shell (geometry + palette, existing enemies).
+    static var arenaOverrideIndex: Int? = nil
+    static let shellIndex = ArenaConfig.all.count
+    static var overlayEnabled = false
+
+    static func cycleArena() {
+        switch arenaOverrideIndex {
+        case nil: arenaOverrideIndex = 0
+        case let i? where i < shellIndex: arenaOverrideIndex = i + 1
+        default: arenaOverrideIndex = nil
+        }
+    }
+
+    static var anyActive: Bool { arenaOverrideIndex != nil || overlayEnabled || GeometryDebug.showOverlay || GeometryDebug.forceSplitworksShell }
+
+    static var bannerText: String {
+        var parts: [String] = []
+        if let i = arenaOverrideIndex {
+            parts.append(i == shellIndex ? "splitworks shell" : "arena \(i + 1)")
+        } else if GeometryDebug.forceSplitworksShell { parts.append("splitworks shell (flag)") }
+        if overlayEnabled || GeometryDebug.showOverlay { parts.append("geometry overlay") }
+        return "⚠︎ DEV — " + parts.joined(separator: " · ")
+    }
+}
+#endif

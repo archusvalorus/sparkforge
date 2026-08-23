@@ -49,10 +49,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// banner; reinstall the sim after switching it back off.
     private static func resolveArenaConfig() -> ArenaConfig {
         #if DEBUG
+        // Runtime dev pick (Settings → DEV ARENA) or the compile-time shell
+        // flag. Both ride the transient Boss-Mode override so that
+        // GameConfig.Arena.radius (which reads ArenaConfig.current.radiusScale)
+        // agrees with the arena actually played — never persisted, cleared
+        // with the run like the gauntlet's own override.
+        if let i = DevSeams.arenaOverrideIndex {
+            if i == DevSeams.shellIndex {
+                ArenaConfig.overrideID = ArenaConfig.splitworksShellOverrideID
+                return ArenaConfig.splitworksShell
+            }
+            ArenaConfig.overrideID = i
+            return ArenaConfig.all[i]
+        }
         if GeometryDebug.forceSplitworksShell {
-            // Ride the transient Boss-Mode override so GameConfig.Arena.radius
-            // (which reads ArenaConfig.current.radiusScale) agrees with the
-            // shell — never persisted, cleared with the run like the gauntlet's.
             ArenaConfig.overrideID = ArenaConfig.splitworksShellOverrideID
             return ArenaConfig.splitworksShell
         }
@@ -578,7 +588,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         buildSolidGeometryVisuals()
 
         #if DEBUG
-        if GeometryDebug.showOverlay, arenaGeometry.hasBlockedGeometry {
+        if GeometryDebug.showOverlay || DevSeams.overlayEnabled, arenaGeometry.hasBlockedGeometry {
             arenaLayer.addChild(GeometryDebug.makeOverlay(for: arenaGeometry, arenaRadius: radius))
         }
         #endif
@@ -1096,13 +1106,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         #if DEBUG
-        // v2.1 (Geometry 1A): the geometry seams announce themselves too.
-        if GeometryDebug.forceSplitworksShell || GeometryDebug.showOverlay {
+        // v2.1: the geometry / dev-arena seams announce themselves too.
+        if DevSeams.anyActive {
             let seam = SKLabelNode(fontNamed: "Menlo-Bold")
-            var parts: [String] = []
-            if GeometryDebug.forceSplitworksShell { parts.append("splitworks shell") }
-            if GeometryDebug.showOverlay { parts.append("geometry overlay") }
-            seam.text = "⚠︎ DEBUG — " + parts.joined(separator: " · ")
+            seam.text = DevSeams.bannerText
             seam.fontSize = 9
             seam.fontColor = SKColor(hex: 0x9FE0DB)
             seam.horizontalAlignmentMode = .left

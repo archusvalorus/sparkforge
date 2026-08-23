@@ -66,6 +66,20 @@ final class SettingsMenuNode: SKNode {
         addChild(banNote)
         y -= 76
 
+        #if DEBUG
+        // v2.1 DEV SEAMS — runtime, session-only, ANNOUNCED (the run HUD paints
+        // a banner while any is active). Not progression: the arena pick rides
+        // the transient Boss-Mode override and never persists. This exists so
+        // a wiped save can still reach any arena — the v2.0 force-unlock that
+        // masked a prod bug is exactly what this is NOT.
+        addButton(name: "devArena", text: devArenaText, y: y,
+                  fill: 0x0E2A28, stroke: 0x3F8F8A, textHex: 0x9FE0DB, fontSize: 13)
+        y -= 52
+        addButton(name: "devOverlay", text: devOverlayText, y: y,
+                  fill: 0x0E2A28, stroke: 0x3F8F8A, textHex: 0x9FE0DB, fontSize: 13)
+        y -= 52
+        #endif
+
         if showErase {
             // "Important notice" red — deliberately distinct from the Bleed
             // tree tint; white text so it reads as a warning, not a skill.
@@ -100,7 +114,22 @@ final class SettingsMenuNode: SKNode {
     /// Single source of truth for the panel's height — the hit-test needs the
     /// same number the panel was drawn with, and two copies of that ternary
     /// were one edit away from disagreeing.
-    private var panelHeight: CGFloat { showErase ? 396 : 326 }
+    private var panelHeight: CGFloat {
+        var h: CGFloat = showErase ? 396 : 326
+        #if DEBUG
+        h += 104   // the two dev rows
+        #endif
+        return h
+    }
+
+    #if DEBUG
+    private var devArenaText: String {
+        guard let i = DevSeams.arenaOverrideIndex else { return "DEV ARENA: OFF" }
+        return i == DevSeams.shellIndex ? "DEV ARENA: 6 · SPLITWORKS SHELL"
+                                        : "DEV ARENA: \(i + 1) · \(ArenaConfig.all[i].marqueeName)"
+    }
+    private var devOverlayText: String { DevSeams.overlayEnabled ? "DEV OVERLAY: ON" : "DEV OVERLAY: OFF" }
+    #endif
 
     private func addButton(name: String, text: String, y: CGFloat,
                            fill: UInt32, stroke: UInt32, textHex: UInt32,
@@ -184,6 +213,18 @@ final class SettingsMenuNode: SKNode {
         case "banToggle":
             presentBanPicker()
             return nil
+        #if DEBUG
+        case "devArena":
+            DevSeams.cycleArena()
+            setText("devArena", devArenaText)
+            AudioManager.shared.play(.cardSelect)
+            return nil
+        case "devOverlay":
+            DevSeams.overlayEnabled.toggle()
+            setText("devOverlay", devOverlayText)
+            AudioManager.shared.play(.cardSelect)
+            return nil
+        #endif
         case "eraseButton":
             return .erase
         case "closeButton":
