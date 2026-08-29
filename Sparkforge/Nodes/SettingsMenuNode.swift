@@ -50,7 +50,9 @@ final class SettingsMenuNode: SKNode {
         y -= 52
         addButton(name: "bgmToggle", text: bgmText, y: y,
                   fill: 0x2A2A2A, stroke: 0x777777, textHex: 0xCCCCCC)
-        let note = UITheme.label("music coming soon", size: UITheme.Size.caption, color: UITheme.Color.hint)
+        // v2.1: the promise is kept once tracks are bundled.
+        let noteText = MusicManager.shared.hasTracks ? "16-bit chaos, courtesy of the forge" : "music coming soon"
+        let note = UITheme.label(noteText, size: UITheme.Size.caption, color: UITheme.Color.hint)
         note.position = CGPoint(x: 0, y: y - 24)
         addChild(note)
         y -= 76
@@ -208,6 +210,7 @@ final class SettingsMenuNode: SKNode {
         case "bgmToggle":
             SettingsManager.shared.bgmEnabled.toggle()
             setText("bgmToggle", bgmText)
+            MusicManager.shared.refresh()   // v2.1: the toggle is live now
             AudioManager.shared.play(.cardSelect)
             return nil
         case "banToggle":

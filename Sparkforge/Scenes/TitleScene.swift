@@ -136,6 +136,7 @@ final class TitleScene: SKScene {
     // MARK: - Scene Lifecycle
     
     override func didMove(to view: SKView) {
+        MusicManager.shared.setContext(.title)
         backgroundColor = .black
 
         // v1.6: stretch the stack to fill the screen — the old fixed 120

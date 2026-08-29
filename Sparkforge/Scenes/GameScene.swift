@@ -404,6 +404,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Scene Lifecycle
     
     override func didMove(to view: SKView) {
+        MusicManager.shared.setContext(.run)
         backgroundColor = .black
 
         #if DEBUG
@@ -4589,6 +4590,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = currentTime
 
         guard gameState == .playing else { return }
+
+        // v2.1 BGM: the boss pool ends when the boss does.
+        if MusicManager.shared.context == .boss, boss == nil {
+            MusicManager.shared.setContext(.run)
+        }
 
         // v1.9 fix: prune enemies that have died (their nodes self-remove via a
         // short death animation) so the auto-aim never locks onto a phantom
@@ -8946,6 +8952,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func showBossEntrance(name: String, colorHex: UInt32) {
         AudioManager.shared.play(.bossEntrance)
+        MusicManager.shared.setContext(.boss)   // v2.1: the boss pool takes over
         let dim = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.5)
         dim.strokeColor = .clear

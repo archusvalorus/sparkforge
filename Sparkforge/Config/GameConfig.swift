@@ -367,6 +367,17 @@ enum GameConfig {
         static let gatherHold: TimeInterval = 0.9
     }
 
+    // MARK: - v2.1: BGM (the Suno 16-bit chaos batch)
+    /// Track discovery is convention-based (see MusicManager) — these are the
+    /// only dials. Volume sits under the SFX layer on purpose: atmosphere,
+    /// not competition.
+    enum BGM {
+        static let volume: Float = 0.4
+        /// Context-change fade (title→run, run→boss). Track-to-track within
+        /// a pool is a straight segue.
+        static let crossfade: Float = 0.9
+    }
+
     // MARK: - v2.0.1 (Unit 2): Boss-spawn camera reveal
     /// The spawn announcement: the field holds its breath, the camera flies
     /// to the newcomer while the entrance banner plays, dwells a beat, and
