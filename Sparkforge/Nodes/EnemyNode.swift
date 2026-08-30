@@ -33,6 +33,12 @@ class EnemyNode: SKNode {
         geometryFootprintOverride ?? GameConfig.Enemy.visualRadius * xScale
     }
     var geometryFootprintOverride: CGFloat? = nil
+
+    // v2.1 (Geometry 1B): route-guidance state. nil = pursuing directly.
+    // The scene's steer pass owns these; enemies never read them.
+    var routeNodeID: Int? = nil
+    var routePrevNodeID: Int? = nil
+    var routeRedecideCooldown: TimeInterval = 0
     
     // MARK: - Status Effects
     

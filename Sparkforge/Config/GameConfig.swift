@@ -367,6 +367,22 @@ enum GameConfig {
         static let gatherHold: TimeInterval = 0.9
     }
 
+    // MARK: - v2.1 (Geometry 1B): route guidance
+    /// The decision-point model, per the reconciliation §4: an actor whose
+    /// direct line is blocked commits to an authored node, walks to it,
+    /// re-decides on arrival. Guidance, not pathfinding.
+    enum Routing {
+        /// "Arrived at the node" radius — generous, so actors flow through
+        /// decision points instead of queuing on an exact pixel.
+        static let arriveRadius: CGFloat = 28
+        /// After choosing (or failing to choose) a node, hold the choice this
+        /// long before re-scoring — kills frame-to-frame thrash.
+        static let redecideCooldown: TimeInterval = 0.4
+        /// Score penalty for re-picking the node the actor just left —
+        /// the oscillation guard. Big enough to lose to any real alternative.
+        static let backtrackPenalty: CGFloat = 10_000
+    }
+
     // MARK: - v2.1: BGM (the Suno 16-bit chaos batch)
     /// Track discovery is convention-based (see MusicManager) — these are the
     /// only dials. Volume sits under the SFX layer on purpose: atmosphere,

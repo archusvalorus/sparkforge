@@ -28,6 +28,7 @@ final class AudioManager {
     private var nextPlayer = 0
     private var buffers: [SFX: AVAudioPCMBuffer] = [:]
     private var lastPlayed: [SFX: TimeInterval] = [:]
+    private var lastEngineStartAttempt: TimeInterval = 0
 
     private static let sampleRate: Double = 44_100
     /// Throttle so orb swarms don't machine-gun the pickup blip
@@ -56,8 +57,14 @@ final class AudioManager {
         if let last = lastPlayed[sfx], now - last < Self.minReplayInterval { return }
         lastPlayed[sfx] = now
 
-        // Self-healing across audio session interruptions
+        // Self-healing across audio session interruptions — with a backoff:
+        // if CoreAudio is wedged (sim audio daemon timeouts, session churn),
+        // hammering start() every play call aggravates the RPC timeout that
+        // can abort the process inside AudioToolbox. One retry per 5s max.
         if !engine.isRunning {
+            let now = CACurrentMediaTime()
+            guard now - lastEngineStartAttempt > 5 else { return }
+            lastEngineStartAttempt = now
             try? AVAudioSession.sharedInstance().setActive(true)
             guard (try? engine.start()) != nil else { return }
         }

@@ -295,3 +295,14 @@ extension ArenaGeometry {
                              routeEdges: edges, spawnZones: zones, safeAnchors: anchors)
     }
 }
+
+// MARK: - Route guidance lookups (Unit 1B)
+
+extension ArenaGeometry {
+    func node(_ id: Int) -> RouteNode? { routeNodes.first { $0.id == id } }
+    /// Adjacency (edges are undirected). Unused by the 1B greedy chooser —
+    /// kept for the overlay and for 1C+ congestion weighting.
+    func neighbors(of id: Int) -> [Int] {
+        routeEdges.compactMap { $0.from == id ? $0.to : ($0.to == id ? $0.from : nil) }
+    }
+}

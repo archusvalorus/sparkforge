@@ -4596,6 +4596,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             MusicManager.shared.setContext(.run)
         }
 
+        #if DEBUG
+        // v2.1 (1B): overlay's live layer — each routed enemy's commitment
+        // line + a 10s counter dump. 5Hz rebuild, DEBUG + overlay only.
+        if DevSeams.overlayEnabled || GeometryDebug.showOverlay {
+            routeDebugAccumulator += dt
+            if routeDebugAccumulator >= 0.2 {
+                routeDebugAccumulator = 0
+                refreshRouteDebugLines()
+            }
+            routeSummaryAccumulator += dt
+            if routeSummaryAccumulator >= 10 {
+                routeSummaryAccumulator = 0
+                NSLog("[GEO] %@", geometryDebug.summary)
+            }
+        }
+        #endif
+
         // v1.9 fix: prune enemies that have died (their nodes self-remove via a
         // short death animation) so the auto-aim never locks onto a phantom
         // position. Some AoE death paths — Inferno Crown DOT, Unstable Core —
@@ -4792,11 +4809,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var crowdCount = 0  // v1.8 Ironhide: enemies pressing the player
 
         for (index, enemy) in enemies.enumerated() {
-            // Use ranged AI for ranged enemies
+            // v2.1 (1B): steer through the route graph when the direct line
+            // is blocked; identical to player.position on open arenas.
+            // (Ranged mobs inherit routing too — their LoS-aware FIRING
+            // behavior is Unit 2 scope, per Ruling 4.)
+            let steerTarget = routeSteerTarget(for: enemy, toward: player.position, dt: dt)
             if let ranged = enemy as? RangedEnemyNode {
-                ranged.rangedChase(target: player.position, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
+                ranged.rangedChase(target: steerTarget, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
             } else {
-                enemy.chase(target: player.position, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
+                enemy.chase(target: steerTarget, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
             }
 
             // v1.8 Undertow (Void 3): a subtle passive pull toward the player
@@ -4889,6 +4910,95 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // no ground-bound enemy may remain embedded in solid geometry. One
         // pass, one site — the seam the recon said didn't exist.
         resolveEnemiesAgainstGeometry()
+    }
+
+    #if DEBUG
+    private var routeDebugAccumulator: TimeInterval = 0
+    private var routeSummaryAccumulator: TimeInterval = 0
+    private let routeDebugLayer = SKNode()
+
+    private func refreshRouteDebugLines() {
+        if routeDebugLayer.parent == nil {
+            routeDebugLayer.zPosition = 3
+            worldNode.addChild(routeDebugLayer)
+        }
+        routeDebugLayer.removeAllChildren()
+        let geo = arenaGeometry
+        for enemy in enemies where !enemy.isDying {
+            guard let id = enemy.routeNodeID, let n = geo.node(id) else { continue }
+            let path = CGMutablePath()
+            path.move(to: enemy.position); path.addLine(to: n.position)
+            let line = SKShapeNode(path: path)
+            line.strokeColor = SKColor(hex: 0xFFB84D, alpha: 0.5)
+            line.lineWidth = 1
+            routeDebugLayer.addChild(line)
+        }
+    }
+    #endif
+
+    // MARK: - v2.1 (Geometry 1B): route guidance
+
+    /// The steer pass — the reconciliation §4 decision-point model, verbatim:
+    /// 1. direct segment clear → pursue directly (open arenas: always).
+    /// 2. blocked → choose a VISIBLE authored node scoring d(enemy,node) +
+    ///    d(node,goal), with a backtrack penalty (oscillation guard).
+    /// 3. commit until arrival, invalidation (displacement broke the line to
+    ///    the node), or the direct line clearing.
+    /// 4. no node visible → beeline (the resolve pass makes it a slide).
+    /// Enemies keep their own chase behaviors untouched — they simply chase
+    /// whatever point this hands them. Guidance, not pathfinding.
+    private func routeSteerTarget(for enemy: EnemyNode, toward goal: CGPoint,
+                                  dt: TimeInterval) -> CGPoint {
+        let geo = arenaGeometry
+        guard geo.hasBlockedGeometry, !geo.routeNodes.isEmpty else { return goal }
+        let r = enemy.geometryFootprintRadius
+        guard r > 0 else { return goal }   // phased/flying actors steer themselves
+
+        if enemy.routeRedecideCooldown > 0 { enemy.routeRedecideCooldown -= dt }
+        let travel = r * 0.8   // slight forgiveness so brushing a corner isn't "blocked"
+
+        // 1. Direct pursuit resumes the moment the line is clear.
+        if !geo.segmentBlocked(enemy.position, goal, travelRadius: travel) {
+            if enemy.routeNodeID != nil {
+                enemy.routePrevNodeID = enemy.routeNodeID
+                enemy.routeNodeID = nil
+                geometryDebug.routeDirectResumes += 1
+            }
+            return goal
+        }
+
+        // 3. Committed: arrive, invalidate, or keep walking.
+        if let id = enemy.routeNodeID, let n = geo.node(id) {
+            if enemy.position.distance(to: n.position) < GameConfig.Routing.arriveRadius {
+                enemy.routePrevNodeID = id
+                enemy.routeNodeID = nil        // fall through to re-decide
+            } else if geo.segmentBlocked(enemy.position, n.position, travelRadius: travel) {
+                enemy.routeNodeID = nil        // displaced behind cover — recover
+                geometryDebug.routeRecoveries += 1
+            } else {
+                return n.position
+            }
+        }
+
+        // 2. Decide (rate-limited so a confused frame can't thrash).
+        if enemy.routeRedecideCooldown > 0 { return goal }
+        enemy.routeRedecideCooldown = GameConfig.Routing.redecideCooldown
+
+        var best: (id: Int, score: CGFloat)? = nil
+        for n in geo.routeNodes {
+            guard !geo.segmentBlocked(enemy.position, n.position, travelRadius: travel) else { continue }
+            var score = enemy.position.distance(to: n.position) + n.position.distance(to: goal)
+            if n.id == enemy.routePrevNodeID { score += GameConfig.Routing.backtrackPenalty }
+            if best == nil || score < best!.score { best = (n.id, score) }
+        }
+        if let choice = best {
+            enemy.routeNodeID = choice.id
+            geometryDebug.routeDecisions += 1
+            return geo.node(choice.id)?.position ?? goal
+        }
+        // 4. Nothing visible — beeline + slide, and say so in the counters.
+        geometryDebug.routeFallbacks += 1
+        return goal
     }
 
     // MARK: - v1.7: Relay Burn (Fire/Shock bridge card)

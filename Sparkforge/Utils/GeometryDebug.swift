@@ -32,6 +32,13 @@ final class GeometryDebug {
     private(set) var resolvesByActor: [String: Int] = [:]
     private(set) var resolvesByCause: [Cause: Int] = [:]
 
+    // v2.1 (1B): route-guidance diagnostics — decisions, recoveries after
+    // displacement, fallbacks (no node visible), direct-pursuit resumes.
+    var routeDecisions = 0
+    var routeRecoveries = 0
+    var routeFallbacks = 0
+    var routeDirectResumes = 0
+
     func recordResolve(actor: String, cause: Cause) {
         resolvesByActor[actor, default: 0] += 1
         resolvesByCause[cause, default: 0] += 1
@@ -40,7 +47,8 @@ final class GeometryDebug {
     var summary: String {
         let byCause = resolvesByCause.map { "\($0.key.rawValue)=\($0.value)" }.sorted().joined(separator: " ")
         let byActor = resolvesByActor.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
-        return "resolves[\(byActor)] causes[\(byCause)] rejects=\(PlacementSampler.rejectionCount)"
+        return "resolves[\(byActor)] causes[\(byCause)] rejects=\(PlacementSampler.rejectionCount) "
+             + "routes[decide=\(routeDecisions) recover=\(routeRecoveries) fallback=\(routeFallbacks) resume=\(routeDirectResumes)]"
     }
 
     // MARK: Overlay (DEBUG only)
