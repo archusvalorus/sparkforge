@@ -45,6 +45,17 @@ final class UpgradeManager {
         /// The run has cultivated ground. Granted by Terra; required by every
         /// other Growth card. Picking Terra is opting into a build grammar.
         case growthUnlocked
+
+        // v2.1 (abilities) — signature capabilities, one per tree. Granted by
+        // the tree's SIGNATURE card; the v2.1 rework pass authors `requires`
+        // on the rest of each tree so a tree opens the way Growth always has.
+        // Growth keeps `growthUnlocked` (live-run persistence never renames).
+        case fireUnlocked
+        case chillUnlocked
+        case shockUnlocked
+        case bleedUnlocked
+        case guardUnlocked
+        case voidUnlocked
     }
 
     // MARK: - Card Definition
@@ -79,6 +90,15 @@ final class UpgradeManager {
         // bleed source is a dead pick that kills tension), and what arena
         // tree-gating / element omission will need later. Do not build a second
         // gating system for those — extend this one.
+
+        // MARK: v2.1 (abilities) — signature cards
+
+        /// The tree's SIGNATURE: its thesis card, the mandatory first pick that
+        /// modifies basic attacks and opens the rest of the tree. Exactly one
+        /// per tagged tree; Neutral has none (it is the palette's constant, not
+        /// a tree). A signature always `provides` its tree's capability, which
+        /// is also what buys it gateway pity for free.
+        var isSignature: Bool = false
 
         /// Capabilities this card grants the run when picked.
         var provides: Set<Capability> = []
@@ -160,6 +180,23 @@ final class UpgradeManager {
     /// v1.9: id → current tier this run (absent = not owned). Per-run,
     /// reset with everything else — no persistence, like pickedCardIDs.
     private(set) var cardTiers: [String: Int] = [:]
+
+    // MARK: v2.1 (abilities) — the signature opening
+
+    /// Does the run hold at least one SIGNATURE card yet? While false, every
+    /// spread offers only signatures (the deterministic first pick). The state
+    /// ends the moment the first signature is taken — which, since a signature
+    /// spread contains nothing else, is the first pick.
+    var runHoldsSignature: Bool {
+        allCards.contains { $0.isSignature && tier(of: $0.id) > 0 }
+    }
+
+    /// Signatures already SHOWN at the current level, driving the reroll rule
+    /// (Lyra, locked Aug 23): a reroll of the signature spread prioritizes the
+    /// UNSEEN signatures — 5 active trees means the reroll shows the 2 unseen
+    /// plus 1 returning option. Reset when the level advances, like the pity
+    /// counter's reroll guard.
+    private var signatureIDsSeenThisLevel: Set<String> = []
 
     /// v1.9: current tier of a card (0 = not owned this run).
     func tier(of cardID: String) -> Int {
@@ -340,24 +377,63 @@ final class UpgradeManager {
 
         guard !available.isEmpty || hasInProgress else { return [] }
 
-        let pool = available.shuffled()
+        // A reroll re-draws the same level; a new level resets what "unseen"
+        // means for the signature rule below, and (further down) is what lets
+        // the pity counter treat a reroll as one offer, not two.
+        let isNewLevel = (level != lastDrawLevel)
+        lastDrawLevel = level
+        if isNewLevel { signatureIDsSeenThisLevel.removeAll() }
+
+        // v2.1 (abilities) — THE SIGNATURE OPENING (design locked: Lyra ×5,
+        // Brandon agreed, Aug 23). While the run holds ZERO signatures, the
+        // spread offers ONLY signature cards — one per tree, a random
+        // `count` of the active trees. Level 1 asks "what kind of Spark are
+        // you becoming?", so Neutral stands aside (it needs no signature and
+        // keeps flowing from the very next spread). The Boss Mode DRAFT
+        // opener draws through here too, so gauntlet builds commit the same
+        // way; so does the RANDOM opener, whose first grant hands the run an
+        // identity instead of a dead-end amplifier. The reroll re-shuffles
+        // WHICH signatures show, prioritizing the unseen — it never escapes
+        // the rule.
+        let signatureSpread = !runHoldsSignature && available.contains { $0.isSignature }
+
         var drawn: [UpgradeCard] = []
-        var usedTags: Set<Tag> = []
 
-        // First pass: unique tags only (shuffled pool = tags weighted by
-        // how many of their cards remain)
-        for card in pool where drawn.count < count {
-            if !usedTags.contains(card.tag) {
-                usedTags.insert(card.tag)
-                drawn.append(card)
+        if signatureSpread {
+            let signatures = available.filter { $0.isSignature }
+            let unseen = signatures.filter { !signatureIDsSeenThisLevel.contains($0.id) }.shuffled()
+            let returning = signatures.filter { signatureIDsSeenThisLevel.contains($0.id) }.shuffled()
+            drawn = Array((unseen + returning).prefix(count))
+            // Transition scaffolding, dead once every tree carries a flagged
+            // signature: if fewer signatures are active than the spread holds,
+            // fill the gap from the normal pool rather than shrink the spread.
+            if drawn.count < count {
+                for card in available.shuffled() where drawn.count < count {
+                    if !drawn.contains(where: { $0.id == card.id }) { drawn.append(card) }
+                }
             }
-        }
+            for card in drawn where card.isSignature {
+                signatureIDsSeenThisLevel.insert(card.id)
+            }
+        } else {
+            let pool = available.shuffled()
+            var usedTags: Set<Tag> = []
 
-        // Second pass: not enough distinct trees left — fill the gaps
-        if drawn.count < count {
+            // First pass: unique tags only (shuffled pool = tags weighted by
+            // how many of their cards remain)
             for card in pool where drawn.count < count {
-                if !drawn.contains(where: { $0.id == card.id }) {
+                if !usedTags.contains(card.tag) {
+                    usedTags.insert(card.tag)
                     drawn.append(card)
+                }
+            }
+
+            // Second pass: not enough distinct trees left — fill the gaps
+            if drawn.count < count {
+                for card in pool where drawn.count < count {
+                    if !drawn.contains(where: { $0.id == card.id }) {
+                        drawn.append(card)
+                    }
                 }
             }
         }
@@ -375,8 +451,20 @@ final class UpgradeManager {
         // Deliberately narrow — this is not a general re-weighting of the draft
         // (that would change the feel of every tree in a shipped, tuned game),
         // it's a discoverability floor for cards that gate content.
-        let isNewLevel = (level != lastDrawLevel)
-        lastDrawLevel = level
+        //
+        // v2.1 (abilities): every signature `provides`, so all eight gateways
+        // now ride this floor — which is exactly how a second tree opens
+        // (locked answer 3: "pity is enough"). Two adjustments for the
+        // multi-gateway world: (1) ONE claimant per draw, the LONGEST-waited —
+        // with several gateways maturing together, first-come overwrites were
+        // resetting the losers as if they'd been shown, and iteration order
+        // let an early-pool gateway re-mature every cycle and starve a later
+        // one forever (the proof harness caught exactly that); longest-waited
+        // makes the matured set cascade in, one per level. (2) A signature
+        // spread never gets overwritten — it IS the signature payout;
+        // counters still tick and reset normally.
+        var pityClaimant: UpgradeCard? = nil
+        var pityLongestWait = 0
         for gateway in allCards where !gateway.provides.isEmpty && !gateway.isSecret {
             // Only unowned gateways whose own requirements are met.
             // v2.0 (E1): a gateway in a DORMANT colour gets no pity — forcing
@@ -388,18 +476,23 @@ final class UpgradeManager {
                 levelsSinceGatewayOffer[gateway.id] = 0
                 continue
             }
-            if drawn.contains(where: { $0.id == gateway.id }) {
-                levelsSinceGatewayOffer[gateway.id] = 0
-                continue
-            }
             let waited = (levelsSinceGatewayOffer[gateway.id] ?? 0) + (isNewLevel ? 1 : 0)
-            if waited >= GameConfig.Drafting.gatewayPityLevels, !drawn.isEmpty {
-                drawn[0] = gateway               // front slot; capstones take the back
-                levelsSinceGatewayOffer[gateway.id] = 0
-            } else {
-                levelsSinceGatewayOffer[gateway.id] = waited
+            levelsSinceGatewayOffer[gateway.id] = waited
+            if !drawn.contains(where: { $0.id == gateway.id }),
+               waited >= GameConfig.Drafting.gatewayPityLevels, waited > pityLongestWait {
+                pityClaimant = gateway
+                pityLongestWait = waited
             }
         }
+        if let claimant = pityClaimant, !drawn.isEmpty, !signatureSpread {
+            drawn[0] = claimant              // front slot; capstones take the back
+        }
+        // Counters reset from the FINAL spread, at the bottom of this function
+        // — a gateway only counts as offered if the player actually sees it.
+        // Resetting here (as this block once did) counted a naturally-drawn
+        // gateway as shown even when the claimant displaced it from slot 0,
+        // silently pushing its next guaranteed offer another full pity cycle
+        // out. The proof harness caught it as outright starvation.
 
         // Guarantee: inject each in-progress capstone whose parity matches this
         // level (offset per capstone so two never crowd the same level), taking
@@ -451,6 +544,14 @@ final class UpgradeManager {
         }
         #endif
 
+        // Gateway-pity bookkeeping, from the FINAL spread (see the pity block
+        // above): whatever gateways survived every seating rule are what the
+        // player actually sees, so those — and only those — reset their
+        // pity clock.
+        for card in drawn where !card.provides.isEmpty && !card.isSecret {
+            levelsSinceGatewayOffer[card.id] = 0
+        }
+
         return drawn
     }
 
@@ -485,6 +586,20 @@ final class UpgradeManager {
             tier(of: $0.id) < $0.maxTier && !displayedIDs.contains($0.id) && !$0.isSecret
                 && activeFamilies.contains($0.tag)
                 && $0.requires.isSubset(of: capabilities)
+        }
+
+        // v2.1 (abilities): the bonus card obeys the signature opening — while
+        // the run holds no signature, +1 Card widens the identity choice (an
+        // unseen signature when one remains) rather than smuggling in a
+        // normal card ahead of the first commitment.
+        if !runHoldsSignature {
+            let signatures = available.filter { $0.isSignature }
+            if !signatures.isEmpty {
+                let unseen = signatures.filter { !signatureIDsSeenThisLevel.contains($0.id) }
+                let bonus = (unseen.isEmpty ? signatures : unseen).randomElement()
+                if let bonus { signatureIDsSeenThisLevel.insert(bonus.id) }
+                return bonus
+            }
         }
 
         if let freshTree = available.filter({ !displayedTags.contains($0.tag) }).randomElement() {
@@ -648,6 +763,7 @@ final class UpgradeManager {
         tagCounts.removeAll()
         appliedSynergies.removeAll()
         shownBuildHints.removeAll()
+        signatureIDsSeenThisLevel.removeAll()
 
         rollRunMutations()
     }
@@ -829,13 +945,24 @@ final class UpgradeManager {
         // ═══════════════════════════════════
         // 🔥 FIRE
         // ═══════════════════════════════════
-        
+
+        // v2.1 (abilities) — SIGNATURE FLAGS. One per tree, per the signature
+        // spec: Kindle / Frost Touch / Arc (→ Chain Lightning in the rework) /
+        // Terra are Brandon's confirmed entry points. Bleed and Guard are
+        // INTERIM until his rework notes land: Needlepoint is today's bleed
+        // source (the crown moves to the new Bloodthirsty when the rework
+        // removes it), Repulse is today's closest "basic attacks gain a
+        // defensive rider". Void's is Phase, the rework's named entry point.
+        // The rest of each tree stays UNGATED for now — the `requires`
+        // authoring rides the rework pass, one pass over the pool, not two.
+
         cards.append(UpgradeCard(
             id: "fire_1", name: "Kindle", tag: .fire,
-            description: "Projectiles ignite enemies (+0.5 burn DPS, 2s)"
-        ) { stats in
-            stats.burnDPS += 0.5
-        })
+            description: "Projectiles ignite enemies (+0.5 burn DPS, 2s)",
+            apply: { stats in stats.burnDPS += 0.5 },
+            isSignature: true,
+            provides: [.fireUnlocked]
+        ))
         
         // v1.9 Unit 3: signature damage ladder (3-tier).
         cards.append(UpgradeCard(
@@ -891,10 +1018,11 @@ final class UpgradeManager {
         
         cards.append(UpgradeCard(
             id: "shock_2", name: "Arc", tag: .shock,
-            description: "Hits chain to 1 nearby enemy at 50% damage"
-        ) { stats in
-            stats.chainTargets += 1
-        })
+            description: "Hits chain to 1 nearby enemy at 50% damage",
+            apply: { stats in stats.chainTargets += 1 },
+            isSignature: true,
+            provides: [.shockUnlocked]
+        ))
         
         cards.append(UpgradeCard(
             id: "shock_3", name: "Surge", tag: .shock,
@@ -964,12 +1092,16 @@ final class UpgradeManager {
             stats.lethalSaves = max(stats.lethalSaves, 1)
         })
         
+        // INTERIM signature (see the Fire block's note) — Brandon's Guard
+        // rework notes name no entry point yet; Repulse is today's closest
+        // "basic attacks gain a defensive rider".
         cards.append(UpgradeCard(
             id: "guard_2", name: "Repulse", tag: .guardT,
-            description: "Projectiles knock enemies back"
-        ) { stats in
-            stats.knockbackForce = 20.0
-        })
+            description: "Projectiles knock enemies back",
+            apply: { stats in stats.knockbackForce = 20.0 },
+            isSignature: true,
+            provides: [.guardUnlocked]
+        ))
         
         cards.append(UpgradeCard(
             id: "guard_3", name: "Harden", tag: .guardT,
@@ -1027,7 +1159,9 @@ final class UpgradeManager {
             tierDescriptions: [
                 "+25% range, pierce 1 enemy",
                 "+20% range, pierce 1 more enemy"
-            ]
+            ],
+            isSignature: true,
+            provides: [.voidUnlocked]
         ))
         
         cards.append(UpgradeCard(
@@ -1052,7 +1186,9 @@ final class UpgradeManager {
             tierDescriptions: [
                 "Projectiles slow enemies 10%",
                 "Slow enemies a further 10%"
-            ]
+            ],
+            isSignature: true,
+            provides: [.chillUnlocked]
         ))
         
         cards.append(UpgradeCard(
@@ -1283,6 +1419,9 @@ final class UpgradeManager {
             // ONE TIER, by design (Brandon): Terra opens the options that grant
             // the effects rather than being prescriptive itself.
             apply: { stats in stats.terraZoneRadius = GameConfig.Growth.terraRadius },
+            // v2.1 (abilities): Growth was the signature pilot in everything
+            // but name — now it carries the name too.
+            isSignature: true,
             provides: [.growthUnlocked]
         ))
 
@@ -1502,13 +1641,19 @@ final class UpgradeManager {
         // are starting values; balance pass tunes them.
         // ═══════════════════════════════════
 
+        // INTERIM signature (see the Fire block's note) — today's bleed
+        // source; the crown moves to Bloodthirsty when the rework pass
+        // removes Needlepoint.
         cards.append(UpgradeCard(
             id: "v18_needlepoint", name: "Needlepoint", tag: .bleed,
-            description: "Crits apply Bleed."
-        ) { stats in
-            stats.critAppliesBleed = true
-            stats.bleedDPS += 0.5
-        })
+            description: "Crits apply Bleed.",
+            apply: { stats in
+                stats.critAppliesBleed = true
+                stats.bleedDPS += 0.5
+            },
+            isSignature: true,
+            provides: [.bleedUnlocked]
+        ))
 
         cards.append(UpgradeCard(
             id: "v18_bloodlust", name: "Bloodlust", tag: .bleed,
