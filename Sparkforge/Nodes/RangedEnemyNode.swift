@@ -71,14 +71,20 @@ final class RangedEnemyNode: EnemyNode {
     // MARK: - AI Override
     
     /// Ranged AI: approach until in range, then stop and shoot
-    func rangedChase(target: CGPoint, deltaTime: TimeInterval, globalSlow: CGFloat = 0) {
+    /// v2.1 (Geometry Unit 2, Ruling 4): `canFire` is the scene's line-of-sight
+    /// verdict. While false, the shooter NEVER stops to fire — it keeps
+    /// approaching (the route steer hands it waypoints, so "keep approaching"
+    /// IS relocating around cover). Default true: open arenas are unchanged
+    /// and no legacy call site breaks.
+    func rangedChase(target: CGPoint, deltaTime: TimeInterval, globalSlow: CGFloat = 0,
+                     canFire: Bool = true) {
         // v1.6: stunned ranged enemies can't move OR fire
         guard !isStunned else { return }
 
         let distToTarget = position.distance(to: target)
         let engageRange = GameConfig.RangedEnemy.engageRange
         
-        if distToTarget > engageRange {
+        if distToTarget > engageRange || !canFire {
             // Too far — chase normally
             isInRange = false
             chase(target: target, deltaTime: deltaTime, globalSlow: globalSlow)

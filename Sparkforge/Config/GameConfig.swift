@@ -371,6 +371,14 @@ enum GameConfig {
     /// The decision-point model, per the reconciliation §4: an actor whose
     /// direct line is blocked commits to an authored node, walks to it,
     /// re-decides on arrival. Guidance, not pathfinding.
+    /// v2.1 (Unit 2): shared geometry constants for the travel/vision family.
+    enum Geometry {
+        /// Thickness of the swept segment for projectile blocking AND
+        /// line-of-sight tests. Slightly under the true visual so grazing a
+        /// corner favors the shooter — generosity reads better than pedantry.
+        static let projectileTravelRadius: CGFloat = 3
+    }
+
     enum Routing {
         /// "Arrived at the node" radius — generous, so actors flow through
         /// decision points instead of queuing on an exact pixel.

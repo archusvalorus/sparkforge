@@ -39,6 +39,12 @@ final class GeometryDebug {
     var routeFallbacks = 0
     var routeDirectResumes = 0
 
+    // v2.1 (Unit 2): travel/vision policy diagnostics.
+    var projectileBlocksPlayer = 0
+    var projectileBlocksEnemy = 0
+    var losSuppressedTargets = 0
+    var rangedHeldFire = 0
+
     func recordResolve(actor: String, cause: Cause) {
         resolvesByActor[actor, default: 0] += 1
         resolvesByCause[cause, default: 0] += 1
@@ -48,7 +54,8 @@ final class GeometryDebug {
         let byCause = resolvesByCause.map { "\($0.key.rawValue)=\($0.value)" }.sorted().joined(separator: " ")
         let byActor = resolvesByActor.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
         return "resolves[\(byActor)] causes[\(byCause)] rejects=\(PlacementSampler.rejectionCount) "
-             + "routes[decide=\(routeDecisions) recover=\(routeRecoveries) fallback=\(routeFallbacks) resume=\(routeDirectResumes)]"
+             + "routes[decide=\(routeDecisions) recover=\(routeRecoveries) fallback=\(routeFallbacks) resume=\(routeDirectResumes)] "
+             + "shots[blockP=\(projectileBlocksPlayer) blockE=\(projectileBlocksEnemy) losSkip=\(losSuppressedTargets) heldFire=\(rangedHeldFire)]"
     }
 
     // MARK: Overlay (DEBUG only)

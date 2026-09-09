@@ -4815,7 +4815,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // behavior is Unit 2 scope, per Ruling 4.)
             let steerTarget = routeSteerTarget(for: enemy, toward: player.position, dt: dt)
             if let ranged = enemy as? RangedEnemyNode {
-                ranged.rangedChase(target: steerTarget, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
+                // v2.1 (Unit 2, Ruling 4): a shooter denied line of sight keeps
+                // moving instead of firing into the wreck forever. One segment
+                // test; open arenas short-circuit to true.
+                let hasLoS = !arenaGeometry.segmentBlocked(
+                    ranged.position, player.position,
+                    travelRadius: GameConfig.Geometry.projectileTravelRadius)
+                if !hasLoS { geometryDebug.rangedHeldFire += 1 }
+                ranged.rangedChase(target: steerTarget, deltaTime: dt,
+                                   globalSlow: playerStats.globalEnemySlow, canFire: hasLoS)
             } else {
                 enemy.chase(target: steerTarget, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
             }
@@ -4935,6 +4943,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     #endif
+
+    /// v2.1 (Unit 2): the "shot meets iron" read — a small dull ring at the
+    /// impact point. Deliberately muted (ash-gray, quick): cover working is
+    /// ambient information, not a reward.
+    private func showGeometryImpact(at point: CGPoint) {
+        let ring = SKShapeNode(circleOfRadius: 3)
+        ring.strokeColor = SKColor(hex: 0x8A8478, alpha: 0.8)
+        ring.lineWidth = 1.5
+        ring.fillColor = .clear
+        ring.position = point
+        ring.zPosition = 6
+        worldNode.addChild(ring)
+        ring.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 2.4, duration: 0.18),
+                            SKAction.fadeOut(withDuration: 0.18)]),
+            SKAction.removeFromParent()
+        ]))
+    }
 
     // MARK: - v2.1 (Geometry 1B): route guidance
 
@@ -5160,10 +5186,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         var closestPosition: CGPoint?
         var closestDist: CGFloat = .greatestFiniteMagnitude
+        // v2.1 (Unit 2): auto-aim requires line of sight — with no manual
+        // targeting (locked canon), firing into stone is a UX failure, not an
+        // edge case. An occluded-only field means HOLD FIRE (clean fallback:
+        // nil target = no shot), never a wasted volley. Open arenas
+        // short-circuit inside segmentBlocked.
+        let solid = arenaGeometry.hasBlockedGeometry
 
         for enemy in enemies where !enemy.isDying {
             let dist = player.position.distance(to: enemy.position)
             if dist < range && dist < closestDist {
+                if solid, arenaGeometry.segmentBlocked(
+                    player.position, enemy.position,
+                    travelRadius: GameConfig.Geometry.projectileTravelRadius) {
+                    geometryDebug.losSuppressedTargets += 1
+                    continue
+                }
                 closestDist = dist
                 closestPosition = enemy.position
             }
@@ -5173,7 +5211,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Surface distance: a monument's origin can sit far outside range
             // even while the player is pressed against its body.
             let dist = player.position.distance(to: boss.position) - boss.targetingRadius
-            if dist < range && dist < closestDist {
+            if dist < range && dist < closestDist,
+               !(solid && arenaGeometry.segmentBlocked(
+                    player.position, boss.position,
+                    travelRadius: GameConfig.Geometry.projectileTravelRadius)) {
                 closestDist = dist
                 closestPosition = boss.position
             }
@@ -5277,9 +5318,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func updateProjectiles(_ dt: TimeInterval) {
         var toRemove: [Int] = []
+        let solid = arenaGeometry.hasBlockedGeometry   // one bool for the loop
         
         for (index, projectile) in projectiles.enumerated() {
+            let prev = projectile.position
             if projectile.move(deltaTime: dt) {
+                toRemove.append(index)
+            } else if solid, arenaGeometry.segmentBlocked(
+                        prev, projectile.position,
+                        travelRadius: GameConfig.Geometry.projectileTravelRadius) {
+                // v2.1 (Unit 2): ordinary shots stop at iron — swept test, so
+                // nothing tunnels. Gravity Well still triggers below: the
+                // canon says wells form where the shot DIED, and dying on the
+                // Carrier is dying (the well itself resolves via the sampler
+                // rules at spawn).
+                projectile.position = arenaGeometry.resolve(
+                    projectile.position, actorRadius: GameConfig.Geometry.projectileTravelRadius)
+                showGeometryImpact(at: projectile.position)
+                geometryDebug.projectileBlocksPlayer += 1
                 toRemove.append(index)
             }
         }
@@ -5303,9 +5359,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func updateEnemyProjectiles(_ dt: TimeInterval) {
         var toRemove: [Int] = []
+        let solid = arenaGeometry.hasBlockedGeometry
         
         for (index, proj) in enemyProjectiles.enumerated() {
+            let prev = proj.position
             if proj.move(deltaTime: dt) {
+                toRemove.append(index)
+            } else if solid, arenaGeometry.segmentBlocked(
+                        prev, proj.position,
+                        travelRadius: GameConfig.Geometry.projectileTravelRadius) {
+                // v2.1 (Unit 2): same segment policy as player shots — hard
+                // cover is real cover against the Linekeeper and its kin.
+                showGeometryImpact(at: arenaGeometry.resolve(
+                    proj.position, actorRadius: GameConfig.Geometry.projectileTravelRadius))
+                geometryDebug.projectileBlocksEnemy += 1
                 toRemove.append(index)
             }
         }
@@ -5595,15 +5662,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                     maxRange: CGFloat = .greatestFiniteMagnitude,
                                     usePlayer: Bool = true) -> CombatTarget? {
         let source = usePlayer ? player.position : origin
+        // v2.1 (Unit 2): the shared brain is also geometry-aware — a turret,
+        // flower, lion, or launched animal only picks what it can actually
+        // reach along a line from ITS OWN position. Same clean fallback as
+        // auto-aim: nothing visible = no target = hold. Open arenas
+        // short-circuit inside segmentBlocked.
+        let solid = arenaGeometry.hasBlockedGeometry
+        func occluded(_ p: CGPoint) -> Bool {
+            guard solid else { return false }
+            if arenaGeometry.segmentBlocked(source, p,
+                travelRadius: GameConfig.Geometry.projectileTravelRadius) {
+                geometryDebug.losSuppressedTargets += 1
+                return true
+            }
+            return false
+        }
         if let boss = boss, !boss.isDead {
             let d = source.distance(to: boss.position) - boss.targetingRadius
-            if d <= maxRange { return .boss(boss) }
+            if d <= maxRange, !occluded(boss.position) { return .boss(boss) }
         }
         var miniboss: EnemyNode?; var minibossDist = CGFloat.greatestFiniteMagnitude
         var nearest: EnemyNode?;  var nearestDist = CGFloat.greatestFiniteMagnitude
         for enemy in enemies where !enemy.isDying {
             let dist = source.distance(to: enemy.position)
             guard dist <= maxRange else { continue }
+            guard dist < minibossDist || dist < nearestDist else { continue }
+            guard !occluded(enemy.position) else { continue }
             if enemy.isMiniBoss, dist < minibossDist { minibossDist = dist; miniboss = enemy }
             if dist < nearestDist { nearestDist = dist; nearest = enemy }
         }
