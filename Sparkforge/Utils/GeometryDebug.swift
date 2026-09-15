@@ -56,6 +56,12 @@ final class GeometryDebug {
     var linekeeperShots = 0
     var linekeeperRelocates = 0
 
+    // v2.1 (2d): Ramplate — braces, charges, shoves landed, wall/Carrier stops.
+    var ramplateBraces = 0
+    var ramplateShoves = 0
+    var ramplateMisses = 0
+    var ramplateWalls = 0
+
     func recordResolve(actor: String, cause: Cause) {
         resolvesByActor[actor, default: 0] += 1
         resolvesByCause[cause, default: 0] += 1
@@ -68,7 +74,8 @@ final class GeometryDebug {
              + "routes[decide=\(routeDecisions) recover=\(routeRecoveries) fallback=\(routeFallbacks) resume=\(routeDirectResumes)] "
              + "shots[blockP=\(projectileBlocksPlayer) blockE=\(projectileBlocksEnemy) losSkip=\(losSuppressedTargets) heldFire=\(rangedHeldFire)] "
              + "hound[lunge=\(spurhoundLunges) hit=\(spurhoundHits) miss=\(spurhoundMisses) clang=\(spurhoundClangs)] "
-             + "keeper[anchor=\(linekeeperAnchors) shot=\(linekeeperShots) relocate=\(linekeeperRelocates)]"
+             + "keeper[anchor=\(linekeeperAnchors) shot=\(linekeeperShots) relocate=\(linekeeperRelocates)] "
+             + "plate[brace=\(ramplateBraces) shove=\(ramplateShoves) miss=\(ramplateMisses) wall=\(ramplateWalls)]"
     }
 
     // MARK: Overlay (DEBUG only)

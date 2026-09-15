@@ -8539,6 +8539,39 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             worldNode.addChild(keeper)
             return
         }
+        if elapsed >= GameConfig.Ramplate.firstSpawnTime &&
+           roll < GameConfig.Spurhound.spawnChance + GameConfig.Linekeeper.spawnChance + GameConfig.Ramplate.spawnChance &&
+           enemies.lazy.filter({ $0 is RamplateNode }).count < GameConfig.Ramplate.maxAlive {
+            // 2d: a passage owner (Beat 4: "surrender the short route"). Capped
+            // alive so the narrow route is CONTESTED, never simply closed.
+            let plate = RamplateNode(health: baseHP + GameConfig.Ramplate.healthBonus, xpValue: xp + 3)
+            plate.position = splitworksSpawnPoint()
+            plate.passageAnchors = { [weak self] in
+                guard let self = self else { return [] }
+                return self.arenaGeometry.routeNodes
+                    .filter { $0.label.hasPrefix(GameConfig.Ramplate.passageLabelPrefix) }
+                    .map { $0.position }
+            }
+            plate.onShovePlayer = { [weak self] dir in
+                guard let self = self, self.gameState == .playing else { return }
+                self.player.position += dir * GameConfig.Ramplate.shoveDistance
+                self.pushPlayerOutOfMonument()
+                self.resolvePlayerAgainstGeometry(cause: .knockback)
+                self.worldNode.shake(intensity: 8, duration: 0.2)
+                self.geometryDebug.ramplateShoves += 1
+            }
+            plate.onBrace = { [weak self] in self?.geometryDebug.ramplateBraces += 1 }
+            plate.onChargeEnded = { [weak self] outcome in
+                switch outcome {
+                case .hit: break
+                case .miss: self?.geometryDebug.ramplateMisses += 1
+                case .wall: self?.geometryDebug.ramplateWalls += 1
+                }
+            }
+            enemies.append(plate)
+            worldNode.addChild(plate)
+            return
+        }
         if elapsed >= GameConfig.Wave.meleeThinningStart &&
            CGFloat.random(in: 0...1) < GameConfig.Wave.meleeThinningChance {
             return

@@ -467,6 +467,39 @@ enum GameConfig {
         static let spawnChance: CGFloat = 0.25
     }
 
+    // MARK: - v2.1 (Geometry 2d): Ramplate — "occupy a route"
+    /// The Splitworks' mobile obstruction (design lock §5.3). Walks to the
+    /// NARROW passage and patrols it, braces (telegraphing facing + charge
+    /// footprint), commits to a fixed-line charge that SHOVES on a clean hit,
+    /// ends at a wall or the Carrier, and is vulnerable in recovery. Lesson:
+    /// the short route is efficient until something else owns it.
+    enum Ramplate {
+        static let moveSpeedFactor: CGFloat = 0.55
+        /// Geometry footprint (× visual radius) — a wide body for route
+        /// clearance. Combat hitbox is untouched (reconciliation §4).
+        static let footprintScale: CGFloat = 1.8
+        static let healthBonus = 3
+        /// Route-node label prefix it occupies; falls back to plain pursuit
+        /// when an arena has no such nodes.
+        static let passageLabelPrefix = "narrow"
+        static let patrolArriveRadius: CGFloat = 16
+        /// Brace trigger: Spark within this (device-scaled), in sight, off cooldown.
+        static var braceRange: CGFloat { 280 * DeviceScale.gameplay }
+        static let braceDuration: TimeInterval = 0.8
+        static let chargeSpeed: CGFloat = 520
+        static var maxChargeDistance: CGFloat { GameConfig.Arena.radius * 0.9 }
+        /// Player displacement along the charge line on a clean hit.
+        static var shoveDistance: CGFloat { 110 * DeviceScale.gameplay }
+        static let recoverAfterHit: TimeInterval = 1.0
+        static let recoverAfterMiss: TimeInterval = 1.6
+        static let punishVulnerability: CGFloat = 1.5
+        static let chargeCooldown: TimeInterval = 4.0
+        /// Splitworks spawn table.
+        static let firstSpawnTime: TimeInterval = 70
+        static let spawnChance: CGFloat = 0.15
+        static let maxAlive = 2
+    }
+
     // MARK: - v2.1: BGM (the Suno 16-bit chaos batch)
     /// Track discovery is convention-based (see MusicManager) — these are the
     /// only dials. Volume sits under the SFX layer on purpose: atmosphere,
