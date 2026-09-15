@@ -39,6 +39,25 @@ class EnemyNode: SKNode {
     var routeNodeID: Int? = nil
     var routePrevNodeID: Int? = nil
     var routeRedecideCooldown: TimeInterval = 0
+
+    // v2.1 (Geometry 2b): two facts the scene already computes, published so
+    // a subclass can act on them without a second geometry query.
+    /// True while the direct line to the pursuit goal is blocked (set by the
+    /// steer pass each frame; always false on open arenas).
+    var isOccludedFromGoal = false
+    /// True when the post-move resolve pushed this body out of a footprint
+    /// last frame — "you ran into the Carrier." A subclass that reads it
+    /// should clear it.
+    var geometryDisplacedThisFrame = false
+
+    /// v2.1 (2b): route-scoring hook. Added to the 1B distance score for
+    /// `node` (lower wins); `occupancy` = how many enemies are already
+    /// committed to it. Default = no opinion.
+    func routeNodeBias(_ node: RouteNode, goal: CGPoint, occupancy: Int) -> CGFloat { 0 }
+
+    /// v2.1 (2b): the scene reports a landed contact hit on the player.
+    /// Default = nothing; committed-attack enemies use it to end the attack.
+    func didStrikePlayer() {}
     
     // MARK: - Status Effects
     

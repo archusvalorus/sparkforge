@@ -2696,6 +2696,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let q = arenaGeometry.resolve(p, actorRadius: r)
             if q != p {
                 enemy.position = q
+                enemy.geometryDisplacedThisFrame = true   // v2.1 (2b): "you hit the Carrier"
                 geometryDebug.recordResolve(actor: "enemy", cause: .movement)
             }
         }
@@ -4808,6 +4809,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var diedFromDOT: [Int] = []
         var crowdCount = 0  // v1.8 Ironhide: enemies pressing the player
 
+        // v2.1 (2b): route occupancy for the crowding term. Skipped entirely
+        // on open arenas (no route nodes → the steer pass never scores).
+        if !arenaGeometry.routeNodes.isEmpty {
+            routeOccupancy.removeAll(keepingCapacity: true)
+            for e in enemies { if let id = e.routeNodeID { routeOccupancy[id, default: 0] += 1 } }
+        }
+
         for (index, enemy) in enemies.enumerated() {
             // v2.1 (1B): steer through the route graph when the direct line
             // is blocked; identical to player.position on open arenas.
@@ -4973,6 +4981,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// 4. no node visible → beeline (the resolve pass makes it a slide).
     /// Enemies keep their own chase behaviors untouched — they simply chase
     /// whatever point this hands them. Guidance, not pathfinding.
+    /// v2.1 (2b): how many enemies are committed to each route node this
+    /// frame — one O(n) pass in `updateEnemies`, read by the bias hook.
+    private var routeOccupancy: [Int: Int] = [:]
+
     private func routeSteerTarget(for enemy: EnemyNode, toward goal: CGPoint,
                                   dt: TimeInterval) -> CGPoint {
         let geo = arenaGeometry
@@ -4984,7 +4996,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let travel = r * 0.8   // slight forgiveness so brushing a corner isn't "blocked"
 
         // 1. Direct pursuit resumes the moment the line is clear.
-        if !geo.segmentBlocked(enemy.position, goal, travelRadius: travel) {
+        let occluded = geo.segmentBlocked(enemy.position, goal, travelRadius: travel)
+        enemy.isOccludedFromGoal = occluded   // v2.1 (2b): published for subclasses
+        if !occluded {
             if enemy.routeNodeID != nil {
                 enemy.routePrevNodeID = enemy.routeNodeID
                 enemy.routeNodeID = nil
@@ -5015,6 +5029,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard !geo.segmentBlocked(enemy.position, n.position, travelRadius: travel) else { continue }
             var score = enemy.position.distance(to: n.position) + n.position.distance(to: goal)
             if n.id == enemy.routePrevNodeID { score += GameConfig.Routing.backtrackPenalty }
+            // v2.1 (2b): subclass opinion (flank preference, crowding). Zero
+            // for every pre-2b enemy, so their routing is bit-identical to 1B.
+            score += enemy.routeNodeBias(n, goal: goal, occupancy: routeOccupancy[n.id, default: 0])
             if best == nil || score < best!.score { best = (n.id, score) }
         }
         if let choice = best {
@@ -7661,6 +7678,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             spawnStarAnvilEnemy()
             return
         }
+        // v2.1: and The Splitworks (Arena 6)
+        if arenaConfig.id == 5 {
+            spawnSplitworksEnemy()
+            return
+        }
 
         let elapsed = waveManager.elapsedTime
 
@@ -8463,6 +8485,65 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(enemy)
     }
 
+    // MARK: - v2.1 (Geometry 2b): Splitworks Spawning (Arena 6)
+
+    /// Arena 6 spawn table — ROSTER IN PROGRESS. 2b: basic bodies teach the
+    /// yard, Spurhounds join at 15s (Beat 2: "remember the flank"); legacy
+    /// shooters stand in for the Linekeeper until 2c; Ramplate lands in 2d.
+    /// Spawns come from the AUTHORED gate zones (n/s/w/e), not a random
+    /// angle — the lock's spawn zones start paying rent here.
+    private func spawnSplitworksEnemy() {
+        let elapsed = waveManager.elapsedTime
+        let baseHP: Int = elapsed < 45 ? 1 : (elapsed < 110 ? 2 : Int.random(in: 2...3))
+        let xp = max(1, baseHP + 1)
+        let roll = CGFloat.random(in: 0...1)
+
+        if elapsed >= GameConfig.Spurhound.firstSpawnTime && roll < GameConfig.Spurhound.spawnChance {
+            let hound = SpurhoundNode(health: baseHP, xpValue: xp + 1)
+            hound.position = splitworksSpawnPoint()
+            hound.onLungeCommitted = { [weak self] in self?.geometryDebug.spurhoundLunges += 1 }
+            hound.onLungeOutcome = { [weak self] outcome in
+                guard let self = self else { return }
+                switch outcome {
+                case .hit: self.geometryDebug.spurhoundHits += 1
+                case .miss: self.geometryDebug.spurhoundMisses += 1
+                case .clang: self.geometryDebug.spurhoundClangs += 1
+                }
+            }
+            enemies.append(hound)
+            worldNode.addChild(hound)
+            return
+        }
+        if elapsed >= GameConfig.RangedEnemy.firstSpawnTime &&
+           roll < GameConfig.Spurhound.spawnChance + GameConfig.RangedEnemy.spawnChance {
+            spawnRangedEnemy(at: splitworksSpawnPoint())   // Linekeeper placeholder (2c)
+            return
+        }
+        if elapsed >= GameConfig.Wave.meleeThinningStart &&
+           CGFloat.random(in: 0...1) < GameConfig.Wave.meleeThinningChance {
+            return
+        }
+        let speedScale: CGFloat = 1.0 + CGFloat(elapsed / 180) * 0.15
+        let body = EnemyNode(health: baseHP, moveSpeed: GameConfig.Enemy.baseSpeed * speedScale, xpValue: xp)
+        body.position = splitworksSpawnPoint()
+        if baseHP >= 3 { body.setScale(1.0 + CGFloat(baseHP - 2) * 0.08) }
+        enemies.append(body)
+        worldNode.addChild(body)
+    }
+
+    /// A point on the field's edge inside a random authored spawn zone,
+    /// resolved out of any footprint. Falls back to the plain ring when the
+    /// arena declares no zones.
+    private func splitworksSpawnPoint() -> CGPoint {
+        let radius = GameConfig.Arena.radius * 0.95
+        guard let zone = arenaGeometry.spawnZones.randomElement() else {
+            return EnemyNode.spawnPosition()
+        }
+        let angle = CGFloat.random(in: zone.startAngle...zone.endAngle)
+        let p = CGPoint(x: cos(angle) * radius, y: sin(angle) * radius)
+        return arenaGeometry.resolve(p, actorRadius: GameConfig.Enemy.visualRadius)
+    }
+
     // MARK: - v1.6: Quench Spawning (Unit 5)
 
     /// Arena 2 spawn table — v1.6 tuning: staggered vocabulary. The first
@@ -8676,7 +8757,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(braceguard)
     }
     
-    private func spawnRangedEnemy() {
+    private func spawnRangedEnemy(at position: CGPoint? = nil) {
         // v1.6 tuning: shooters are glass cannons — dangerous at range,
         // dead in one hit (Brandon playtest 7/9/26). Was 2–8 HP scaling.
         let ranged = RangedEnemyNode(
@@ -8684,7 +8765,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             moveSpeed: GameConfig.Enemy.baseSpeed * 0.75,
             xpValue: 2
         )
-        ranged.position = EnemyNode.spawnPosition()
+        ranged.position = position ?? EnemyNode.spawnPosition()
 
         // Wire up the fire callback
         ranged.onFireProjectile = { [weak self] position, direction in
@@ -9654,6 +9735,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func handlePlayerEnemyContact(enemyBody: SKPhysicsBody) {
         guard gameState == .playing else { return }
+        // v2.1 (2b): committed-attack enemies learn their lunge connected —
+        // before the i-frame guards, because the CONTACT is the outcome.
+        (enemyBody.node as? EnemyNode)?.didStrikePlayer()
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
         if consumeSilverSkin() { return }

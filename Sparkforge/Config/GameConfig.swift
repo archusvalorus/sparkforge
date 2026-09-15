@@ -367,11 +367,7 @@ enum GameConfig {
         static let gatherHold: TimeInterval = 0.9
     }
 
-    // MARK: - v2.1 (Geometry 1B): route guidance
-    /// The decision-point model, per the reconciliation §4: an actor whose
-    /// direct line is blocked commits to an authored node, walks to it,
-    /// re-decides on arrival. Guidance, not pathfinding.
-    /// v2.1 (Unit 2): shared geometry constants for the travel/vision family.
+    // MARK: - v2.1 (Geometry 2a): shared travel/vision constants
     enum Geometry {
         /// Thickness of the swept segment for projectile blocking AND
         /// line-of-sight tests. Slightly under the true visual so grazing a
@@ -379,6 +375,10 @@ enum GameConfig {
         static let projectileTravelRadius: CGFloat = 3
     }
 
+    // MARK: - v2.1 (Geometry 1B): route guidance
+    /// The decision-point model, per the reconciliation §4: an actor whose
+    /// direct line is blocked commits to an authored node, walks to it,
+    /// re-decides on arrival. Guidance, not pathfinding.
     enum Routing {
         /// "Arrived at the node" radius — generous, so actors flow through
         /// decision points instead of queuing on an exact pixel.
@@ -389,6 +389,50 @@ enum GameConfig {
         /// Score penalty for re-picking the node the actor just left —
         /// the oscillation guard. Big enough to lose to any real alternative.
         static let backtrackPenalty: CGFloat = 10_000
+    }
+
+    // MARK: - v2.1 (Geometry 2b): Spurhound — "go around"
+    /// The Splitworks' fast flanker (design lock §5.1). Selects a route at a
+    /// decision point (1B), prefers the route that creates a flank, sprints
+    /// while out of sight, gives an exhaust tell on emergence, COMMITS to a
+    /// short lunge, and is briefly punishable after a miss or a wall clang.
+    /// Lesson: breaking sightline does not erase a fast threat.
+    enum Spurhound {
+        /// Hunt speed while in sight — a hair under a basic body so the
+        /// SPRINT reads as the change, not the baseline.
+        static let huntSpeedFactor: CGFloat = 0.95
+        /// Top speed while occluded (× base). Reached over `sprintRampTime`.
+        static let sprintSpeedFactor: CGFloat = 2.3
+        static let sprintRampTime: TimeInterval = 0.9
+        /// Momentum after re-emerging: sprint decays over this long, so the
+        /// hound comes AROUND the corner fast rather than braking at it.
+        static let sprintDecayTime: TimeInterval = 0.5
+        /// Lunge trigger: line of sight AND within this range (device-scaled).
+        static var lungeRange: CGFloat { 210 * DeviceScale.gameplay }
+        /// Emergence tell — exhaust flare + crouch. The line is committed at
+        /// tell START (Star Needle grammar: punish late movement, not random).
+        static let tellDuration: TimeInterval = 0.5
+        static let lungeSpeed: CGFloat = 600
+        static let lungeDuration: TimeInterval = 0.38     // ≈228pt
+        /// Recovery windows. A miss or a wall clang is the PUNISHABLE one.
+        static let recoverAfterHit: TimeInterval = 0.6
+        static let recoverAfterMiss: TimeInterval = 1.4
+        /// Incoming damage multiplier while punishable (stacks multiplicatively
+        /// with any card-applied vulnerability; restored on recovery).
+        static let punishVulnerability: CGFloat = 1.5
+        /// Minimum gap between lunges (from lunge start).
+        static let lungeCooldown: TimeInterval = 2.6
+        /// Route scoring (added to the 1B distance score, in points):
+        /// nodes on the hound's own side of the player cost up to +flankBias,
+        /// nodes on the far side earn up to −flankBias — "go around."
+        static let flankBias: CGFloat = 140
+        /// Per-hound already committed to a node — spreads a pack across both
+        /// routes instead of a conga line (lock: "subject to crowding").
+        static let crowdPenalty: CGFloat = 60
+        /// Splitworks spawn table (shell roster, 2b): Spurhound joins at this
+        /// time with this share of spawns.
+        static let firstSpawnTime: TimeInterval = 15
+        static let spawnChance: CGFloat = 0.35
     }
 
     // MARK: - v2.1: BGM (the Suno 16-bit chaos batch)

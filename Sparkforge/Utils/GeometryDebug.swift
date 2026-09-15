@@ -45,6 +45,12 @@ final class GeometryDebug {
     var losSuppressedTargets = 0
     var rangedHeldFire = 0
 
+    // v2.1 (2b): Spurhound outcomes — lunges committed, and how they ended.
+    var spurhoundLunges = 0
+    var spurhoundHits = 0
+    var spurhoundMisses = 0
+    var spurhoundClangs = 0
+
     func recordResolve(actor: String, cause: Cause) {
         resolvesByActor[actor, default: 0] += 1
         resolvesByCause[cause, default: 0] += 1
@@ -55,7 +61,8 @@ final class GeometryDebug {
         let byActor = resolvesByActor.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
         return "resolves[\(byActor)] causes[\(byCause)] rejects=\(PlacementSampler.rejectionCount) "
              + "routes[decide=\(routeDecisions) recover=\(routeRecoveries) fallback=\(routeFallbacks) resume=\(routeDirectResumes)] "
-             + "shots[blockP=\(projectileBlocksPlayer) blockE=\(projectileBlocksEnemy) losSkip=\(losSuppressedTargets) heldFire=\(rangedHeldFire)]"
+             + "shots[blockP=\(projectileBlocksPlayer) blockE=\(projectileBlocksEnemy) losSkip=\(losSuppressedTargets) heldFire=\(rangedHeldFire)] "
+             + "hound[lunge=\(spurhoundLunges) hit=\(spurhoundHits) miss=\(spurhoundMisses) clang=\(spurhoundClangs)]"
     }
 
     // MARK: Overlay (DEBUG only)
