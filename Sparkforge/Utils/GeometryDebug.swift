@@ -51,6 +51,11 @@ final class GeometryDebug {
     var spurhoundMisses = 0
     var spurhoundClangs = 0
 
+    // v2.1 (2c): Linekeeper — anchors taken, shots fired, relocations.
+    var linekeeperAnchors = 0
+    var linekeeperShots = 0
+    var linekeeperRelocates = 0
+
     func recordResolve(actor: String, cause: Cause) {
         resolvesByActor[actor, default: 0] += 1
         resolvesByCause[cause, default: 0] += 1
@@ -62,7 +67,8 @@ final class GeometryDebug {
         return "resolves[\(byActor)] causes[\(byCause)] rejects=\(PlacementSampler.rejectionCount) "
              + "routes[decide=\(routeDecisions) recover=\(routeRecoveries) fallback=\(routeFallbacks) resume=\(routeDirectResumes)] "
              + "shots[blockP=\(projectileBlocksPlayer) blockE=\(projectileBlocksEnemy) losSkip=\(losSuppressedTargets) heldFire=\(rangedHeldFire)] "
-             + "hound[lunge=\(spurhoundLunges) hit=\(spurhoundHits) miss=\(spurhoundMisses) clang=\(spurhoundClangs)]"
+             + "hound[lunge=\(spurhoundLunges) hit=\(spurhoundHits) miss=\(spurhoundMisses) clang=\(spurhoundClangs)] "
+             + "keeper[anchor=\(linekeeperAnchors) shot=\(linekeeperShots) relocate=\(linekeeperRelocates)]"
     }
 
     // MARK: Overlay (DEBUG only)

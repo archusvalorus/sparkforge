@@ -4987,6 +4987,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func routeSteerTarget(for enemy: EnemyNode, toward goal: CGPoint,
                                   dt: TimeInterval) -> CGPoint {
+        enemy.goalPosition = goal   // v2.1 (2c): the real goal, whatever we hand `chase`
         let geo = arenaGeometry
         guard geo.hasBlockedGeometry, !geo.routeNodes.isEmpty else { return goal }
         let r = enemy.geometryFootprintRadius
@@ -8514,9 +8515,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             worldNode.addChild(hound)
             return
         }
-        if elapsed >= GameConfig.RangedEnemy.firstSpawnTime &&
-           roll < GameConfig.Spurhound.spawnChance + GameConfig.RangedEnemy.spawnChance {
-            spawnRangedEnemy(at: splitworksSpawnPoint())   // Linekeeper placeholder (2c)
+        if elapsed >= GameConfig.Linekeeper.firstSpawnTime &&
+           roll < GameConfig.Spurhound.spawnChance + GameConfig.Linekeeper.spawnChance {
+            // 2c: the Linekeeper replaces the legacy shooter here. Glass cannon
+            // like every shooter (canon: 1-HP anti-turret tax), worth a bit more.
+            let keeper = LinekeeperNode(health: 1, xpValue: 3)
+            keeper.position = splitworksSpawnPoint()
+            keeper.onFireProjectile = { [weak self] position, direction in
+                guard let self = self else { return }
+                self.spawnEnemyProjectile(at: position, direction: direction,
+                                          speed: GameConfig.Linekeeper.boltSpeed,
+                                          range: GameConfig.Linekeeper.boltRange,
+                                          colorHex: GameConfig.Linekeeper.boltColorHex,
+                                          elongated: true)
+                self.geometryDebug.linekeeperShots += 1
+            }
+            keeper.resolveFiringAnchor = { [weak self] from, goal in
+                self?.findFiringAnchor(from: from, toward: goal)
+            }
+            keeper.onAnchorChosen = { [weak self] in self?.geometryDebug.linekeeperAnchors += 1 }
+            keeper.onRelocate = { [weak self] in self?.geometryDebug.linekeeperRelocates += 1 }
+            enemies.append(keeper)
+            worldNode.addChild(keeper)
             return
         }
         if elapsed >= GameConfig.Wave.meleeThinningStart &&
@@ -8529,6 +8549,31 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if baseHP >= 3 { body.setScale(1.0 + CGFloat(baseHP - 2) * 0.08) }
         enemies.append(body)
         worldNode.addChild(body)
+    }
+
+    /// v2.1 (2c): a VALID firing anchor for a Linekeeper — at standoff from
+    /// Spark, not inside geometry, clear line to Spark for the bolt, and a
+    /// clear walk from where the keeper stands. Candidates fan out from the
+    /// keeper's current bearing so it plants close to where it already is.
+    /// Open arenas: every test short-circuits, the first candidate wins.
+    private func findFiringAnchor(from p: CGPoint, toward goal: CGPoint) -> CGPoint? {
+        let C = GameConfig.Linekeeper.self
+        let geo = arenaGeometry
+        let bodyR = GameConfig.Enemy.visualRadius
+        let limit = GameConfig.Arena.radius * 0.92
+        let base = atan2(p.y - goal.y, p.x - goal.x)
+        var order: [Int] = [0]
+        for k in 1...C.anchorSteps { order.append(k); order.append(-k) }
+        for k in order {
+            let a = base + CGFloat(k) * C.anchorAngleStep
+            let cand = goal + CGPoint(x: cos(a), y: sin(a)) * C.standoff
+            guard cand.length <= limit else { continue }
+            guard !geo.isBlocked(cand, margin: bodyR) else { continue }
+            guard !geo.segmentBlocked(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius) else { continue }
+            guard !geo.segmentBlocked(p, cand, travelRadius: bodyR * 0.8) else { continue }
+            return cand
+        }
+        return nil
     }
 
     /// A point on the field's edge inside a random authored spawn zone,
@@ -8776,12 +8821,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(ranged)
     }
     
-    private func spawnEnemyProjectile(at position: CGPoint, direction: CGPoint) {
+    private func spawnEnemyProjectile(at position: CGPoint, direction: CGPoint,
+                                      speed: CGFloat = GameConfig.RangedEnemy.projectileSpeed,
+                                      range: CGFloat = GameConfig.RangedEnemy.projectileRange,
+                                      colorHex: UInt32 = GameConfig.RangedEnemy.projectileColorHex,
+                                      elongated: Bool = false) {
         // v1.4: Projectile carries scaled damage
         let elapsed = waveManager.elapsedTime
         let scalingTicks = Int(elapsed / 30)
         let damage = GameConfig.Enemy.baseRangedDamage + (scalingTicks * GameConfig.Enemy.rangedDamageScaling)
-        let proj = EnemyProjectileNode(direction: direction, damage: damage)
+        let proj = EnemyProjectileNode(direction: direction, damage: damage,
+                                       speed: speed, range: range, colorHex: colorHex, elongated: elongated)
         proj.position = position
         proj.zPosition = 7
         enemyProjectiles.append(proj)

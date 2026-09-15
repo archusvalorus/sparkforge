@@ -45,6 +45,9 @@ class EnemyNode: SKNode {
     /// True while the direct line to the pursuit goal is blocked (set by the
     /// steer pass each frame; always false on open arenas).
     var isOccludedFromGoal = false
+    /// The real pursuit goal (Spark) this frame, even when the steer pass
+    /// hands `chase` a route node instead. Anchor-seeking enemies need it.
+    var goalPosition: CGPoint = .zero
     /// True when the post-move resolve pushed this body out of a footprint
     /// last frame — "you ran into the Carrier." A subclass that reads it
     /// should clear it.

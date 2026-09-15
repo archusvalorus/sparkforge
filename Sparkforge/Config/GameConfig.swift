@@ -435,6 +435,38 @@ enum GameConfig {
         static let spawnChance: CGFloat = 0.35
     }
 
+    // MARK: - v2.1 (Geometry 2c): Linekeeper — "hold a line"
+    /// The Splitworks' ranged anchor (design lock §5.2). Seeks a VALID firing
+    /// anchor (standoff from Spark, clear line both ways), plants, telegraphs
+    /// a narrow line, fires a fast bolt the Carrier can interrupt, and
+    /// relocates when denied a shot for too long. Lesson: cover protects you,
+    /// but the same cover buys the rest of the yard time.
+    enum Linekeeper {
+        static let moveSpeedFactor: CGFloat = 0.8
+        /// Preferred distance from Spark for a firing anchor (device-scaled).
+        static var standoff: CGFloat { 240 * DeviceScale.gameplay }
+        /// Anchor candidates are tried at this angular step around Spark,
+        /// starting from the keeper's current bearing (0, ±1, ±2… steps).
+        static let anchorAngleStep: CGFloat = .pi / 6
+        static let anchorSteps = 8
+        /// "Arrived" radius at the anchor.
+        static let arriveRadius: CGFloat = 12
+        /// Grounded aim telegraph before the shot; line locked at aim START.
+        static let aimDuration: TimeInterval = 0.7
+        static let fireInterval: TimeInterval = 2.4
+        /// Denied a clear shot this long (at or near its anchor) → relocate.
+        static let relocateAfter: TimeInterval = 1.8
+        /// Re-anchor if Spark drifts beyond this many standoffs away.
+        static let reanchorDistanceFactor: CGFloat = 1.7
+        /// The bolt: faster and narrower than the purple orb, same danger colour family.
+        static let boltSpeed: CGFloat = 340
+        static var boltRange: CGFloat { 560 * DeviceScale.gameplay }
+        static let boltColorHex: UInt32 = 0xC58BFF
+        /// Splitworks spawn table: joins at this time with this share of spawns.
+        static let firstSpawnTime: TimeInterval = 45
+        static let spawnChance: CGFloat = 0.25
+    }
+
     // MARK: - v2.1: BGM (the Suno 16-bit chaos batch)
     /// Track discovery is convention-based (see MusicManager) — these are the
     /// only dials. Volume sits under the SFX layer on purpose: atmosphere,

@@ -23,7 +23,8 @@ final class EnemyProjectileNode: SKNode {
          damage: Int = GameConfig.Enemy.baseRangedDamage,
          speed: CGFloat = GameConfig.RangedEnemy.projectileSpeed,
          range: CGFloat = GameConfig.RangedEnemy.projectileRange,
-         colorHex: UInt32 = GameConfig.RangedEnemy.projectileColorHex) {
+         colorHex: UInt32 = GameConfig.RangedEnemy.projectileColorHex,
+         elongated: Bool = false) {
 
         self.direction = direction.normalized
         self.damage = damage
@@ -32,7 +33,16 @@ final class EnemyProjectileNode: SKNode {
 
         let radius = GameConfig.RangedEnemy.projectileRadius
 
-        bulletNode = SKShapeNode(circleOfRadius: radius)
+        if elongated {
+            // v2.1 (2c): a narrow bolt for the Linekeeper — a capsule along
+            // its travel direction. Same contact radius as the orb.
+            let len = radius * 5
+            bulletNode = SKShapeNode(rect: CGRect(x: -len / 2, y: -radius * 0.55, width: len, height: radius * 1.1),
+                                     cornerRadius: radius * 0.55)
+            bulletNode.zRotation = atan2(self.direction.y, self.direction.x)
+        } else {
+            bulletNode = SKShapeNode(circleOfRadius: radius)
+        }
         bulletNode.fillColor = SKColor(hex: colorHex)
         bulletNode.strokeColor = .clear
         bulletNode.glowWidth = 4
@@ -42,12 +52,14 @@ final class EnemyProjectileNode: SKNode {
         addChild(bulletNode)
         setupPhysics()
         
-        // Subtle pulse
-        let pulse = SKAction.sequence([
-            SKAction.scale(to: 1.2, duration: 0.3),
-            SKAction.scale(to: 0.9, duration: 0.3)
-        ])
-        bulletNode.run(SKAction.repeatForever(pulse))
+        if !elongated {
+            // Subtle pulse (the orb); the bolt stays crisp.
+            let pulse = SKAction.sequence([
+                SKAction.scale(to: 1.2, duration: 0.3),
+                SKAction.scale(to: 0.9, duration: 0.3)
+            ])
+            bulletNode.run(SKAction.repeatForever(pulse))
+        }
     }
     
     required init?(coder aDecoder: NSCoder) {
