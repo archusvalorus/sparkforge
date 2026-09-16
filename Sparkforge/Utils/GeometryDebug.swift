@@ -62,6 +62,12 @@ final class GeometryDebug {
     var ramplateMisses = 0
     var ramplateWalls = 0
 
+    // v2.1 (Unit 3): Marchwarden verbs — declared charges, standards landed,
+    // musters answered, escalations.
+    var wardenCharges = 0
+    var wardenStandards = 0
+    var wardenMusters = 0
+
     func recordResolve(actor: String, cause: Cause) {
         resolvesByActor[actor, default: 0] += 1
         resolvesByCause[cause, default: 0] += 1
@@ -75,7 +81,8 @@ final class GeometryDebug {
              + "shots[blockP=\(projectileBlocksPlayer) blockE=\(projectileBlocksEnemy) losSkip=\(losSuppressedTargets) heldFire=\(rangedHeldFire)] "
              + "hound[lunge=\(spurhoundLunges) hit=\(spurhoundHits) miss=\(spurhoundMisses) clang=\(spurhoundClangs)] "
              + "keeper[anchor=\(linekeeperAnchors) shot=\(linekeeperShots) relocate=\(linekeeperRelocates)] "
-             + "plate[brace=\(ramplateBraces) shove=\(ramplateShoves) miss=\(ramplateMisses) wall=\(ramplateWalls)]"
+             + "plate[brace=\(ramplateBraces) shove=\(ramplateShoves) miss=\(ramplateMisses) wall=\(ramplateWalls)] "
+             + "warden[charge=\(wardenCharges) fall=\(wardenStandards) muster=\(wardenMusters)]"
     }
 
     // MARK: Overlay (DEBUG only)

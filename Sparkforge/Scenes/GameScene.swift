@@ -8612,9 +8612,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// A point on the field's edge inside a random authored spawn zone,
     /// resolved out of any footprint. Falls back to the plain ring when the
     /// arena declares no zones.
-    private func splitworksSpawnPoint() -> CGPoint {
+    private func splitworksSpawnPoint(zone forced: SpawnZone? = nil) -> CGPoint {
         let radius = GameConfig.Arena.radius * 0.95
-        guard let zone = arenaGeometry.spawnZones.randomElement() else {
+        guard let zone = forced ?? arenaGeometry.spawnZones.randomElement() else {
             return EnemyNode.spawnPosition()
         }
         let angle = CGFloat.random(in: zone.startAngle...zone.endAngle)
@@ -8905,6 +8905,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 2: spawnDynamoChoir()
         case 3: spawnFacetedLie()
         case 4: spawnUnmadeStar()
+        case 5: spawnMarchwarden()   // v2.1 Unit 3
         default: spawnMiniBoss()   // arenas with no authored boss yet
         }
     }
@@ -9154,6 +9155,116 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(lie)
 
         showBossEntrance(name: "THE FACETED LIE", colorHex: 0x8E44FF)
+    }
+
+    // MARK: - v2.1 (Geometry Unit 3): The Marchwarden (Arena 6)
+
+    /// The warden keeps every verb inside the arena that already exists: its
+    /// lanes are the authored route nodes, its gates are the authored spawn
+    /// zones, its standards cross the Carrier by the sky-strike exemption and
+    /// land on VALID ground, and its reinforcements come through
+    /// `splitworksSpawnPoint(zone:)` like every other native.
+    private func spawnMarchwarden() {
+        let elapsed = waveManager.elapsedTime
+        let hpScaling = bossHPScaling(elapsed: elapsed, step: 6)
+
+        let warden = MarchwardenNode(hpScaling: hpScaling)
+        warden.position = arenaGeometry.anchor("boss_anchor")
+            ?? CGPoint(x: 0, y: GameConfig.Arena.radius * 0.6)
+        warden.zPosition = 6
+
+        // Lanes: the two authored routes, south → north.
+        warden.lanes = { [weak self] in
+            guard let self = self else { return [] }
+            let nodes = self.arenaGeometry.routeNodes
+            func pos(_ label: String) -> CGPoint? { nodes.first { $0.label == label }?.position }
+            var out: [(CGPoint, CGPoint)] = []
+            if let a = pos("narrow_s"), let b = pos("narrow_n") { out.append((a, b)) }
+            if let a = pos("broad_s"),  let b = pos("broad_n")  { out.append((a, b)) }
+            return out
+        }
+        // Gates: the authored spawn zones' mid-angles (for "opposite the boss").
+        warden.gateAngles = { [weak self] in
+            (self?.arenaGeometry.spawnZones ?? []).map { ($0.startAngle + $0.endAngle) / 2 }
+        }
+        // Standards must LAND on valid ground even though they cross the Carrier.
+        warden.resolveGround = { [weak self] p in
+            guard let self = self else { return p }
+            let limit = GameConfig.Arena.radius - 30
+            let clamped = p.length > limit ? p.normalized * limit : p
+            return self.arenaGeometry.resolve(clamped, actorRadius: 24)
+        }
+        warden.onHazardDamage = { [weak self] damage in
+            self?.applyBossHazardDamage(damage, shakeIntensity: 7)
+        }
+        warden.onChargeShove = { [weak self] dir in
+            guard let self = self, self.gameState == .playing else { return }
+            self.player.position += dir * GameConfig.Marchwarden.chargeShove
+            self.pushPlayerOutOfMonument()
+            self.resolvePlayerAgainstGeometry(cause: .knockback)
+            self.worldNode.shake(intensity: 12, duration: 0.25)
+        }
+        warden.onMuster = { [weak self] gateIndex in
+            guard let self = self else { return }
+            let C = GameConfig.Marchwarden.self
+            guard self.enemies.count < C.musterCrowdCap else { return }
+            let zones = self.arenaGeometry.spawnZones
+            let zone = zones.indices.contains(gateIndex) ? zones[gateIndex] : nil
+            let elapsed = self.waveManager.elapsedTime
+            let baseHP: Int = elapsed < 110 ? 2 : 3
+            for _ in 0..<C.musterBodies {
+                let body = EnemyNode(health: baseHP, moveSpeed: GameConfig.Enemy.baseSpeed, xpValue: baseHP + 1)
+                body.position = self.splitworksSpawnPoint(zone: zone)
+                self.enemies.append(body); self.worldNode.addChild(body)
+            }
+            for _ in 0..<C.musterHounds {
+                let hound = SpurhoundNode(health: baseHP, xpValue: baseHP + 2)
+                hound.position = self.splitworksSpawnPoint(zone: zone)
+                hound.onLungeCommitted = { [weak self] in self?.geometryDebug.spurhoundLunges += 1 }
+                self.enemies.append(hound); self.worldNode.addChild(hound)
+            }
+            self.geometryDebug.wardenMusters += 1
+        }
+        // The Column Advances: the dead procession appears to move — the
+        // standards and the Carrier ignite in sequence. Visual only; no
+        // collision change (lock §6).
+        warden.onColumnAdvances = { [weak self] in
+            guard let self = self else { return }
+            let solids = self.worldNode.children.filter { ($0.name ?? "").hasPrefix("solidGeometry_") }
+            for (i, node) in solids.enumerated() {
+                guard let shape = node as? SKShapeNode else { continue }
+                let base = shape.strokeColor
+                shape.run(SKAction.sequence([
+                    SKAction.wait(forDuration: Double(i) * 0.25),
+                    SKAction.run { shape.strokeColor = SKColor(hex: 0xFF7722, alpha: 0.95); shape.glowWidth = 10 },
+                    SKAction.wait(forDuration: 0.6),
+                    SKAction.run { shape.strokeColor = base; shape.glowWidth = 2 }
+                ]))
+            }
+        }
+        warden.onCharge = { [weak self] in self?.geometryDebug.wardenCharges += 1 }
+        warden.onStandardLanded = { [weak self] in self?.geometryDebug.wardenStandards += 1 }
+
+        warden.onDeath = { [weak self] pos, xp in
+            guard let self = self else { return }
+            self.bossDefeatedThisRun = true
+            ProgressionManager.shared.recordKill(.boss)
+            // Bestiary entry + Marchworn skin land in Unit 4 (presentation).
+            // The registry chokepoint is wired NOW so the unlock can never be
+            // the missing line again (v2.0.1 lesson).
+            ProgressionManager.shared.registerArenaBossDefeat("marchwarden")
+            for _ in 0..<10 {
+                let offset = CGPoint(x: CGFloat.random(in: -40...40), y: CGFloat.random(in: -40...40))
+                self.spawnXPOrb(at: pos + offset, value: xp / 10)
+            }
+            self.spawnForgeCoins(at: pos)
+            self.boss = nil
+            self.worldNode.shake(intensity: 15, duration: 0.5)
+        }
+
+        boss = warden
+        worldNode.addChild(warden)
+        showBossEntrance(name: "THE MARCHWARDEN", colorHex: 0x3F8F8A)
     }
 
     // MARK: - v1.7: Relay Imp Arcs
@@ -9821,6 +9932,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 (2b): committed-attack enemies learn their lunge connected —
         // before the i-frame guards, because the CONTACT is the outcome.
         (enemyBody.node as? EnemyNode)?.didStrikePlayer()
+        (enemyBody.node as? MarchwardenNode)?.chargeConnected()   // v2.1 Unit 3: Right of Way shove
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
         if consumeSilverSkin() { return }

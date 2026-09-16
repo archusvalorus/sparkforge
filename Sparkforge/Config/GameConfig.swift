@@ -500,6 +500,51 @@ enum GameConfig {
         static let maxAlive = 2
     }
 
+    // MARK: - v2.1 (Geometry Unit 3): The Marchwarden — Arena 6 boss
+    /// "The boss does not change the arena. It demonstrates mastery over the
+    /// arena that already exists." Three verbs (lock §6): Right of Way (declare
+    /// a route, charge it), Standardfall (arcing standards that CROSS the
+    /// Carrier — the sky-strike exemption), Muster Signal (a bounded packet
+    /// through a lit gate, favouring the route opposite the boss). Escalation
+    /// The Column Advances: faster cadence, chains Standardfall → Right of Way.
+    enum Marchwarden {
+        static let baseHealth: Int = 140
+        static let contactDamage: Int = 36
+        static let xpReward: Int = 96
+        static let bodyRadius: CGFloat = 34
+        static let idleSpeed: CGFloat = 42
+        static let attackCooldown: TimeInterval = 1.6
+        /// The Column Advances below this health fraction.
+        static let advanceThreshold: CGFloat = 0.35
+        static let advanceCadenceScale: Double = 0.6
+
+        // Right of Way
+        /// Declare window: lane lights, the warden runs to the lane's near end.
+        static let declareDuration: TimeInterval = 1.3
+        static let declareRunSpeed: CGFloat = 300
+        static let chargeSpeed: CGFloat = 560
+        static var laneWidth: CGFloat { 120 * DeviceScale.gameplay }
+        /// Player displacement on a clean charge hit (contact damage still applies).
+        static var chargeShove: CGFloat { 150 * DeviceScale.gameplay }
+        static let recoverAfterCharge: TimeInterval = 1.5
+
+        // Standardfall
+        static let standardCount: Int = 3
+        static let standardDelay: TimeInterval = 1.05      // telegraph window
+        static let standardStagger: TimeInterval = 0.3
+        static var standardReach: CGFloat { GameConfig.Arena.radius * 0.22 }
+        static var standardRadius: CGFloat { 62 * DeviceScale.gameplay }
+        static let standardDamage: Int = 18
+
+        // Muster Signal
+        static let musterSignalDuration: TimeInterval = 0.9
+        static let musterBodies: Int = 3
+        static let musterHounds: Int = 1
+        /// Skip the muster entirely when the yard is already this crowded.
+        static let musterCrowdCap: Int = 40
+        static let recoverAfterVerb: TimeInterval = 0.9
+    }
+
     // MARK: - v2.1: BGM (the Suno 16-bit chaos batch)
     /// Track discovery is convention-based (see MusicManager) — these are the
     /// only dials. Volume sits under the SFX layer on purpose: atmosphere,
