@@ -206,7 +206,18 @@ final class UpgradeCardNode: SKNode {
         let descText = currentTier >= 1
             ? card.description(forTier: currentTier + 1)
             : card.description
-        let descLines = wrapText(descText, maxChars: 17)
+        // v2.1 A1b: a card with more to say than fits — expanded `detail`, or a
+        // line that overflows — gives its 4th line to a MORE chip, ends the
+        // visible text with "…" if it was cut, and opens the full helper text
+        // in the shared detail modal. Secret cards stay unreadable by design.
+        let allLines = wrapText(descText, maxChars: Self.descMaxChars)
+        hasMore = !card.isSecret && (card.detail != nil || allLines.count > Self.descMaxLines)
+        let limit = hasMore ? Self.descMaxLines - 1 : Self.descMaxLines
+        var descLines = Array(allLines.prefix(limit))
+        if allLines.count > limit, let last = descLines.last {
+            descLines[descLines.count - 1] = String(last.prefix(Self.descMaxChars - 1)) + "…"
+        }
+        if hasMore { addMoreChip(tagColor: tagColor) }
         for (i, line) in descLines.enumerated() {
             let descLabel = SKLabelNode(fontNamed: "Menlo")
             descLabel.text = line
@@ -214,7 +225,8 @@ final class UpgradeCardNode: SKNode {
             // v1.7 playtest: fluorescent white — 0xBBBBBB gray washed out
             // at low screen brightness (reading problems, not vibes)
             descLabel.fontColor = SKColor(hex: 0xFFFFFF)
-            descLabel.position = CGPoint(x: 0, y: -12 - CGFloat(i) * 13)
+            // (a card with a MORE chip starts its text a touch higher to clear it)
+            descLabel.position = CGPoint(x: 0, y: (hasMore ? -9 : -12) - CGFloat(i) * 13)
             descLabel.verticalAlignmentMode = .center
             descLabel.horizontalAlignmentMode = .center
             addChild(descLabel)
@@ -252,9 +264,42 @@ final class UpgradeCardNode: SKNode {
         if !currentLine.isEmpty {
             lines.append(currentLine)
         }
-        
-        // Cap at 4 lines for card space
-        return Array(lines.prefix(4))
+        return lines   // the caller caps to the card's line budget
+    }
+
+    // MARK: - v2.1 A1b: MORE chip
+
+    /// The card's description budget.
+    static let descMaxChars = 17
+    static let descMaxLines = 4
+    private static let moreChipCenter = CGPoint(x: 0, y: -cardHeight / 2 + 27)
+    private static let moreChipSize = CGSize(width: 52, height: 14)
+
+    /// True when the card carries a MORE chip (expanded detail, or a cut line).
+    private(set) var hasMore = false
+
+    /// The chip's tap target in the CARD's own coordinates — padded well past
+    /// the drawn pill so it's a thumb target, not a pixel hunt.
+    var moreChipHitFrame: CGRect {
+        let c = Self.moreChipCenter
+        return CGRect(x: -UpgradeCardNode.cardWidth / 2, y: c.y - 13,
+                      width: UpgradeCardNode.cardWidth, height: 26)
+    }
+
+    private func addMoreChip(tagColor: SKColor) {
+        let pill = SKShapeNode(rectOf: Self.moreChipSize, cornerRadius: 7)
+        pill.fillColor = SKColor(hex: 0x000000, alpha: 0.35)
+        pill.strokeColor = tagColor.withAlphaComponent(0.8)
+        pill.lineWidth = 1
+        pill.position = Self.moreChipCenter
+        addChild(pill)
+        let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        label.text = "MORE ▸"
+        label.fontSize = 8
+        label.fontColor = UpgradeCardNode.brightColor(for: card.tag)
+        label.verticalAlignmentMode = .center
+        label.horizontalAlignmentMode = .center
+        pill.addChild(label)
     }
     
     // MARK: - Animation

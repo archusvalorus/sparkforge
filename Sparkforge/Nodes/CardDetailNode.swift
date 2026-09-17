@@ -57,6 +57,28 @@ final class CardDetailNode: SKNode {
         var masked: Bool = false
     }
 
+    /// v2.1 A1b: the ONE way an in-run surface builds a card's detail — the
+    /// pause build viewer and the level-up card's MORE chip show the same
+    /// panel. `tagCount` = cards held in the card's tree; `ownedTier` = the
+    /// card's current tier (0 = not owned yet).
+    static func content(for card: UpgradeManager.UpgradeCard, tagCount: Int, ownedTier: Int) -> Content {
+        let tiers = UpgradeManager.synergyTiers(for: card.tag).map {
+            TierLine(threshold: $0.threshold, title: $0.title,
+                     effect: $0.effect, reached: tagCount >= $0.threshold)
+        }
+        // v1.9: multi-tier cards render their full ladder with the reached
+        // rungs marked; 1-tier cards keep the single effect line.
+        let ladder: [CardTierLine]? = card.maxTier > 1
+            ? (1...card.maxTier).map {
+                CardTierLine(tier: $0, effect: card.description(forTier: $0), reached: $0 <= ownedTier)
+              }
+            : nil
+        return Content(name: card.name, tag: card.tag, secondaryTag: card.secondaryTag,
+                       effect: card.description, tiers: tiers,
+                       cardTierLine: card.maxTier > 1 && ownedTier > 0 ? "TIER \(ownedTier) / \(card.maxTier)" : nil,
+                       cardLadder: ladder, detail: card.detail, masked: card.isSecret)
+    }
+
     // MARK: - Layout constants
 
     private static let panelWidth: CGFloat = 300

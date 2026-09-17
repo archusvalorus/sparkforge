@@ -80,9 +80,10 @@ final class UpgradeManager {
         /// v2.1 (abilities): expanded detail — the full approved wording plus
         /// the cooldowns, prerequisites and rules the card can't fit. Shown on
         /// the detail surfaces (pause build viewer, Card Codex) and the Card
-        /// Atlas. The selection card shows `description` only, and TRUNCATES
-        /// at 4 lines of 17 characters — so `description` stays compact and
-        /// the long sentence lives here.
+        /// Atlas. The selection card shows `description` in 4 lines of 17
+        /// characters; a card with `detail` (or an overflowing line) gives its
+        /// 4th line to a MORE chip that opens this text (A1b). Keep
+        /// `description` compact — 3 lines when there is a `detail`.
         var detail: String? = nil
         /// v1.9 Unit 3: the one tier-5 capstone per tree. Reaching its max tier
         /// fires the grand capstone reveal (vs a quiet flourish for signature
@@ -1297,7 +1298,7 @@ final class UpgradeManager {
         // 1. Overcharge — damage scales while unhit
         cards.append(UpgradeCard(
             id: "v13_overcharge", name: "Overcharge", tag: .fire,
-            description: "+5% damage each second unhit (max +50%). Resets on hit",
+            description: "+5% damage/s unhit, max +50%. Resets on hit",
             apply: { stats in
                 stats.overchargeDamagePerSecond = 0.05  // +5% per second, caps at +50%
             },

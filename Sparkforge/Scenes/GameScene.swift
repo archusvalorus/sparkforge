@@ -404,6 +404,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var levelStatPick: PlayerStats.StatKind?
     private var levelNeedsStat = false
     private var pendingLevelCard: UpgradeCardNode?
+    /// v2.1 A1b: the helper-text modal opened from a level-up card's MORE chip.
+    private var levelCardDetail: CardDetailNode?
     
     // MARK: - Scene Lifecycle
     
@@ -2213,6 +2215,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func handleCardSelection(_ touch: UITouch) {
         let location = touch.location(in: levelUpOverlay)
+
+        // v2.1 A1b: an open helper-text modal eats the tap (any tap closes it).
+        if let open = levelCardDetail {
+            open.dismiss()
+            levelCardDetail = nil
+            return
+        }
         
         // Check reroll button first
         if let rerollBtn = levelUpOverlay.childNode(withName: "rerollButton"),
@@ -2277,10 +2286,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             )
 
             if cardFrame.contains(location) {
+                // v2.1 A1b: the MORE chip opens the full helper text instead
+                // of picking the card.
+                if cardNode.hasMore, cardNode.xScale > 0 {
+                    let local = CGPoint(x: (location.x - cardNode.position.x) / cardNode.xScale,
+                                        y: (location.y - cardNode.position.y) / cardNode.yScale)
+                    if cardNode.moreChipHitFrame.contains(local) {
+                        presentLevelCardDetail(cardNode.card)
+                        return
+                    }
+                }
                 selectLevelCard(cardNode)
                 return
             }
         }
+    }
+
+    /// v2.1 A1b: the level-up card's MORE chip — the same panel the pause
+    /// build viewer shows, so the full wording is one tap away while choosing.
+    private func presentLevelCardDetail(_ card: UpgradeManager.UpgradeCard) {
+        let content = CardDetailNode.content(for: card,
+                                             tagCount: upgradeManager.tagCounts[card.tag] ?? 0,
+                                             ownedTier: upgradeManager.tier(of: card.id))
+        let detail = CardDetailNode(content: content)
+        detail.present(in: levelUpOverlay)
+        levelCardDetail = detail
+        AudioManager.shared.play(.cardSelect)
     }
 
     // MARK: - v1.9 4b: combined stat + card selection (either order, auto-commit)

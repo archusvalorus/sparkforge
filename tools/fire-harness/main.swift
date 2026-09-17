@@ -288,11 +288,13 @@ do {
     let um = UpgradeManager()
     var tooLong: [String] = []
     for c in um.allCards where c.tag == .fire {
-        for tier in 1...c.maxTier where cardLines(c.description(forTier: tier)) > 4 || c.description(forTier: tier).split(separator: " ").contains(where: { $0.count > 17 }) {
+        // A card with a `detail` gives its 4th line to the MORE chip (A1b).
+        let budget = c.detail == nil ? 4 : 3
+        for tier in 1...c.maxTier where cardLines(c.description(forTier: tier)) > budget || c.description(forTier: tier).split(separator: " ").contains(where: { $0.count > 17 }) {
             tooLong.append("\(c.id) T\(tier)")
         }
     }
-    check("D1 every Fire card line fits the selection card untruncated", tooLong.isEmpty, "truncated: \(tooLong)")
+    check("D1 every Fire card line fits the selection card untruncated (3 lines beside a MORE chip)", tooLong.isEmpty, "truncated: \(tooLong)")
 }
 
 // E — prerequisites ship with the tree: every Fire card past Kindle needs it.

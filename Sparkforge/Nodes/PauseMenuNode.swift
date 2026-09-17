@@ -414,30 +414,9 @@ final class PauseMenuNode: SKNode {
         guard index < cards.count else { return }
         let card = cards[index]
 
-        let count = manager.tagCounts[card.tag] ?? 0
-        let tiers = UpgradeManager.synergyTiers(for: card.tag).map {
-            CardDetailNode.TierLine(threshold: $0.threshold, title: $0.title,
-                                    effect: $0.effect, reached: count >= $0.threshold)
-        }
-        // v1.9: multi-tier cards render their full ladder with the reached
-        // rungs marked; 1-tier cards keep the single effect line.
-        let cardTier = manager.tier(of: card.id)
-        let ladder: [CardDetailNode.CardTierLine]? = card.maxTier > 1
-            ? (1...card.maxTier).map {
-                CardDetailNode.CardTierLine(tier: $0,
-                                            effect: card.description(forTier: $0),
-                                            reached: $0 <= cardTier)
-              }
-            : nil
-        let content = CardDetailNode.Content(
-            name: card.name, tag: card.tag,
-            secondaryTag: card.secondaryTag,
-            effect: card.description,
-            tiers: tiers,
-            cardTierLine: card.maxTier > 1 ? "TIER \(cardTier) / \(card.maxTier)" : nil,
-            cardLadder: ladder,
-            detail: card.detail
-        )
+        let content = CardDetailNode.content(for: card,
+                                             tagCount: manager.tagCounts[card.tag] ?? 0,
+                                             ownedTier: manager.tier(of: card.id))
         let detail = CardDetailNode(content: content)
         detail.present(in: self)
         detailNode = detail
