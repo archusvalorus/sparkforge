@@ -19,6 +19,12 @@ class EnemyNode: SKNode {
     /// death animation, so a dying enemy must be pruned from GameScene's
     /// `enemies` array to avoid becoming a phantom auto-aim target.
     private(set) var isDying = false
+    /// v2.1 A0: set by GameScene.onEnemyKilled when this kill has been paid —
+    /// the ledger that makes every death credit exactly once.
+    var killCredited = false
+    /// v2.1 A0: the killing blow's damage to REMAINING health (no overkill).
+    /// Sanguinarian's Blood Barrier (A4) reads it.
+    private(set) var finishingDamage: Int = 0
     /// v1.6: Mini-bosses deal their configured contact damage instead of generic melee
     var isMiniBoss: Bool = false
 
@@ -90,6 +96,12 @@ class EnemyNode: SKNode {
     var isFrozen: Bool { freezeTimer > 0 }
     private var stunTimer: TimeInterval = 0
     private var dotAccumulator: CGFloat = 0.0
+    /// v2.1 A0: timed vulnerability windows on GAME time. These were SKAction
+    /// waits, which kept running under the pause menu and the level-up screen.
+    /// They still share `vulnerabilityMultiplier` (last writer wins) as before.
+    private var fractureWindow = GameTimer()
+    private var frostbiteWindow = DelayedWindow()
+    private var frostbiteMultiplier: CGFloat = 1.0
     
     var isBurning: Bool { burnDPS > 0 && burnTimer > 0 }
     var isSlowed: Bool { currentSlow > 0 && slowTimer > 0 }
@@ -375,6 +387,20 @@ class EnemyNode: SKNode {
         freezeTimer = max(freezeTimer, duration)
         bodyNode.fillColor = SKColor(hex: 0x66CCFF)
     }
+
+    /// v1.9 Erasure Fracture: take more damage for a while. Re-applying
+    /// restarts the window.
+    func applyFracture(_ multiplier: CGFloat, duration: TimeInterval) {
+        vulnerabilityMultiplier = multiplier
+        fractureWindow.start(duration)
+    }
+
+    /// v1.9 Polar Vortex Frostbite: once the freeze ends, take more damage for
+    /// a while. Re-applying replaces a pending or open window.
+    func scheduleFrostbite(_ multiplier: CGFloat, after delay: TimeInterval, lasting duration: TimeInterval) {
+        frostbiteMultiplier = multiplier
+        frostbiteWindow.schedule(after: delay, lasting: duration)
+    }
     
     // MARK: - Status Effect Update
     
@@ -397,6 +423,13 @@ class EnemyNode: SKNode {
                 chillStacks = 0
                 bodyNode.fillColor = SKColor(hex: baseBodyHex)
             }
+        }
+
+        if fractureWindow.tick(deltaTime) { vulnerabilityMultiplier = 1.0 }
+        switch frostbiteWindow.tick(deltaTime) {
+        case .opened: vulnerabilityMultiplier = frostbiteMultiplier
+        case .closed: vulnerabilityMultiplier = 1.0
+        case .none: break
         }
 
         if burnTimer > 0 {
@@ -441,13 +474,18 @@ class EnemyNode: SKNode {
     
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
+        // v2.1 A0: a dying enemy can't die again. Re-hits used to return
+        // "killed" a second time — the root of every duplicate kill credit.
+        guard !isDying else { return false }
         // v1.9: general vulnerability scales every incoming hit (1.0 = no change).
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+        let healthBefore = health
         health -= scaled
 
         if health <= 0 {
+            finishingDamage = max(0, min(scaled, healthBefore))
             onDeath()
             return true
         }

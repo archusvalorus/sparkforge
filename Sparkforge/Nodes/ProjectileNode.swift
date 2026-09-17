@@ -28,6 +28,8 @@ final class ProjectileNode: SKNode {
     /// v2.0 Phase C (C1.4): Seed Spore Shot generation carried by a FRAGMENT.
     /// 0 = a normal shot; ≥1 = a burst fragment, used to cap re-embedding.
     var seedGeneration: Int = 0
+    /// v2.1 A0: what a kill by this projectile credits as. Set at spawn.
+    var killSource: KillSource = .primary
 
     init(direction: CGPoint,
          speed: CGFloat = GameConfig.Projectile.speed,

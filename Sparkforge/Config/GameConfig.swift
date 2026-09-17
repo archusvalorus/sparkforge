@@ -1130,6 +1130,32 @@ enum GameConfig {
         static let steadyPulseHeal: Int = 2
     }
 
+    // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)
+    /// The shared order every enemy hit on Spark resolves through
+    /// (`PlayerDamagePipeline`): input scaling → percentage reductions
+    /// (multiplicative, global ceiling) → flat DEF → Blood Barrier → health →
+    /// Brace, then Unbroken Core. The Forge Path bucket cap, Unyielding and
+    /// kaiju keep their existing homes (`ForgePath`, `Panda`).
+    enum DamagePipeline {
+        /// All percentage reductions combined never exceed this (Brandon: 0.90).
+        static let reductionCeiling: CGFloat = 0.90
+        /// Blood Barrier pool cap, as a fraction of max HP (Q-B3).
+        static let barrierCapFraction: CGFloat = 0.5
+        /// Blood Barrier empties this long after its last positive gain (Q-B3).
+        static let barrierExpiry: TimeInterval = 4.0
+
+        static var tuning: PlayerDamagePipeline.Tuning {
+            PlayerDamagePipeline.Tuning(
+                reductionCeiling: reductionCeiling,
+                forgeBucketCap: ForgePath.drCap,
+                unyieldingThreshold: ForgePath.unyieldingThreshold,
+                unyieldingMultiplier: ForgePath.unyieldingReduction,
+                kaijuReduction: Panda.kaijuDamageReduction,
+                barrierCapFraction: barrierCapFraction,
+                barrierExpiry: barrierExpiry)
+        }
+    }
+
     // MARK: - Level-Up Stats (v1.9 Unit 4)
     /// Per-award stat increments for the level-up cadence: even levels let the
     /// player CHOOSE one of these, odd levels auto-award a random one. Starting

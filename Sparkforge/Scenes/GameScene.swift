@@ -41,6 +41,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var arenaConfig = GameScene.resolveArenaConfig()
     /// v2.1 (Geometry 1A): resolve/rejection counters + the DEBUG overlay.
     private let geometryDebug = GeometryDebug()
+    #if DEBUG
+    /// v2.1 A0: proof counters for the shared damage + kill events.
+    private var combatLedger = CombatLedger()
+    #endif
 
     /// v2.1 (Geometry 1A): the arena this RUN plays in. Normally
     /// ArenaConfig.current; under the DEBUG shell seam, the Splitworks shell —
@@ -2998,9 +3002,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // so it takes something catastrophic instead.
                 dealDirectDamage(GameConfig.BossClass.scaledDamage(
                     Int(playerStats.effectiveAttack * GameConfig.Panda.samuraiCatastrophicMult),
-                    isBossClass: true), toEnemy: e)
+                    isBossClass: true), toEnemy: e, source: .summon)
             } else {
-                dealDirectDamage(e.health, toEnemy: e)      // deleted
+                dealDirectDamage(e.health, toEnemy: e, source: .summon)      // deleted
             }
         case .boss(let b):
             if b.healthPercent <= GameConfig.BossClass.executeThreshold {
@@ -3083,7 +3087,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let damage = Int(playerStats.effectiveAttack * GameConfig.Panda.bodyCheckDamageMult)
             dealDirectDamage(GameConfig.BossClass.scaledDamage(damage,
                                                                isBossClass: target.isMiniBoss),
-                             toEnemy: target)
+                             toEnemy: target, source: .summon)
             target.applyKnockback(from: panda.node.position,
                                   force: GameConfig.Panda.bodyCheckKnockback)
             panda.node.bounce()
@@ -3287,7 +3291,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let idx = enemies.firstIndex(where: { $0 === e }) {
                 let pos = e.position, xp = e.xpValue
                 enemies.remove(at: idx)
-                onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+                onEnemyKilled(at: pos, xpValue: xp, enemy: e, source: .capstone)
             }
         }
         if let b = boss, !b.isDead,
@@ -3409,7 +3413,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 if let idx = enemies.firstIndex(where: { $0 === e }) {
                     let pos = e.position, xp = e.xpValue
                     enemies.remove(at: idx)
-                    onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+                    onEnemyKilled(at: pos, xpValue: xp, enemy: e, source: .summon)
                 }
             }
             // Rolling out of the arena is not a panda's problem, but it is ours.
@@ -3703,7 +3707,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pounce(animal, to: target.position,
                duration: GameConfig.NatureCanon.rabbitFlight) { [weak self] in
             guard let self = self, let mark = self.stillValid(target) else { return }
-            self.strikeCombatTarget(mark, damage: self.canonDamage(GameConfig.NatureCanon.rabbitCritMult))
+            self.strikeCombatTarget(mark, damage: self.canonDamage(GameConfig.NatureCanon.rabbitCritMult), source: .summon)
             // Crit grammar: the game's crits are red, so the kick reads as one
             // even without damage numbers on screen yet.
             self.showRingPulse(at: mark.position,
@@ -3750,6 +3754,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         )
         acorn.position = position
         acorn.zPosition = 8
+        acorn.killSource = .summon   // v2.1 A0
         projectiles.append(acorn)
         worldNode.addChild(acorn)
     }
@@ -3886,7 +3891,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let origin = treeNode?.position ?? player.position
         pounce(animal, to: target.position, spin: false) { [weak self] in
             guard let self = self, let mark = self.stillValid(target) else { return }
-            self.strikeCombatTarget(mark, damage: self.canonDamage(GameConfig.NatureCanon.deerDamageMult))
+            self.strikeCombatTarget(mark, damage: self.canonDamage(GameConfig.NatureCanon.deerDamageMult), source: .summon)
             // Knockback is an enemy-only verb — bosses hold their ground (the
             // same line the Vine Wall draws: a wall for the swarm, not titans).
             if case .enemy(let e) = mark {
@@ -3955,7 +3960,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let idx = enemies.firstIndex(where: { $0 === e }) {
                 let pos = e.position, xp = e.xpValue
                 enemies.remove(at: idx)
-                onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+                onEnemyKilled(at: pos, xpValue: xp, enemy: e, source: .summon)
             }
         }
 
@@ -4080,12 +4085,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     let bite = GameConfig.BossClass.scaledDamage(
                         self.canonDamage(GameConfig.NatureCanon.badgerBiteMult), isBossClass: true)
                     let dealt = min(bite, e.health)
-                    self.dealDirectDamage(bite, toEnemy: e)
+                    self.dealDirectDamage(bite, toEnemy: e, source: .summon)
                     healed += Int(CGFloat(dealt) * GameConfig.BossClass.debuffScale)
                 } else {
                     let worth = e.health
                     let scale = e.isMiniBoss ? GameConfig.BossClass.debuffScale : 1.0
-                    self.dealDirectDamage(worth, toEnemy: e)      // devoured whole
+                    self.dealDirectDamage(worth, toEnemy: e, source: .summon)      // devoured whole
                     healed += Int(CGFloat(worth) * scale * GameConfig.NatureCanon.badgerHealFraction)
                 }
                 self.showRingPulse(at: e.position,
@@ -4224,7 +4229,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     if let idx = enemies.firstIndex(where: { $0 === e }) {
                         let pos = e.position, xp = e.xpValue
                         enemies.remove(at: idx)
-                        onEnemyKilled(at: pos, xpValue: xp, enemy: e)
+                        onEnemyKilled(at: pos, xpValue: xp, enemy: e, source: .ground)
                         // THE propagation rule — and the leash on it.
                         if cloud.generation < GameConfig.NatureCanon.skunkMaxGeneration {
                             seeds.append((pos, cloud.generation + 1))
@@ -4276,7 +4281,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 fireProjectile(direction: dir,
                                originOffset: turret.body.position - player.position,
                                damageScale: GameConfig.NatureCanon.hedgehogNeedleDamage,
-                               allowModifiers: false)
+                               allowModifiers: false, source: .summon)
             }
             canonTurrets[i] = turret
         }
@@ -4334,7 +4339,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
               lion.position.distance(to: prey.position) < GameConfig.Tree.lionMaulReach + pad
         else { return }
         lionMaulCooldown = GameConfig.Tree.lionMaulInterval
-        strikeCombatTarget(prey, damage: Int(playerStats.effectiveAttack * GameConfig.Tree.lionMaulMult))
+        strikeCombatTarget(prey, damage: Int(playerStats.effectiveAttack * GameConfig.Tree.lionMaulMult), source: .summon)
 
         // A claw-swipe punch so each maul reads as a discrete hit rather than a
         // continuous grind.
@@ -4431,6 +4436,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         frag.seedGeneration = generation
         frag.position = position
         frag.zPosition = 8
+        frag.killSource = .fragment   // v2.1 A0
         projectiles.append(frag)
         worldNode.addChild(frag)
     }
@@ -4479,7 +4485,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             fireProjectile(direction: dir,
                            originOffset: flower.position - player.position,
                            damageScale: GameConfig.Growth.flowerDamageFraction,
-                           allowModifiers: false)
+                           allowModifiers: false, source: .summon)
         }
     }
 
@@ -4621,10 +4627,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // leave dead entries in `enemies` that pellets chased over the boss.
         // A kill is a kill: award its XP orb here (players shouldn't be robbed),
         // matching the burst-kill helpers — XP only, no on-kill cascade.
-        enemies.removeAll { enemy in
-            guard enemy.isDying else { return false }
-            spawnXPOrb(at: enemy.position, value: enemy.xpValue)
-            return true
+        // v2.1 A0: through the chokepoint, so it can never pay a credited kill.
+        for fallen in enemies where fallen.isDying {
+            onEnemyKilled(at: fallen.position, xpValue: fallen.xpValue, enemy: fallen, source: .sweep)
         }
 
         // Invulnerability timer
@@ -4806,7 +4811,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Enemy Updates
     
     private func updateEnemies(_ dt: TimeInterval) {
-        var diedFromDOT: [Int] = []
+        var diedFromDOT: [EnemyNode] = []
         var crowdCount = 0  // v1.8 Ironhide: enemies pressing the player
 
         // v2.1 (2b): route occupancy for the crowding term. Skipped entirely
@@ -4816,7 +4821,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             for e in enemies { if let id = e.routeNodeID { routeOccupancy[id, default: 0] += 1 } }
         }
 
-        for (index, enemy) in enemies.enumerated() {
+        for enemy in enemies {
             // v2.1 (1B): steer through the route graph when the direct line
             // is blocked; identical to player.position on open arenas.
             // (Ranged mobs inherit routing too — their LoS-aware FIRING
@@ -4888,7 +4893,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
             let diedDOT = enemy.updateStatusEffects(deltaTime: dt)
             if diedDOT {
-                diedFromDOT.append(index)
+                diedFromDOT.append(enemy)
             }
 
             if playerStats.burnSpreads && enemy.isBurning {
@@ -4906,12 +4911,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         playerStats.pressureDefActive = playerStats.pressureDefBonus > 0
             && crowdCount >= playerStats.pressureDefEnemyCount
 
-        for index in diedFromDOT.reversed() {
-            let enemy = enemies[index]
-            let pos = enemy.position
-            let xp = enemy.xpValue
-            enemies.remove(at: index)
-            onEnemyKilled(at: pos, xpValue: xp, enemy: enemy)
+        // v2.1 A0: by identity. Removing by the indices collected above broke
+        // when a death's on-kill burst removed other enemies first — the wrong
+        // (living) enemy was removed and credited, or the index ran off the end.
+        for enemy in diedFromDOT.reversed() {
+            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .statusTick)
         }
 
         // Fire queued Relay Burn arcs after the removal pass (safe mutation)
@@ -5082,7 +5086,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let index = enemies.firstIndex(where: { $0 === target }) {
                 enemies.remove(at: index)
             }
-            onEnemyKilled(at: target.position, xpValue: target.xpValue, enemy: target)
+            onEnemyKilled(at: target.position, xpValue: target.xpValue, enemy: target, source: .chain)
         }
     }
 
@@ -5241,8 +5245,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return closestPosition
     }
     
+    /// v2.1 A0: `source` is what a kill by this shot credits as — by default a
+    /// modifier-bearing shot is `.primary` and one fired without modifiers
+    /// (echoes, splits, shards, backwash) is `.fragment`.
     private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero,
-                                damageScale: CGFloat = 1.0, allowModifiers: Bool = true) {
+                                damageScale: CGFloat = 1.0, allowModifiers: Bool = true,
+                                source: KillSource? = nil) {
         // v1.9 Polar Vortex Glacial Condensation (T4): primary shots don't fire
         // immediately — every Nth condenses into one icicle; the rest are absorbed.
         if playerStats.glacialActive && allowModifiers {
@@ -5271,6 +5279,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             voidStyle: playerStats.erasureVoidTouched,
             frostStyle: playerStats.polarVortexTier >= 1
         )
+        projectile.killSource = source ?? (allowModifiers ? .primary : .fragment)
         projectile.position = player.position + originOffset
         projectile.zPosition = 8
         projectiles.append(projectile)
@@ -5438,6 +5447,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // v1.3: Overcharge — builds while unhit
         playerStats.updateOvercharge(dt)
+        playerStats.bloodBarrier.tick(dt)   // v2.1 A0: expiry on game time
         
         // v1.3: Phase Skin — tick timers
         playerStats.updatePhaseSkin(dt)
@@ -5587,10 +5597,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         for enemy in killed {
-            if let index = enemies.firstIndex(where: { $0 === enemy }) {
-                spawnXPOrb(at: enemy.position, value: enemy.xpValue)
-                enemies.remove(at: index)
-            }
+            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .burst)
         }
 
         // Boss death flow (XP, bossKills, shake) runs via the boss's onDeath callback.
@@ -5739,7 +5746,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .boss(let b):
             b.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: true))
         case .enemy(let e):
-            dealDirectDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: e.isMiniBoss), toEnemy: e)
+            dealDirectDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: e.isMiniBoss), toEnemy: e, source: .capstone)
         }
         showIronMaidenTracer(from: player.position, to: target.position)
     }
@@ -5768,32 +5775,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if let bossNode = enemyBody.node as? (any ArenaBossNode) {
             bossNode.takeDamage(amount)
         } else if let enemy = enemyBody.node as? EnemyNode {
-            dealDirectDamage(amount, toEnemy: enemy)
+            dealDirectDamage(amount, toEnemy: enemy, source: .retaliation)
         }
     }
 
     /// v1.9 Forge Path (Unit 2a): route ALL player damage through here so the
-    /// Vitality survival nodes apply — the damage-reduction bucket (defined order,
-    /// capped) + the emergency nodes (Second Breath / Unyielding). Returns died.
+    /// Vitality survival nodes apply — the damage-reduction bucket + the
+    /// emergency nodes (Second Breath / Unyielding).
+    /// v2.1 A0: the numbers resolve through `PlayerDamagePipeline` (closure
+    /// table CL-5 order) and a lethal hit's rescue is decided HERE — callers
+    /// read `outcome.died` / `outcome.rescue` and keep only their own aftermath.
+    /// Explicit invulnerability (i-frames, Silver Skin, Phase Skin) stays in the
+    /// callers' guards, before this runs.
     @discardableResult
-    private func applyPlayerDamage(_ raw: Int, fromBossClass: Bool) -> Bool {
-        var dmg = CGFloat(raw)
+    private func applyPlayerDamage(_ raw: Int, fromBossClass: Bool) -> PlayerDamagePipeline.Outcome {
+        var hit = PlayerDamagePipeline.Hit(raw: raw)
 
         // v2.0 (B3): Boss Mode ATK dial — scales incoming boss-class damage,
         // BEFORE the player's own mitigation runs, so DEF/DR still behave. Only
         // boss-class sources; the dial is about the boss's threat, not adds.
         if isGauntlet, fromBossClass {
-            dmg *= BossModeDials.shared.atk
+            hit.inputScale = BossModeDials.shared.atk
         }
 
         // Unyielding (20B): once/CD, halve a hit that exceeds 20% of Max HP.
-        if playerStats.forgeUnyielding, forgeUnyieldingCooldown <= 0,
-           CGFloat(raw) > CGFloat(playerStats.maxHP) * GameConfig.ForgePath.unyieldingThreshold {
-            dmg *= GameConfig.ForgePath.unyieldingReduction
-            forgeUnyieldingCooldown = GameConfig.ForgePath.emergencyCooldown
-        }
+        // The pipeline decides whether it qualifies; the cooldown starts below.
+        hit.unyieldingReady = playerStats.forgeUnyielding && forgeUnyieldingCooldown <= 0
 
-        // Damage-reduction bucket — sum active sources, then cap.
+        // Damage-reduction bucket — sum active sources (the pipeline caps it).
         var dr: CGFloat = 0
         let hpFrac = playerStats.hpPercent
         if playerStats.forgeVitalSurplusDR > 0, hpFrac > GameConfig.ForgePath.vitalSurplusThreshold {
@@ -5813,16 +5822,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             dr += GameConfig.ForgePath.bracedReduction
             forgeBracedCooldown = GameConfig.ForgePath.bracedCooldown
         }
-        dr = min(dr, GameConfig.ForgePath.drCap)
-        if dr > 0 { dmg *= (1 - dr) }
+        hit.forgeBucket = dr
 
         // v2.0 (C2): while Spark is a kaiju, most of what hits him doesn't
-        // matter. Applied AFTER the DR cap on purpose — this is a transformation,
-        // not another entry in the mitigation bucket, and capping it would make
-        // the biggest moment in the tree feel like a Forge Path node.
-        if kaijuActive { dmg *= (1 - GameConfig.Panda.kaijuDamageReduction) }
+        // matter. v2.1 (CL-5 ruling): inside the 90% ceiling — alone it keeps
+        // its full 85%; stacked, it tops out with everything else.
+        hit.kaijuActive = kaijuActive
+        hit.flatDEF = playerStats.effectiveFlatDEF
 
-        // A hit resets the undamaged clock (Steady Pulse / Slipstream) + Defiant.
+        let outcome = PlayerDamagePipeline.resolve(hit, against: playerStats.damageDefender,
+                                                   tuning: GameConfig.DamagePipeline.tuning)
+        playerStats.commit(outcome)
+        if outcome.unyieldingFired {
+            forgeUnyieldingCooldown = GameConfig.ForgePath.emergencyCooldown
+        }
+
+        // Every resolved hit is a HIT — barrier-only included: Overcharge
+        // resets, the undamaged clock (Steady Pulse / Slipstream), Defiant.
+        playerStats.resetOvercharge()
         forgeTimeSinceDamage = 0
         forgeSlipstreamReady = true
         if playerStats.forgeDefiant {
@@ -5830,17 +5847,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             playerStats.forgeDefiantActive = true
         }
 
-        let died = player.applyDamage(max(1, Int(dmg)))
+        player.playHitFeedback(damage: outcome.percentDamage)
+        switch outcome.rescue {
+        case .brace, .unbrokenCore:
+            // Unbroken Core's 10s invulnerability / bonus-ATK window lands in A5.
+            player.playLethalSaveFlash()
+        case .none:
+            break
+        }
 
-        // Second Breath (20A): once/CD, dropping below 25% HP restores 10% Max HP.
-        if !died, playerStats.forgeSecondBreath, forgeSecondBreathCooldown <= 0,
+        // Second Breath (20A): once/CD, dropping below 25% HP restores 10% Max
+        // HP — on a hit that wasn't lethal (a rescued hit never triggered it).
+        if !outcome.wasLethal, playerStats.forgeSecondBreath, forgeSecondBreathCooldown <= 0,
            playerStats.hpPercent < GameConfig.ForgePath.secondBreathThreshold {
             playerStats.heal(Int(CGFloat(playerStats.maxHP) * GameConfig.ForgePath.secondBreathFraction))
             forgeSecondBreathCooldown = GameConfig.ForgePath.emergencyCooldown
             hpBar.flashHeal()
             hpBar.updateFill(playerStats.hpPercent, currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
         }
-        return died
+
+        #if DEBUG
+        combatLedger.record(outcome)
+        #endif
+        return outcome
     }
 
     private func nearbyEnemyCount(_ radius: CGFloat) -> Int {
@@ -5960,13 +5989,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     /// Deal flat damage to a specific normal enemy, handling kill bookkeeping.
-    private func dealDirectDamage(_ amount: Int, toEnemy enemy: EnemyNode) {
+    private func dealDirectDamage(_ amount: Int, toEnemy enemy: EnemyNode, source: KillSource) {
         guard amount > 0 else { return }
         if enemy.takeDamage(amount) {
             if let index = enemies.firstIndex(where: { $0 === enemy }) {
                 enemies.remove(at: index)
             }
-            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: source)
         }
     }
 
@@ -5995,7 +6024,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if skybeamTickTimer >= GameConfig.Skybeam.tickInterval {
             skybeamTickTimer -= GameConfig.Skybeam.tickInterval
             let dmg = max(1, Int(playerStats.effectiveAttack * playerStats.skybeamTickMult))
-            if strikeCombatTarget(target, damage: dmg) { clearLasso(); return }
+            if strikeCombatTarget(target, damage: dmg, source: .capstone) { clearLasso(); return }
         }
 
         // T4 : Heaven's Call — the prey takes +35% from all sources after 2s.
@@ -6061,7 +6090,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// global BossClass factor — capstones stay strong vs the horde, fair vs the
     /// big targets. Returns true if the hit killed a normal enemy.
     @discardableResult
-    private func strikeCombatTarget(_ target: CombatTarget, damage: Int) -> Bool {
+    private func strikeCombatTarget(_ target: CombatTarget, damage: Int, source: KillSource) -> Bool {
         switch target {
         case .boss(let b):
             b.takeDamage(GameConfig.BossClass.scaledDamage(damage, isBossClass: true))
@@ -6071,7 +6100,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let killed = e.takeDamage(dmg)
             if killed {
                 if let index = enemies.firstIndex(where: { $0 === e }) { enemies.remove(at: index) }
-                onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e)
+                onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e, source: source)
             }
             return killed
         }
@@ -6227,7 +6256,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if alive {
             let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Skybeam.strikeMult))
-            strikeCombatTarget(target, damage: dmg)
+            strikeCombatTarget(target, damage: dmg, source: .capstone)
         }
     }
 
@@ -6435,7 +6464,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func recordBatKill(_ e: EnemyNode) {
         if let i = enemies.firstIndex(where: { $0 === e }) { enemies.remove(at: i) }
         playerStats.apexFamiliarKills += 1
-        onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e)
+        onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e, source: .summon)
     }
 
     /// Execute a normal enemy outright — lethal hit + a pixelated blood-mist
@@ -6799,7 +6828,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.group([SKAction.scale(to: 8, duration: 0.5), SKAction.fadeOut(withDuration: 0.6)]),
             SKAction.removeFromParent()
         ]))
-        playerDied()   // direct — bypasses tryLethalSave / ad-revive
+        playerDied()   // direct — bypasses the lethal rescues / ad-revive
     }
 
     private func nearestEnemyToPlayer() -> EnemyNode? {
@@ -6869,7 +6898,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         for e in killed {
             if let i = enemies.firstIndex(where: { $0 === e }) { enemies.remove(at: i) }
-            onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e)
+            onEnemyKilled(at: e.position, xpValue: e.xpValue, enemy: e, source: .capstone)
         }
         if let b = boss, !b.isDead {
             let rel = b.position - origin
@@ -6939,7 +6968,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 self.showRingPulse(at: enemy.position, radius: 28, colorHex: 0x8E44AD)
                 if enemy.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: enemy.isMiniBoss)) {
                     if let i = self.enemies.firstIndex(where: { $0 === enemy }) { self.enemies.remove(at: i) }
-                    self.onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                    self.onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .capstone)
                 }
             }
         ]))
@@ -6957,12 +6986,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// 6. Fracture — the target briefly takes more damage (timed vulnerability).
     private func erasureFracture(_ enemy: EnemyNode) {
-        enemy.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
-            GameConfig.Erasure.fractureVulnerability, isBossClass: enemy.isMiniBoss)
-        enemy.run(SKAction.sequence([
-            SKAction.wait(forDuration: GameConfig.Erasure.fractureDuration),
-            SKAction.run { [weak enemy] in enemy?.vulnerabilityMultiplier = 1.0 }
-        ]), withKey: "erasureFracture")
+        // v2.1 A0: game-time window (was an SKAction wait that ran on under pause).
+        enemy.applyFracture(GameConfig.BossClass.scaledDebuff(
+                                GameConfig.Erasure.fractureVulnerability, isBossClass: enemy.isMiniBoss),
+                            duration: GameConfig.Erasure.fractureDuration)
         showRingPulse(at: enemy.position, radius: 26, colorHex: 0xC39BD3)
     }
 
@@ -7013,6 +7040,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         )
         icicle.position = player.position + originOffset
         icicle.zPosition = 8
+        icicle.killSource = .capstone   // v2.1 A0: the condensed capstone shot
         projectiles.append(icicle)
         worldNode.addChild(icicle)
     }
@@ -7134,12 +7162,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         showRingPulse(at: e.position, radius: 30, colorHex: 0x99E6FF)
 
         let vuln = GameConfig.BossClass.scaledDebuff(GameConfig.PolarVortex.frostbiteVuln, isBossClass: bossClass)
-        e.run(SKAction.sequence([
-            SKAction.wait(forDuration: freezeDur),
-            SKAction.run { [weak e] in e?.vulnerabilityMultiplier = vuln },
-            SKAction.wait(forDuration: GameConfig.PolarVortex.frostbiteDuration),
-            SKAction.run { [weak e] in e?.vulnerabilityMultiplier = 1.0 }
-        ]), withKey: "frostbite")
+        // v2.1 A0: game-time window (was an SKAction wait that ran on under pause).
+        e.scheduleFrostbite(vuln, after: freezeDur, lasting: GameConfig.PolarVortex.frostbiteDuration)
     }
 
     // MARK: - v1.6: Gravity Wells
@@ -7176,7 +7200,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 for enemy in killed {
                     if let i = enemies.firstIndex(where: { $0 === enemy }) {
                         enemies.remove(at: i)
-                        onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                        onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .ground)
                     }
                 }
             }
@@ -7267,10 +7291,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         for enemy in killed {
-            if let index = enemies.firstIndex(where: { $0 === enemy }) {
-                spawnXPOrb(at: enemy.position, value: enemy.xpValue)
-                enemies.remove(at: index)
-            }
+            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .burst)
         }
     }
 
@@ -7380,7 +7401,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for enemy in killed {
             if let index = enemies.firstIndex(where: { $0 === enemy }) {
                 enemies.remove(at: index)
-                onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .ground)
             }
         }
     }
@@ -7573,7 +7594,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // it owns killCount (now the per-run boss gate), the seed burst,
                 // forge triggers and the XP orb. A manual spawnXPOrb here both
                 // skipped the gate and would double the orb.
-                onEnemyKilled(at: pos, xpValue: xp, enemy: enemy)
+                onEnemyKilled(at: pos, xpValue: xp, enemy: enemy, source: .ground)
             }
         }
     }
@@ -8927,16 +8948,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossNode.onSlamHit = { [weak self] pos, radius, damage in
             guard let self = self else { return }
             if self.player.position.distance(to: pos) < radius {
-                guard self.damageCooldownTimer <= 0 else { return }
-                let died = self.applyPlayerDamage(damage, fromBossClass: true)  // boss slam
-                self.damageCooldownTimer = GameConfig.Player.damageCooldown
-                self.hpBar.flashDamage()
-                AudioManager.shared.play(.playerDamage)
-                self.worldNode.shake(intensity: 10, duration: 0.3)
-                if died {
-                    if self.player.tryLethalSave() { return }
-                    self.playerDied()
-                }
+                // v2.1 A0: the slam used to check only the damage cooldown —
+                // no i-frames, Silver Skin or Phase Skin. It's a boss hazard.
+                self.applyBossHazardDamage(damage, shakeIntensity: 10, shakeDuration: 0.3)
             }
         }
         bossNode.onDeath = { [weak self] pos, xp in
@@ -9385,6 +9399,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// boss hazard); Arena 5's Anvilborn slam passes false — it's an elite, so
     /// boss-class DR (Giantkiller's Guard) must not apply to it.
     private func applyBossHazardDamage(_ damage: Int, shakeIntensity: CGFloat,
+                                       shakeDuration: TimeInterval = 0.2,
                                        fromBossClass: Bool = true) {
         guard gameState == .playing else { return }
         guard !isInvulnerable else { return }
@@ -9403,18 +9418,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        playerStats.resetOvercharge()
-        let died = applyPlayerDamage(damage, fromBossClass: fromBossClass)
+        let outcome = applyPlayerDamage(damage, fromBossClass: fromBossClass)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
-        worldNode.shake(intensity: shakeIntensity, duration: 0.2)
+        worldNode.shake(intensity: shakeIntensity, duration: shakeDuration)
 
-        if died {
-            if player.tryLethalSave() {
-                damageCooldownTimer = 1.0
-                return
-            }
+        if outcome.rescue != .none {
+            damageCooldownTimer = 1.0
+        } else if outcome.died {
             playerDied()
         }
     }
@@ -9589,7 +9601,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - Enemy Killed
     
-    private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil) {
+    /// v2.1 A0: THE kill-credit chokepoint. Every enemy death routes here with
+    /// its `KillSource`. A kill is paid exactly once (`killCredited`), leaves
+    /// `enemies` by identity, and pays at its source's tier: radius bursts and
+    /// the frame-top sweep are XP-only (as they always were); everything else
+    /// is a full kill with its on-kill effects. On-kill effects can read
+    /// `source` to decide whether they react (A1–A6).
+    private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil,
+                               source: KillSource) {
+        if let enemy = enemy {
+            guard !enemy.killCredited else {
+                #if DEBUG
+                combatLedger.recordDuplicate(source)
+                #endif
+                return
+            }
+            enemy.killCredited = true
+            if let index = enemies.firstIndex(where: { $0 === enemy }) {
+                enemies.remove(at: index)
+            }
+        }
+        #if DEBUG
+        combatLedger.recordKill(source)
+        #endif
+        guard source.credit == .full else {
+            spawnXPOrb(at: position, value: xpValue)
+            return
+        }
+
         killCount += 1
 
         // v1.9 Polar Vortex Iceburst (T1): a chilled foe's death bursts into shards.
@@ -9782,20 +9821,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let radius = playerStats.explosionRadius
         let damage = max(1, Int(playerStats.damageMultiplier * playerStats.explosionDamagePercent))
         
-        var killedInExplosion: [Int] = []
+        var killedInExplosion: [EnemyNode] = []
         
-        for (index, enemy) in enemies.enumerated() {
+        for enemy in enemies {
             if enemy.position.distance(to: position) < radius {
                 if enemy.takeDamage(damage) {
-                    killedInExplosion.append(index)
+                    killedInExplosion.append(enemy)
                 }
             }
         }
         
-        for index in killedInExplosion.reversed() {
-            let enemy = enemies[index]
-            spawnXPOrb(at: enemy.position, value: enemy.xpValue)
-            enemies.remove(at: index)
+        for enemy in killedInExplosion.reversed() {
+            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .burst)
         }
         
         let blast = SKShapeNode(circleOfRadius: 1)
@@ -9947,7 +9984,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     if let index = enemies.firstIndex(where: { $0 === enemy }) {
                         enemies.remove(at: index)
                     }
-                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy)
+                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .retaliation)
                 }
             }
         }
@@ -9964,9 +10001,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             worldNode.shake(intensity: 4, duration: 0.15)
             return
         }
-        
-        // v1.3: Overcharge resets on hit
-        playerStats.resetOvercharge()
         
         // v1.4: Calculate damage based on elapsed time
         // v1.6: Boss and mini-boss hit with their configured damage, not generic melee
@@ -9985,7 +10019,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             fromBossClass = false
         }
 
-        let died = applyPlayerDamage(damage, fromBossClass: fromBossClass)
+        // v1.3 Overcharge reset + lethal rescue now live inside the pipeline (A0).
+        let outcome = applyPlayerDamage(damage, fromBossClass: fromBossClass)
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
@@ -10017,18 +10052,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        if died {
-            if player.tryLethalSave() {
-                for enemy in enemies {
-                    if player.position.distance(to: enemy.position) < 50 {
-                        let dir = (enemy.position - player.position).normalized
-                        enemy.position += dir * 40
-                    }
+        if outcome.rescue != .none {
+            for enemy in enemies {
+                if player.position.distance(to: enemy.position) < 50 {
+                    let dir = (enemy.position - player.position).normalized
+                    enemy.position += dir * 40
                 }
-                worldNode.shake(intensity: 8, duration: 0.25)
-                damageCooldownTimer = 1.0  // Generous i-frames after lethal save
-                return
             }
+            worldNode.shake(intensity: 8, duration: 0.25)
+            damageCooldownTimer = 1.0  // Generous i-frames after lethal save
+        } else if outcome.died {
             playerDied()
         }
     }
@@ -10069,11 +10102,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
         
-        // v1.3: Overcharge resets on hit
-        playerStats.resetOvercharge()
-        
-        // v1.4: Use projectile's damage value instead of instant kill
-        let died = applyPlayerDamage(projNode.damage, fromBossClass: false)  // enemy projectile
+        // v1.4: Use projectile's damage value instead of instant kill.
+        // v2.1 A0: Overcharge reset + lethal rescue live inside the pipeline.
+        let outcome = applyPlayerDamage(projNode.damage, fromBossClass: false)  // enemy projectile
         damageCooldownTimer = GameConfig.Player.damageCooldown
         hpBar.flashDamage()
         AudioManager.shared.play(.playerDamage)
@@ -10088,18 +10119,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             kineticGauge.setFilled(playerStats.ironKineticStacks)
         }
 
-        if died {
-            if player.tryLethalSave() {
-                for enemy in enemies {
-                    if player.position.distance(to: enemy.position) < 50 {
-                        let dir = (enemy.position - player.position).normalized
-                        enemy.position += dir * 40
-                    }
+        if outcome.rescue != .none {
+            for enemy in enemies {
+                if player.position.distance(to: enemy.position) < 50 {
+                    let dir = (enemy.position - player.position).normalized
+                    enemy.position += dir * 40
                 }
-                worldNode.shake(intensity: 8, duration: 0.25)
-                damageCooldownTimer = 1.0
-                return
             }
+            worldNode.shake(intensity: 8, duration: 0.25)
+            damageCooldownTimer = 1.0
+        } else if outcome.died {
             playerDied()
         }
     }
@@ -10224,7 +10253,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
                         enemies.remove(at: index)
                     }
-                    onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode)
+                    onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode, source: projectileNode.killSource)
                 }
                 if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
                     projectiles.remove(at: index)
@@ -10277,7 +10306,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
                 enemies.remove(at: index)
             }
-            onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode)
+            onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode, source: projectileNode.killSource)
         }
         apexRegisterAttack()   // T5 Apex: every player hit charges the pounce gauge
 
@@ -10383,7 +10412,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let index = enemies.firstIndex(where: { $0 === target }) {
                 enemies.remove(at: index)
             }
-            onEnemyKilled(at: pos, xpValue: xp, enemy: target)
+            onEnemyKilled(at: pos, xpValue: xp, enemy: target, source: .chain)
         }
     }
     
@@ -10620,6 +10649,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func playerDied() {
         guard gameState == .playing else { return }
         gameState = .dead
+        #if DEBUG
+        NSLog("[A0] run ended  %@", combatLedger.summary)
+        #endif
 
         // v1.9: the killing blow zeroed currentHP, but updateHUD only runs while
         // .playing — so push the bar to 0 here or it freezes on its last value.
@@ -11103,6 +11135,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         forgeBracedCooldown = 0
         forgeSecondBreathCooldown = 0
         forgeUnyieldingCooldown = 0
+        #if DEBUG
+        combatLedger = CombatLedger()
+        #endif
         forgeRegenTimer = 0
         forgeTimeSinceDamage = 0
         forgeDefiantTimer = 0

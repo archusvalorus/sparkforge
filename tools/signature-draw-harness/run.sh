@@ -12,9 +12,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
+# PlayerStats holds A0's damage-pipeline state, so its value types ride along.
 cp "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/Sparkforge/Systems/PlayerStats.swift" \
+   "$ROOT/Sparkforge/Systems/PlayerDamagePipeline.swift" \
+   "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$HERE/Stubs.swift" "$HERE/main.swift" "$BUILD/"
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
-       "$BUILD/UpgradeManager.swift" "$BUILD/PlayerStats.swift"
+       "$BUILD/UpgradeManager.swift" "$BUILD/PlayerStats.swift" \
+       "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GameTimer.swift"
 "$BUILD/harness"

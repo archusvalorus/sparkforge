@@ -996,12 +996,14 @@ final class PlayerNode: SKNode {
         }
     }
 
-    func applyDamage(_ rawDamage: Int) -> Bool {
-        guard let stats = stats else { return true }
-        let died = stats.takeDamage(rawDamage)
+    /// v2.1 A0: hit feedback only — the numbers resolve in GameScene through
+    /// `PlayerDamagePipeline`. `damage` is the hit after percentage reduction,
+    /// before flat DEF (what the flash has always scaled by).
+    func playHitFeedback(damage: Int) {
+        guard let stats = stats else { return }
 
         // Visual feedback — red flash proportional to damage
-        let flashIntensity = min(CGFloat(rawDamage) / CGFloat(stats.maxHP) * 2.0, 1.0)
+        let flashIntensity = min(CGFloat(damage) / CGFloat(max(1, stats.maxHP)) * 2.0, 1.0)
         let flashColor = SKColor(red: 1.0, green: 1.0 - flashIntensity * 0.7, blue: 1.0 - flashIntensity * 0.7, alpha: 1.0)
 
         let flash = SKAction.sequence([
@@ -1027,8 +1029,6 @@ final class PlayerNode: SKNode {
         glowNode.run(flicker, withKey: "damageFlicker")
 
         showHitFace()   // v1.9: a little ">_<" personality on every hit
-
-        return died
     }
 
     // MARK: - Lethal Save
@@ -1039,8 +1039,13 @@ final class PlayerNode: SKNode {
         guard let stats = stats, stats.lethalSaves > 0 else { return false }
         stats.lethalSaves -= 1
         stats.currentHP = 1  // Survive with 1 HP
+        playLethalSaveFlash()
+        return true
+    }
 
-        // Brief invulnerability flash
+    /// v2.1 A0: the survive-at-1-HP flash, shared by Brace (and Unbroken Core
+    /// until A5 gives it its own window).
+    func playLethalSaveFlash() {
         let flash = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.2, duration: 0.05),
             SKAction.fadeAlpha(to: 1.0, duration: 0.05),
@@ -1050,7 +1055,6 @@ final class PlayerNode: SKNode {
             SKAction.fadeAlpha(to: 1.0, duration: 0.1)
         ])
         run(flash)
-        return true
     }
 
     // MARK: - Death

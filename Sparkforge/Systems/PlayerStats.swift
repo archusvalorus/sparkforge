@@ -176,21 +176,31 @@ final class PlayerStats {
         }
     }
 
-    /// Take damage after DEF reduction. Returns true if player died (HP <= 0).
-    @discardableResult
-    func takeDamage(_ rawDamage: Int) -> Bool {
+    /// Flat DEF a hit is reduced by: base DEF plus every conditional source.
+    var effectiveFlatDEF: Int {
         // v1.7 Grounded Core: the brace adds DEF while standing still
         // v1.8 Ironhide: pressure-DEF while crowded (set per-frame by GameScene)
-        let effectiveDefense = defense
+        defense
             + (groundedCoreBraced ? groundedCoreBonusDEF : 0)
             + (pressureDefActive ? pressureDefBonus : 0)
             + groundDefBonus   // C1.7 Deeproot: DEF while on cultivated ground
-        let reduced = max(1, rawDamage - effectiveDefense)
+    }
+
+    /// Take damage after DEF reduction. Returns true if player died (HP <= 0).
+    /// v2.1 A0: enemy hits go through `PlayerDamagePipeline` + `commit`; this
+    /// stays for self-inflicted damage (Unstable Core), unchanged.
+    @discardableResult
+    func takeDamage(_ rawDamage: Int) -> Bool {
+        let reduced = max(1, rawDamage - effectiveFlatDEF)
         currentHP -= reduced
         if currentHP < 0 { currentHP = 0 }
+        growEverglowOnHit()
+        return currentHP <= 0
+    }
 
-        // v1.9 Everglow: rage — taking damage permanently grows the pulse (T3)
-        // and ATK (T4), each capped per run.
+    /// v1.9 Everglow: rage — taking damage permanently grows the pulse (T3)
+    /// and ATK (T4), each capped per run.
+    private func growEverglowOnHit() {
         if everglowRageScaling {
             everglowPulseGrowth = min(everglowPulseGrowth + GameConfig.Everglow.rageGainPerHit,
                                       GameConfig.Everglow.pulseGrowthCap)
@@ -199,8 +209,36 @@ final class PlayerStats {
             everglowAtkGrowth = min(everglowAtkGrowth + GameConfig.Everglow.furnaceAtkGainPerHit,
                                     GameConfig.Everglow.atkGrowthCap)
         }
+    }
 
-        return currentHP <= 0
+    // MARK: - v2.1 A0: damage pipeline state (closure table CL-5)
+
+    /// Pre-health shield pool — Sanguinarian kills and Siphon overheal (A4).
+    var bloodBarrier = BloodBarrier()
+    /// Guard ×7 Unbroken Core's lethal rescue: armed by the synergy (A5),
+    /// spent once per run, always AFTER Brace (Q-G1).
+    var unbrokenRescueAvailable = false
+
+    /// The state an incoming hit resolves against.
+    var damageDefender: PlayerDamagePipeline.Defender {
+        PlayerDamagePipeline.Defender(currentHP: currentHP, maxHP: maxHP,
+                                      barrier: bloodBarrier.amount,
+                                      braceAvailable: lethalSaves > 0,
+                                      unbrokenAvailable: unbrokenRescueAvailable)
+    }
+
+    /// Commit a resolved hit: health, barrier, the spent rescue, and the
+    /// per-hit Everglow growth (every hit, barrier-only included). Cooldowns,
+    /// FX and the reactive events stay with the scene.
+    func commit(_ outcome: PlayerDamagePipeline.Outcome) {
+        currentHP = outcome.hpAfter
+        bloodBarrier.spend(outcome.absorbed)
+        switch outcome.rescue {
+        case .brace: lethalSaves = max(0, lethalSaves - 1)
+        case .unbrokenCore: unbrokenRescueAvailable = false
+        case .none: break
+        }
+        growEverglowOnHit()
     }
     
     // MARK: - Forge Path — Vitality survival nodes (rework Unit 2a)
@@ -1070,6 +1108,8 @@ final class PlayerStats {
         inWellSlow = 0.0
         knockbackForce = 0.0
         lethalSaves = 0
+        bloodBarrier.clear()
+        unbrokenRescueAvailable = false
         collisionShrink = 1.0
         globalEnemySlow = 0.0
         chainTargets = 0
