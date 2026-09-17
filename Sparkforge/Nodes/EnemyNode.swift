@@ -72,8 +72,12 @@ class EnemyNode: SKNode {
     
     private(set) var currentSlow: CGFloat = 0.0
     private var slowTimer: TimeInterval = 0
-    private(set) var burnDPS: CGFloat = 0.0
-    private var burnTimer: TimeInterval = 0
+    /// v2.1 A1: Burn — Crucible's per-enemy stacks + dormant decay (CL-16).
+    private(set) var burn = BurnState()
+    /// Lazily built row of ember pips — only enemies that reach 2+ stacks pay for it.
+    private var burnPips: [SKShapeNode] = []
+    private var drawnBurnStacks = 0
+    private var drawnBurnDormant = false
     private(set) var bleedDPS: CGFloat = 0.0
     private var bleedTimer: TimeInterval = 0
     /// v1.8 (Unit 14): situational bleed scaling set by GameScene each frame —
@@ -103,7 +107,8 @@ class EnemyNode: SKNode {
     private var frostbiteWindow = DelayedWindow()
     private var frostbiteMultiplier: CGFloat = 1.0
     
-    var isBurning: Bool { burnDPS > 0 && burnTimer > 0 }
+    var isBurning: Bool { burn.isBurning }
+    var burnStacks: Int { burn.stacks }
     var isSlowed: Bool { currentSlow > 0 && slowTimer > 0 }
     var isBleeding: Bool { bleedDPS > 0 && bleedTimer > 0 }
     var isStunned: Bool { stunTimer > 0 }
@@ -366,11 +371,53 @@ class EnemyNode: SKNode {
         rightEye.fillColor = SKColor(hex: 0x4488FF)
     }
     
-    func applyBurn(_ dps: CGFloat, duration: TimeInterval) {
-        burnDPS = max(burnDPS, dps)
-        burnTimer = max(burnTimer, duration)
-        rimGlowNode.strokeColor = SKColor(hex: 0xFF6633, alpha: 0.9)
-        rimGlowNode.glowWidth = 6
+    /// Apply Burn. `source` decides whether this can add a Crucible stack
+    /// (only a Kindle hit can); `stackCap` is the player's cap (1 = no
+    /// stacking). Returns true when a stack was added.
+    @discardableResult
+    func applyBurn(_ dps: CGFloat, duration: TimeInterval,
+                   source: BurnState.Source = .other, stackCap: Int = 1) -> Bool {
+        let added = burn.ignite(dps: dps, duration: duration, source: source, stackCap: stackCap,
+                                stackInterval: GameConfig.Fire.crucibleStackInterval)
+        refreshBurnVisual()
+        return added
+    }
+
+    /// v2.1 A1 placeholder tell: the rim burns hotter per stack, and from two
+    /// stacks up a row of ember pips counts them. Dormant stacks (Burn ended,
+    /// fading one by one) keep their pips, dimmed, with the rim gone cold.
+    private func refreshBurnVisual() {
+        let stacks = burn.stacks
+        let dormant = burn.isDormant
+        drawnBurnStacks = stacks
+        drawnBurnDormant = dormant
+
+        if burn.isBurning {
+            rimGlowNode.strokeColor = SKColor(hex: 0xFF6633, alpha: 0.9)
+            rimGlowNode.glowWidth = 6 + CGFloat(max(0, stacks - 1)) * 1.5
+        } else {
+            rimGlowNode.strokeColor = SKColor(hex: 0x661111, alpha: 0.7)
+            rimGlowNode.glowWidth = 4
+        }
+
+        guard stacks >= 2 || !burnPips.isEmpty else { return }
+        let r = GameConfig.Enemy.visualRadius
+        while burnPips.count < stacks {
+            let pip = SKShapeNode(circleOfRadius: 1.8)
+            pip.strokeColor = .clear
+            pip.zPosition = 7
+            addChild(pip)
+            burnPips.append(pip)
+        }
+        let shown = stacks >= 2 ? stacks : 0
+        let spacing: CGFloat = 5
+        let startX = -CGFloat(max(0, shown - 1)) * spacing / 2
+        for (i, pip) in burnPips.enumerated() {
+            pip.isHidden = i >= shown
+            pip.position = CGPoint(x: startX + CGFloat(i) * spacing, y: r + 6)
+            pip.fillColor = SKColor(hex: dormant ? 0x8A4A2A : 0xFFB84D, alpha: dormant ? 0.55 : 1.0)
+            pip.glowWidth = dormant ? 0 : 2
+        }
     }
     
     func applyBleed(_ dps: CGFloat, duration: TimeInterval) {
@@ -432,13 +479,10 @@ class EnemyNode: SKNode {
         case .none: break
         }
 
-        if burnTimer > 0 {
-            burnTimer -= deltaTime
-            totalDOT += burnDPS
-            if burnTimer <= 0 {
-                burnDPS = 0
-                rimGlowNode.strokeColor = SKColor(hex: 0x661111, alpha: 0.7)
-                rimGlowNode.glowWidth = 4
+        if burn.stacks > 0 {
+            totalDOT += burn.tick(deltaTime, decayInterval: GameConfig.Fire.burnStackDecayInterval)
+            if burn.stacks != drawnBurnStacks || burn.isDormant != drawnBurnDormant {
+                refreshBurnVisual()
             }
         }
         

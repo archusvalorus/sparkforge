@@ -47,6 +47,9 @@ final class CardDetailNode: SKNode {
         /// (multi-tier cards), the ladder replaces the single `effect` line —
         /// rung 1 IS the base effect. nil/empty → 1-tier card, show `effect`.
         var cardLadder: [CardTierLine]? = nil
+        /// v2.1 (abilities): the card's expanded detail — cooldowns,
+        /// prerequisites, rules the compact line can't fit. nil → nothing renders.
+        var detail: String? = nil
         /// v2.0 (C2): a SECRET card. Its family is not disclosed — the chip
         /// reads `???` instead of naming a tree. Everything else about the entry
         /// is already useless by construction (every rung's effect is `???`),
@@ -169,6 +172,23 @@ final class CardDetailNode: SKNode {
                 body.addChild(l)
                 y -= 16
             }
+        }
+
+        // v2.1 (abilities): expanded detail, dimmer than the effect it explains.
+        if let detail = content.detail, !detail.isEmpty, !content.masked {
+            y -= 4
+            for line in Self.wrap(detail, maxChars: 40) {
+                let l = SKLabelNode(fontNamed: "Menlo")
+                l.text = line
+                l.fontSize = 10
+                l.fontColor = SKColor(hex: 0x9A9A9A)
+                l.verticalAlignmentMode = .top
+                l.horizontalAlignmentMode = .center
+                l.position = CGPoint(x: 0, y: y)
+                body.addChild(l)
+                y -= 13
+            }
+            y -= 2
         }
 
         // Synergy tiers for the tree (skipped for Neutral / no-synergy cards).

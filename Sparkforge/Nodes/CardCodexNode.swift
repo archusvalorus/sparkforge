@@ -261,6 +261,7 @@ final class CardCodexNode: SKNode, CodexPage {
                                              secondaryTag: card.secondaryTag,
                                              effect: card.description, tiers: synTiers,
                                              cardTierLine: nil, cardLadder: ladder,
+                                             detail: card.detail,
                                              masked: card.isSecret)
         let detail = CardDetailNode(content: content)
         detail.present(in: self)

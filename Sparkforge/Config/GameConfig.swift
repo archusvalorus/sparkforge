@@ -1130,6 +1130,35 @@ enum GameConfig {
         static let steadyPulseHeal: Int = 2
     }
 
+    // MARK: - v2.1 Abilities A1: Fire rework
+    /// Approved values from the Sep 15 decision packet (Q-F1…Q-F4) and
+    /// closure table CL-16 (Sep 17). Kindle's own numbers and the synergy
+    /// ladder are unchanged and stay where they were.
+    enum Fire {
+        /// Forge Breath: bonus to FIRE-OWNED damage (Burn incl. Spreading
+        /// Flame, Ember Burst, Everglow, Inferno Crown) — TOTAL per tier.
+        static let forgeBreathBonus: [CGFloat] = [0.25, 0.50, 1.00]
+        /// Crucible: Kindle hits stack Burn per enemy, to this cap…
+        static let crucibleStackCap: Int = 5
+        /// …adding at most one stack per enemy this often.
+        static let crucibleStackInterval: TimeInterval = 3.0
+        /// CL-16: after Burn ends, one dormant stack fades this often.
+        static let burnStackDecayInterval: TimeInterval = 2.0
+        /// Ember Burst: fraction of a hit's damage (was 0.30)…
+        static let emberBurstDamageFraction: CGFloat = 0.25
+        /// …in a +50% radius (was 40).
+        static let emberBurstRadius: CGFloat = 60
+        /// Glass Engine: +100% firing rate (a real rate increase — the
+        /// interval divides by 1 + this) for −50% max HP. Brandon, Sep 17: the
+        /// card swings to the bigger upside (live was a real +66.7% for −30%).
+        static let glassEngineFireRateBonus: CGFloat = 1.00
+        static let glassEngineMaxHPLoss: CGFloat = 0.50
+        /// Cauterize: +5 HP after each 3 continuous s below 25% max HP.
+        static let cauterizeThreshold: CGFloat = 0.25
+        static let cauterizeInterval: TimeInterval = 3.0
+        static let cauterizeHeal: Int = 5
+    }
+
     // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)
     /// The shared order every enemy hit on Spark resolves through
     /// (`PlayerDamagePipeline`): input scaling → percentage reductions

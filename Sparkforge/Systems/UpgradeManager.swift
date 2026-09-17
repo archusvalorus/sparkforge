@@ -77,6 +77,13 @@ final class UpgradeManager {
         /// v1.9: per-tier copy for the selection card / Codex. Index i is
         /// tier i+1's line. nil → `description` serves every tier.
         var tierDescriptions: [String]? = nil
+        /// v2.1 (abilities): expanded detail — the full approved wording plus
+        /// the cooldowns, prerequisites and rules the card can't fit. Shown on
+        /// the detail surfaces (pause build viewer, Card Codex) and the Card
+        /// Atlas. The selection card shows `description` only, and TRUNCATES
+        /// at 4 lines of 17 characters — so `description` stays compact and
+        /// the long sentence lives here.
+        var detail: String? = nil
         /// v1.9 Unit 3: the one tier-5 capstone per tree. Reaching its max tier
         /// fires the grand capstone reveal (vs a quiet flourish for signature
         /// maxes). Capstone IDENTITIES are authored from Lyra's tier riff.
@@ -964,36 +971,46 @@ final class UpgradeManager {
             provides: [.fireUnlocked]
         ))
         
-        // v1.9 Unit 3: signature damage ladder (3-tier).
+        // v2.1 A1 (Fire rework): every Fire card past Kindle `requires` the
+        // signature — prerequisites ship with the tree (A7 is the audit).
+
+        // v2.1 A1 (Q-F1): all-damage → FIRE-owned damage only. Tier numbers
+        // are TOTALS (25 / 50 / 100), so the rungs add 25 / 25 / 50.
         cards.append(UpgradeCard(
             id: "fire_2", name: "Forge Breath", tag: .fire,
-            description: "+15% damage",
-            apply: { stats in stats.damageMultiplier += 0.15 },
+            description: "+25% Fire damage.",
+            apply: { stats in stats.fireDamageBonus += GameConfig.Fire.forgeBreathBonus[0] },
             higherTiers: [
-                { stats in stats.damageMultiplier += 0.15 },
-                { stats in stats.damageMultiplier += 0.20 }
+                { stats in stats.fireDamageBonus += GameConfig.Fire.forgeBreathBonus[1] - GameConfig.Fire.forgeBreathBonus[0] },
+                { stats in stats.fireDamageBonus += GameConfig.Fire.forgeBreathBonus[2] - GameConfig.Fire.forgeBreathBonus[1] }
             ],
             tierDescriptions: [
-                "+15% damage",
-                "+15% more damage",
-                "+20% more damage"
-            ]
+                "+25% Fire damage.",
+                "+50% Fire damage.",
+                "+100% Fire damage."
+            ],
+            detail: "Boosts Burn, Ember Burst, Everglow, and Inferno Crown damage.",
+            requires: [.fireUnlocked]
         ))
         
+        // v2.1 A1: 30% → 25%, radius +50% (values in GameConfig.Fire, read by
+        // PlayerStats' explosion defaults).
         cards.append(UpgradeCard(
             id: "fire_3", name: "Ember Burst", tag: .fire,
-            description: "Kills explode for 30% damage in a small radius"
-        ) { stats in
-            stats.killsExplode = true
-        })
+            description: "Kills explode for 25% damage in a medium radius",
+            apply: { stats in stats.killsExplode = true },
+            requires: [.fireUnlocked]
+        ))
         
+        // v2.1 A1 (Q-F2, CL-16): burns STACK per enemy. Drops the old +25%
+        // damage / +0.3 burn DPS — the stacks are the card.
         cards.append(UpgradeCard(
             id: "fire_4", name: "Crucible", tag: .fire,
-            description: "+25% damage, +0.3 burn DPS"
-        ) { stats in
-            stats.damageMultiplier += 0.25
-            stats.burnDPS += 0.3
-        })
+            description: "Kindle hits stack Burn on an enemy, up to 5x",
+            apply: { stats in stats.burnStackCap = GameConfig.Fire.crucibleStackCap },
+            detail: "Kindle hits build Burn to 5 stacks, adding at most 1 stack every 3s per enemy. Each stack deals full Burn damage. When Burn ends, its damage stops and stacks fade one every 2s. Reignite the enemy to preserve its remaining stacks.",
+            requires: [.fireUnlocked]
+        ))
         
         // ═══════════════════════════════════
         // ⚡ SHOCK
@@ -1280,10 +1297,13 @@ final class UpgradeManager {
         // 1. Overcharge — damage scales while unhit
         cards.append(UpgradeCard(
             id: "v13_overcharge", name: "Overcharge", tag: .fire,
-            description: "Damage grows while unhit, resets on hit"
-        ) { stats in
-            stats.overchargeDamagePerSecond = 0.05  // +5% per second, caps at +50%
-        })
+            description: "+5% damage each second unhit (max +50%). Resets on hit",
+            apply: { stats in
+                stats.overchargeDamagePerSecond = 0.05  // +5% per second, caps at +50%
+            },
+            detail: "Gain +5% damage each second without taking a hit, up to +50%. Taking a hit resets the bonus.",
+            requires: [.fireUnlocked]
+        ))
         
         // 2. Magnetic Core — bigger pickup + speed on collect
         cards.append(UpgradeCard(
@@ -1306,14 +1326,18 @@ final class UpgradeManager {
         // v1.4: Was "lose a lethal save" — now reduces max HP by 30%
         cards.append(UpgradeCard(
             id: "v13_glass_engine", name: "Glass Engine", tag: .fire,
-            description: "+40% attack speed, -30% max HP"
-        ) { stats in
-            stats.fireRateMultiplier *= 0.60  // 40% faster
-            stats.glassEngineActive = true
-            let hpLoss = Int(Double(stats.maxHP) * 0.30)
-            stats.maxHP -= hpLoss
-            stats.currentHP = min(stats.currentHP, stats.maxHP)
-        })
+            description: "+100% attack speed, -50% max HP",
+            apply: { stats in
+                // v2.1 A1: a REAL +100% firing rate (the interval halves). The
+                // old "+40%" line was ×0.60 on the interval — really +66.7%.
+                stats.fireRateMultiplier /= (1.0 + GameConfig.Fire.glassEngineFireRateBonus)
+                stats.glassEngineActive = true
+                let hpLoss = Int(CGFloat(stats.maxHP) * GameConfig.Fire.glassEngineMaxHPLoss)
+                stats.maxHP -= hpLoss
+                stats.currentHP = min(stats.currentHP, stats.maxHP)
+            },
+            requires: [.fireUnlocked]
+        ))
         
         // 5. Phase Skin — brief invulnerability on hit
         cards.append(UpgradeCard(
@@ -1583,10 +1607,11 @@ final class UpgradeManager {
 
         cards.append(UpgradeCard(
             id: "v16_cauterize", name: "Cauterize", tag: .fire,
-            description: "Slowly regenerate while at low HP"
-        ) { stats in
-            stats.cauterizeActive = true
-        })
+            description: "Below 25% HP: heal 5 HP every 3s",
+            apply: { stats in stats.cauterizeActive = true },
+            detail: "While below 25% max HP, recover 5 HP every 3s. Leaving this threshold resets the timer.",
+            requires: [.fireUnlocked]
+        ))
 
         // ═══════════════════════════════════
         // ⚙️ v1.7 COILWORKS (Lyra's six — lyra-response-v1.7.md)
@@ -1609,10 +1634,10 @@ final class UpgradeManager {
         // The first bridge card — counts toward Fire AND Shock
         cards.append(UpgradeCard(
             id: "v17_relay_burn", name: "Relay Burn", tag: .fire, secondaryTag: .shock,
-            description: "Burning foes can arc Shock"
-        ) { stats in
-            stats.relayBurnActive = true
-        })
+            description: "Burning foes can arc Shock",
+            apply: { stats in stats.relayBurnActive = true },
+            requires: [.fireUnlocked]
+        ))
 
         cards.append(UpgradeCard(
             id: "v17_overclock", name: "Overclock", tag: .neutral,
@@ -1761,7 +1786,8 @@ final class UpgradeManager {
                 "Living Furnace: pulse doubled; hits also grow ATK",
                 "Everglow: erupt for 500% ATK arena-wide every 15s"
             ],
-            isCapstone: true
+            isCapstone: true,
+            requires: [.fireUnlocked]   // v2.1 A1: the capstone sits behind Kindle too
         ))
 
         // 🛡️ Iron Maiden — incoming force becomes stored retaliation.

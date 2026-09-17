@@ -18,6 +18,9 @@ struct CombatLedger {
     private(set) var unbrokenRescues = 0
     private(set) var duplicateCredits = 0
     private(set) var kills: [KillSource: Int] = [:]
+    // v2.1 A1: Crucible — stacks added by Kindle hits, and the tallest pile seen.
+    private(set) var burnStacksAdded = 0
+    private(set) var burnMaxStacks = 0
 
     mutating func record(_ outcome: PlayerDamagePipeline.Outcome) {
         hits += 1
@@ -40,6 +43,14 @@ struct CombatLedger {
         kills[source, default: 0] += 1
     }
 
+    mutating func recordBurnStack(_ stacks: Int) {
+        burnStacksAdded += 1
+        if stacks > burnMaxStacks {
+            burnMaxStacks = stacks
+            NSLog("[A1] Burn reached %d stacks", stacks)
+        }
+    }
+
     mutating func recordDuplicate(_ source: KillSource) {
         duplicateCredits += 1
         NSLog("[A0] duplicate kill credit rejected (%@)  %@", source.rawValue, summary)
@@ -51,7 +62,8 @@ struct CombatLedger {
             .joined(separator: " ")
         return "hits=\(hits) clamp=\(ceilingClamps) barrierOnly=\(barrierOnlyHits) "
             + "absorbed=\(barrierAbsorbed) brace=\(braceRescues) unbroken=\(unbrokenRescues) "
-            + "dupes=\(duplicateCredits) kills[\(bySource)]"
+            + "dupes=\(duplicateCredits) kills[\(bySource)] "
+            + "burn[stacks+=\(burnStacksAdded) max=\(burnMaxStacks)]"
     }
 }
 #endif

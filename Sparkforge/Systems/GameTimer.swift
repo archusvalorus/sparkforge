@@ -29,12 +29,16 @@ struct GameTimer {
         remaining = max(remaining, duration)
     }
 
+    /// Float dust left by summing frame deltas (sixty 0.05s ticks don't quite
+    /// make 3.0). Anything this close to zero has run out.
+    private static let epsilon: TimeInterval = 1e-9
+
     /// Advance by `dt`. Returns true on the tick the timer runs out.
     @discardableResult
     mutating func tick(_ dt: TimeInterval) -> Bool {
         guard remaining > 0 else { return false }
         remaining -= dt
-        if remaining <= 0 {
+        if remaining <= Self.epsilon {
             remaining = 0
             return true
         }

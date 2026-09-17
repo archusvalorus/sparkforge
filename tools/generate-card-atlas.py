@@ -82,6 +82,7 @@ def extract_cards():
             signature=('isSignature: true' in ch),
             provides=(grab(r'provides:\s*\[\.(\w+)\]') or ''),
             requires=(grab(r'requires:\s*\[\.(\w+)\]') or ''),
+            detail=(grab(r'\bdetail:\s*"([^"]*)"') or ''),
             tiers=(re.findall(r'"([^"]*)"', tiers.group(1)) if tiers else []),
             tierNames=(re.findall(r'"([^"]*)"', tnames.group(1)) if tnames else [])))
     return cards
@@ -109,11 +110,12 @@ def card_html(c, fam_color):
     if c['capstone'] and c['name'] in CAP_LENS:
         tagt, note, flag = CAP_LENS[c['name']]
         lens = f'<div class="{"lens flag" if flag else "lens"}"><b>AoE lens: {tagt}</b> {esc(note)}</div>'
+    detail = f'<p class="detail">{esc(c["detail"])}</p>' if c.get('detail') else ''
     n = len(tiers)
     return (f'<article class="card" style="--fc:{fam_color}" id="{c["id"]}">'
             f'<header><h4>{esc(c["name"])}{crown}{dual}</h4>'
             f'<span class="meta"><code>{c["id"]}</code> · {n} tier{"s" if n>1 else ""}</span></header>'
-            f'{rungs}{lens}<footer>{gate}</footer></article>')
+            f'{rungs}{detail}{lens}<footer>{gate}</footer></article>')
 
 def build(cards):
     commit = subprocess.run(['git','rev-parse','--short','HEAD'], capture_output=True,

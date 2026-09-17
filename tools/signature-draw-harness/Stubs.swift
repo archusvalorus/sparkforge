@@ -47,6 +47,19 @@ enum GameConfig {
         static let seedFragmentsT2: Int = 5
         static let seedFragmentsT3: Int = 6
     }
+    enum Fire {
+        static let forgeBreathBonus: [CGFloat] = [0.25, 0.50, 1.00]
+        static let crucibleStackCap: Int = 5
+        static let crucibleStackInterval: TimeInterval = 3.0
+        static let burnStackDecayInterval: TimeInterval = 2.0
+        static let emberBurstDamageFraction: CGFloat = 0.25
+        static let emberBurstRadius: CGFloat = 60
+        static let glassEngineFireRateBonus: CGFloat = 1.00
+        static let glassEngineMaxHPLoss: CGFloat = 0.50
+        static let cauterizeThreshold: CGFloat = 0.25
+        static let cauterizeInterval: TimeInterval = 3.0
+        static let cauterizeHeal: Int = 5
+    }
     enum Erasure {
         static let unstableTriggerCooldown: TimeInterval = 2.0
         static let unstableTriggerCooldownT2: TimeInterval = 1.2

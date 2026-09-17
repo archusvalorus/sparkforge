@@ -435,7 +435,8 @@ final class PauseMenuNode: SKNode {
             effect: card.description,
             tiers: tiers,
             cardTierLine: card.maxTier > 1 ? "TIER \(cardTier) / \(card.maxTier)" : nil,
-            cardLadder: ladder
+            cardLadder: ladder,
+            detail: card.detail
         )
         let detail = CardDetailNode(content: content)
         detail.present(in: self)

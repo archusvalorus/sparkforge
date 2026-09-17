@@ -5123,7 +5123,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for enemy in enemies {
             guard enemy !== source, !enemy.isBurning else { continue }
             if source.position.distance(to: enemy.position) < radius {
-                enemy.applyBurn(playerStats.burnDPS * 0.5, duration: playerStats.burnDuration)
+                // v2.1 A1: spread is Kindle's Burn jumping — it ignites (or
+                // re-ignites dormant stacks) but never adds one.
+                enemy.applyBurn(playerStats.effectiveBurnDPS * 0.5, duration: playerStats.burnDuration,
+                                source: .kindleSpread, stackCap: playerStats.burnStackCap)
             }
         }
     }
@@ -5428,6 +5431,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.teslaFieldDPS > 0 {
             for enemy in enemies {
                 if player.position.distance(to: enemy.position) < playerStats.teslaFieldRadius {
+                    // v2.1 A1: Shock-owned damage on the burn channel — flat
+                    // (default `.other`): no Fire bonus, never multiplied by stacks.
                     enemy.applyBurn(playerStats.teslaFieldDPS, duration: 0.5)
                 }
             }
@@ -5435,7 +5440,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Arena-wide DOT
         if playerStats.passiveArenaDPS > 0 {
-            passiveDOTAccumulator += playerStats.passiveArenaDPS * CGFloat(dt)
+            // v2.1 A1: Inferno Crown is Fire-owned — Forge Breath amplifies it.
+            passiveDOTAccumulator += playerStats.passiveArenaDPS * playerStats.fireDamageMultiplier * CGFloat(dt)
             if passiveDOTAccumulator >= 1.0 {
                 let dmg = Int(passiveDOTAccumulator)
                 passiveDOTAccumulator -= CGFloat(dmg)
@@ -9819,7 +9825,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func explosionAt(_ position: CGPoint) {
         let radius = playerStats.explosionRadius
-        let damage = max(1, Int(playerStats.damageMultiplier * playerStats.explosionDamagePercent))
+        // v2.1 A1: Fire-owned — Forge Breath amplifies it.
+        let damage = max(1, Int(playerStats.damageMultiplier * playerStats.explosionDamagePercent
+                                * playerStats.fireDamageMultiplier))
         
         var killedInExplosion: [EnemyNode] = []
         
@@ -10227,7 +10235,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if playerStats.burnDPS > 0 {
-            enemyNode.applyBurn(playerStats.burnDPS, duration: playerStats.burnDuration)
+            // v2.1 A1: a Kindle hit — the only thing that can add a Crucible
+            // stack. Forge Breath's Fire bonus rides the Burn, not the shot.
+            let stacked = enemyNode.applyBurn(playerStats.effectiveBurnDPS,
+                                              duration: playerStats.burnDuration,
+                                              source: .kindleHit,
+                                              stackCap: playerStats.burnStackCap)
+            #if DEBUG
+            if stacked { combatLedger.recordBurnStack(enemyNode.burnStacks) }
+            #endif
         }
         if playerStats.slowAmount > 0 {
             enemyNode.applySlow(playerStats.effectiveSlow(playerStats.slowAmount), duration: playerStats.slowDuration)

@@ -132,13 +132,13 @@ final class PlayerStats {
     var everglowPulseDamage: Int {
         guard everglowTier >= 1 else { return 0 }
         let atk = CGFloat(baseAttack) * effectiveDamageMultiplier
-        return max(1, Int(atk * everglowBasePulseMult * (1 + everglowPulseGrowth)))
+        return max(1, Int(atk * everglowBasePulseMult * (1 + everglowPulseGrowth) * fireDamageMultiplier))
     }
 
     /// Damage of one Everglow eruption: effective ATK × eruption multiplier.
     var everglowEruptionDamage: Int {
         let atk = CGFloat(baseAttack) * effectiveDamageMultiplier
-        return max(1, Int(atk * GameConfig.Everglow.eruptionMult))
+        return max(1, Int(atk * GameConfig.Everglow.eruptionMult * fireDamageMultiplier))
     }
     
     /// HP as 0.0–1.0 fraction for HUD bar
@@ -327,6 +327,15 @@ final class PlayerStats {
     
     /// Burn DPS applied on projectile hit (base: 0)
     var burnDPS: CGFloat = 0.0
+    /// v2.1 A1 Forge Breath: bonus to FIRE-OWNED damage only — Burn (incl.
+    /// Spreading Flame), Ember Burst, Everglow, Inferno Crown. An ignited hit
+    /// does NOT make the projectile's own damage Fire (Q-F1).
+    var fireDamageBonus: CGFloat = 0.0
+    var fireDamageMultiplier: CGFloat { 1.0 + fireDamageBonus }
+    /// Burn DPS per stack as it lands on an enemy (Fire bonus included).
+    var effectiveBurnDPS: CGFloat { burnDPS * fireDamageMultiplier }
+    /// v2.1 A1 Crucible: per-enemy Burn stack cap. 1 = Burn never stacks.
+    var burnStackCap: Int = 1
     /// Burn duration in seconds (base: 2.0 when active)
     var burnDuration: TimeInterval = 2.0
     /// Whether burns spread to nearby enemies
@@ -478,9 +487,9 @@ final class PlayerStats {
     /// Whether kills explode (Ember Burst)
     var killsExplode: Bool = false
     /// Explosion radius
-    var explosionRadius: CGFloat = 40.0
+    var explosionRadius: CGFloat = GameConfig.Fire.emberBurstRadius
     /// Explosion damage as % of kill damage
-    var explosionDamagePercent: CGFloat = 0.3
+    var explosionDamagePercent: CGFloat = GameConfig.Fire.emberBurstDamageFraction
     
     /// Kill streak fire rate bonus
     var killStreakFireRateBonus: CGFloat = 0.0
@@ -621,10 +630,13 @@ final class PlayerStats {
     var hoarfrostInterval: TimeInterval = 0.0
     private var hoarfrostTimer: TimeInterval = 0.0
 
-    /// Cauterize: regen 1 HP per interval while below HP threshold
+    /// Cauterize (v2.1 A1, Q-F3): +5 HP after each 3 CONTINUOUS seconds below
+    /// 25% max HP. Leaving the threshold resets the timer; no heal on entry;
+    /// a tick may carry HP back above the threshold.
     var cauterizeActive: Bool = false
-    var cauterizeThreshold: CGFloat = 0.3
-    var cauterizeInterval: TimeInterval = 3.0
+    var cauterizeThreshold: CGFloat = GameConfig.Fire.cauterizeThreshold
+    var cauterizeInterval: TimeInterval = GameConfig.Fire.cauterizeInterval
+    var cauterizeHeal: Int = GameConfig.Fire.cauterizeHeal
     private var cauterizeTimer: TimeInterval = 0.0
 
     /// Whiteout: slowed enemies release a slow burst on death
@@ -911,7 +923,7 @@ final class PlayerStats {
                 cauterizeTimer += dt
                 if cauterizeTimer >= cauterizeInterval {
                     cauterizeTimer = 0
-                    heal += 1
+                    heal += cauterizeHeal
                 }
             } else {
                 cauterizeTimer = 0
@@ -1082,6 +1094,8 @@ final class PlayerStats {
         pickupRadiusMultiplier = 1.0
         xpMultiplier = 1.0
         burnDPS = 0.0
+        fireDamageBonus = 0.0
+        burnStackCap = 1
         burnDuration = 2.0
         burnSpreads = false
         burnSpreadRadius = 30.0
@@ -1125,8 +1139,8 @@ final class PlayerStats {
         groundedCoreBraced = false
         stationaryTime = 0
         killsExplode = false
-        explosionRadius = 40.0
-        explosionDamagePercent = 0.3
+        explosionRadius = GameConfig.Fire.emberBurstRadius
+        explosionDamagePercent = GameConfig.Fire.emberBurstDamageFraction
         killStreakFireRateBonus = 0.0
         killStreakThreshold = 3
         killStreakWindow = 3.0
@@ -1190,8 +1204,9 @@ final class PlayerStats {
         hoarfrostInterval = 0.0
         hoarfrostTimer = 0.0
         cauterizeActive = false
-        cauterizeThreshold = 0.3
-        cauterizeInterval = 3.0
+        cauterizeThreshold = GameConfig.Fire.cauterizeThreshold
+        cauterizeInterval = GameConfig.Fire.cauterizeInterval
+        cauterizeHeal = GameConfig.Fire.cauterizeHeal
         cauterizeTimer = 0.0
         whiteoutActive = false
         whiteoutRadius = 50.0
