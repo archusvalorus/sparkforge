@@ -506,8 +506,35 @@ final class PlayerStats {
     
     /// Whether player leaves chill trail
     var chillTrail: Bool = false
+    // v2.1 A2 Glacial Drift ladder (CL-11): 1 trail · 2 lingers · 3 longer +
+    // wider · 4 permanent · 5 Ice Rink (arena-wide, replaces the trail).
+    var glacialDriftTier: Int = 0
+    var iceRinkActive: Bool { glacialDriftTier >= 5 }
+    /// Per-segment lifetime for the current tier; nil = permanent (T4).
+    var chillTrailLifetime: TimeInterval? {
+        let t = GameConfig.Chill.driftLifetime
+        guard glacialDriftTier >= 1, glacialDriftTier <= t.count else { return nil }
+        return t[glacialDriftTier - 1]
+    }
+    var chillTrailRadius: CGFloat {
+        GameConfig.Chill.driftRadius * (glacialDriftTier >= 3 ? 1 + GameConfig.Chill.driftSizeBonusT3 : 1)
+    }
+    /// v2.1 A2 Glacial Spikes: chilled ground can impale what stands on it.
+    var glacialSpikesActive = false
+    /// v2.1 A2 Frost Touch T3 (CL-3): Iceburst shards + icicle fragments
+    /// apply Frost Touch on hit — those two shard sources SPECIFICALLY.
+    var frostTouchShards = false
+    /// v2.1 A2 Whiteout: snowmen. 0 = off; 1 = 3s · 2 = 6s · 3 = damage melts.
+    var whiteoutTier: Int = 0
+    var snowmanDuration: TimeInterval {
+        let d = GameConfig.Chill.snowmanDuration
+        guard whiteoutTier >= 1 else { return 0 }
+        return d[min(whiteoutTier, d.count) - 1]
+    }
+    /// Hoarfrost heal per interval.
+    var hoarfrostHeal: Int = GameConfig.Chill.hoarfrostHeal
     /// Chill trail slow amount
-    var chillTrailSlow: CGFloat = 0.08
+    var chillTrailSlow: CGFloat = GameConfig.Chill.driftSlow
     /// Chill trail slow duration
     var chillTrailDuration: TimeInterval = 1.5
     
@@ -640,10 +667,6 @@ final class PlayerStats {
     private var cauterizeTimer: TimeInterval = 0.0
 
     /// Whiteout: slowed enemies release a slow burst on death
-    var whiteoutActive: Bool = false
-    var whiteoutRadius: CGFloat = 50.0
-    var whiteoutSlow: CGFloat = 0.3
-    var whiteoutDuration: TimeInterval = 2.0
 
     // MARK: - v1.8 Mirrorwound Cards (Unit 14)
 
@@ -705,8 +728,6 @@ final class PlayerStats {
     var chainReactionDamage: Int = 1
     
     /// Static Field: proximity slow aura around player
-    var staticFieldRange: CGFloat = 0.0
-    var staticFieldSlow: CGFloat = 0.15
     
     /// Execution Protocol: bonus damage to low HP enemies
     var executionProtocolThreshold: CGFloat = 0.0
@@ -915,7 +936,7 @@ final class PlayerStats {
             hoarfrostTimer += dt
             if hoarfrostTimer >= hoarfrostInterval {
                 hoarfrostTimer = 0
-                heal += 1
+                heal += hoarfrostHeal
             }
         }
         if cauterizeActive {
@@ -1147,7 +1168,12 @@ final class PlayerStats {
         killHealAmount = 0
         killOrbPullMultiplier = 1.0
         chillTrail = false
-        chillTrailSlow = 0.08
+        glacialDriftTier = 0
+        glacialSpikesActive = false
+        frostTouchShards = false
+        whiteoutTier = 0
+        hoarfrostHeal = GameConfig.Chill.hoarfrostHeal
+        chillTrailSlow = GameConfig.Chill.driftSlow
         chillTrailDuration = 1.5
         teslaFieldDPS = 0.0
         teslaFieldRadius = 50.0
@@ -1208,10 +1234,6 @@ final class PlayerStats {
         cauterizeInterval = GameConfig.Fire.cauterizeInterval
         cauterizeHeal = GameConfig.Fire.cauterizeHeal
         cauterizeTimer = 0.0
-        whiteoutActive = false
-        whiteoutRadius = 50.0
-        whiteoutSlow = 0.3
-        whiteoutDuration = 2.0
 
         // v1.8 Mirrorwound cards
         echoChance = 0.0
@@ -1254,8 +1276,6 @@ final class PlayerStats {
         chainReactionExplode = false
         chainReactionRadius = 35.0
         chainReactionDamage = 1
-        staticFieldRange = 0
-        staticFieldSlow = 0.15
         executionProtocolThreshold = 0
         executionProtocolMultiplier = 2.0
         unstableCoreActive = false

@@ -248,8 +248,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var forgeCalcStrikeCount = 0
     private var forgeMoveBuffTimer: TimeInterval = 0
     private var forgeSlipstreamReady = true
-    private var chillTrailPoints: [(position: CGPoint, expiry: TimeInterval)] = []
+    // v2.1 A2: Glacial Drift's frozen ground (pure grid) + what draws it.
+    private var chillGround = ChillGround(bucketSize: GameConfig.Chill.driftRadius * 1.35,
+                                          mergeFraction: GameConfig.Chill.driftMergeFraction)
+    private var chillVisuals: [Int: SKSpriteNode] = [:]
+    private var frostTexture: SKTexture?
+    private var iceRinkFloor: SKShapeNode?
     private var chillTrailDropTimer: TimeInterval = 0
+    // v2.1 A2: Glacial Spikes — one arena-wide cooldown, tells land on game time.
+    private var spikeCooldown = GameTimer()
+    private var pendingSpikes: [(enemy: EnemyNode?, isBoss: Bool, timer: GameTimer, mark: SKNode)] = []
 
     // MARK: - v1.6: Quench Card State (Unit 3)
 
@@ -5284,7 +5292,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// (echoes, splits, shards, backwash) is `.fragment`.
     private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero,
                                 damageScale: CGFloat = 1.0, allowModifiers: Bool = true,
-                                source: KillSource? = nil) {
+                                source: KillSource? = nil,
+                                configure: ((ProjectileNode) -> Void)? = nil) {
         // v1.9 Polar Vortex Glacial Condensation (T4): primary shots don't fire
         // immediately — every Nth condenses into one icicle; the rest are absorbed.
         if playerStats.glacialActive && allowModifiers {
@@ -5314,6 +5323,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             frostStyle: playerStats.polarVortexTier >= 1
         )
         projectile.killSource = source ?? (allowModifiers ? .primary : .fragment)
+        configure?(projectile)
         projectile.position = player.position + originOffset
         projectile.zPosition = 8
         projectiles.append(projectile)
@@ -5491,15 +5501,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // v1.3: Magnetic Core — tick speed boost timer
         playerStats.updateMagneticCore(dt)
-        
-        // v1.3: Static Field — slow enemies near player
-        if playerStats.staticFieldRange > 0 {
-            for enemy in enemies {
-                if player.position.distance(to: enemy.position) < playerStats.staticFieldRange {
-                    enemy.applySlow(playerStats.staticFieldSlow, duration: 0.5)
-                }
-            }
-        }
         
         // v1.3: Unstable Core — periodic burst
         if playerStats.updateUnstableCore(dt) {
@@ -7084,15 +7085,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// T1: a burst of ice shards from a chilled foe's death (reuses the projectile
     /// system at reduced damage, no further modifiers).
-    private func iceburst(at pos: CGPoint) {
+    /// v2.1 A2: shards carry Frost Touch only at Frost Touch T3 (CL-3), and a
+    /// `generation` so the chain stops — a kill by a gen-2 shard doesn't burst.
+    private func iceburst(at pos: CGPoint, generation: Int = 1) {
         let n = playerStats.iceburstShards
+        let frost = playerStats.frostTouchShards
         let offset = pos - player.position
         for i in 0..<n {
             let ang = CGFloat(i) / CGFloat(n) * 2 * .pi + CGFloat.random(in: -0.3...0.3)
             fireProjectile(direction: CGPoint(x: cos(ang), y: sin(ang)),
                            originOffset: offset,
                            damageScale: GameConfig.PolarVortex.shardMult,
-                           allowModifiers: false)
+                           allowModifiers: false,
+                           configure: { $0.appliesFrostTouch = frost; $0.iceburstGeneration = generation })
         }
         showRingPulse(at: pos, radius: 28, colorHex: 0x99E6FF)
     }
@@ -7101,12 +7106,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func iceShatter(at pos: CGPoint) {
         let n = GameConfig.PolarVortex.icicleShards
         let offset = pos - player.position
+        let frost = playerStats.frostTouchShards   // v2.1 A2 (CL-3)
         for i in 0..<n {
             let ang = CGFloat(i) / CGFloat(n) * 2 * .pi
             fireProjectile(direction: CGPoint(x: cos(ang), y: sin(ang)),
                            originOffset: offset,
                            damageScale: GameConfig.PolarVortex.icicleShardMult,
-                           allowModifiers: false)
+                           allowModifiers: false,
+                           configure: { $0.appliesFrostTouch = frost; $0.iceburstGeneration = 1 })
         }
         showRingPulse(at: pos, radius: 34, colorHex: 0xCCF2FF)
     }
@@ -7251,49 +7258,201 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    // MARK: - v1.6: Chill Trail (Glacial Drift)
+    // MARK: - v2.1 A2: Chilled ground (Glacial Drift ×5, Ice Rink, Glacial Spikes)
 
     private func updateChillTrail(_ dt: TimeInterval) {
+        guard playerStats.chillTrail else { return }
         let now = waveManager.elapsedTime
 
-        // Drop trail points while moving
-        if playerStats.chillTrail && joystick.direction != .zero {
-            chillTrailDropTimer += dt
-            if chillTrailDropTimer >= 0.15 {
-                chillTrailDropTimer = 0
-                chillTrailPoints.append((position: player.position,
-                                         expiry: now + playerStats.chillTrailDuration))
-                spawnChillTrailVisual(at: player.position)
+        if playerStats.iceRinkActive {
+            // T5: the rink REPLACES the trail. The arena-wide slow and Spark's
+            // speed are stats (set by the card); this is the ground + the floor.
+            if !chillGround.isRink {
+                chillGround.becomeRink().forEach(removeChillVisual)
+            }
+            if iceRinkFloor == nil { showIceRinkFloor() }
+        } else {
+            if joystick.direction != .zero {
+                chillTrailDropTimer += dt
+                if chillTrailDropTimer >= GameConfig.Chill.driftDropInterval {
+                    chillTrailDropTimer = 0
+                    dropChillSegment(now: now)
+                }
+            }
+            // CL-11: each segment melts on its own clock, measured from creation.
+            chillGround.prune(now: now).forEach(removeChillVisual)
+
+            // Slow enemies standing on the trail.
+            if chillGround.count > 0 {
+                let slow = playerStats.effectiveSlow(playerStats.chillTrailSlow)
+                for enemy in enemies where chillGround.isChilled(enemy.position) {
+                    enemy.applySlow(slow, duration: 0.5)
+                }
             }
         }
+        updateGlacialSpikes(dt)
+    }
 
-        chillTrailPoints.removeAll { $0.expiry <= now }
-        guard !chillTrailPoints.isEmpty else { return }
-
-        // Slow enemies standing on the trail
-        for enemy in enemies {
-            for point in chillTrailPoints
-            where enemy.position.distance(to: point.position) < 22 {
-                enemy.applySlow(playerStats.effectiveSlow(playerStats.chillTrailSlow), duration: 0.5)
-                break
+    private func dropChillSegment(now: TimeInterval) {
+        let radius = playerStats.chillTrailRadius
+        guard let result = chillGround.drop(at: player.position, radius: radius, now: now,
+                                            lifetime: playerStats.chillTrailLifetime) else { return }
+        switch result {
+        case .created(let id):
+            let frost = SKSpriteNode(texture: chillTexture())
+            frost.position = player.position
+            frost.zPosition = 2
+            frost.alpha = 0
+            frost.size = CGSize(width: radius * 2, height: radius * 2)
+            frost.run(SKAction.fadeAlpha(to: 1, duration: 0.15))
+            worldNode.addChild(frost)
+            chillVisuals[id] = frost
+        case .merged(let id):
+            // Walked back over frozen ground: it may have grown (T3) — match it.
+            if let frost = chillVisuals[id], frost.size.width < radius * 2 {
+                frost.size = CGSize(width: radius * 2, height: radius * 2)
             }
         }
     }
 
-    private func spawnChillTrailVisual(at position: CGPoint) {
-        let frost = SKShapeNode(circleOfRadius: 9)
-        frost.fillColor = SKColor(hex: 0x88CCFF, alpha: 0.12)
-        frost.strokeColor = SKColor(hex: 0xAADDFF, alpha: 0.25)
-        frost.lineWidth = 1
-        frost.position = position
-        frost.zPosition = 2
-        worldNode.addChild(frost)
-        frost.run(SKAction.sequence([
-            SKAction.fadeOut(withDuration: playerStats.chillTrailDuration),
+    /// One shared texture for every frost patch — a permanent (T4) battlefield
+    /// is hundreds of sprites, and sprites off one texture batch; shapes don't.
+    private func chillTexture() -> SKTexture? {
+        if let t = frostTexture { return t }
+        let shape = SKShapeNode(circleOfRadius: 24)
+        shape.fillColor = SKColor(hex: 0x88CCFF, alpha: 0.16)
+        shape.strokeColor = SKColor(hex: 0xAADDFF, alpha: 0.30)
+        shape.lineWidth = 1.5
+        frostTexture = view?.texture(from: shape)
+        return frostTexture
+    }
+
+    private func removeChillVisual(_ id: Int) {
+        guard let frost = chillVisuals.removeValue(forKey: id) else { return }
+        frost.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.3), SKAction.removeFromParent()]))
+    }
+
+    /// Placeholder Ice Rink floor (A9 art): the whole arena glazes over.
+    private func showIceRinkFloor() {
+        let rink = SKShapeNode(circleOfRadius: GameConfig.Arena.radius)
+        rink.fillColor = SKColor(hex: 0x88CCFF, alpha: 0.10)
+        rink.strokeColor = SKColor(hex: 0xCCF2FF, alpha: 0.55)
+        rink.lineWidth = 3
+        rink.glowWidth = 6
+        rink.zPosition = 1.2
+        rink.alpha = 0
+        worldNode.addChild(rink)
+        rink.run(SKAction.fadeIn(withDuration: 0.6))
+        iceRinkFloor = rink
+        showRingPulse(at: player.position, radius: GameConfig.Arena.radius * 0.5, colorHex: 0xCCF2FF)
+    }
+
+    /// New arena (Boss Mode swap) or new run. T4's "permanent" means for the
+    /// CURRENT arena; the rink belongs to the build, so it re-lays itself.
+    private func thawChillGround(newRun: Bool) {
+        chillGround.clear(keepRink: false).forEach { chillVisuals.removeValue(forKey: $0)?.removeFromParent() }
+        iceRinkFloor?.removeFromParent()
+        iceRinkFloor = nil
+        for spike in pendingSpikes { spike.mark.removeFromParent() }
+        pendingSpikes.removeAll()
+        if newRun {
+            chillTrailDropTimer = 0
+            spikeCooldown.cancel()
+        }
+    }
+
+    // Glacial Spikes (Q-C2): every enemy on chilled ground rolls 4%/s; at most
+    // one spike per 0.75s arena-wide; a brief ground tell, then the spike.
+    // Normals are executed, elites lose 20% max HP, bosses 3% — already the
+    // boss-reduced numbers, so no further BossClass scaling.
+    private func updateGlacialSpikes(_ dt: TimeInterval) {
+        spikeCooldown.tick(dt)
+
+        for i in pendingSpikes.indices.reversed() where pendingSpikes[i].timer.tick(dt) {
+            let spike = pendingSpikes.remove(at: i)
+            spike.mark.removeFromParent()
+            landGlacialSpike(enemy: spike.enemy, isBoss: spike.isBoss)
+        }
+
+        guard playerStats.glacialSpikesActive, !spikeCooldown.isActive else { return }
+        let chance = GameConfig.Chill.spikeChancePerSecond * CGFloat(dt)
+
+        if let b = boss, !b.isDead, chillGround.isChilled(b.position), CGFloat.random(in: 0...1) < chance {
+            beginGlacialSpike(at: b.position, enemy: nil, isBoss: true)
+            return
+        }
+        guard !enemies.isEmpty else { return }
+        // Random start so the front of the array isn't the unluckiest place to stand.
+        let start = Int.random(in: 0..<enemies.count)
+        for offset in 0..<enemies.count {
+            let enemy = enemies[(start + offset) % enemies.count]
+            guard !enemy.isDying, chillGround.isChilled(enemy.position),
+                  CGFloat.random(in: 0...1) < chance else { continue }
+            beginGlacialSpike(at: enemy.position, enemy: enemy, isBoss: false)
+            return
+        }
+    }
+
+    private func beginGlacialSpike(at position: CGPoint, enemy: EnemyNode?, isBoss: Bool) {
+        spikeCooldown.start(GameConfig.Chill.spikeGlobalCooldown)
+        // The tell: a frost ring closing on the spot.
+        let mark = SKShapeNode(circleOfRadius: 16)
+        mark.fillColor = SKColor(hex: 0xCCF2FF, alpha: 0.10)
+        mark.strokeColor = SKColor(hex: 0xFFFFFF, alpha: 0.9)
+        mark.lineWidth = 1.5
+        mark.glowWidth = 3
+        mark.position = position
+        mark.zPosition = 2.6
+        mark.setScale(1.6)
+        mark.run(SKAction.scale(to: 0.5, duration: GameConfig.Chill.spikeTell))
+        worldNode.addChild(mark)
+        var timer = GameTimer()
+        timer.start(GameConfig.Chill.spikeTell)
+        pendingSpikes.append((enemy: enemy, isBoss: isBoss, timer: timer, mark: mark))
+    }
+
+    private func landGlacialSpike(enemy: EnemyNode?, isBoss: Bool) {
+        let C = GameConfig.Chill.self
+        if isBoss {
+            guard let b = boss, !b.isDead else { return }
+            let maxHP = CGFloat(b.health) / max(b.healthPercent, 0.0001)
+            b.takeDamage(max(1, Int(maxHP * C.spikeBossFraction)))
+            showGlacialSpike(at: b.position, scale: 1.8)
+        } else if let e = enemy, !e.isDying, e.parent != nil {
+            showGlacialSpike(at: e.position, scale: e.isMiniBoss ? 1.5 : 1.0)
+            let damage = e.isMiniBoss ? max(1, Int(CGFloat(e.maxHealth) * C.spikeEliteFraction)) : e.health
+            dealDirectDamage(damage, toEnemy: e, source: .ground)
+        } else { return }
+        #if DEBUG
+        combatLedger.spikes += 1
+        #endif
+    }
+
+    /// Placeholder spike (A9 art): an ice shard punching up, then sinking.
+    private func showGlacialSpike(at position: CGPoint, scale: CGFloat) {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: -6, y: -4))
+        path.addLine(to: CGPoint(x: 0, y: 26))
+        path.addLine(to: CGPoint(x: 6, y: -4))
+        path.closeSubpath()
+        let spike = SKShapeNode(path: path)
+        spike.fillColor = SKColor(hex: 0xCCF2FF, alpha: 0.95)
+        spike.strokeColor = SKColor(hex: 0xFFFFFF)
+        spike.lineWidth = 1
+        spike.glowWidth = 4
+        spike.position = position
+        spike.zPosition = 9
+        spike.xScale = scale
+        spike.yScale = 0.1
+        worldNode.addChild(spike)
+        spike.run(SKAction.sequence([
+            SKAction.scaleY(to: scale, duration: 0.07),
+            SKAction.wait(forDuration: 0.25),
+            SKAction.group([SKAction.scaleY(to: 0.1, duration: 0.2), SKAction.fadeOut(withDuration: 0.2)]),
             SKAction.removeFromParent()
         ]))
     }
-    
+
     // MARK: - v1.6: Shared Burst Helpers (Unit 3)
 
     /// Damage all enemies within radius of a point. Kills spawn XP orbs
@@ -8131,6 +8290,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         teardownArena()
         setupArena()
         setupEmberParticles()
+        thawChillGround(newRun: false)   // v2.1 A2: frozen ground is per arena
 
         // The field just changed size. Anything still holding a position from
         // the old arena has to be brought inside the new boundary — and the
@@ -9645,7 +9805,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// is a full kill with its on-kill effects. On-kill effects can read
     /// `source` to decide whether they react (A1–A6).
     private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil,
-                               source: KillSource) {
+                               source: KillSource, iceburstGeneration: Int = 0) {
         if let enemy = enemy {
             guard !enemy.killCredited else {
                 #if DEBUG
@@ -9669,8 +9829,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         killCount += 1
 
         // v1.9 Polar Vortex Iceburst (T1): a chilled foe's death bursts into shards.
-        if playerStats.iceburstActive, let e = enemy, e.isFrozen || e.isSlowed {
-            iceburst(at: position)
+        // v2.1 A2: capped — a shard's kill may burst once more (gen 2), and a
+        // gen-2 shard's kill doesn't. Uncapped, T3's slowing shards chained forever.
+        if playerStats.iceburstActive, let e = enemy, e.isFrozen || e.isSlowed, iceburstGeneration < 2 {
+            iceburst(at: position, generation: iceburstGeneration + 1)
         }
 
         // v2.0 Phase C (C1.4): Seed Spore Shot — a seeded foe's death REPRODUCES,
@@ -9772,16 +9934,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damageEnemiesInRadius(playerStats.openVeinRadius, around: position,
                                   damage: playerStats.openVeinDamage)
             showRingPulse(at: position, radius: playerStats.openVeinRadius, colorHex: 0xCC2233)
-        }
-
-        // v1.6: Whiteout — slowed enemies chill others on death
-        if playerStats.whiteoutActive, let enemy = enemy, enemy.isSlowed {
-            for other in enemies
-            where other.position.distance(to: position) < playerStats.whiteoutRadius {
-                other.applySlow(playerStats.effectiveSlow(playerStats.whiteoutSlow),
-                                duration: playerStats.whiteoutDuration)
-            }
-            showRingPulse(at: position, radius: playerStats.whiteoutRadius, colorHex: 0xAADDFF)
         }
 
         // v1.6: Null Bloom — chance to leave a slowing zone
@@ -10005,6 +10157,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func handlePlayerEnemyContact(enemyBody: SKPhysicsBody) {
         guard gameState == .playing else { return }
+        // v2.1 A2 (Brandon, Sep 17): a snowman is HARMLESS to touch — a
+        // stationary snowman that still bites contradicts the control fantasy
+        // and its own visual promise. Normal contact returns when it reverts.
+        if (enemyBody.node as? EnemyNode)?.isSnowman == true { return }
         // v2.1 (2b): committed-attack enemies learn their lunge connected —
         // before the i-frame guards, because the CONTACT is the outcome.
         (enemyBody.node as? EnemyNode)?.didStrikePlayer()
@@ -10234,7 +10390,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             damage = Int(CGFloat(damage) * playerStats.executionProtocolMultiplier)
         }
         
-        if playerStats.slowedDamageBonus > 0 && enemyNode.isSlowed {
+        // v2.1 A2 Permafrost: ANY slow source counts — including arena-wide
+        // ones (Ice Rink lights it for everyone, Q-C5).
+        if playerStats.slowedDamageBonus > 0 && (enemyNode.isSlowed || playerStats.globalEnemySlow > 0) {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.slowedDamageBonus))
         }
 
@@ -10276,7 +10434,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if stacked { combatLedger.recordBurnStack(enemyNode.burnStacks) }
             #endif
         }
-        if playerStats.slowAmount > 0 {
+        // v2.1 A2 (CL-3): Iceburst shards / icicle fragments only at Frost Touch T3.
+        if playerStats.slowAmount > 0, projectileNode.appliesFrostTouch {
             enemyNode.applySlow(playerStats.effectiveSlow(playerStats.slowAmount), duration: playerStats.slowDuration)
         }
         if playerStats.critAppliesBleed && projectileNode.isCrit {
@@ -10353,7 +10512,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
                 enemies.remove(at: index)
             }
-            onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode, source: projectileNode.killSource)
+            onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode, source: projectileNode.killSource,
+                          iceburstGeneration: projectileNode.iceburstGeneration)
+        }
+        // v2.1 A2 Whiteout: any player projectile that lands may make a snowman.
+        if !killed, playerStats.whiteoutTier >= 1,
+           CGFloat.random(in: 0...1) < GameConfig.Chill.snowmanChance,
+           enemyNode.becomeSnowman(duration: playerStats.snowmanDuration,
+                                   meltsOnDamage: playerStats.whiteoutTier >= 3) {
+            #if DEBUG
+            combatLedger.snowmen += 1
+            #endif
         }
         apexRegisterAttack()   // T5 Apex: every player hit charges the pounce gauge
 
@@ -11131,7 +11300,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera?.childNode(withName: "placePrompt")?.removeFromParent()
         camera?.childNode(withName: "placeHint")?.removeFromParent()
         player.setNourished(false)
-        chillTrailPoints.removeAll()
+        thawChillGround(newRun: true)
         singularityTimer = 0
         chillTrailDropTimer = 0
         arcWakeSparks.removeAll()

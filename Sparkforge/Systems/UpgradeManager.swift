@@ -56,6 +56,12 @@ final class UpgradeManager {
         case bleedUnlocked
         case guardUnlocked
         case voidUnlocked
+
+        // v2.1 A2 — in-tree prerequisites (NOT gateways: no pity; see drawCards).
+        /// Granted by Glacial Drift; required by Glacial Spikes.
+        case glacialDrift
+        /// Granted by Whiteout (T1+); required by Glacial Drift's T5 Ice Rink (Q-C1).
+        case whiteout
     }
 
     // MARK: - Card Definition
@@ -113,6 +119,10 @@ final class UpgradeManager {
         /// Capabilities the run must ALREADY have for this card to be offered.
         /// Unmet ⇒ hard-gated out of the draw entirely.
         var requires: Set<Capability> = []
+        /// v2.1 A2: extra capabilities a specific TIER needs before its
+        /// upgrade is offered (key = the tier being bought). Glacial Drift's
+        /// T5 Ice Rink needs Whiteout; until then the card stops at T4.
+        var tierRequires: [Int: Set<Capability>] = [:]
 
         // MARK: v2.0 (C2) — outside the taxonomy
 
@@ -364,6 +374,9 @@ final class UpgradeManager {
             // Growth cards before Terra would be dead picks, and a dead pick in
             // a 3-card spread is a wasted level-up.
             guard card.requires.isSubset(of: capabilities) else { return false }
+            // v2.1 A2: …and so is the NEXT TIER's own prerequisite, if it has one.
+            if let need = card.tierRequires[tier(of: card.id) + 1],
+               !need.isSubset(of: capabilities) { return false }
             // v2.0 (C2): a secret card is never in the random pool. It arrives
             // only when its own scheduler puts it there.
             if card.isSecret { return false }
@@ -473,7 +486,10 @@ final class UpgradeManager {
         // counters still tick and reset normally.
         var pityClaimant: UpgradeCard? = nil
         var pityLongestWait = 0
-        for gateway in allCards where !gateway.provides.isEmpty && !gateway.isSecret {
+        // v2.1 A2: gateways are SIGNATURES. In-tree prerequisite cards (Glacial
+        // Drift, Whiteout) also `provide`, but they open one card, not a tree —
+        // no pity for them.
+        for gateway in allCards where gateway.isSignature && !gateway.provides.isEmpty && !gateway.isSecret {
             // Only unowned gateways whose own requirements are met.
             // v2.0 (E1): a gateway in a DORMANT colour gets no pity — forcing
             // Terra into a slot on a run where Growth isn't playable would
@@ -717,7 +733,7 @@ final class UpgradeManager {
         if pickedCardIDs.contains("v13_overcharge") && pickedCardIDs.contains("v13_execution") {
             return showHintOnce("skill_cannon_alt", "⚡ Skill Cannon forming")
         }
-        if pickedCardIDs.contains("v13_phase_skin") && pickedCardIDs.contains("v13_static_field") {
+        if pickedCardIDs.contains("v13_phase_skin") && pickedCardIDs.contains("v16_hoarfrost") {
             return showHintOnce("survivor_loop", "🛡️ Survivor Loop forming")
         }
         if pickedCardIDs.contains("v13_chain_reaction") && pickedCardIDs.contains("v13_magnetic_core") {
@@ -1193,43 +1209,80 @@ final class UpgradeManager {
         // ❄️ CHILL
         // ═══════════════════════════════════
         
-        // v1.9 Unit 3: signature chill ladder (2-tier).
+        // v2.1 A2 (Chill rework): every Chill card past Frost Touch `requires`
+        // the signature. Tier numbers are TOTALS.
+
+        // Signature. T1 25% / T2 50% slow; T3 (CL-3): the two real shard
+        // sources — Iceburst shards and icicle fragments — carry Frost Touch.
         cards.append(UpgradeCard(
             id: "chill_1", name: "Frost Touch", tag: .chill,
-            description: "Projectiles slow enemies 10% for 2s",
-            apply: { stats in stats.slowAmount += 0.10 },
+            description: "Projectiles slow enemies 25% for 2s",
+            apply: { stats in stats.slowAmount += GameConfig.Chill.frostTouchSlow[0] },
             higherTiers: [
-                { stats in stats.slowAmount += 0.10 }
+                { stats in stats.slowAmount += GameConfig.Chill.frostTouchSlow[1] - GameConfig.Chill.frostTouchSlow[0] },
+                { stats in stats.frostTouchShards = true }
             ],
             tierDescriptions: [
-                "Projectiles slow enemies 10%",
-                "Slow enemies a further 10%"
+                "Projectiles slow enemies 25%",
+                "Projectiles slow enemies 50%",
+                "Shards and icicle fragments apply it too"
             ],
+            detail: "T3: Iceburst shards and icicle fragments apply Frost Touch on hit.",
             isSignature: true,
             provides: [.chillUnlocked]
         ))
         
         cards.append(UpgradeCard(
             id: "chill_2", name: "Ice Shard", tag: .chill,
-            description: "+15% projectile speed, +10% range"
-        ) { stats in
-            stats.projectileSpeedMultiplier += 0.15
-            stats.projectileRangeMultiplier += 0.10
-        })
+            description: "+30% projectile speed",
+            apply: { stats in stats.projectileSpeedMultiplier += GameConfig.Chill.iceShardSpeedBonus },
+            requires: [.chillUnlocked]
+        ))
         
         cards.append(UpgradeCard(
             id: "chill_3", name: "Permafrost", tag: .chill,
-            description: "Slowed enemies take +15% damage"
-        ) { stats in
-            stats.slowedDamageBonus += 0.15
-        })
+            description: "Slowed enemies take +25% damage",
+            apply: { stats in stats.slowedDamageBonus += GameConfig.Chill.permafrostBonus },
+            detail: "Slowed enemies take 25% more damage, regardless of the slow's source.",
+            requires: [.chillUnlocked]
+        ))
         
+        // 1 → 5 tiers (canon amended Sep 15; CL-11 Sep 17). T5 needs Whiteout (Q-C1).
         cards.append(UpgradeCard(
             id: "chill_4", name: "Glacial Drift", tag: .chill,
-            description: "Leave a chill trail that slows enemies"
-        ) { stats in
-            stats.chillTrail = true
-        })
+            description: "Leave a chill trail that slows enemies",
+            apply: { stats in stats.chillTrail = true; stats.glacialDriftTier = 1 },
+            higherTiers: [
+                { stats in stats.glacialDriftTier = 2 },
+                { stats in stats.glacialDriftTier = 3 },
+                { stats in stats.glacialDriftTier = 4 },
+                { stats in
+                    stats.glacialDriftTier = 5
+                    stats.globalEnemySlow += GameConfig.Chill.iceRinkEnemySlow
+                    stats.moveSpeedMultiplier += GameConfig.Chill.iceRinkMoveBonus
+                }
+            ],
+            tierDescriptions: [
+                "Leave a chill trail that slows enemies (2s)",
+                "Trail lingers 3.5s",
+                "Trail lingers 5s and is 30% wider",
+                "Trail is permanent",
+                "Ice Rink: enemies -50% speed, you +25%"
+            ],
+            detail: "Trail time is per patch of ground. T4's frozen ground lasts for the arena. T5 Ice Rink: freeze the arena, slowing enemies by 50% and increasing your movement speed by 25%. Replaces your chill trail. Requires Whiteout.",
+            provides: [.glacialDrift],
+            requires: [.chillUnlocked],
+            tierRequires: [5: [.whiteout]]
+        ))
+
+        // NEW (Q-C2) — takes Static Field's slot.
+        cards.append(UpgradeCard(
+            id: "v21_glacial_spikes", name: "Glacial Spikes", tag: .chill,
+            description: "Chilled ground can impale enemies (4%/s)",
+            apply: { stats in stats.glacialSpikesActive = true },
+            detail: "Enemies on chilled ground have a 4% chance each second to be impaled. Executes normal enemies; deals 20% max HP to elites or 3% to bosses. At most one spike triggers every 0.75s across the arena.",
+            requires: [.glacialDrift]
+        ))
         
         // ═══════════════════════════════════
         // ⚪ NEUTRAL
@@ -1349,13 +1402,9 @@ final class UpgradeManager {
             stats.phaseSkinDuration = 1.0
         })
         
-        // 6. Static Field — proximity slow aura
-        cards.append(UpgradeCard(
-            id: "v13_static_field", name: "Static Field", tag: .chill,
-            description: "Nearby enemies are slowed 15%"
-        ) { stats in
-            stats.staticFieldRange = 80.0
-        })
+        // v2.1 A2: Static Field (`v13_static_field`) REMOVED — Glacial Spikes took
+        // its slot. The id is retired, never reused; old Codex records simply stop
+        // rendering.
         
         // 7. Execution Protocol — bonus damage to low HP
         cards.append(UpgradeCard(
@@ -1594,17 +1643,29 @@ final class UpgradeManager {
 
         cards.append(UpgradeCard(
             id: "v16_hoarfrost", name: "Hoarfrost", tag: .chill,
-            description: "Regenerate 1 HP every 12s"
-        ) { stats in
-            stats.hoarfrostInterval = 12.0
-        })
+            description: "Regenerate 5 HP every 7s",
+            apply: { stats in stats.hoarfrostInterval = GameConfig.Chill.hoarfrostInterval },
+            requires: [.chillUnlocked]
+        ))
 
         cards.append(UpgradeCard(
+            // v2.1 A2 (Q-C3, CL-7): full rework — SNOWMEN.
             id: "v16_whiteout", name: "Whiteout", tag: .chill,
-            description: "Slowed enemies chill others on death"
-        ) { stats in
-            stats.whiteoutActive = true
-        })
+            description: "Hits have a 12% chance to make a snowman (3s)",
+            apply: { stats in stats.whiteoutTier = 1 },
+            higherTiers: [
+                { stats in stats.whiteoutTier = 2 },
+                { stats in stats.whiteoutTier = 3 }
+            ],
+            tierDescriptions: [
+                "Hits have a 12% chance to make a snowman (3s)",
+                "Snowmen last 6s",
+                "Damaging a snowman melts it: it dies"
+            ],
+            detail: "Hits have a 12% chance to turn an enemy into a snowman for 3s. Each enemy can transform once every 10s. T3: damaging a snowman melts it. Normal enemies die instantly; elites take an additional 20% of max HP as damage. Bosses cannot become snowmen.",
+            provides: [.whiteout],
+            requires: [.chillUnlocked]
+        ))
 
         cards.append(UpgradeCard(
             id: "v16_cauterize", name: "Cauterize", tag: .fire,
@@ -1982,7 +2043,8 @@ final class UpgradeManager {
                 "Glacial Condensation: every 3 shots fire one shattering icicle",
                 "Polar Vortex: storm ×3; 5 Chill → freeze → Frostbite (+100% dmg)"
             ],
-            isCapstone: true
+            isCapstone: true,
+            requires: [.chillUnlocked]   // v2.1 A2
         ))
 
         return cards

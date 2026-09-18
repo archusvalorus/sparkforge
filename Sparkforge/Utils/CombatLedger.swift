@@ -21,6 +21,9 @@ struct CombatLedger {
     // v2.1 A1: Crucible — stacks added by Kindle hits, and the tallest pile seen.
     private(set) var burnStacksAdded = 0
     private(set) var burnMaxStacks = 0
+    // v2.1 A2: Chill — snowmen made, Glacial Spikes landed.
+    var snowmen = 0
+    var spikes = 0
 
     mutating func record(_ outcome: PlayerDamagePipeline.Outcome) {
         hits += 1
@@ -63,7 +66,8 @@ struct CombatLedger {
         return "hits=\(hits) clamp=\(ceilingClamps) barrierOnly=\(barrierOnlyHits) "
             + "absorbed=\(barrierAbsorbed) brace=\(braceRescues) unbroken=\(unbrokenRescues) "
             + "dupes=\(duplicateCredits) kills[\(bySource)] "
-            + "burn[stacks+=\(burnStacksAdded) max=\(burnMaxStacks)]"
+            + "burn[stacks+=\(burnStacksAdded) max=\(burnMaxStacks)] "
+            + "chill[snowmen=\(snowmen) spikes=\(spikes)]"
     }
 }
 #endif

@@ -103,6 +103,12 @@ class EnemyNode: SKNode {
     /// v2.1 A0: timed vulnerability windows on GAME time. These were SKAction
     /// waits, which kept running under the pause menu and the level-up screen.
     /// They still share `vulnerabilityMultiplier` (last writer wins) as before.
+    // v2.1 A2 Whiteout: the snowman. A transform is a stun with a costume —
+    // every subclass already respects `isStunned`, so none of them need to
+    // learn about snowmen. One transform per enemy per cooldown.
+    private var snowman = SnowmanState()
+    private var snowmanNode: SKNode?
+    var isSnowman: Bool { snowman.isSnowman }
     private var fractureWindow = GameTimer()
     private var frostbiteWindow = DelayedWindow()
     private var frostbiteMultiplier: CGFloat = 1.0
@@ -435,6 +441,83 @@ class EnemyNode: SKNode {
         bodyNode.fillColor = SKColor(hex: 0x66CCFF)
     }
 
+    /// v2.1 A2 Whiteout: become a snowman for `duration` (boss-class at the
+    /// BossClass debuff scale). Returns false if this enemy transformed too
+    /// recently or is already gone. `meltsOnDamage` = Whiteout T3.
+    @discardableResult
+    func becomeSnowman(duration: TimeInterval, meltsOnDamage: Bool) -> Bool {
+        guard !isDying,
+              let applied = snowman.begin(duration: duration, cooldown: GameConfig.Chill.snowmanCooldown,
+                                          meltsOnDamage: meltsOnDamage, isBossClass: isMiniBoss,
+                                          bossClassScale: GameConfig.BossClass.debuffScale) else { return false }
+        stunTimer = max(stunTimer, applied)
+        showSnowman()
+        return true
+    }
+
+    /// Placeholder art (A9 replaces it): two snowballs, coal eyes, a carrot.
+    private func showSnowman() {
+        let r = GameConfig.Enemy.visualRadius
+        let snow = SKNode()
+        snow.zPosition = 8
+        let body = SKShapeNode(circleOfRadius: r * 1.05)
+        body.fillColor = SKColor(hex: 0xF2F8FF); body.strokeColor = SKColor(hex: 0xAADDFF); body.lineWidth = 1.5
+        let head = SKShapeNode(circleOfRadius: r * 0.62)
+        head.fillColor = SKColor(hex: 0xFFFFFF); head.strokeColor = SKColor(hex: 0xAADDFF); head.lineWidth = 1.2
+        head.position = CGPoint(x: 0, y: r * 1.25)
+        snow.addChild(body); snow.addChild(head)
+        for dx: CGFloat in [-0.22, 0.22] {
+            let eye = SKShapeNode(circleOfRadius: 1.3)
+            eye.fillColor = SKColor(hex: 0x222222); eye.strokeColor = .clear
+            eye.position = CGPoint(x: r * dx, y: r * 1.35)
+            snow.addChild(eye)
+        }
+        let nose = SKShapeNode(rectOf: CGSize(width: 5, height: 2), cornerRadius: 1)
+        nose.fillColor = SKColor(hex: 0xFF8833); nose.strokeColor = .clear
+        nose.position = CGPoint(x: 2.5, y: r * 1.18)
+        snow.addChild(nose)
+        snow.setScale(0.2)
+        snow.run(SKAction.scale(to: 1.0, duration: 0.12))
+        addChild(snow)
+        snowmanNode = snow
+    }
+
+    /// Drop the costume. `melted` = damage did it (T3): the blue smiling puddle.
+    private func endSnowman(melted: Bool) {
+        stunTimer = 0
+        snowmanNode?.removeFromParent()
+        snowmanNode = nil
+        guard melted, let field = parent else { return }
+        let r = GameConfig.Enemy.visualRadius * xScale
+        let puddle = SKShapeNode(ellipseOf: CGSize(width: r * 2.6, height: r * 1.3))
+        puddle.fillColor = SKColor(hex: 0x66B8FF, alpha: 0.55)
+        puddle.strokeColor = SKColor(hex: 0xCCEEFF, alpha: 0.8)
+        puddle.lineWidth = 1
+        puddle.position = position
+        puddle.zPosition = 2.5
+        for dx: CGFloat in [-0.35, 0.35] {
+            let eye = SKShapeNode(circleOfRadius: 1.4)
+            eye.fillColor = SKColor(hex: 0x1A3A66); eye.strokeColor = .clear
+            eye.position = CGPoint(x: r * dx, y: r * 0.12)
+            puddle.addChild(eye)
+        }
+        let smile = SKShapeNode()
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: -r * 0.4, y: -r * 0.08))
+        path.addQuadCurve(to: CGPoint(x: r * 0.4, y: -r * 0.08), control: CGPoint(x: 0, y: -r * 0.45))
+        smile.path = path
+        smile.strokeColor = SKColor(hex: 0x1A3A66); smile.lineWidth = 1.2
+        puddle.addChild(smile)
+        puddle.setScale(0.3)
+        field.addChild(puddle)
+        puddle.run(SKAction.sequence([
+            SKAction.scale(to: 1.0, duration: 0.18),
+            SKAction.wait(forDuration: 0.9),
+            SKAction.fadeOut(withDuration: 0.5),
+            SKAction.removeFromParent()
+        ]))
+    }
+
     /// v1.9 Erasure Fracture: take more damage for a while. Re-applying
     /// restarts the window.
     func applyFracture(_ multiplier: CGFloat, duration: TimeInterval) {
@@ -472,6 +555,7 @@ class EnemyNode: SKNode {
             }
         }
 
+        if snowman.tick(deltaTime) { endSnowman(melted: false) }
         if fractureWindow.tick(deltaTime) { vulnerabilityMultiplier = 1.0 }
         switch frostbiteWindow.tick(deltaTime) {
         case .opened: vulnerabilityMultiplier = frostbiteMultiplier
@@ -521,6 +605,27 @@ class EnemyNode: SKNode {
         // v2.1 A0: a dying enemy can't die again. Re-hits used to return
         // "killed" a second time — the root of every duplicate kill credit.
         guard !isDying else { return false }
+
+        // v2.1 A2 Whiteout T3 (CL-7): damaging a snowman MELTS it. The form is
+        // consumed FIRST, so the extra damage below can never re-trigger it.
+        // Normals die outright; an elite takes the hit, then an additional
+        // 20% of its max HP — and may die to either.
+        switch snowman.onDamage(amount, isBossClass: isMiniBoss, maxHealth: maxHealth,
+                                eliteFraction: GameConfig.Chill.snowmanEliteMeltFraction) {
+        case .none:
+            break
+        case .dies:
+            endSnowman(melted: true)
+            finishingDamage = max(0, health)
+            health = 0
+            onDeath()
+            return true
+        case .elite(let extra):
+            endSnowman(melted: true)
+            if takeDamage(amount) { return true }
+            return takeDamage(extra)
+        }
+
         // v1.9: general vulnerability scales every incoming hit (1.0 = no change).
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount

@@ -60,6 +60,27 @@ enum GameConfig {
         static let cauterizeInterval: TimeInterval = 3.0
         static let cauterizeHeal: Int = 5
     }
+    enum Chill {
+        static let frostTouchSlow: [CGFloat] = [0.25, 0.50]
+        static let iceShardSpeedBonus: CGFloat = 0.30
+        static let permafrostBonus: CGFloat = 0.25
+        static let hoarfrostHeal: Int = 5
+        static let hoarfrostInterval: TimeInterval = 7.0
+        static let driftLifetime: [TimeInterval] = [2.0, 3.5, 5.0]
+        static let driftRadius: CGFloat = 22
+        static let driftSizeBonusT3: CGFloat = 0.30
+        static let driftDropInterval: TimeInterval = 0.15
+        static let driftMergeFraction: CGFloat = 0.6
+        static let driftSlow: CGFloat = 0.08
+        static let iceRinkEnemySlow: CGFloat = 0.50
+        static let iceRinkMoveBonus: CGFloat = 0.25
+        static let spikeChancePerSecond: CGFloat = 0.04
+        static let spikeGlobalCooldown: TimeInterval = 0.75
+        static let snowmanChance: CGFloat = 0.12
+        static let snowmanDuration: [TimeInterval] = [3.0, 6.0, 6.0]
+        static let snowmanCooldown: TimeInterval = 10.0
+        static let snowmanEliteMeltFraction: CGFloat = 0.20
+    }
     enum Erasure {
         static let unstableTriggerCooldown: TimeInterval = 2.0
         static let unstableTriggerCooldownT2: TimeInterval = 1.2

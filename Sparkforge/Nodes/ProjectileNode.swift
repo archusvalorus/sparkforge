@@ -30,6 +30,13 @@ final class ProjectileNode: SKNode {
     var seedGeneration: Int = 0
     /// v2.1 A0: what a kill by this projectile credits as. Set at spawn.
     var killSource: KillSource = .primary
+    /// v2.1 A2 (CL-3): whether this projectile applies Frost Touch's slow.
+    /// True for everything EXCEPT Iceburst shards and icicle fragments, which
+    /// earn it at Frost Touch T3 — opted in specifically, not by a blanket flag.
+    var appliesFrostTouch = true
+    /// v2.1 A2: an Iceburst shard's generation. A kill by a gen-2 shard (one
+    /// born from a shard's own kill) doesn't burst again — the cascade cap.
+    var iceburstGeneration = 0
 
     init(direction: CGPoint,
          speed: CGFloat = GameConfig.Projectile.speed,

@@ -1159,6 +1159,56 @@ enum GameConfig {
         static let cauterizeHeal: Int = 5
     }
 
+    // MARK: - v2.1 Abilities A2: Chill rework
+    /// Approved values: decision packet Q-C1…Q-C5 (Sep 15), closure table
+    /// CL-3, CL-7 and CL-11 (Sep 17). Polar Vortex and the synergy ladder are
+    /// unchanged and keep their own homes.
+    enum Chill {
+        /// Frost Touch: slow per tier — TOTALS (25% / 50%). T3 adds the shards.
+        static let frostTouchSlow: [CGFloat] = [0.25, 0.50]
+        /// Ice Shard: +30% projectile speed (no range any more).
+        static let iceShardSpeedBonus: CGFloat = 0.30
+        /// Permafrost: slowed enemies (ANY source) take this much more damage.
+        static let permafrostBonus: CGFloat = 0.25
+        /// Hoarfrost: 5 HP every 7s.
+        static let hoarfrostHeal: Int = 5
+        static let hoarfrostInterval: TimeInterval = 7.0
+
+        // Glacial Drift (CL-11) — per-segment lifetimes for T1…T3; T4 permanent;
+        // T5 is the Ice Rink.
+        static let driftLifetime: [TimeInterval] = [2.0, 3.5, 5.0]
+        static var driftRadius: CGFloat { 22 * DeviceScale.gameplay }
+        /// T3+: segments are 30% larger.
+        static let driftSizeBonusT3: CGFloat = 0.30
+        static let driftDropInterval: TimeInterval = 0.15
+        /// A drop landing within this fraction of a segment's radius merges
+        /// into it — the bound on a permanent (T4) battlefield.
+        static let driftMergeFraction: CGFloat = 0.6
+        static let driftSlow: CGFloat = 0.08
+        /// Ice Rink (T5): every enemy −50% speed, Spark +25% move.
+        static let iceRinkEnemySlow: CGFloat = 0.50
+        static let iceRinkMoveBonus: CGFloat = 0.25
+
+        // Glacial Spikes (Q-C2)
+        /// Chance per second, per enemy standing on chilled ground.
+        static let spikeChancePerSecond: CGFloat = 0.04
+        /// At most one spike per this long, arena-wide.
+        static let spikeGlobalCooldown: TimeInterval = 0.75
+        /// The ground tell before the spike lands.
+        static let spikeTell: TimeInterval = 0.35
+        static let spikeEliteFraction: CGFloat = 0.20
+        static let spikeBossFraction: CGFloat = 0.03
+
+        // Whiteout snowmen (Q-C3, CL-7)
+        static let snowmanChance: CGFloat = 0.12
+        static let snowmanDuration: [TimeInterval] = [3.0, 6.0, 6.0]
+        /// Each enemy can transform once per this long.
+        static let snowmanCooldown: TimeInterval = 10.0
+        /// T3: an elite melted by damage takes this much of its max HP on top
+        /// of the hit that melted it.
+        static let snowmanEliteMeltFraction: CGFloat = 0.20
+    }
+
     // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)
     /// The shared order every enemy hit on Spark resolves through
     /// (`PlayerDamagePipeline`): input scaling → percentage reductions
