@@ -412,6 +412,46 @@ final class PlayerStats {
 
     /// Number of chain targets on hit (base: 0)
     var chainTargets: Int = 0
+    // v2.1 A3 Chain Lightning ladder (Q-S1, CL-12). `chainTargets` stays the
+    // JUMP count (the card adds one per tier; Chain Current ×3 adds one more).
+    var chainLightningTier: Int = 0
+    /// Fraction of the preceding hit each jump keeps — compounded per jump.
+    var chainRetention: CGFloat {
+        let r = GameConfig.Shock.chainRetention
+        guard chainLightningTier >= 1 else { return chainDamageMultiplier }
+        return r[min(chainLightningTier, r.count) - 1]
+    }
+    /// Damage of each jump in order, from the hit that started the chain.
+    func chainDamages(primary: Int) -> [Int] {
+        var out: [Int] = [], carry = CGFloat(primary)
+        for _ in 0..<max(0, chainTargets) {
+            carry *= chainRetention
+            out.append(max(1, Int(carry)))
+        }
+        return out
+    }
+    // v2.1 A3 Overload (Q-S2, CL-2): owning it + a MAXED Chain Lightning is the
+    // linked upgrade — no extra pick.
+    var overloadOwned = false
+    var overloadLinked: Bool { overloadOwned && chainLightningTier >= GameConfig.Shock.chainRetention.count }
+    var effectiveStunChance: CGFloat {
+        guard overloadOwned else { return stunChance }
+        return overloadLinked ? GameConfig.Shock.overloadLinkedChance : GameConfig.Shock.overloadChance
+    }
+    /// Stun length for this target. Boss-class gets CL-2's fixed durations —
+    /// that IS the boss reduction; nothing scales it again.
+    func overloadStunDuration(isBossClass: Bool) -> TimeInterval {
+        let S = GameConfig.Shock.self
+        if isBossClass { return overloadLinked ? S.overloadLinkedBossDuration : S.overloadBossDuration }
+        return overloadLinked ? S.overloadLinkedDuration : S.overloadDuration
+    }
+    // v2.1 A3: Lightning Sentry (1–3 coils, 4 = Lightning Network), Electro Pulse.
+    var lightningSentryTier: Int = 0
+    var electroPulseActive = false
+    /// Static Crown reworked: an expanding pulse on level-up.
+    var staticCrownActive = false
+    /// Damage of an effect worth `fraction` of a Spark hit (integer hit scale).
+    func shotFractionDamage(_ fraction: CGFloat) -> Int { max(1, Int(effectiveDamageMultiplier * fraction)) }
     /// Chain damage multiplier relative to original hit
     var chainDamageMultiplier: CGFloat = 0.5
     /// v1.7 Copper Vein: extra chain target search radius
@@ -1148,6 +1188,11 @@ final class PlayerStats {
         collisionShrink = 1.0
         globalEnemySlow = 0.0
         chainTargets = 0
+        chainLightningTier = 0
+        overloadOwned = false
+        lightningSentryTier = 0
+        electroPulseActive = false
+        staticCrownActive = false
         chainDamageMultiplier = 0.5
         shockChainRadiusBonus = 0
         inductionStepActive = false

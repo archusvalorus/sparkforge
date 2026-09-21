@@ -87,6 +87,9 @@ def extract_cards():
             tierNames=(re.findall(r'"([^"]*)"', tnames.group(1)) if tnames else [])))
     return cards
 
+# Q-S2: linked cards — owning one and maxing the other upgrades it, no extra pick.
+LINKED = {'shock_4': 'Chain Lightning (maxed → 35% / 2s)', 'shock_2': 'Overload (upgrades it at T4)'}
+
 def esc(s): return html.escape(s or '')
 
 def card_html(c, fam_color):
@@ -95,6 +98,7 @@ def card_html(c, fam_color):
         crown += ' <span class="sig">★ SIGNATURE</span>'
     dual = f' <span class="dual">+{FAM[c["tag2"]][1]}</span>' if c.get('tag2') else ''
     gate = ''
+    if c['id'] in LINKED: gate += f'<span class="gate link">linked ⇄ {esc(LINKED[c["id"]])}</span>'
     if c['provides']: gate += f'<span class="gate">grants ▸ {esc(c["provides"])}</span>'
     if c['requires']: gate += f'<span class="gate req">needs ▸ {esc(c["requires"])}</span>'
     tiers = c['tiers'] if c['tiers'] else [c['desc']]
@@ -168,6 +172,8 @@ def build(cards):
 
 if __name__ == '__main__':
     cards = extract_cards()
-    assert len(cards) >= 80, f'extracted only {len(cards)} cards — parser drift?'
+    # The pool total moves while the v2.1 rework lands tree by tree (A7 audits
+    # the final count) — this only guards against the parser silently breaking.
+    assert len(cards) >= 70, f'extracted only {len(cards)} cards — parser drift?'
     open(OUT, 'w').write(build(cards))
     print(f'{OUT}: {len(cards)} cards')

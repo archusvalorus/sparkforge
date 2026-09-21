@@ -106,6 +106,9 @@ class EnemyNode: SKNode {
     // v2.1 A2 Whiteout: the snowman. A transform is a stun with a costume —
     // every subclass already respects `isStunned`, so none of them need to
     // learn about snowmen. One transform per enemy per cooldown.
+    // v2.1 A3 Overload (CL-2): its stun + the 3s per-target immunity after it.
+    private var overloadStun = OverloadStunState()
+    private var dazedStars: SKNode?
     private var snowman = SnowmanState()
     private var snowmanNode: SKNode?
     var isSnowman: Bool { snowman.isSnowman }
@@ -435,6 +438,37 @@ class EnemyNode: SKNode {
         stunTimer = max(stunTimer, duration)
     }
 
+    /// v2.1 A3 Overload: stun with the CL-2 immunity rule. Returns false when
+    /// this enemy is already Overload-stunned or still immune.
+    @discardableResult
+    func applyOverloadStun(_ duration: TimeInterval) -> Bool {
+        guard !isDying, overloadStun.tryStun(duration: duration) else { return false }
+        stunTimer = max(stunTimer, duration)
+        showDazedStars()
+        return true
+    }
+
+    /// Placeholder "dazed" tell (A9 art): three stars circling the head.
+    private func showDazedStars() {
+        dazedStars?.removeFromParent()
+        let r = GameConfig.Enemy.visualRadius
+        let orbit = SKNode()
+        orbit.position = CGPoint(x: 0, y: r + 5)
+        orbit.zPosition = 9
+        for k in 0..<3 {
+            let star = SKLabelNode(text: "✦")
+            star.fontSize = 8
+            star.fontColor = SKColor(hex: 0xFFE066)
+            star.verticalAlignmentMode = .center
+            let a = CGFloat(k) / 3 * 2 * .pi
+            star.position = CGPoint(x: cos(a) * r * 0.75, y: sin(a) * r * 0.3)
+            orbit.addChild(star)
+        }
+        orbit.run(SKAction.repeatForever(SKAction.rotate(byAngle: 2 * .pi, duration: 0.9)))
+        addChild(orbit)
+        dazedStars = orbit
+    }
+
     /// v1.9 Polar Vortex: freeze the enemy in place with an icy tint.
     func applyFreeze(_ duration: TimeInterval) {
         freezeTimer = max(freezeTimer, duration)
@@ -556,6 +590,9 @@ class EnemyNode: SKNode {
         }
 
         if snowman.tick(deltaTime) { endSnowman(melted: false) }
+        let wasDazed = overloadStun.isStunned
+        overloadStun.tick(deltaTime, immunityDuration: GameConfig.Shock.overloadImmunity)
+        if wasDazed, !overloadStun.isStunned { dazedStars?.removeFromParent(); dazedStars = nil }
         if fractureWindow.tick(deltaTime) { vulnerabilityMultiplier = 1.0 }
         switch frostbiteWindow.tick(deltaTime) {
         case .opened: vulnerabilityMultiplier = frostbiteMultiplier

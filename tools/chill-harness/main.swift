@@ -190,8 +190,9 @@ do {
             && rest.allSatisfy { $0.requires.contains(.chillUnlocked) || $0.requires.contains(.glacialDrift) })
     check("E2 Glacial Spikes requires Glacial Drift", card(um, "v21_glacial_spikes").requires == [.glacialDrift]
             && card(um, "chill_4").provides.contains(.glacialDrift))
-    check("E3 Static Field is gone; the pool is still 80",
-          !um.allCards.contains { $0.id == "v13_static_field" } && um.allCards.count == 80, "count=\(um.allCards.count)")
+    // (The pool total moves as each tree lands; A7 audits the final count.)
+    check("E3 Static Field is gone; Glacial Spikes took its slot (Chill stays 8 cards)",
+          !um.allCards.contains { $0.id == "v13_static_field" } && chill.count == 8, "chill=\(chill.count)")
     check("E4 in-tree prerequisite cards are NOT signatures (so they get no gateway pity)",
           !card(um, "chill_4").isSignature && !card(um, "v16_whiteout").isSignature)
 

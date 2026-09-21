@@ -255,6 +255,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var frostTexture: SKTexture?
     private var iceRinkFloor: SKShapeNode?
     private var chillTrailDropTimer: TimeInterval = 0
+    // v2.1 A3 Shock: Electro Pulse clock, Static Crown rings, Lightning Sentry coils.
+    private var electroPulseTimer: TimeInterval = 0
+    private var crownPulses: [(center: CGPoint, elapsed: TimeInterval, hit: [EnemyNode], ring: SKShapeNode)] = []
+    private var sentryCoils: [(node: SKNode, timer: TimeInterval)] = []
+    private var sentryDeployedTier = 0
     // v2.1 A2: Glacial Spikes — one arena-wide cooldown, tells land on game time.
     private var spikeCooldown = GameTimer()
     private var pendingSpikes: [(enemy: EnemyNode?, isBoss: Bool, timer: GameTimer, mark: SKNode)] = []
@@ -2599,14 +2604,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // knockback). Guard 3 is now Ironhide — no level-up effect.
 
         // v1.6: Static Crown — level-ups release a shock burst
-        if playerStats.staticCrownDamage > 0 {
-            damageEnemiesInRadius(playerStats.staticCrownRadius,
-                                  around: player.position,
-                                  damage: playerStats.staticCrownDamage)
-            showRingPulse(at: player.position,
-                          radius: playerStats.staticCrownRadius,
-                          colorHex: 0xFFE066)
-        }
+        // v2.1 A3: reworked — an electro pulse that EXPANDS for 4s (see
+        // updateShockSystems); the old instant burst is gone.
+        if playerStats.staticCrownActive { beginCrownPulse() }
 
         // v1.8 Unit 14: Silver Skin (Guard/Void) — a level-up arms a one-hit block.
         if playerStats.hasSilverSkin {
@@ -4701,6 +4701,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updatePassiveEffects(dt)
         updateGravityWells(dt)
         updateChillTrail(dt)
+        updateShockSystems(dt)
         updateArcWake(dt)
         updateNullBlooms(dt)
         updateCultivatedGround(dt)
@@ -6043,6 +6044,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard playerStats.skybeamTier >= 1 else { return }
         if skybeamStrikeCooldown > 0 { skybeamStrikeCooldown -= dt }
 
+        // v2.1 A3 (Q-S4, CL-8): the T5 strike runs on its OWN 5s clock — the
+        // lasso picks its target but no longer gates it. Prefer the lassoed
+        // prey; with nothing lassoed, the nearest valid enemy. (This sits ABOVE
+        // the no-lasso early return on purpose — that return was the banked trap.)
+        if playerStats.skybeamStrike, skybeamStrikeCooldown <= 0,
+           let prey = currentLassoTarget() ?? nearestCombatTarget() {
+            beginSkyStrike(at: prey)
+            skybeamStrikeCooldown = GameConfig.Skybeam.strikeCooldown
+        }
+
         // Resolve/maintain the lasso target — retargets when it dies or leaves range.
         guard let target = currentLassoTarget() else { clearLasso(); return }
 
@@ -6081,14 +6092,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        // T5 : Skybeam — strike from above after 2s continuous, repeating on cooldown.
-        if playerStats.skybeamStrike, skybeamAttachTime >= GameConfig.Skybeam.calledThreshold,
-           skybeamStrikeCooldown <= 0 {
-            beginSkyStrike(at: target)
-            skybeamStrikeCooldown = GameConfig.Skybeam.strikeCooldown
-        }
-
         drawLasso(to: target.position)
+    }
+
+    /// v2.1 A3 (CL-8): the nearest valid target to Spark — enemy or boss, by
+    /// distance alone (NOT the priority rule; "otherwise the nearest valid enemy").
+    private func nearestCombatTarget() -> CombatTarget? {
+        var best: CombatTarget?
+        var bestDist = CGFloat.greatestFiniteMagnitude
+        for enemy in enemies where !enemy.isDying {
+            let d = player.position.distance(to: enemy.position)
+            if d < bestDist { bestDist = d; best = .enemy(enemy) }
+        }
+        if let b = boss, !b.isDead {
+            let d = player.position.distance(to: b.position) - b.targetingRadius
+            if d < bestDist { best = .boss(b) }
+        }
+        return best
     }
 
     /// The current lasso target: keep the existing one while it's alive and within
@@ -6295,6 +6315,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if alive {
             let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Skybeam.strikeMult))
             strikeCombatTarget(target, damage: dmg, source: .capstone)
+        }
+
+        // v2.1 A3 (CL-8): splash — every OTHER enemy within 80pt takes 150% ATK.
+        // The primary never eats its own splash. Boss-class at the capstone
+        // damage scale, like the bolt itself (strikeCombatTarget applies it).
+        let splash = max(1, Int(playerStats.effectiveAttack * GameConfig.Skybeam.strikeSplashMult))
+        var primaryEnemy: EnemyNode? = nil
+        if case .enemy(let e) = target { primaryEnemy = e }
+        for enemy in enemies where enemy !== primaryEnemy && !enemy.isDying
+            && enemy.position.distance(to: pos) < GameConfig.Skybeam.strikeSplashRadius {
+            strikeCombatTarget(.enemy(enemy), damage: splash, source: .capstone)
+        }
+        if case .enemy = target, let b = boss, !b.isDead,
+           b.position.distance(to: pos) - b.targetingRadius < GameConfig.Skybeam.strikeSplashRadius {
+            strikeCombatTarget(.boss(b), damage: splash, source: .capstone)
         }
     }
 
@@ -7256,6 +7291,208 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             gravityWells[index].collapseAndRemove()
             gravityWells.remove(at: index)
         }
+    }
+
+    // MARK: - v2.1 A3: Shock systems (Electro Pulse, Static Crown, Lightning Sentry)
+
+    private func updateShockSystems(_ dt: TimeInterval) {
+        updateElectroPulse(dt)
+        updateCrownPulses(dt)
+        updateSentryCoils(dt)
+    }
+
+    /// Electro Pulse: only MOVING charges it; every 3s a static shock arcs to
+    /// the nearest enemy for 40% — and that strike can start a Chain Lightning.
+    private func updateElectroPulse(_ dt: TimeInterval) {
+        guard playerStats.electroPulseActive, joystick.direction != .zero else { return }
+        electroPulseTimer += dt
+        guard electroPulseTimer >= GameConfig.Shock.pulseInterval else { return }
+        var nearest: EnemyNode?
+        var best = GameConfig.Shock.pulseRange
+        for enemy in enemies where !enemy.isDying {
+            let d = player.position.distance(to: enemy.position)
+            if d < best { best = d; nearest = enemy }
+        }
+        guard let target = nearest else { return }   // stay charged until something is in reach
+        electroPulseTimer = 0
+        showRingPulse(at: player.position, radius: 26, colorHex: 0xFFE066)
+        shockArc(from: player.position, to: target.position, width: 3)
+        let damage = playerStats.shotFractionDamage(GameConfig.Shock.pulseDamageFraction)
+        if target.takeDamage(damage) {
+            onEnemyKilled(at: target.position, xpValue: target.xpValue, enemy: target, source: .chain)
+        } else {
+            rollOverload(on: target)
+        }
+        // Lethal or not, the pulse's strike can start ONE chain (same rule as a shot).
+        if playerStats.chainTargets > 0 { chainLightning(from: target, primaryDamage: damage) }
+    }
+
+    private func shockArc(from: CGPoint, to: CGPoint, width: CGFloat) {
+        let arc = SKShapeNode(path: jaggedBoltPath(from: from, to: to, jitter: 9, segments: 5))
+        arc.strokeColor = SKColor(hex: 0xFFE066, alpha: 0.95)
+        arc.lineWidth = width
+        arc.glowWidth = 6
+        arc.zPosition = 8
+        worldNode.addChild(arc)
+        arc.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.25), SKAction.removeFromParent()]))
+    }
+
+    /// Static Crown: the ring leaves Spark where he levelled and expands for 4s
+    /// (game time); each enemy it passes takes 150% — once per ring.
+    private func beginCrownPulse() {
+        let ring = SKShapeNode(circleOfRadius: 1)
+        ring.fillColor = .clear
+        ring.strokeColor = SKColor(hex: 0xFFE066, alpha: 0.9)
+        ring.lineWidth = 3
+        ring.glowWidth = 8
+        ring.position = player.position
+        ring.zPosition = 7
+        worldNode.addChild(ring)
+        crownPulses.append((center: player.position, elapsed: 0, hit: [], ring: ring))
+    }
+
+    private func updateCrownPulses(_ dt: TimeInterval) {
+        guard !crownPulses.isEmpty else { return }
+        let S = GameConfig.Shock.self
+        let damage = playerStats.shotFractionDamage(S.crownDamageFraction)
+        for i in crownPulses.indices.reversed() {
+            crownPulses[i].elapsed += dt
+            let f = min(1, CGFloat(crownPulses[i].elapsed / S.crownExpandTime))
+            let radius = max(1, S.crownRadius * f)
+            let pulse = crownPulses[i]
+            pulse.ring.path = CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2),
+                                     transform: nil)
+            pulse.ring.alpha = 1 - f * 0.6
+            for enemy in enemies where !enemy.isDying
+                && enemy.position.distance(to: pulse.center) <= radius
+                && !pulse.hit.contains(where: { $0 === enemy }) {
+                crownPulses[i].hit.append(enemy)
+                if enemy.takeDamage(damage) {
+                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .burst)
+                }
+            }
+            if f >= 1 {
+                pulse.ring.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.2), SKAction.removeFromParent()]))
+                crownPulses.remove(at: i)
+            }
+        }
+    }
+
+    // Lightning Sentry (Q-S3, CL-13). T1–T3: a coil deploys NEAR SPARK when the
+    // tier is picked, on valid ground, clear of the other coils. T4: they merge
+    // into one central coil with arena-wide reach. Each shock hits ONE enemy.
+    private func updateSentryCoils(_ dt: TimeInterval) {
+        let tier = playerStats.lightningSentryTier
+        guard tier > 0 else { return }
+        if tier != sentryDeployedTier { deploySentryCoils(tier: tier) }
+
+        let S = GameConfig.Shock.self
+        let network = tier >= 4
+        let interval = network ? S.networkInterval : S.sentryInterval
+        let range = network ? CGFloat.greatestFiniteMagnitude : S.sentryRange
+        let damage = playerStats.shotFractionDamage(network ? S.networkDamageFraction : S.sentryDamageFraction)
+        for i in sentryCoils.indices {
+            sentryCoils[i].timer += dt
+            guard sentryCoils[i].timer >= interval else { continue }
+            let origin = sentryCoils[i].node.position
+            var nearest: EnemyNode?
+            var best = range
+            for enemy in enemies where !enemy.isDying {
+                let d = origin.distance(to: enemy.position)
+                if d < best { best = d; nearest = enemy }
+            }
+            if let target = nearest {
+                sentryCoils[i].timer = 0
+                shockArc(from: CGPoint(x: origin.x, y: origin.y + 14), to: target.position, width: network ? 3.5 : 2)
+                if target.takeDamage(damage) {
+                    onEnemyKilled(at: target.position, xpValue: target.xpValue, enemy: target, source: .summon)
+                }
+                #if DEBUG
+                combatLedger.coilShocks += 1
+                #endif
+            } else if let b = boss, !b.isDead, origin.distance(to: b.position) - b.targetingRadius < range {
+                sentryCoils[i].timer = 0
+                shockArc(from: CGPoint(x: origin.x, y: origin.y + 14), to: b.position, width: network ? 3.5 : 2)
+                b.takeDamage(damage)
+            }
+        }
+    }
+
+    private func deploySentryCoils(tier: Int) {
+        sentryDeployedTier = tier
+        if tier >= 4 {
+            // Lightning Network: consolidate at a valid CENTRAL anchor. Geometry
+            // may push the body off-centre (the Carrier sits mid-yard); coverage
+            // is arena-wide regardless.
+            sentryCoils.forEach { $0.node.removeFromParent() }
+            sentryCoils.removeAll()
+            let centre = arenaGeometry.resolve(.zero, actorRadius: 22)
+            geometryDebug.recordResolve(actor: "coil", cause: .teleport)
+            addSentryCoil(at: centre, network: true)
+            showRingPulse(at: centre, radius: 120, colorHex: 0xFFE066)
+            return
+        }
+        while sentryCoils.count < tier {
+            addSentryCoil(at: sentryPlacement(), network: false)
+        }
+    }
+
+    /// A point near Spark: inside the arena, off solid geometry, clear of the
+    /// other coils. Falls back to resolving the last candidate out of geometry.
+    private func sentryPlacement() -> CGPoint {
+        let S = GameConfig.Shock.self
+        let limit = GameConfig.Arena.radius - 30
+        var candidate = player.position
+        for _ in 0..<16 {
+            let angle = CGFloat.random(in: 0..<(2 * .pi))
+            let reach = CGFloat.random(in: S.sentryPlaceMin...S.sentryPlaceMax)
+            candidate = CGPoint(x: player.position.x + cos(angle) * reach, y: player.position.y + sin(angle) * reach)
+            if candidate.length > limit { candidate = candidate.normalized * limit }
+            let clear = !sentryCoils.contains { $0.node.position.distance(to: candidate) < S.sentrySpacing }
+            if clear, !arenaGeometry.isBlocked(candidate, margin: 16) { return candidate }
+        }
+        return arenaGeometry.resolve(candidate, actorRadius: 16)
+    }
+
+    /// Placeholder coil (A9 art): a stubby tower with a crackling top.
+    private func addSentryCoil(at position: CGPoint, network: Bool) {
+        let coil = SKNode()
+        coil.position = position
+        coil.zPosition = 4
+        let scale: CGFloat = network ? 1.6 : 1.0
+        let base = SKShapeNode(rectOf: CGSize(width: 14 * scale, height: 6 * scale), cornerRadius: 2)
+        base.fillColor = SKColor(hex: 0x2A2A33); base.strokeColor = SKColor(hex: 0xF6D36B, alpha: 0.7)
+        let mast = SKShapeNode(rectOf: CGSize(width: 5 * scale, height: 18 * scale), cornerRadius: 2)
+        mast.fillColor = SKColor(hex: 0x3A3A44); mast.strokeColor = SKColor(hex: 0xF6D36B, alpha: 0.6)
+        mast.position = CGPoint(x: 0, y: 10 * scale)
+        let top = SKShapeNode(circleOfRadius: 5 * scale)
+        top.fillColor = SKColor(hex: 0xFFE066); top.strokeColor = .clear; top.glowWidth = 6
+        top.position = CGPoint(x: 0, y: 20 * scale)
+        top.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.55, duration: 0.35), SKAction.fadeAlpha(to: 1.0, duration: 0.35)])))
+        coil.addChild(base); coil.addChild(mast); coil.addChild(top)
+        if !network {
+            let reach = SKShapeNode(circleOfRadius: GameConfig.Shock.sentryRange)
+            reach.fillColor = .clear
+            reach.strokeColor = SKColor(hex: 0xF6D36B, alpha: 0.10)
+            reach.lineWidth = 1
+            coil.addChild(reach)
+        }
+        coil.setScale(0.1)
+        coil.run(SKAction.scale(to: 1.0, duration: 0.2))
+        worldNode.addChild(coil)
+        sentryCoils.append((node: coil, timer: 0))
+    }
+
+    /// New arena or new run: coils come down. On an arena swap they redeploy
+    /// around Spark next frame (the tier is the build's; the ground is the arena's).
+    private func clearShockSystems() {
+        sentryCoils.forEach { $0.node.removeFromParent() }
+        sentryCoils.removeAll()
+        sentryDeployedTier = 0
+        crownPulses.forEach { $0.ring.removeFromParent() }
+        crownPulses.removeAll()
+        electroPulseTimer = 0
     }
 
     // MARK: - v2.1 A2: Chilled ground (Glacial Drift ×5, Ice Rink, Glacial Spikes)
@@ -8291,6 +8528,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         setupArena()
         setupEmberParticles()
         thawChillGround(newRun: false)   // v2.1 A2: frozen ground is per arena
+        clearShockSystems()              // v2.1 A3: coils redeploy in the new arena
 
         // The field just changed size. Anything still holding a position from
         // the old arena has to be brought inside the new boundary — and the
@@ -10445,9 +10683,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             enemyNode.applyKnockback(from: player.position, force: playerStats.knockbackForce)
         }
         // v1.6: Overload — real stun (was a mislabeled slow)
-        if playerStats.stunChance > 0 && CGFloat.random(in: 0...1) < playerStats.stunChance {
-            enemyNode.applyStun(playerStats.stunDuration)
-        }
+        rollOverload(on: enemyNode)
 
         // Shatter check
         if playerStats.shatterChance > 0 && enemyNode.isSlowed {
@@ -10531,11 +10767,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.9 Polar Vortex (T4): the icicle shatters into shards on first impact.
         if projectileNode.isIcicle { iceShatter(at: enemyNode.position) }
 
-        if playerStats.chainTargets > 0 && !killed {
-            chainLightning(from: enemyNode.position,
-                          damage: max(1, Int(CGFloat(damage) * playerStats.chainDamageMultiplier)),
-                          remaining: playerStats.chainTargets,
-                          excludeEnemy: enemyNode)
+        // v2.1 A3 (Brandon, Sep 18): a LETHAL hit chains too — from the victim's
+        // impact position. Three boundaries: ONE sequence per triggering hit
+        // (here, never from the death handler); every victim visited once,
+        // the original included; and the basis is THIS hit's damage, not what
+        // the victim had left — killing a 1-HP enemy must not shrink the chain.
+        if playerStats.chainTargets > 0 {
+            chainLightning(from: enemyNode, primaryDamage: damage)
         }
     }
     
@@ -10589,49 +10827,78 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - Chain Lightning
     
-    private func chainLightning(from position: CGPoint, damage: Int, remaining: Int, excludeEnemy: EnemyNode) {
-        guard remaining > 0 else { return }
-        
-        var closest: EnemyNode?
-        // v1.7 Copper Vein: chains reach farther
-        var closestDist: CGFloat = 80 + playerStats.shockChainRadiusBonus
-
-        for enemy in enemies where enemy !== excludeEnemy {
-            let dist = position.distance(to: enemy.position)
-            if dist < closestDist {
-                closestDist = dist
-                closest = enemy
+    /// v2.1 A3 Overload (Q-S2, CL-2): roll a stun on this hit. Chain hits roll
+    /// too. Boss-class gets CL-2's fixed durations (the one and only reduction);
+    /// a target that was just stunned is immune for 3s.
+    private func rollOverload(on enemy: EnemyNode) {
+        let chance = playerStats.effectiveStunChance
+        guard chance > 0, !enemy.isDying, CGFloat.random(in: 0...1) < chance else { return }
+        if playerStats.overloadOwned {
+            if enemy.applyOverloadStun(playerStats.overloadStunDuration(isBossClass: enemy.isMiniBoss)) {
+                #if DEBUG
+                combatLedger.overloadStuns += 1
+                #endif
             }
-        }
-        
-        guard let target = closest else { return }
-        
-        let line = SKShapeNode()
-        let path = CGMutablePath()
-        path.move(to: position)
-        path.addLine(to: target.position)
-        line.path = path
-        line.strokeColor = SKColor(hex: GameConfig.ChainLightning.colorHex,
-                                   alpha: GameConfig.ChainLightning.alpha)
-        line.lineWidth = GameConfig.ChainLightning.lineWidth
-        line.glowWidth = GameConfig.ChainLightning.glowWidth
-        line.zPosition = 8
-        worldNode.addChild(line)
-        line.run(SKAction.sequence([
-            SKAction.fadeOut(withDuration: GameConfig.ChainLightning.fadeDuration),
-            SKAction.removeFromParent()
-        ]))
-        
-        if target.takeDamage(damage) {
-            let pos = target.position
-            let xp = target.xpValue
-            if let index = enemies.firstIndex(where: { $0 === target }) {
-                enemies.remove(at: index)
-            }
-            onEnemyKilled(at: pos, xpValue: xp, enemy: target, source: .chain)
+        } else {
+            enemy.applyStun(playerStats.stunDuration)   // legacy path (no card grants this any more)
         }
     }
-    
+
+    /// v2.1 A3 Chain Lightning (Q-S1, CL-12): jump from `origin` to the nearest
+    /// enemy in range, then on from THAT one — every jump a DISTINCT target.
+    /// Damage per jump comes from the card's tier (compounded falloff; none at
+    /// T4). Each jump can trigger Overload. `origin` may already be dead — the
+    /// chain leaves from where it was hit — and a victim dying mid-sequence
+    /// never stops the remaining jumps.
+    private func chainLightning(from origin: EnemyNode, primaryDamage: Int) {
+        let damages = playerStats.chainDamages(primary: primaryDamage)
+        guard !damages.isEmpty else { return }
+        var visited: [EnemyNode] = [origin]
+        var from = origin.position
+        let tier = CGFloat(max(1, playerStats.chainLightningTier))
+        #if DEBUG
+        var jumps = 0
+        #endif
+
+        for damage in damages {
+            var closest: EnemyNode?
+            var closestDist = GameConfig.Shock.chainRange + playerStats.shockChainRadiusBonus
+            for enemy in enemies where !enemy.isDying && !visited.contains(where: { $0 === enemy }) {
+                let dist = from.distance(to: enemy.position)
+                if dist < closestDist { closestDist = dist; closest = enemy }
+            }
+            guard let target = closest else { break }
+            visited.append(target)
+
+            // LOUD (spec): the bolt thickens and glows harder with the card's tier.
+            let line = SKShapeNode(path: jaggedBoltPath(from: from, to: target.position, jitter: 7, segments: 5))
+            line.strokeColor = SKColor(hex: GameConfig.ChainLightning.colorHex,
+                                       alpha: GameConfig.ChainLightning.alpha)
+            line.lineWidth = GameConfig.ChainLightning.lineWidth + (tier - 1) * 0.6
+            line.glowWidth = GameConfig.ChainLightning.glowWidth + (tier - 1) * 2
+            line.zPosition = 8
+            worldNode.addChild(line)
+            line.run(SKAction.sequence([
+                SKAction.fadeOut(withDuration: GameConfig.ChainLightning.fadeDuration),
+                SKAction.removeFromParent()
+            ]))
+            showRingPulse(at: target.position, radius: 12 + tier * 3, colorHex: GameConfig.ChainLightning.colorHex)
+
+            from = target.position
+            #if DEBUG
+            jumps += 1
+            #endif
+            if target.takeDamage(damage) {
+                onEnemyKilled(at: target.position, xpValue: target.xpValue, enemy: target, source: .chain)
+            } else {
+                rollOverload(on: target)
+            }
+        }
+        #if DEBUG
+        combatLedger.recordChain(jumps: jumps)
+        #endif
+    }
+
     // MARK: - XP Collection
     
     private func handleXPCollection(orbBody: SKPhysicsBody) {
@@ -11301,6 +11568,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera?.childNode(withName: "placeHint")?.removeFromParent()
         player.setNourished(false)
         thawChillGround(newRun: true)
+        clearShockSystems()
         singularityTimer = 0
         chillTrailDropTimer = 0
         arcWakeSparks.removeAll()

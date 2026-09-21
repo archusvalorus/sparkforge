@@ -81,6 +81,26 @@ enum GameConfig {
         static let snowmanCooldown: TimeInterval = 10.0
         static let snowmanEliteMeltFraction: CGFloat = 0.20
     }
+    enum Shock {
+        static let staticFireRate: [CGFloat] = [0.15, 0.30, 0.50]
+        static let chainRetention: [CGFloat] = [0.50, 0.75, 0.85, 1.00]
+        static let surgeMoveBonus: CGFloat = 0.10
+        static let surgeProjectileSpeed: CGFloat = 0.20
+        static let surgeFireRate: CGFloat = 0.10
+        static let overloadChance: CGFloat = 0.20
+        static let overloadDuration: TimeInterval = 1.0
+        static let overloadLinkedChance: CGFloat = 0.35
+        static let overloadLinkedDuration: TimeInterval = 2.0
+        static let overloadBossDuration: TimeInterval = 0.25
+        static let overloadLinkedBossDuration: TimeInterval = 0.5
+        static let overloadImmunity: TimeInterval = 3.0
+        static let sentryDamageFraction: CGFloat = 0.50
+        static let sentryInterval: TimeInterval = 0.8
+        static let networkDamageFraction: CGFloat = 0.75
+        static let networkInterval: TimeInterval = 0.4
+        static let crownDamageFraction: CGFloat = 1.50
+        static let pulseDamageFraction: CGFloat = 0.40
+    }
     enum Erasure {
         static let unstableTriggerCooldown: TimeInterval = 2.0
         static let unstableTriggerCooldownT2: TimeInterval = 1.2

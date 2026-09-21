@@ -24,6 +24,16 @@ struct CombatLedger {
     // v2.1 A2: Chill — snowmen made, Glacial Spikes landed.
     var snowmen = 0
     var spikes = 0
+    // v2.1 A3: Shock — Overload stuns, coil shocks, longest chain seen.
+    var overloadStuns = 0
+    var coilShocks = 0
+    private(set) var chains = 0
+    private(set) var longestChain = 0
+    mutating func recordChain(jumps: Int) {
+        guard jumps > 0 else { return }
+        chains += 1
+        if jumps > longestChain { longestChain = jumps; NSLog("[A3] chain reached %d jumps", jumps) }
+    }
 
     mutating func record(_ outcome: PlayerDamagePipeline.Outcome) {
         hits += 1
@@ -67,7 +77,8 @@ struct CombatLedger {
             + "absorbed=\(barrierAbsorbed) brace=\(braceRescues) unbroken=\(unbrokenRescues) "
             + "dupes=\(duplicateCredits) kills[\(bySource)] "
             + "burn[stacks+=\(burnStacksAdded) max=\(burnMaxStacks)] "
-            + "chill[snowmen=\(snowmen) spikes=\(spikes)]"
+            + "chill[snowmen=\(snowmen) spikes=\(spikes)] "
+            + "shock[chains=\(chains) longest=\(longestChain) stuns=\(overloadStuns) coils=\(coilShocks)]"
     }
 }
 #endif

@@ -1033,46 +1033,98 @@ final class UpgradeManager {
         // ⚡ SHOCK
         // ═══════════════════════════════════
         
-        // v1.9 Unit 3: signature attack-speed ladder (3-tier). Lower interval
-        // = faster; each rung stacks another ×0.88.
+        // v2.1 A3 (Shock rework): every Shock card past Chain Lightning
+        // `requires` the signature. Tier numbers are TOTALS; attack-speed %
+        // is a REAL firing-rate increase (the interval divides).
+
+        // 15 / 30 / 50% — each rung re-bases the interval onto the new total.
         cards.append(UpgradeCard(
             id: "shock_1", name: "Static", tag: .shock,
-            description: "+12% attack speed",
-            apply: { stats in stats.fireRateMultiplier *= 0.88 },
+            description: "+15% attack speed",
+            apply: { stats in stats.fireRateMultiplier /= (1 + GameConfig.Shock.staticFireRate[0]) },
             higherTiers: [
-                { stats in stats.fireRateMultiplier *= 0.88 },
-                { stats in stats.fireRateMultiplier *= 0.88 }
+                { stats in stats.fireRateMultiplier *= (1 + GameConfig.Shock.staticFireRate[0]) / (1 + GameConfig.Shock.staticFireRate[1]) },
+                { stats in stats.fireRateMultiplier *= (1 + GameConfig.Shock.staticFireRate[1]) / (1 + GameConfig.Shock.staticFireRate[2]) }
             ],
             tierDescriptions: [
-                "+12% attack speed",
-                "+12% more attack speed",
-                "+12% more attack speed"
-            ]
+                "+15% attack speed",
+                "+30% attack speed",
+                "+50% attack speed"
+            ],
+            requires: [.shockUnlocked]
         ))
         
+        // Signature. Arc → CHAIN LIGHTNING, 4 tiers (Q-S1, CL-12). The id stays
+        // `shock_2` (persistence canon); one jump per tier, distinct targets.
         cards.append(UpgradeCard(
-            id: "shock_2", name: "Arc", tag: .shock,
+            id: "shock_2", name: "Chain Lightning", tag: .shock,
             description: "Hits chain to 1 nearby enemy at 50% damage",
-            apply: { stats in stats.chainTargets += 1 },
+            apply: { stats in stats.chainTargets += 1; stats.chainLightningTier = 1 },
+            higherTiers: [
+                { stats in stats.chainTargets += 1; stats.chainLightningTier = 2 },
+                { stats in stats.chainTargets += 1; stats.chainLightningTier = 3 },
+                { stats in stats.chainTargets += 1; stats.chainLightningTier = 4 }
+            ],
+            tierDescriptions: [
+                "Hits chain to 1 nearby enemy at 50% damage",
+                "Chains to 2; each jump keeps 75%",
+                "Chains to 3; each jump keeps 85%",
+                "Chains to 4 with no damage falloff"
+            ],
+            detail: "Each jump strikes a different enemy. T2 and T3 lose damage per jump, compounding (75% / 85% of the hit before). T4: hits chain to 4 additional enemies with no damage falloff. Chain Current adds one more jump.",
             isSignature: true,
             provides: [.shockUnlocked]
         ))
         
         cards.append(UpgradeCard(
             id: "shock_3", name: "Surge", tag: .shock,
-            description: "+15% attack speed, +10% projectile speed"
-        ) { stats in
-            stats.fireRateMultiplier *= 0.85
-            stats.projectileSpeedMultiplier += 0.10
-        })
+            description: "+10% move, +20% shot speed, +10% attack speed",
+            apply: { stats in
+                stats.moveSpeedMultiplier += GameConfig.Shock.surgeMoveBonus
+                stats.projectileSpeedMultiplier += GameConfig.Shock.surgeProjectileSpeed
+                stats.fireRateMultiplier /= (1 + GameConfig.Shock.surgeFireRate)
+            },
+            requires: [.shockUnlocked]
+        ))
         
+        // Q-S2: LINKED to Chain Lightning — while that is maxed, an owned
+        // Overload is 35% / 2s with no extra pick (PlayerStats.overloadLinked).
         cards.append(UpgradeCard(
             id: "shock_4", name: "Overload", tag: .shock,
-            description: "15% chance to stun enemies for 0.5s on hit"
-        ) { stats in
-            // v1.6: real stun — previous version added a slow by mistake
-            stats.stunChance += 0.15
-        })
+            description: "Hits have a 20% chance to stun for 1s",
+            apply: { stats in stats.overloadOwned = true },
+            detail: "Hits have a 20% chance to stun enemies for 1s. Chain Lightning hits can also trigger this effect. With maxed Chain Lightning: 35% stun chance and 2s stun duration. An enemy can't be stunned again for 3s after a stun ends. Elites and mini-bosses are stunned for 0.25s, or 0.5s with maxed Chain Lightning. Arena bosses are immune.",
+            requires: [.shockUnlocked]
+        ))
+
+        // NEW (Q-S3, CL-13) — 4 tiers. Coils deploy near Spark at pick time.
+        cards.append(UpgradeCard(
+            id: "v21_lightning_sentry", name: "Lightning Sentry", tag: .shock,
+            description: "Deploy a Tesla coil that shocks enemies",
+            apply: { stats in stats.lightningSentryTier = 1 },
+            higherTiers: [
+                { stats in stats.lightningSentryTier = 2 },
+                { stats in stats.lightningSentryTier = 3 },
+                { stats in stats.lightningSentryTier = 4 }
+            ],
+            tierDescriptions: [
+                "Deploy a Tesla coil that shocks enemies",
+                "Deploy a second Tesla coil",
+                "Deploy a third Tesla coil",
+                "Network: one arena-wide coil, 75% damage"
+            ],
+            detail: "Deploy a Tesla coil near you that shocks enemies in range for 50% of your attack damage. T4 Lightning Network: merge your coils into one central coil with arena-wide coverage. Each shock deals 75% of your attack damage.",
+            requires: [.shockUnlocked]
+        ))
+
+        // NEW — moving charges a pulse.
+        cards.append(UpgradeCard(
+            id: "v21_electro_pulse", name: "Electro Pulse", tag: .shock,
+            description: "Moving: every 3s, shock the nearest enemy",
+            apply: { stats in stats.electroPulseActive = true },
+            detail: "While moving, pulse every 3s: a static shock arcs to the nearest enemy for 40% damage. It can trigger Chain Lightning.",
+            requires: [.shockUnlocked]
+        ))
         
         // ═══════════════════════════════════
         // 🩸 BLEED
@@ -1428,27 +1480,17 @@ final class UpgradeManager {
         // Brings every tag to 7 cards; tier-7 synergies become reachable.
         // ═══════════════════════════════════
 
-        cards.append(UpgradeCard(
-            id: "v16_arc_wake", name: "Arc Wake", tag: .shock,
-            description: "Movement leaves brief damaging sparks"
-        ) { stats in
-            stats.arcWakeDamage = 1
-        })
+        // v2.1 A3: Arc Wake (`v16_arc_wake`) REMOVED — id retired, never reused.
 
         cards.append(UpgradeCard(
             id: "v16_static_crown", name: "Static Crown", tag: .shock,
-            description: "Level-ups release a shock burst"
-        ) { stats in
-            stats.staticCrownDamage = 2
-        })
+            description: "Level-ups release an expanding electro pulse",
+            apply: { stats in stats.staticCrownActive = true },
+            detail: "Level-ups release an electro pulse that expands from you for 4s, dealing 150% damage to each enemy the ring passes.",
+            requires: [.shockUnlocked]
+        ))
 
-        cards.append(UpgradeCard(
-            id: "v16_live_wire", name: "Live Wire", tag: .shock,
-            description: "Attacks chain to 1 more nearby foe"
-        ) { stats in
-            // Stacks with Arc and the Charged synergy
-            stats.chainTargets += 1
-        })
+        // v2.1 A3: Live Wire (`v16_live_wire`) REMOVED — folded into Chain Lightning.
 
         cards.append(UpgradeCard(
             id: "v16_blood_price", name: "Blood Price", tag: .bleed,
@@ -1679,19 +1721,9 @@ final class UpgradeManager {
         // ⚙️ v1.7 COILWORKS (Lyra's six — lyra-response-v1.7.md)
         // ═══════════════════════════════════
 
-        cards.append(UpgradeCard(
-            id: "v17_induction_step", name: "Induction Step", tag: .shock,
-            description: "Moving charges your next attack"
-        ) { stats in
-            stats.inductionStepActive = true
-        })
+        // v2.1 A3: Induction Step (`v17_induction_step`) REMOVED — id retired.
 
-        cards.append(UpgradeCard(
-            id: "v17_copper_vein", name: "Copper Vein", tag: .shock,
-            description: "Shock chains reach farther"
-        ) { stats in
-            stats.shockChainRadiusBonus += 50
-        })
+        // v2.1 A3: Copper Vein (`v17_copper_vein`) REMOVED — id retired.
 
         // The first bridge card — counts toward Fire AND Shock
         cards.append(UpgradeCard(
@@ -1925,9 +1957,10 @@ final class UpgradeManager {
                 "Extended Circuit: lasso damage doubled; range doubled",
                 "Homing Beacon: your fire prioritizes the lassoed prey",
                 "Heaven's Call: 2s lassoed → prey takes +35% from all sources",
-                "Skybeam: 2s lassoed → 200% ATK strike from above, every 3s"
+                "Skybeam: every 5s a 300% ATK strike from above, with splash"
             ],
-            isCapstone: true
+            isCapstone: true,
+            requires: [.shockUnlocked]   // v2.1 A3
         ))
 
         // 🩸 Apex — feed the familiar; become the hunt.

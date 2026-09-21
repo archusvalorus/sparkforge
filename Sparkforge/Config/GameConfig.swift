@@ -1026,8 +1026,13 @@ enum GameConfig {
         static let retentionFactor: CGFloat = 1.4  // lasso holds a bit past acquire range
         static let calledThreshold: TimeInterval = 2.0    // continuous secs → Called + first bolt
         static let calledVulnerability: CGFloat = 1.35    // Called: +35% damage taken
-        static let strikeMult: CGFloat = 2.00      // 200% ATK sky-strike
-        static let strikeCooldown: TimeInterval = 3.0     // then a bolt every 3s while lassoed
+        // v2.1 A3 (Q-S4, CL-8): the T5 strike is its own clock now — every 5s,
+        // at the lassoed prey if there is one, else the nearest valid enemy.
+        static let strikeMult: CGFloat = 3.00      // 300% ATK to the primary
+        static let strikeCooldown: TimeInterval = 5.0
+        /// Each OTHER enemy within the splash radius takes this much ATK.
+        static let strikeSplashMult: CGFloat = 1.50
+        static var strikeSplashRadius: CGFloat { 80 * DeviceScale.gameplay }
         static let strikeWindup: TimeInterval = 1.0       // channel/telegraph before the bolt lands
     }
 
@@ -1157,6 +1162,55 @@ enum GameConfig {
         static let cauterizeThreshold: CGFloat = 0.25
         static let cauterizeInterval: TimeInterval = 3.0
         static let cauterizeHeal: Int = 5
+    }
+
+    // MARK: - v2.1 Abilities A3: Shock rework
+    /// Approved values: decision packet Q-S1…Q-S4 (Sep 15), closure table
+    /// CL-2, CL-8, CL-12, CL-13 (Sep 17). Skybeam's T1–T4 and the synergy
+    /// ladder are unchanged; the T5 strike numbers live in `Skybeam`.
+    enum Shock {
+        /// Static: REAL firing-rate increase per tier — TOTALS.
+        static let staticFireRate: [CGFloat] = [0.15, 0.30, 0.50]
+        /// Chain Lightning (CL-12): how much of the PRECEDING hit each jump
+        /// keeps, by tier — compounded per jump. T1's one chain is 50%.
+        static let chainRetention: [CGFloat] = [0.50, 0.75, 0.85, 1.00]
+        static var chainRange: CGFloat { 80 * DeviceScale.gameplay }
+        /// Surge.
+        static let surgeMoveBonus: CGFloat = 0.10
+        static let surgeProjectileSpeed: CGFloat = 0.20
+        static let surgeFireRate: CGFloat = 0.10
+        /// Overload, and its linked form while Chain Lightning is maxed (Q-S2).
+        static let overloadChance: CGFloat = 0.20
+        static let overloadDuration: TimeInterval = 1.0
+        static let overloadLinkedChance: CGFloat = 0.35
+        static let overloadLinkedDuration: TimeInterval = 2.0
+        /// CL-2: boss-class stun durations — applied ONCE, no further scaling.
+        static let overloadBossDuration: TimeInterval = 0.25
+        static let overloadLinkedBossDuration: TimeInterval = 0.5
+        /// CL-2: per-target immunity after an Overload stun ends.
+        static let overloadImmunity: TimeInterval = 3.0
+
+        // Lightning Sentry (Q-S3, CL-13)
+        static let sentryDamageFraction: CGFloat = 0.50
+        static var sentryRange: CGFloat { 140 * DeviceScale.gameplay }
+        static let sentryInterval: TimeInterval = 0.8
+        /// T4 Lightning Network: one central coil, arena-wide.
+        static let networkDamageFraction: CGFloat = 0.75
+        static let networkInterval: TimeInterval = 0.4
+        /// Coils deploy within this band around Spark, this far apart.
+        static var sentryPlaceMin: CGFloat { 50 * DeviceScale.gameplay }
+        static var sentryPlaceMax: CGFloat { 110 * DeviceScale.gameplay }
+        static var sentrySpacing: CGFloat { 60 * DeviceScale.gameplay }
+
+        // Static Crown: an expanding electro pulse on level-up.
+        static let crownDamageFraction: CGFloat = 1.50
+        static let crownExpandTime: TimeInterval = 4.0
+        static var crownRadius: CGFloat { 260 * DeviceScale.gameplay }
+
+        // Electro Pulse: while moving, every 3s, arc to the nearest enemy.
+        static let pulseInterval: TimeInterval = 3.0
+        static let pulseDamageFraction: CGFloat = 0.40
+        static var pulseRange: CGFloat { 220 * DeviceScale.gameplay }
     }
 
     // MARK: - v2.1 Abilities A2: Chill rework
