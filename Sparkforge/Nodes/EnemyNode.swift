@@ -87,14 +87,17 @@ class EnemyNode: SKNode {
     private(set) var killedByBleed = false
     /// v2.1 A4a (Brandon, Sep 21): was this enemy ALREADY bleeding when the
     /// killing damage began? The one eligibility rule for every "kill a
-    /// bleeding enemy" reward (Red Harvest, Open Vein; Frenzy, Bloodlust in
-    /// A4b) — a wound established first, then capitalised on. A hit that
+    /// bleeding enemy" reward (Red Harvest, Open Vein, Frenzy, Bloodlust) —
+    /// a wound established first, then capitalised on. A hit that
     /// kills never counts its own Bleed; the corpse's look decides nothing.
     private(set) var diedBleeding = false
+    /// v2.1 A4b: the lineage of the Bleed this enemy carried when it died (CL-28).
+    private(set) var diedBleedGeneration = 0
     /// Bleed ticks that landed during the last `updateStatusEffects` (DEBUG proof).
     var bleedTicksThisFrame: Int { dots.bleed.ticksThisFrame }
     /// v1.8 (Unit 14): situational bleed scaling set by GameScene each frame —
-    /// Glass Blood (vs chilled/slowed) and Red Smile (player low HP). 1.0 = none.
+    /// legacy Red Smile (player low HP) until its A4c rework. 1.0 = none.
+    /// (Glass Blood's vs-slowed bonus retired with its A4b rework.)
     var bleedDamageMultiplier: CGFloat = 1.0
     /// v1.9: general vulnerability — scales ALL incoming damage (every source
     /// routes through takeDamage). 1.0 = none. Reusable temporary-vulnerability
@@ -453,11 +456,12 @@ class EnemyNode: SKNode {
     /// v2.1 A4a: inflict (or refresh) the ticking Bleed — CL-1: `tickDamage`
     /// every 0.5s for 3s; a refresh restarts the duration without stacking or
     /// delaying the next tick. Returns true when this started a new Bleed.
+    /// `generation` = Glass Blood lineage (0 = a primary wound, CL-28).
     @discardableResult
-    func applyBleed(tickDamage: CGFloat) -> Bool {
+    func applyBleed(tickDamage: CGFloat, generation: Int = 0) -> Bool {
         guard !isDying else { return false }
         let fresh = dots.bleed.inflict(tickDamage: tickDamage, duration: GameConfig.Bleed.duration,
-                                       interval: GameConfig.Bleed.tickInterval)
+                                       interval: GameConfig.Bleed.tickInterval, generation: generation)
         refreshBleedMark()
         return fresh
     }
@@ -640,7 +644,8 @@ class EnemyNode: SKNode {
 
     /// Ticks every status timer. Returns the DoT channel that killed this
     /// enemy this frame, or nil if it survived (or died to nothing here).
-    func updateStatusEffects(deltaTime: TimeInterval) -> StatusDoTs.Channel? {
+    /// `openWounds`: the Bleed ×3 bonus on DoTs while bleeding (CL-25).
+    func updateStatusEffects(deltaTime: TimeInterval, openWounds: CGFloat = 0) -> StatusDoTs.Channel? {
         timeAlive += deltaTime
 
         // v1.6: stun timer ticks here so ALL enemy types respect it
@@ -671,7 +676,9 @@ class EnemyNode: SKNode {
         // v2.1 A4a: Burn and Bleed pay out as separate hits (Burn first, the
         // legacy order), each at the boss-class scale for a mini-boss (CL-17).
         let wasBleeding = dots.bleed.isBleeding
+        let wasGeneration = dots.bleed.generation
         let pay = dots.tick(deltaTime, scale: dotScale, bleedMultiplier: bleedDamageMultiplier,
+                            openWounds: openWounds,
                             burnDecayInterval: GameConfig.Fire.burnStackDecayInterval,
                             bleedInterval: GameConfig.Bleed.tickInterval)
         if burn.stacks != drawnBurnStacks || burn.isBurning != drawnBurnHot
@@ -695,11 +702,13 @@ class EnemyNode: SKNode {
         // Bleed tick can land on the instant the Bleed ends.
         if pay.burn > 0, takeDamage(pay.burn) {
             diedBleeding = wasBleeding
+            diedBleedGeneration = wasGeneration
             return .burn
         }
         if pay.bleed > 0, takeDamage(pay.bleed) {
             killedByBleed = true
             diedBleeding = true
+            diedBleedGeneration = wasGeneration
             return .bleed
         }
         return nil
@@ -780,6 +789,7 @@ class EnemyNode: SKNode {
         // Status BEFORE the killing damage — primary-hit riders like
         // Bloodthirsty land only on survivors, so a killing hit never counts.
         diedBleeding = dots.bleed.isBleeding
+        diedBleedGeneration = dots.bleed.generation
         physicsBody?.categoryBitMask = 0
 
         // Eyes flare out, body shrinks

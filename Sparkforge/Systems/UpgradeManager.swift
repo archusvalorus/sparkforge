@@ -172,7 +172,7 @@ final class UpgradeManager {
     /// (Release builds never see this — `#if DEBUG`.)
     ///
     /// Card ids live in `buildCardPool()`, e.g.: "neutral_6" (Scatter),
-    /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Nick),
+    /// "fire_2" (Forge Breath), "shock_1" (Static), "bleed_1" (Gouge),
     /// "guard_4" (Fortify), "void_3" (Phase), "chill_1" (Frost Touch).
     static let debugForcedCardID: String? = nil
     #endif
@@ -854,9 +854,9 @@ final class UpgradeManager {
 
         // BLEED — vulnerability → execution → sustain (v1.8 5b)
         case (.bleed, 3):
-            stats.bleedingEnemyDamageTaken = 0.15   // Open Wounds
+            stats.bleedingEnemyDamageTaken = GameConfig.Bleed.openWoundsBonus   // Open Wounds (CL-25)
         case (.bleed, 5):
-            stats.executionThreshold = 0.3          // Exsanguinate (remap from old B7)
+            stats.executionThreshold = GameConfig.Bleed.exsanguinateThreshold  // Exsanguinate (CL-26)
         case (.bleed, 7):
             stats.bleedKillHeal = 1                  // Red Harvest (start 1; test 2)
 
@@ -937,9 +937,9 @@ final class UpgradeManager {
                     SynergyTier(threshold: 5, title: "Tesla Field", effect: "A charged aura damages nearby enemies"),
                     SynergyTier(threshold: 7, title: "Storm Engine", effect: "Every 3rd shot fires a chaining spread")]
         case .bleed:
-            return [SynergyTier(threshold: 3, title: "Open Wounds", effect: "Bleeding enemies take more damage"),
-                    SynergyTier(threshold: 5, title: "Exsanguinate", effect: "Low-HP enemies take double damage"),
-                    SynergyTier(threshold: 7, title: "Red Harvest", effect: "Bleed kills restore HP")]
+            return [SynergyTier(threshold: 3, title: "Open Wounds", effect: "Bleeding enemies take 25% more damage"),
+                    SynergyTier(threshold: 5, title: "Exsanguinate", effect: "Enemies below 25% HP take 2× damage"),
+                    SynergyTier(threshold: 7, title: "Red Harvest", effect: "Killing a bleeding enemy restores 1 HP")]
         case .guardT:
             return [SynergyTier(threshold: 3, title: "Ironhide", effect: "Gain DEF while enemies crowd you"),
                     SynergyTier(threshold: 5, title: "Thornwall", effect: "Enemies that touch you take damage back"),
@@ -1144,42 +1144,83 @@ final class UpgradeManager {
             provides: [.bleedUnlocked]
         ))
 
-        // v1.9 Unit 3: signature crit ladder (2-tier).
+        // v2.1 A4b — the rest of the Bleed tree (spec Q-B1…Q-B6, closure table
+        // CL-19…CL-32). Prerequisites ship with the tree: every card past
+        // Bloodthirsty `requires` it, the capstone included. Tier numbers are
+        // TOTALS; the rungs add the difference (never re-set a stat).
+
+        // Nick → Gouge (id kept): crit chance totals 10 / 20%.
+        let gouge = GameConfig.Bleed.gougeCritTotals
         cards.append(UpgradeCard(
-            id: "bleed_1", name: "Nick", tag: .bleed,
-            description: "+8% critical hit chance",
-            apply: { stats in stats.critChance += 0.08 },
+            id: "bleed_1", name: "Gouge", tag: .bleed,
+            description: "+10% critical hit chance",
+            apply: { stats in stats.critChance += gouge[0] },
             higherTiers: [
-                { stats in stats.critChance += 0.08 }
+                { stats in stats.critChance += gouge[1] - gouge[0] }
             ],
             tierDescriptions: [
-                "+8% critical hit chance",
-                "+8% more crit chance"
-            ]
+                "+10% critical hit chance",
+                "+20% critical hit chance"
+            ],
+            requires: [.bleedUnlocked]
         ))
-        
+
+        // CL-31: ADDS to the crit-damage multiplier (it used to re-set it to 3,
+        // erasing Forge Path Deadeye's +0.10).
         cards.append(UpgradeCard(
             id: "bleed_2", name: "Hemorrhage", tag: .bleed,
-            description: "Critical hits deal 3x damage instead of 2x"
-        ) { stats in
-            stats.critMultiplier = 3.0
-        })
-        
+            description: "Critical hits deal 3x damage instead of 2x",
+            apply: { stats in stats.critMultiplier += GameConfig.Bleed.hemorrhageCritBonus },
+            requires: [.bleedUnlocked]
+        ))
+
+        // Q-B1: a kill of an enemy that was ALREADY bleeding → +15% for 4s;
+        // further qualifying kills reset the window (was: any 3-kill streak).
         cards.append(UpgradeCard(
             id: "bleed_3", name: "Frenzy", tag: .bleed,
-            description: "Kill streak (3+) grants +20% attack speed for 3s"
-        ) { stats in
-            stats.killStreakFireRateBonus = 0.20
-        })
-        
+            description: "Kill a bleeding foe: +15% attack speed for 4s",
+            apply: { stats in stats.frenzyOwned = true },
+            detail: "Killing a bleeding enemy grants +15% attack speed for 4s. Further qualifying kills reset the duration. An enemy counts as bleeding only if it was already bleeding before the killing hit.",
+            requires: [.bleedUnlocked]
+        ))
+
+        // Q-B2: NEW — attack speed = 50% × missing-HP fraction (live).
+        cards.append(UpgradeCard(
+            id: "v21_berserk", name: "Berserk", tag: .bleed,
+            description: "+0.5% attack speed per 1% HP missing",
+            apply: { stats in stats.berserkOwned = true },
+            detail: "Gain attack speed as health falls: +0.5% for every 1% of max HP missing.",
+            requires: [.bleedUnlocked]
+        ))
+
+        // Q-B5: four tiers, 1 / 2 / 4 / 5 HP per kill (totals).
+        let siphon = GameConfig.Bleed.siphonHealTotals
+        let siphonRungs: [(PlayerStats) -> Void] = (1..<siphon.count).map { i in
+            { stats in stats.killHealAmount += siphon[i] - siphon[i - 1] }
+        }
         cards.append(UpgradeCard(
             id: "bleed_4", name: "Siphon", tag: .bleed,
-            description: "Kills restore 1 HP"
-        ) { stats in
-            // v1.6: redesigned — old "extends your run" effect predated the
-            // HP system and was never implemented
-            stats.killHealAmount += 1
-        })
+            description: "Kills restore 1 HP.",
+            apply: { stats in stats.killHealAmount += siphon[0] },
+            higherTiers: siphonRungs,
+            tierDescriptions: [
+                "Kills restore 1 HP.",
+                "Kills restore 2 HP.",
+                "Kills restore 4 HP.",
+                "Kills restore 5 HP."
+            ],
+            requires: [.bleedUnlocked]
+        ))
+
+        // Q-B3 / CL-19 / CL-20: NEW — kills grant Blood Barrier; with Siphon,
+        // Siphon's overheal converts too.
+        cards.append(UpgradeCard(
+            id: "v21_sanguinarian", name: "Sanguinarian", tag: .bleed,
+            description: "Kills grant Blood Barrier: 20% of the finishing hit",
+            apply: { stats in stats.sanguinarianOwned = true },
+            detail: "Kills grant Blood Barrier equal to 20% of the finishing hit's damage (at least 1), excluding overkill. Barrier absorbs damage before health, up to 50% of max HP. It expires 4s after the last positive gain. With Siphon: Siphon's overhealing becomes Blood Barrier.",
+            requires: [.bleedUnlocked]
+        ))
         
         // ═══════════════════════════════════
         // 🛡️ GUARD
@@ -1475,10 +1516,10 @@ final class UpgradeManager {
         // 7. Execution Protocol — bonus damage to low HP
         cards.append(UpgradeCard(
             id: "v13_execution", name: "Execution Protocol", tag: .bleed,
-            description: "2x damage to enemies below 30% HP"
-        ) { stats in
-            stats.executionProtocolThreshold = 0.30
-        })
+            description: "2x damage to enemies below 30% HP",
+            apply: { stats in stats.executionProtocolThreshold = 0.30 },
+            requires: [.bleedUnlocked]   // v2.1 A4b
+        ))
         
         // 8. Unstable Core — periodic burst + self damage
         // v1.4: Self-damage is now 10 HP instead of losing a lethal save
@@ -1506,19 +1547,15 @@ final class UpgradeManager {
 
         // v2.1 A3: Live Wire (`v16_live_wire`) REMOVED — folded into Chain Lightning.
 
-        cards.append(UpgradeCard(
-            id: "v16_blood_price", name: "Blood Price", tag: .bleed,
-            description: "+30% damage while below half HP"
-        ) { stats in
-            stats.bloodPriceBonus = 0.30
-        })
+        // v16_blood_price (Blood Price) — retired in v2.1 A4b.
 
         cards.append(UpgradeCard(
             id: "v16_open_vein", name: "Open Vein", tag: .bleed,
-            description: "Bleeding enemies burst on death"
-        ) { stats in
-            stats.openVeinDamage = 2
-        })
+            description: "Bleeding enemies burst on death",
+            apply: { stats in stats.openVeinDamage = 2 },
+            detail: "Enemies that were already bleeding when they die burst, dealing 2 damage to nearby enemies.",
+            requires: [.bleedUnlocked]   // v2.1 A4b
+        ))
 
         cards.append(UpgradeCard(
             id: "v16_iron_bloom", name: "Iron Bloom", tag: .guardT,
@@ -1777,16 +1814,16 @@ final class UpgradeManager {
 
         // v18_needlepoint (Needlepoint) — retired in v2.1 A4a; Bloodthirsty is the Bleed signature.
 
+        // Q-B6: +0.1% attack speed per kill of an enemy that was ALREADY
+        // bleeding, permanent this run, capped at +30% (was a damage stack
+        // counted twice that never decayed).
         cards.append(UpgradeCard(
             id: "v18_bloodlust", name: "Bloodlust", tag: .bleed,
-            description: "Bleed kills briefly boost damage."
-        ) { stats in
-            // Capped killstreak (spec: ~3 stacks, refreshable 4–6s) — reuses
-            // the existing bloodlust machinery (stacks × per-kill, min-capped).
-            stats.bloodlustDamagePerKill = 0.06
-            stats.bloodlustMaxBonus = 0.18   // 3 stacks × 0.06
-            stats.bloodlustWindow = 5.0
-        })
+            description: "Kill a bleeding foe: +0.1% attack speed, max +30%",
+            apply: { stats in stats.bloodlustOwned = true },
+            detail: "Killing a bleeding enemy permanently grants +0.1% attack speed this run, up to +30%.",
+            requires: [.bleedUnlocked]
+        ))
 
         cards.append(UpgradeCard(
             id: "v18_riftline", name: "Riftline", tag: .voidT,
@@ -1808,12 +1845,15 @@ final class UpgradeManager {
             stats.echoChance = 0.35
         })
 
+        // v2.1 A4b rework (CL-27/28): enemies whose finishing blow is a Bleed
+        // tick burst into Bleed-carrying fragments. No longer a Chill bridge.
         cards.append(UpgradeCard(
-            id: "v18_glass_blood", name: "Glass Blood", tag: .bleed, secondaryTag: .chill,
-            description: "Bleed bites harder on slowed foes."
-        ) { stats in
-            stats.bleedVsSlowedMultiplier = 1.5
-        })
+            id: "v18_glass_blood", name: "Glass Blood", tag: .bleed,
+            description: "Bleed-killed foes burst: fragments hurt + Bleed",
+            apply: { stats in stats.glassBloodActive = true },
+            detail: "Enemies killed by Bleed burst into fragments that damage and inflict Bleed on nearby enemies. Each outbreak spreads at most two hops.",
+            requires: [.bleedUnlocked]
+        ))
 
         cards.append(UpgradeCard(
             id: "v18_silver_skin", name: "Silver Skin", tag: .guardT, secondaryTag: .voidT,
@@ -1829,12 +1869,13 @@ final class UpgradeManager {
             stats.splitCount = 2
         })
 
+        // Legacy until its A4c rework (form change + melee, Bleed/Void bridge).
         cards.append(UpgradeCard(
             id: "v18_red_smile", name: "Red Smile", tag: .bleed,
-            description: "Low HP increases Bleed damage."
-        ) { stats in
-            stats.bleedLowHpBonus = 1.5
-        })
+            description: "Low HP increases Bleed damage.",
+            apply: { stats in stats.bleedLowHpBonus = 1.5 },
+            requires: [.bleedUnlocked]   // v2.1 A4b
+        ))
 
         cards.append(UpgradeCard(
             id: "v18_false_opening", name: "False Opening", tag: .voidT,
@@ -1999,7 +2040,8 @@ final class UpgradeManager {
                 "Marked: enemies alive 10s take +35% from all sources",
                 "The Hunter: hits on injured foes charge a gauge; full → the bat executes a weakened enemy"
             ],
-            isCapstone: true
+            isCapstone: true,
+            requires: [.bleedUnlocked]   // v2.1 A4b: prerequisites ship with the tree
         ))
 
         // 🕳️ Erasure — destabilize reality; accept the final cost.

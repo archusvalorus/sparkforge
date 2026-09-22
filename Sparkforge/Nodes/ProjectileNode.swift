@@ -35,6 +35,10 @@ final class ProjectileNode: SKNode {
     /// Spark's primary shot, so it inherits the eligibility — its kill still
     /// credits as `.capstone` — while the shards it shatters into do not.
     var isPrimaryHit: Bool { killSource == .primary || isIcicle }
+    /// v2.1 A4b Glass Blood (CL-27/28): > 0 marks a Glass Blood fragment and is
+    /// the Bleed generation it inflicts. Fragments deal plain damage — no crit,
+    /// no pierce, no other on-hit procs — and always Bleed a survivor.
+    var glassBloodGeneration = 0
     /// v2.1 A2 (CL-3): whether this projectile applies Frost Touch's slow.
     /// True for everything EXCEPT Iceburst shards and icicle fragments, which
     /// earn it at Frost Touch T3 — opted in specifically, not by a blanket flag.
@@ -53,7 +57,8 @@ final class ProjectileNode: SKNode {
          voidStyle: Bool = false,
          isIcicle: Bool = false,
          frostStyle: Bool = false,
-         seedStyle: Bool = false) {
+         seedStyle: Bool = false,
+         bloodStyle: Bool = false) {
         self.isIcicle = isIcicle
 
         self.direction = direction.normalized
@@ -91,6 +96,14 @@ final class ProjectileNode: SKNode {
             bulletNode.strokeColor = SKColor(hex: 0x2E9BD6, alpha: 0.8)
             bulletNode.lineWidth = 0.5
             bulletNode.glowWidth = isCrit ? 5 : 3
+        } else if bloodStyle {
+            // v2.1 A4b Glass Blood: a small blood-glass shard along travel.
+            bulletNode = SKShapeNode(ellipseOf: CGSize(width: radius * 2.4, height: radius * 1.1))
+            bulletNode.fillColor = SKColor(hex: 0xE0203A)
+            bulletNode.strokeColor = SKColor(hex: 0xFF8A99, alpha: 0.85)
+            bulletNode.lineWidth = 0.5
+            bulletNode.glowWidth = 2
+            bulletNode.zRotation = atan2(direction.y, direction.x)
         } else if seedStyle {
             // v2.0 Phase C: a spore — seed-gold, small, with a soft green glow.
             bulletNode = SKShapeNode(circleOfRadius: radius * 0.85)

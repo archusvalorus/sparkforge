@@ -239,6 +239,11 @@ do {
     stats.bloodBarrier.gain(30, maxHP: 100, tuning: tuning)
     stats.unbrokenRescueAvailable = true
     stats.reset()
+    var trim = BloodBarrier()
+    trim.gain(50, maxHP: 100, tuning: tuning)            // 50 = the cap at 100 max HP
+    let trimmed = trim.gain(2, maxHP: 60, tuning: tuning) // max HP fell to 60 → cap 30
+    check("P9j v2.1 A4b: a pool above a LOWERED cap trims to it on the next grant (never kept over cap)",
+          trim.amount == 30 && trimmed == 0 && abs(trim.expiry.remaining - 4.0) < 1e-9, "amount=\(trim.amount)")
     check("P9i run reset clears the barrier and the Unbroken rescue",
           stats.bloodBarrier.amount == 0 && !stats.unbrokenRescueAvailable)
 }
@@ -291,6 +296,50 @@ do {
     _ = re.tick(0.3)
     re.schedule(after: 0.2, lasting: 1.0)
     check("P12f rescheduling replaces an open window", re.isPending && !re.isOpen)
+}
+
+
+// P10 — v2.1 A4b (independent review, finding 1): an existing barrier
+// reconciles the moment MAX HP drops below what it can support.
+do {
+    var b = BloodBarrier()
+    b.gain(50, maxHP: 100, tuning: tuning)          // cap 50 at 100 max HP
+    b.tick(1.0)                                     // expiry now 3.0s in
+    let before = b.expiry.remaining
+    b.clampToCap(maxHP: 50, capFraction: 0.5)       // Glass Engine: cap is now 25
+    check("P10a a max-HP drop clamps the pool to the new cap at once (50 → 25)", b.amount == 25)
+    check("P10b the reconciliation is NOT a grant: the expiry is untouched",
+          abs(b.expiry.remaining - before) < 1e-9, "remaining=\(b.expiry.remaining) was \(before)")
+
+    // The reviewer's case: 45 damage against the reconciled pool.
+    let out = resolve(Hit(raw: 45), Defender(currentHP: 50, maxHP: 50, barrier: b.amount))
+    check("P10c after the clamp a 45 hit absorbs 25 and sends 20 through to HP",
+          out.absorbed == 25 && out.toHP == 20, "absorbed=\(out.absorbed) toHP=\(out.toHP)")
+
+    var under = BloodBarrier()
+    under.gain(10, maxHP: 100, tuning: tuning)
+    let untouched = under.expiry.remaining
+    under.clampToCap(maxHP: 50, capFraction: 0.5)   // 10 is already under the new cap of 25
+    check("P10d a pool already under the new cap is left alone",
+          under.amount == 10 && abs(under.expiry.remaining - untouched) < 1e-9)
+
+    var grown = BloodBarrier()
+    grown.gain(50, maxHP: 100, tuning: tuning)
+    grown.clampToCap(maxHP: 200, capFraction: 0.5)  // max HP ROSE: nothing to reconcile
+    check("P10e a max-HP rise never changes the pool", grown.amount == 50)
+
+    // The hook itself: PlayerStats reconciles on any max-HP drop.
+    let stats = PlayerStats()
+    stats.maxHP = 100
+    stats.bloodBarrier.gain(50, maxHP: stats.maxHP, tuning: tuning)
+    stats.bloodBarrier.tick(1.0)
+    let statsExpiry = stats.bloodBarrier.expiry.remaining
+    stats.maxHP = 50                                 // Glass Engine / Mass Tax
+    check("P10f PlayerStats reconciles the barrier whenever max HP falls, expiry intact",
+          stats.bloodBarrier.amount == 25 && abs(stats.bloodBarrier.expiry.remaining - statsExpiry) < 1e-9,
+          "barrier=\(stats.bloodBarrier.amount)")
+    stats.maxHP = 200
+    check("P10g …and leaves it alone when max HP rises", stats.bloodBarrier.amount == 25)
 }
 
 print("\n\(passed) passed, \(failed) failed")

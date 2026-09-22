@@ -42,6 +42,9 @@ class MonumentBossNode: SKNode, ArenaBossNode {
 
     /// Reward + death callback, matching the arena-boss convention.
     var onDeath: ((CGPoint, Int) -> Void)?
+    /// v2.1 A4b: fires once, synchronously, on the killing blow — before the
+    /// death plays out — with the damage it dealt to remaining HP.
+    var onLethalHit: ((Int) -> Void)?
     let xpValue: Int
 
     /// Fires ONCE the first time the boss drops below 50% health. Monument fights
@@ -191,7 +194,9 @@ class MonumentBossNode: SKNode, ArenaBossNode {
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        let healthBefore = health
+        let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        health -= dealt
 
         refreshHealthBar()
 
@@ -213,6 +218,8 @@ class MonumentBossNode: SKNode, ArenaBossNode {
         if health <= 0 {
             health = 0
             isDead = true
+            // v2.1 A4b: credit the kill BEFORE onDeath clears the boss slot.
+            onLethalHit?(min(dealt, healthBefore))
             physicsBody?.categoryBitMask = 0   // stop registering hits mid-collapse
             fadeOutHealthBar()
             onDeath?(position, xpValue)

@@ -21,6 +21,15 @@ final class HPBarNode: SKNode {
     private let fillBar: SKShapeNode
     private let hpLabel: SKLabelNode
     private let tagLabel: SKLabelNode  // v1.6: "HP" tag
+    /// v2.1 A4b (CL-21): the Blood Barrier strip under the bar — bone-white
+    /// with a dark-red edge, width ∝ barrier / max HP, plus its number.
+    private let barrierStrip: SKShapeNode
+    private let barrierLabel: SKLabelNode
+    private let barrierHeight: CGFloat = 4
+    /// v2.1 A4b: when the strip may hide — a hit that EMPTIES the pool still
+    /// shows its absorption flash first (pure state, harness-proven).
+    private var barrierTell = BarrierTellState()
+    private var drawnBarrierMaxHP = -1
 
     // MARK: - State
 
@@ -63,12 +72,26 @@ final class HPBarNode: SKNode {
         tagLabel.horizontalAlignmentMode = .right
         tagLabel.position = CGPoint(x: -width / 2 - 7, y: 0)
 
+        barrierStrip = SKShapeNode()
+        barrierStrip.fillColor = SKColor(hex: 0xEDE4D3)
+        barrierStrip.strokeColor = SKColor(hex: 0x8A1426)
+        barrierStrip.lineWidth = 1
+        barrierStrip.isHidden = true
+        barrierLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        barrierLabel.fontSize = 8
+        barrierLabel.fontColor = SKColor(hex: 0xEDE4D3)
+        barrierLabel.verticalAlignmentMode = .center
+        barrierLabel.horizontalAlignmentMode = .left
+        barrierLabel.isHidden = true
+
         super.init()
 
         addChild(backgroundBar)
         addChild(fillBar)
         addChild(hpLabel)
         addChild(tagLabel)
+        addChild(barrierStrip)
+        addChild(barrierLabel)
 
         updateFill(1.0, currentHP: GameConfig.Player.baseMaxHP, maxHP: GameConfig.Player.baseMaxHP)
     }
@@ -135,6 +158,76 @@ final class HPBarNode: SKNode {
         ])
         run(flash, withKey: "hpFlash")
     }
+
+    // MARK: - v2.1 A4b: Blood Barrier
+
+    /// Redraw the barrier strip (only when something visible changed).
+    func updateBarrier(_ amount: Int, maxHP: Int) {
+        let sizeChanged = maxHP != drawnBarrierMaxHP
+        guard barrierTell.update(amount: amount) || (sizeChanged && amount > 0) else { return }
+        guard amount > 0, maxHP > 0 else { hideBarrierStrip(); return }
+        drawBarrierStrip(amount: amount, maxHP: maxHP)
+    }
+
+    /// Give the strip its geometry and number, and show it.
+    private func drawBarrierStrip(amount: Int, maxHP: Int) {
+        drawnBarrierMaxHP = maxHP
+        let w = max(2, barWidth * min(1, CGFloat(amount) / CGFloat(maxHP)))
+        let y = -barHeight / 2 - 1 - barrierHeight / 2     // tight under the bar
+        barrierStrip.path = CGPath(roundedRect: CGRect(x: -barWidth / 2, y: y - barrierHeight / 2,
+                                                       width: w, height: barrierHeight),
+                                   cornerWidth: 2, cornerHeight: 2, transform: nil)
+        barrierLabel.text = "+\(amount)"
+        barrierLabel.position = CGPoint(x: -barWidth / 2 + w + 4, y: y)
+        barrierStrip.isHidden = false
+        barrierLabel.isHidden = false
+    }
+
+    private func hideBarrierStrip() {
+        barrierStrip.isHidden = true
+        barrierLabel.isHidden = true
+    }
+
+    /// A hit the barrier absorbed: the strip flashes (a FULLY absorbed hit
+    /// flashes only this — the HP bar stays calm).
+    /// A hit the barrier absorbed: the strip flashes (a FULLY absorbed hit
+    /// flashes only this — the HP bar stays calm). `absorbed` is what this hit
+    /// soaked, so a pool GRANTED AND EMPTIED between two HUD draws still has
+    /// something to show: without it the strip would be "visible" with no shape
+    /// or number, and the player would see no tell at all.
+    func flashBarrier(absorbed: Int, maxHP: Int) {
+        barrierTell.absorbedHit()
+        if barrierTell.drawnAmount <= 0, absorbed > 0, maxHP > 0,
+           barrierTell.update(amount: absorbed) {
+            drawBarrierStrip(amount: absorbed, maxHP: maxHP)
+        }
+        barrierStrip.isHidden = false
+        barrierLabel.isHidden = false
+        let flash = SKAction.sequence([
+            SKAction.run { [weak self] in self?.barrierStrip.fillColor = SKColor(hex: 0xFFFFFF) },
+            SKAction.wait(forDuration: 0.1),
+            SKAction.run { [weak self] in self?.endBarrierFlash() }
+        ])
+        barrierStrip.run(flash, withKey: "barrierFlash")
+    }
+
+    /// The flash finished (its own completion step, so it is testable): an
+    /// emptied pool hides now — never a lingering 0 strip — while a pool that
+    /// refilled mid-flash stays on screen.
+    func endBarrierFlash() {
+        barrierStrip.fillColor = SKColor(hex: 0xEDE4D3)
+        if barrierTell.flashEnded() { hideBarrierStrip() }
+    }
+
+    #if DEBUG
+    /// Harness probe: what the strip is actually PRESENTING — not just whether
+    /// a flag says visible, but whether it has drawable geometry and a number.
+    var barrierPresentation: (visible: Bool, hasShape: Bool, label: String) {
+        (!barrierStrip.isHidden && !barrierLabel.isHidden,
+         barrierStrip.path != nil,
+         barrierLabel.text ?? "")
+    }
+    #endif
 
     // MARK: - Heal Flash
 

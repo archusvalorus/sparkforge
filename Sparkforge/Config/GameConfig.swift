@@ -1282,6 +1282,42 @@ enum GameConfig {
         static let tickInterval: TimeInterval = 0.5
         /// …for this long: six ticks, 60% ATK per application.
         static let duration: TimeInterval = 3.0
+
+        // v2.1 A4b — the rest of the tree (decision packet Q-B1…Q-B6; closure
+        // table CL-19…CL-32, ruled by Brandon × Lyra Sep 22).
+        /// Gouge (was Nick): crit chance TOTALS per tier.
+        static let gougeCritTotals: [CGFloat] = [0.10, 0.20]
+        /// Hemorrhage (CL-31): ADDS to the crit-damage multiplier (2× → 3×),
+        /// keeping Forge Path Deadeye's +0.10.
+        static let hemorrhageCritBonus: CGFloat = 1.0
+        /// Frenzy (Q-B1): killing a bleeding enemy → +15% attack speed for 4s;
+        /// further qualifying kills reset the 4s, never stack or extend.
+        static let frenzyAttackSpeed: CGFloat = 0.15
+        static let frenzyDuration: TimeInterval = 4.0
+        /// Berserk (Q-B2): attack speed = this × missing-HP fraction.
+        static let berserkMaxAttackSpeed: CGFloat = 0.50
+        /// Bloodlust (Q-B6): +0.1% attack speed per bleeding kill, run-long, cap +30%.
+        static let bloodlustPerKill: CGFloat = 0.001
+        static let bloodlustCap: CGFloat = 0.30
+        /// Siphon (Q-B5): HP per kill — TOTALS per tier.
+        static let siphonHealTotals: [Int] = [1, 2, 4, 5]
+        /// Sanguinarian (CL-19): barrier = max(1, floor(this × finishing damage)).
+        static let sanguinarianFraction: CGFloat = 0.20
+        static let sanguinarianMinGrant: Int = 1
+        /// Open Wounds (Bleed ×3, CL-25): bleeding targets take +25%.
+        static let openWoundsBonus: CGFloat = 0.25
+        /// Exsanguinate (Bleed ×5, CL-26): ×2 below 25% HP — ONE ×2 with
+        /// Execution Protocol (30%) where they overlap, never ×4.
+        static let exsanguinateThreshold: CGFloat = 0.25
+        static let exsanguinateMultiplier: CGFloat = 2.0
+        /// Glass Blood (CL-27/28): a Bleed-killed enemy bursts into fragments —
+        /// short range, no crit, no pierce, guaranteed Bleed on survivors.
+        static let glassBloodFragments: Int = 3
+        static let glassBloodDamageFraction: CGFloat = 0.30
+        static let glassBloodRange: CGFloat = 150        // × DeviceScale at use
+        static let glassBloodSpeedFraction: CGFloat = 0.9
+        /// Generations 0 and 1 burst; 2 does not — two hops per lineage.
+        static let glassBloodMaxGeneration: Int = 2
     }
 
     // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)

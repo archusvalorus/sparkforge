@@ -47,6 +47,14 @@ protocol ArenaBossNode: SKNode {
     @discardableResult
     func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool
 
+    /// v2.1 A4b: the boss-kill chokepoint. Every boss calls this exactly once,
+    /// synchronously, on its killing blow — after `isDead` is set, before any
+    /// death animation or `onDeath` — with the damage that blow dealt to
+    /// REMAINING health. The scene credits the kill here (Siphon, Frenzy,
+    /// Bloodlust, Sanguinarian, death bursts…), never from `takeDamage`'s
+    /// return value (a dead Unmade Star still returns true).
+    var onLethalHit: ((Int) -> Void)? { get set }
+
     /// v2.1 A4a: where the scene pins the Burn/Bleed status row, in the boss's
     /// own coordinates — beside the HP bar, so every boss reads the same way.
     var statusTellAnchor: CGPoint { get }

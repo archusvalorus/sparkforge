@@ -92,6 +92,9 @@ final class BossNode: SKNode {
     var onSlamHit: ((_ position: CGPoint, _ radius: CGFloat, _ damage: Int) -> Void)?
     var onChargeHit: ((_ damage: Int) -> Void)?
     var onDeath: ((_ position: CGPoint, _ xpReward: Int) -> Void)?
+    /// v2.1 A4b: fires once, synchronously, on the killing blow — before the
+    /// death plays out — with the damage it dealt to remaining HP.
+    var onLethalHit: ((Int) -> Void)?
     
     // MARK: - Visual Nodes
     
@@ -476,7 +479,9 @@ final class BossNode: SKNode {
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        let healthBefore = health
+        let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        health -= dealt
 
         // Hit flash
         let flash = SKAction.sequence([
@@ -497,6 +502,7 @@ final class BossNode: SKNode {
         if health <= 0 {
             health = 0
             die()
+            onLethalHit?(min(dealt, healthBefore))   // v2.1 A4b: credited on the killing blow
             return true
         }
         return false

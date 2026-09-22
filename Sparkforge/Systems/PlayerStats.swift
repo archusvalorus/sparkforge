@@ -19,7 +19,17 @@ final class PlayerStats {
     // MARK: - HP / ATK / DEF (v1.4)
     
     /// Maximum health — cards and forge bonuses can increase this
-    var maxHP: Int = GameConfig.Player.baseMaxHP
+    var maxHP: Int = GameConfig.Player.baseMaxHP {
+        didSet {
+            // v2.1 A4b: a max-HP DROP (Glass Engine, Mass Tax) reconciles an
+            // existing Blood Barrier to its new cap immediately — the expiry
+            // is untouched, because this is not a grant.
+            if maxHP < oldValue {
+                bloodBarrier.clampToCap(maxHP: maxHP,
+                                        capFraction: GameConfig.DamagePipeline.barrierCapFraction)
+            }
+        }
+    }
     /// Current health — depletes on damage, restored by health orbs
     var currentHP: Int = GameConfig.Player.baseMaxHP
     /// Base attack damage per projectile
@@ -282,9 +292,15 @@ final class PlayerStats {
 
     /// Heal HP, clamped to maxHP — scaled by Forge Path healing-received bonuses
     /// (Restoration + Defiant Recovery's temp window).
-    func heal(_ amount: Int) {
+    /// v2.1 A4b: returns the OVERHEAL (the part the clamp discarded, after the
+    /// multipliers) — only Siphon turns it into Blood Barrier (CL-20).
+    @discardableResult
+    func heal(_ amount: Int) -> Int {
         let mult = 1.0 + forgeRestorationBonus + (forgeDefiantActive ? GameConfig.ForgePath.defiantBonus : 0)
-        currentHP = min(currentHP + Int(CGFloat(amount) * mult), maxHP)
+        let gained = Int(CGFloat(amount) * mult)
+        let before = currentHP
+        currentHP = min(currentHP + gained, maxHP)
+        return max(0, gained - (currentHP - before))
     }
     
     // MARK: - Damage
@@ -537,15 +553,23 @@ final class PlayerStats {
     /// Explosion damage as % of kill damage
     var explosionDamagePercent: CGFloat = GameConfig.Fire.emberBurstDamageFraction
     
-    /// Kill streak fire rate bonus
-    var killStreakFireRateBonus: CGFloat = 0.0
-    /// Kill streak required count
-    var killStreakThreshold: Int = 3
-    /// Kill streak duration window
-    var killStreakWindow: TimeInterval = 3.0
-    
     /// HP restored per kill (Siphon — v1.6 redesign from the dead "time bonus" concept)
     var killHealAmount: Int = 0
+
+    // v2.1 A4b — the Bleed tree's attack speed (Q-B1, Q-B2, Q-B6). Each is a
+    // live bonus folded into `effectiveFireInterval` as its own real-rate
+    // multiplier (CL-22). The legacy kill streak and Bloodlust's damage stacks
+    // (counted twice, never decaying) are gone.
+    /// Frenzy owned: killing a bleeding enemy starts / resets `frenzyTimer`.
+    var frenzyOwned = false
+    private(set) var frenzyTimer = GameTimer()
+    /// Berserk owned: attack speed rises as HP falls.
+    var berserkOwned = false
+    /// Bloodlust owned: each bleeding kill adds a permanent sliver of attack speed.
+    var bloodlustOwned = false
+    private(set) var bloodlustAttackSpeed: CGFloat = 0
+    /// Sanguinarian owned: kills grant Blood Barrier; Siphon's overheal converts.
+    var sanguinarianOwned = false
 
     /// XP orb pull range multiplier on kill (Devour)
     var killOrbPullMultiplier: CGFloat = 1.0
@@ -600,11 +624,6 @@ final class PlayerStats {
     var gravityWellDuration: TimeInterval = 1.0
     /// Gravity well DPS (if upgraded)
     var gravityWellDPS: CGFloat = 0.0
-    
-    /// Bloodlust: stacking damage bonus per kill within window
-    var bloodlustDamagePerKill: CGFloat = 0.0
-    var bloodlustMaxBonus: CGFloat = 0.25
-    var bloodlustWindow: TimeInterval = 2.0
     
     /// Whether enemies below HP threshold take double damage (Exsanguinate)
     var executionThreshold: CGFloat = 0.0
@@ -721,8 +740,8 @@ final class PlayerStats {
     var echoDamageMultiplier: CGFloat = 0.5
     var echoDelay: TimeInterval = 0.15
 
-    /// Glass Blood (Bleed/Chill): bleed deals more vs chilled/slowed foes.
-    var bleedVsSlowedMultiplier: CGFloat = 1.0   // 1.0 = no bonus
+    /// v2.1 A4b Glass Blood (reworked): Bleed-killed enemies burst into fragments.
+    var glassBloodActive = false
 
     /// Red Smile (Bleed): below the HP threshold, bleed deals more.
     var bleedLowHpBonus: CGFloat = 1.0           // 1.0 = no bonus
@@ -790,11 +809,62 @@ final class PlayerStats {
     
     // MARK: - Computed Properties
     
-    /// Effective fire interval after multipliers
+    /// Effective fire interval after multipliers — the ONE shared firing
+    /// calculation (v2.1 A4b, CL-22): the gun, the HUD's live rate and the
+    /// hedgehog all read it. Permanent cards live in `fireRateMultiplier`;
+    /// each live bonus is its own real-rate divisor, so every card's
+    /// percentage stays true whatever else is owned.
     var effectiveFireInterval: TimeInterval {
-        // Forge Path Bloodrush (Fer 15A): temp attack-speed bonus shortens it.
-        return GameConfig.Projectile.fireInterval * TimeInterval(fireRateMultiplier)
-            / TimeInterval(1 + forgeBloodrushBonus)
+        let live = (1 + forgeBloodrushBonus)      // Forge Path Bloodrush (Fer 15A)
+            * (1 + frenzyAttackSpeed)
+            * (1 + berserkAttackSpeed)
+            * (1 + bloodlustAttackSpeed)
+        return GameConfig.Projectile.fireInterval * TimeInterval(fireRateMultiplier) / TimeInterval(live)
+    }
+
+    // MARK: - v2.1 A4b: Bleed attack speed, kill rewards, executes
+
+    /// Frenzy's live bonus: +15% while its 4s window runs.
+    var frenzyAttackSpeed: CGFloat { frenzyTimer.isActive ? GameConfig.Bleed.frenzyAttackSpeed : 0 }
+    /// Berserk's live bonus: 50% × the missing-HP fraction (barrier isn't HP).
+    var berserkAttackSpeed: CGFloat {
+        guard berserkOwned, maxHP > 0 else { return 0 }
+        let missing = 1 - min(1, max(0, CGFloat(currentHP) / CGFloat(maxHP)))
+        return GameConfig.Bleed.berserkMaxAttackSpeed * missing
+    }
+
+    /// A kill of an enemy that was ALREADY bleeding (Frenzy + Bloodlust).
+    /// Frenzy RESETS to its full window — never stacks, never extends.
+    func recordBleedingKill() {
+        if frenzyOwned { frenzyTimer.start(GameConfig.Bleed.frenzyDuration) }
+        if bloodlustOwned {
+            bloodlustAttackSpeed = min(bloodlustAttackSpeed + GameConfig.Bleed.bloodlustPerKill,
+                                       GameConfig.Bleed.bloodlustCap)
+        }
+    }
+
+    /// Game-time clocks for the Bleed tree's timed buffs.
+    func tickBleedBuffs(_ dt: TimeInterval) { frenzyTimer.tick(dt) }
+
+    /// Sanguinarian (CL-19): barrier for a kill — 20% of the finishing damage
+    /// (no overkill), at least 1. 0 when the card isn't owned.
+    func sanguinarianGrant(finishingDamage: Int) -> Int {
+        guard sanguinarianOwned else { return 0 }
+        return max(GameConfig.Bleed.sanguinarianMinGrant,
+                   Int(GameConfig.Bleed.sanguinarianFraction * CGFloat(max(0, finishingDamage))))
+    }
+
+    /// Exsanguinate (<25%) and Execution Protocol (<30%) — CL-26: where they
+    /// overlap it is ONE ×2, never ×4. Returns the multiplier (1 = none).
+    func executeMultiplier(healthPercent: CGFloat) -> CGFloat {
+        var m: CGFloat = 1
+        if executionThreshold > 0 && healthPercent < executionThreshold {
+            m = max(m, GameConfig.Bleed.exsanguinateMultiplier)
+        }
+        if executionProtocolThreshold > 0 && healthPercent < executionProtocolThreshold {
+            m = max(m, executionProtocolMultiplier)
+        }
+        return m
     }
     
     /// Effective move speed (+ Forge Path temp buffs: Read the Room / Slipstream)
@@ -852,56 +922,10 @@ final class PlayerStats {
         return min(baseAmount * slowPotencyMultiplier, 0.8)  // Cap at 80% slow
     }
     
-    /// v1.4: Effective projectile damage (baseAttack × multipliers + overcharge + bloodlust)
+    /// v1.4: Effective projectile damage (baseAttack × multipliers + overcharge)
     var effectiveProjectileDamage: Int {
         let multiplied = CGFloat(baseAttack) * effectiveDamageMultiplier
         return max(1, Int(multiplied))
-    }
-    
-    // MARK: - Kill Streak Tracking
-    
-    private(set) var currentKillStreak: Int = 0
-    private var lastKillTime: TimeInterval = 0
-    
-    /// Record a kill. Returns true if streak is active.
-    func recordKill(atTime time: TimeInterval) -> Bool {
-        if time - lastKillTime <= killStreakWindow {
-            currentKillStreak += 1
-        } else {
-            currentKillStreak = 1
-        }
-        lastKillTime = time
-        return currentKillStreak >= killStreakThreshold
-    }
-    
-    /// Check if kill streak is currently active
-    func isKillStreakActive(atTime time: TimeInterval) -> Bool {
-        guard killStreakFireRateBonus > 0 else { return false }
-        return currentKillStreak >= killStreakThreshold && (time - lastKillTime) <= killStreakWindow
-    }
-    
-    // MARK: - Bloodlust Tracking
-    
-    private(set) var bloodlustStacks: Int = 0
-    private var bloodlustLastKillTime: TimeInterval = 0
-    
-    func recordBloodlustKill(atTime time: TimeInterval) {
-        guard bloodlustDamagePerKill > 0 else { return }
-        if time - bloodlustLastKillTime <= bloodlustWindow {
-            bloodlustStacks += 1
-        } else {
-            bloodlustStacks = 1
-        }
-        bloodlustLastKillTime = time
-    }
-    
-    var bloodlustBonus: CGFloat {
-        let bonus = CGFloat(bloodlustStacks) * bloodlustDamagePerKill
-        return min(bonus, bloodlustMaxBonus)
-    }
-    
-    func isBloodlustActive(atTime time: TimeInterval) -> Bool {
-        return bloodlustStacks > 0 && (time - bloodlustLastKillTime) <= bloodlustWindow + 3.0
     }
     
     // MARK: - Shot Counter (for Lightning Storm)
@@ -929,8 +953,9 @@ final class PlayerStats {
     
     /// Total damage multiplier including overcharge
     var effectiveDamageMultiplier: CGFloat {
-        var total = damageMultiplier + overchargeCurrentBonus + bloodlustBonus
-        // v1.6: Blood Price — bonus while at or below half HP
+        var total = damageMultiplier + overchargeCurrentBonus
+        // v1.6: Blood Price — bonus while at or below half HP (card retired in
+        // v2.1 A4b; dormant at 0 until the A7 cleanup)
         if bloodPriceBonus > 0 && currentHP * 2 <= maxHP {
             total += bloodPriceBonus
         }
@@ -950,7 +975,7 @@ final class PlayerStats {
     /// Multiplier for the HUD's "effective ATK" readout: the persistent build
     /// multiplier PLUS the permanent DEF-fueled conversions (Unbroken Core, Iron
     /// Skin) and per-run ATK growth. Excludes volatile combat buffs
-    /// (overcharge/bloodlust/blood price) so the number reflects build power and
+    /// (overcharge/blood price) so the number reflects build power and
     /// updates the moment DEF changes — without flickering frame to frame.
     var displayDamageMultiplier: CGFloat {
         var total = damageMultiplier
@@ -1211,10 +1236,13 @@ final class PlayerStats {
         killsExplode = false
         explosionRadius = GameConfig.Fire.emberBurstRadius
         explosionDamagePercent = GameConfig.Fire.emberBurstDamageFraction
-        killStreakFireRateBonus = 0.0
-        killStreakThreshold = 3
-        killStreakWindow = 3.0
         killHealAmount = 0
+        frenzyOwned = false
+        frenzyTimer.cancel()
+        berserkOwned = false
+        bloodlustOwned = false
+        bloodlustAttackSpeed = 0
+        sanguinarianOwned = false
         killOrbPullMultiplier = 1.0
         chillTrail = false
         glacialDriftTier = 0
@@ -1231,9 +1259,6 @@ final class PlayerStats {
         gravityWellRadius = 30.0
         gravityWellDuration = 1.0
         gravityWellDPS = 0.0
-        bloodlustDamagePerKill = 0.0
-        bloodlustMaxBonus = 0.25
-        bloodlustWindow = 2.0
         executionThreshold = 0.0
         spreadShotInterval = 0
         spreadShotCount = 3
@@ -1288,7 +1313,7 @@ final class PlayerStats {
         echoChance = 0.0
         echoDamageMultiplier = 0.5
         echoDelay = 0.15
-        bleedVsSlowedMultiplier = 1.0
+        glassBloodActive = false
         bleedLowHpBonus = 1.0
         bleedLowHpThreshold = 0.5
         hasSilverSkin = false
@@ -1304,10 +1329,6 @@ final class PlayerStats {
         falseOpeningSlowDuration = 1.2
         falseOpeningCooldown = 1.1
 
-        currentKillStreak = 0
-        lastKillTime = 0
-        bloodlustStacks = 0
-        bloodlustLastKillTime = 0
         shotsFired = 0
         
         // v1.3 cards

@@ -85,6 +85,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// slot: a spawn, a gauntlet hand-off, a death, a restart.
     private var bossStatus = StatusDoTs()
     private var bossStatusTell: BossStatusTellNode?
+    /// v2.1 A4b: credits the boss in the slot exactly once (re-armed on every
+    /// slot change), and the DoT payout in flight when it takes damage.
+    private var bossKillLatch = BossKillLatch()
+    private var pendingBossDoT: KillContext.DoTHit?
     private var bossDefeatedThisRun: Bool = false
     /// v2.0: the real arena boss is per-run and kill-driven — this guards it to
     /// one spawn per run so climbing past the kill threshold can't re-trigger it.
@@ -388,7 +392,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Timing
     
     private var lastUpdateTime: TimeInterval = 0
-    private var timeSinceLastShot: TimeInterval = 0
+    /// v2.1 A4b (CL-23): the auto-attack cadence — carries the leftover
+    /// partial frame, with bounded catch-up and no debt while idle or paused.
+    private var fireClock = FireClock()
     
     // MARK: - Invulnerability (post-revive)
     
@@ -1231,17 +1237,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.0 HUD readout pass: each capstone gauge gets its OWN row. Multiple
         // capstones can now be owned at once (the +1 pick), and stacking them in
         // one slot rendered them on top of each other — maximally illegible.
-        kineticGauge.position = CGPoint(x: 0, y: safeTop - 86)
+        kineticGauge.position = CGPoint(x: 0, y: safeTop - 90)   // v2.1 A4b: −4pt for the barrier strip
         kineticGauge.zPosition = 101
         camera.addChild(kineticGauge)
         refreshKineticGauge()
 
-        apexGauge.position = CGPoint(x: 0, y: safeTop - 110)
+        apexGauge.position = CGPoint(x: 0, y: safeTop - 114)
         apexGauge.zPosition = 101
         camera.addChild(apexGauge)
         refreshApexGauge()
 
-        erasureGauge.position = CGPoint(x: 0, y: safeTop - 134)
+        erasureGauge.position = CGPoint(x: 0, y: safeTop - 138)
         erasureGauge.zPosition = 101
         camera.addChild(erasureGauge)
         refreshErasureGauge()
@@ -4931,21 +4937,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 crowdCount += 1
             }
 
-            // v1.8 (Unit 14): situational bleed scaling — Glass Blood (vs
-            // chilled/slowed) and Red Smile (player below the HP threshold).
-            // Defaults are 1.0, so this is a no-op unless a card is owned.
-            var bleedMult: CGFloat = 1.0
-            if enemy.isSlowed { bleedMult *= playerStats.bleedVsSlowedMultiplier }
-            if playerStats.hpPercent < playerStats.bleedLowHpThreshold {
-                bleedMult *= playerStats.bleedLowHpBonus
-            }
-            enemy.bleedDamageMultiplier = bleedMult
+            // v1.8 (Unit 14): situational bleed scaling — legacy Red Smile
+            // (player below the HP threshold) until its A4c rework. 1.0 unless
+            // owned. (Glass Blood's vs-slowed bonus retired with its A4b rework.)
+            enemy.bleedDamageMultiplier = playerStats.hpPercent < playerStats.bleedLowHpThreshold
+                ? playerStats.bleedLowHpBonus : 1.0
 
             // v2.1 A4a: a DoT death names its channel (Burn or Bleed).
-            if let channel = enemy.updateStatusEffects(deltaTime: dt) {
+            // v2.1 A4b: Open Wounds rides the DoT ticks, before rounding (CL-25).
+            if let channel = enemy.updateStatusEffects(deltaTime: dt,
+                                                       openWounds: playerStats.bleedingEnemyDamageTaken) {
                 diedFromDOT.append(enemy)
                 #if DEBUG
                 combatLedger.recordDotKill(channel)
+                // Glass Blood's check, counted HERE (independent of the burst code).
+                if channel == .bleed, playerStats.glassBloodActive {
+                    combatLedger.recordGlassBloodDeath(generation: enemy.diedBleedGeneration)
+                }
                 #endif
             }
             #if DEBUG
@@ -5195,17 +5203,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // leaving projectiles running would undercut the whole transformation,
         // and it's the difference between "a big Spark" and a rampage.
         guard !kaijuActive else { return }
-        timeSinceLastShot += dt
-        
-        var effectiveInterval = playerStats.effectiveFireInterval
-        if playerStats.isKillStreakActive(atTime: waveManager.elapsedTime) {
-            effectiveInterval *= TimeInterval(1.0 - playerStats.killStreakFireRateBonus)
-        }
-        
-        guard timeSinceLastShot >= effectiveInterval else { return }
-        guard let targetPosition = findNearestTargetPosition() else { return }
 
-        timeSinceLastShot = 0
+        // v2.1 A4b: ONE shared firing calculation (CL-22) — Frenzy, Berserk and
+        // Bloodlust live inside `effectiveFireInterval` beside Bloodrush.
+        var target: CGPoint?
+        guard fireClock.advance(dt, interval: playerStats.effectiveFireInterval, hasTarget: {
+            target = findNearestTargetPosition()
+            return target != nil
+        }), let targetPosition = target else { return }
 
         let totalProjectiles = 1 + playerStats.extraProjectiles
         let baseDirection = (targetPosition - player.position).normalized
@@ -5512,6 +5517,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.3: Overcharge — builds while unhit
         playerStats.updateOvercharge(dt)
         playerStats.bloodBarrier.tick(dt)   // v2.1 A0: expiry on game time
+        playerStats.tickBleedBuffs(dt)      // v2.1 A4b: Frenzy's window
         
         // v1.3: Phase Skin — tick timers
         playerStats.updatePhaseSkin(dt)
@@ -6505,7 +6511,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if d < nearestD { nearestD = d; nearest = e }
             if e.isBleeding && d < nearestBleedD { nearestBleedD = d; nearestBleed = e }
         }
-        if playerStats.apexBloodhound, let b = nearestBleed { return .enemy(b) }
+        if playerStats.apexBloodhound {
+            // v2.1 A4b (CL-32): a bleeding boss is a Bloodhound candidate too,
+            // measured to its SURFACE; the nearest bleeding target wins.
+            if let b = boss, !b.isDead, bossStatus.bleed.isBleeding {
+                let d = player.position.distance(to: b.position) - b.targetingRadius
+                if d <= range && d < nearestBleedD { return .boss(b) }
+            }
+            if let b = nearestBleed { return .enemy(b) }
+        }
         if let n = nearest { return .enemy(n) }
         if let boss = boss, !boss.isDead,
            player.position.distance(to: boss.position) - boss.targetingRadius <= range {
@@ -8280,6 +8294,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 self.spawnXPOrb(at: pos + offset, value: xp / 12)
             }
             self.spawnForgeCoins(at: pos)
+            self.checkBossCredited()   // v2.1 A4b DEBUG backstop
             self.boss = nil
             self.worldNode.shake(intensity: 20, duration: 0.7)
         }
@@ -9423,6 +9438,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // v1.8 (Unit 2): forge XP coins erupt and scatter arena-wide, on
             // top of the XP shower — bonus forge XP for pushing the post-boss swarm.
             self.spawnForgeCoins(at: pos)
+            self.checkBossCredited()   // v2.1 A4b DEBUG backstop
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -9477,6 +9493,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // v1.8 (Unit 2): forge XP coins erupt and scatter arena-wide, on
             // top of the XP shower — bonus forge XP for pushing the post-boss swarm.
             self.spawnForgeCoins(at: pos)
+            self.checkBossCredited()   // v2.1 A4b DEBUG backstop
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -9563,6 +9580,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // v1.8 (Unit 2): forge XP coins erupt and scatter arena-wide, on
             // top of the XP shower — bonus forge XP for pushing the post-boss swarm.
             self.spawnForgeCoins(at: pos)
+            self.checkBossCredited()   // v2.1 A4b DEBUG backstop
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -9612,6 +9630,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 self.spawnXPOrb(at: pos + offset, value: xp / 10)
             }
             self.spawnForgeCoins(at: pos)
+            self.checkBossCredited()   // v2.1 A4b DEBUG backstop
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -9723,6 +9742,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 self.spawnXPOrb(at: pos + offset, value: xp / 10)
             }
             self.spawnForgeCoins(at: pos)
+            self.checkBossCredited()   // v2.1 A4b DEBUG backstop
             self.boss = nil
             self.worldNode.shake(intensity: 15, duration: 0.5)
         }
@@ -9871,7 +9891,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let outcome = applyPlayerDamage(damage, fromBossClass: fromBossClass)
         damageCooldownTimer = GameConfig.Player.damageCooldown
-        hpBar.flashDamage()
+        flashHitFeedback(outcome)
         AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: shakeIntensity, duration: shakeDuration)
 
@@ -10096,34 +10116,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             seedBurst(at: position, generation: e.seedGeneration)
         }
 
-        // v1.9 Forge Path kill triggers (Unit 2b).
-        forgeTimeSinceKill = 0
-        forgeColdFuryArmed = false   // a kill resets Cold Fury's "no-kill" clock
-        if playerStats.forgeRisingHeat {
-            forgeRisingHeatStacks = min(forgeRisingHeatStacks + 1, 5)
-            forgeRisingHeatTimer = 3.0
-        }
-        if playerStats.forgeBloodrush {
-            forgeBloodrushStacks = min(forgeBloodrushStacks + 1, 3)
-            forgeBloodrushTimer = 4.0
-            playerStats.forgeBloodrushBonus = CGFloat(forgeBloodrushStacks) * 0.05
-        }
-
-        // v1.9 Apex Bloodfed (T2): every N kills, grow max HP (capped) + heal.
-        if playerStats.apexTier >= 2 {
-            apexBloodfedKills += 1
-            if apexBloodfedKills >= GameConfig.Apex.bloodfedKills {
-                apexBloodfedKills = 0
-                if playerStats.apexBloodfedBonusHP < GameConfig.Apex.bloodfedMaxHPCap {
-                    playerStats.apexBloodfedBonusHP += GameConfig.Apex.bloodfedHP
-                    playerStats.maxHP += GameConfig.Apex.bloodfedHP
-                    playerStats.heal(GameConfig.Apex.bloodfedHP)
-                    hpBar.updateFill(playerStats.hpPercent,
-                                     currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
-                    statHUD.update(from: playerStats)
-                }
-            }
-        }
+        // v2.1 A4b: ONE reward path for enemy and boss kills, from a snapshot
+        // of the kill taken at death (bleeding before the killing damage,
+        // killed by a Bleed tick, its Bleed lineage, finishing damage).
+        let ctx = KillContext(position: position,
+                              diedBleeding: enemy?.diedBleeding ?? false,
+                              killedByBleed: enemy?.killedByBleed ?? false,
+                              bleedGeneration: enemy?.diedBleedGeneration ?? 0,
+                              finishingDamage: enemy?.finishingDamage ?? 0,
+                              isBoss: false)
+        resolveKillRewards(ctx)
 
         // v1.6: kills made in The Quench feed the Warden's gate
         if arenaConfig.id == 1 {
@@ -10157,9 +10159,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self?.spawnXPOrb(at: position, value: xpValue)
         }
         
-        _ = playerStats.recordKill(atTime: waveManager.elapsedTime)
-        playerStats.recordBloodlustKill(atTime: waveManager.elapsedTime)
-
         // v1.6: Ashlings split into two shards on death.
         // v1.8 (B2): the parent's death-AoE (the Open Vein / Whiteout bursts
         // below, plus any splash that landed this frame) was insta-killing the
@@ -10173,38 +10172,115 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        // v1.6: Siphon — kills restore HP
-        if playerStats.killHealAmount > 0 {
-            playerStats.heal(playerStats.killHealAmount)
+        resolveDeathBursts(ctx)
+
+        worldNode.shake(intensity: 2, duration: 0.08)
+    }
+
+    /// v2.1 A4b — the player's rewards for a full-credit kill, enemy or boss
+    /// (CL-29). Nothing here waits; no player rewards once Spark is dead.
+    private func resolveKillRewards(_ ctx: KillContext) {
+        // "Already dead" includes the instant after an unrescued lethal hit,
+        // before playerDied() runs — a Thornwall / Iron Maiden reflect can kill
+        // on the very contact that killed Spark. A rescue leaves HP ≥ 1.
+        guard gameState != .dead, playerStats.currentHP > 0 else { return }
+
+        // v1.9 Forge Path kill triggers (Unit 2b).
+        forgeTimeSinceKill = 0
+        forgeColdFuryArmed = false   // a kill resets Cold Fury's "no-kill" clock
+        if playerStats.forgeRisingHeat {
+            forgeRisingHeatStacks = min(forgeRisingHeatStacks + 1, 5)
+            forgeRisingHeatTimer = 3.0
+        }
+        if playerStats.forgeBloodrush {
+            forgeBloodrushStacks = min(forgeBloodrushStacks + 1, 3)
+            forgeBloodrushTimer = 4.0
+            playerStats.forgeBloodrushBonus = CGFloat(forgeBloodrushStacks) * 0.05
         }
 
-        // v1.8 Red Harvest (Bleed 7) — killing a BLEEDING enemy restores HP
-        if playerStats.bleedKillHeal > 0, let enemy = enemy, enemy.diedBleeding {   // A4a: bleeding BEFORE the kill
+        // v1.9 Apex Bloodfed (T2): every N kills, grow max HP (capped) + heal.
+        // A boss kill counts as one (CL-29).
+        if playerStats.apexTier >= 2 {
+            apexBloodfedKills += 1
+            if apexBloodfedKills >= GameConfig.Apex.bloodfedKills {
+                apexBloodfedKills = 0
+                if playerStats.apexBloodfedBonusHP < GameConfig.Apex.bloodfedMaxHPCap {
+                    playerStats.apexBloodfedBonusHP += GameConfig.Apex.bloodfedHP
+                    playerStats.maxHP += GameConfig.Apex.bloodfedHP
+                    playerStats.heal(GameConfig.Apex.bloodfedHP)
+                    hpBar.updateFill(playerStats.hpPercent,
+                                     currentHP: playerStats.currentHP, maxHP: playerStats.maxHP)
+                    statHUD.update(from: playerStats)
+                }
+            }
+        }
+
+        // v2.1 A4b Frenzy + Bloodlust (Q-B1, Q-B6): only a target that was
+        // ALREADY bleeding when the killing damage began.
+        if ctx.diedBleeding {
+            playerStats.recordBleedingKill()
+            #if DEBUG
+            combatLedger.bleedingKills += 1
+            #endif
+        }
+
+        // v1.6 Siphon — kills restore HP. With Sanguinarian, ONLY Siphon's
+        // overheal becomes Blood Barrier, 1:1 after the heal multipliers (CL-20).
+        if playerStats.killHealAmount > 0 {
+            let overheal = playerStats.heal(playerStats.killHealAmount)
+            if overheal > 0, playerStats.sanguinarianOwned { grantBloodBarrier(overheal, fromSiphon: true) }
+        }
+
+        // v1.8 Red Harvest (Bleed 7) — killing a bleeding enemy restores HP.
+        if playerStats.bleedKillHeal > 0, ctx.diedBleeding {
             playerStats.heal(playerStats.bleedKillHeal)
         }
 
-        // v1.6: Open Vein — bleeding enemies burst on death
-        if playerStats.openVeinDamage > 0, let enemy = enemy, enemy.diedBleeding {
-            damageEnemiesInRadius(playerStats.openVeinRadius, around: position,
+        // v2.1 A4b Sanguinarian (CL-19): 20% of the finishing damage, at least 1.
+        let barrier = playerStats.sanguinarianGrant(finishingDamage: ctx.finishingDamage)
+        if barrier > 0 { grantBloodBarrier(barrier, fromSiphon: false) }
+    }
+
+    /// v2.1 A4b — death effects that burst from where the target died, once
+    /// each (CL-29). An arena boss's burst happens at its body's origin.
+    private func resolveDeathBursts(_ ctx: KillContext) {
+        // v1.6 Open Vein — a target that was bleeding bursts on death.
+        if playerStats.openVeinDamage > 0, ctx.diedBleeding {
+            damageEnemiesInRadius(playerStats.openVeinRadius, around: ctx.position,
                                   damage: playerStats.openVeinDamage)
-            showRingPulse(at: position, radius: playerStats.openVeinRadius, colorHex: 0xCC2233)
+            showRingPulse(at: ctx.position, radius: playerStats.openVeinRadius, colorHex: 0xCC2233)
+        }
+
+        // v2.1 A4b Glass Blood (CL-27/28): a BLEED TICK delivered the kill, and
+        // the lineage has a hop left (generations 0 and 1 burst; 2 does not).
+        if playerStats.glassBloodActive,
+           ctx.burstsGlassBlood(maxGeneration: GameConfig.Bleed.glassBloodMaxGeneration) {
+            glassBloodBurst(at: ctx.position, generation: ctx.bleedGeneration + 1)
         }
 
         // v1.6: Null Bloom — chance to leave a slowing zone
         if playerStats.nullBloomChance > 0 && CGFloat.random(in: 0...1) < playerStats.nullBloomChance {
-            spawnNullBloom(at: position)
+            spawnNullBloom(at: ctx.position)
         }
 
         if playerStats.killsExplode {
-            explosionAt(position)
+            explosionAt(ctx.position)
         }
-        
+
         // v1.3: Chain Reaction — separate from Ember Burst
         if playerStats.chainReactionExplode {
-            chainReactionAt(position)
+            chainReactionAt(ctx.position)
         }
-        
-        worldNode.shake(intensity: 2, duration: 0.08)
+    }
+
+    /// Blood Barrier gain (A0's pool: cap 50% max HP; any positive gain
+    /// refreshes its 4s expiry — the established rule).
+    private func grantBloodBarrier(_ amount: Int, fromSiphon: Bool) {
+        let added = playerStats.bloodBarrier.gain(amount, maxHP: playerStats.maxHP,
+                                                  tuning: GameConfig.DamagePipeline.tuning)
+        #if DEBUG
+        combatLedger.recordBarrier(requested: amount, added: added, fromSiphon: fromSiphon)
+        #endif
     }
 
     /// v1.8 Unit 5: map a live enemy node onto its bestiary family. Mirrors the
@@ -10318,6 +10394,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hpBar.updateFill(playerStats.hpPercent,
                          currentHP: playerStats.currentHP,
                          maxHP: playerStats.maxHP)
+        hpBar.updateBarrier(playerStats.bloodBarrier.amount, maxHP: playerStats.maxHP)   // v2.1 A4b (CL-21)
         statHUD.update(from: playerStats)  // v1.9 Unit 5: live combat modifiers
 
         levelLabel.text = "LV \(player.currentLevel)"
@@ -10471,7 +10548,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.3 Overcharge reset + lethal rescue now live inside the pipeline (A0).
         let outcome = applyPlayerDamage(damage, fromBossClass: fromBossClass)
         damageCooldownTimer = GameConfig.Player.damageCooldown
-        hpBar.flashDamage()
+        flashHitFeedback(outcome)
         AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: 6, duration: 0.2)
 
@@ -10555,7 +10632,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 A0: Overcharge reset + lethal rescue live inside the pipeline.
         let outcome = applyPlayerDamage(projNode.damage, fromBossClass: false)  // enemy projectile
         damageCooldownTimer = GameConfig.Player.damageCooldown
-        hpBar.flashDamage()
+        flashHitFeedback(outcome)
         AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: 4, duration: 0.15)
 
@@ -10594,6 +10671,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let enemyNode = enemyBody.node as? EnemyNode else { return }
+
+        // v2.1 A4b Glass Blood (CL-27): a fragment is plain damage + a Bleed.
+        if projectileNode.glassBloodGeneration > 0 {
+            resolveGlassBloodFragmentHit(projectileNode, on: enemyNode)
+            return
+        }
 
         // v1.6 tuning: Braceguard's fixed shield halves damage from its arc
         // (was a full block — too punishing with auto-aim mid-chaos)
@@ -10635,14 +10718,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        if playerStats.executionThreshold > 0 && enemyNode.healthPercent < playerStats.executionThreshold {
-            damage *= 2
-        }
-        
-        // Execution Protocol: bonus damage to low HP enemies
-        if playerStats.executionProtocolThreshold > 0 && enemyNode.healthPercent < playerStats.executionProtocolThreshold {
-            damage = Int(CGFloat(damage) * playerStats.executionProtocolMultiplier)
-        }
+        // Exsanguinate (<25%) + Execution Protocol (<30%): ONE ×2 where they
+        // overlap, never ×4 (v2.1 A4b, CL-26).
+        let execute = playerStats.executeMultiplier(healthPercent: enemyNode.healthPercent)
+        if execute > 1 { damage = Int(CGFloat(damage) * execute) }
         
         // v2.1 A2 Permafrost: ANY slow source counts — including arena-wide
         // ones (Ice Rink lights it for everyone, Q-C5).
@@ -10656,12 +10735,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         // v1.8 Open Wounds (Bleed 3): bleeding enemies take more damage
+        // (v2.1 A4b: 25%. Direct hits stay integer — its DoT share rides the
+        // ticks before rounding, CL-25.)
         if playerStats.bleedingEnemyDamageTaken > 0 && enemyNode.isBleeding {
             damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
-        }
-
-        if playerStats.isBloodlustActive(atTime: waveManager.elapsedTime) {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
         }
 
         // v1.9 Forge Path (Unit 2b) — Ferocity offensive + Opportunist.
@@ -10799,12 +10876,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - v1.6: Projectile ↔ Boss
 
-    /// Boss damage pipeline. Crits, execution effects, and bloodlust apply.
+    /// Boss damage pipeline. Crits, executes (one ×2, CL-26) and Open Wounds apply.
     /// v2.1 A4a: bosses now take Burn and Bleed (at the boss-class scale,
     /// ticked in `updateBossStatus`); slows, stuns and knockback they still resist.
     private func handleProjectileHitBoss(projectileBody: SKPhysicsBody) {
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let bossNode = boss, !bossNode.isDead else { return }
+
+        // v2.1 A4b Glass Blood (CL-27): fragments hit and Bleed the boss too.
+        if projectileNode.glassBloodGeneration > 0 {
+            consumeProjectile(projectileNode)
+            bossNode.takeDamage(max(1, Int(projectileNode.damageMultiplier)))
+            inflictBossBleed(generation: projectileNode.glassBloodGeneration)
+            return
+        }
 
         var damage = max(1, Int(projectileNode.damageMultiplier))
 
@@ -10815,16 +10900,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        if playerStats.executionThreshold > 0 && bossNode.healthPercent < playerStats.executionThreshold {
-            damage *= 2
-        }
+        // CL-26: one ×2 where Exsanguinate and Execution Protocol overlap.
+        let execute = playerStats.executeMultiplier(healthPercent: bossNode.healthPercent)
+        if execute > 1 { damage = Int(CGFloat(damage) * execute) }
 
-        if playerStats.executionProtocolThreshold > 0 && bossNode.healthPercent < playerStats.executionProtocolThreshold {
-            damage = Int(CGFloat(damage) * playerStats.executionProtocolMultiplier)
-        }
-
-        if playerStats.isBloodlustActive(atTime: waveManager.elapsedTime) {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.bloodlustBonus))
+        // v2.1 A4b Open Wounds (CL-25/32): a bleeding boss takes +25% too.
+        if playerStats.bleedingEnemyDamageTaken > 0 && bossStatus.bleed.isBleeding {
+            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
         }
 
         // v1.9 Forge Path (Unit 2b): offense applies to the boss too (Headsman,
@@ -10855,13 +10937,84 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossNode.takeDamage(damage)
         // Bloodthirsty lands on a boss that SURVIVED the hit — never on a dead
         // one (a monument's slot is already clear by now).
-        if !bossNode.isDead, playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
-                                                             roll: CGFloat.random(in: 0..<1)) {
-            if bossStatus.bleed.inflict(tickDamage: playerStats.bleedTickDamage,
-                                        duration: GameConfig.Bleed.duration,
-                                        interval: GameConfig.Bleed.tickInterval) { noteBleedStarted() }
+        if playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
+                                           roll: CGFloat.random(in: 0..<1)) {
+            inflictBossBleed(generation: 0)
         }
         erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too
+    }
+
+    // MARK: - v2.1 A4b: Glass Blood + boss Bleed
+
+    /// Remove a projectile that hit (if it doesn't pierce on).
+    private func consumeProjectile(_ projectileNode: ProjectileNode) {
+        guard projectileNode.onHitEnemy() else { return }
+        if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
+            projectiles.remove(at: index)
+        }
+        projectileNode.removeFromParent()
+    }
+
+    /// Bleed the boss — only one that SURVIVED the damage (the invariant that
+    /// keeps `bossStatus` meaning "bleeding before the killing damage").
+    private func inflictBossBleed(generation: Int) {
+        guard let b = boss, !b.isDead else { return }
+        if bossStatus.bleed.inflict(tickDamage: playerStats.bleedTickDamage,
+                                    duration: GameConfig.Bleed.duration,
+                                    interval: GameConfig.Bleed.tickInterval,
+                                    generation: generation) { noteBleedStarted() }
+    }
+
+    /// CL-27: a Glass Blood fragment deals plain damage — no crit, no pierce,
+    /// no other on-hit procs — and always Bleeds a survivor, carrying its
+    /// lineage (CL-28). Its kills are full `.fragment` credit.
+    private func resolveGlassBloodFragmentHit(_ fragment: ProjectileNode, on enemyNode: EnemyNode) {
+        consumeProjectile(fragment)
+        var damage = max(1, Int(fragment.damageMultiplier))
+        // A Braceguard's shield arc still halves it, like every projectile.
+        if let braceguard = enemyNode as? BraceguardNode, braceguard.blocksHit(from: player.position) {
+            braceguard.flashShield()
+            if !playerStats.erasureVoidTouched {
+                damage = max(1, Int(CGFloat(damage) * BraceguardNode.shieldDamageMultiplier))
+            }
+        }
+        if enemyNode.takeDamage(damage) {
+            onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode,
+                          source: fragment.killSource)
+        } else if enemyNode.applyBleed(tickDamage: playerStats.bleedTickDamage,
+                                       generation: fragment.glassBloodGeneration) {
+            noteBleedStarted()
+        }
+    }
+
+    /// A Bleed-killed enemy bursts: short blood-glass fragments that carry the
+    /// next generation of its Bleed (CL-27/28).
+    private func glassBloodBurst(at position: CGPoint, generation: Int) {
+        let B = GameConfig.Bleed.self
+        let base = CGFloat.random(in: 0..<(2 * .pi))
+        for i in 0..<B.glassBloodFragments {
+            let a = base + CGFloat(i) / CGFloat(B.glassBloodFragments) * 2 * .pi
+            let frag = ProjectileNode(
+                direction: CGPoint(x: cos(a), y: sin(a)),
+                speed: playerStats.effectiveProjectileSpeed * B.glassBloodSpeedFraction,
+                range: B.glassBloodRange * DeviceScale.gameplay,
+                pierces: 0,
+                damageMultiplier: playerStats.effectiveDamageMultiplier * B.glassBloodDamageFraction,
+                isCrit: false,
+                bloodStyle: true
+            )
+            frag.glassBloodGeneration = generation
+            frag.appliesFrostTouch = false
+            frag.position = position
+            frag.zPosition = 8
+            frag.killSource = .fragment
+            projectiles.append(frag)
+            worldNode.addChild(frag)
+        }
+        showRingPulse(at: position, radius: 22, colorHex: 0xE0203A)
+        #if DEBUG
+        combatLedger.glassBursts += 1
+        #endif
     }
 
     // MARK: - v2.1 A4a: Boss status (Burn + Bleed)
@@ -10877,13 +11030,60 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// the placeholder tell row (A9 art) is pinned beside the new boss's HP bar.
     private func resetBossStatus() {
         bossStatus = StatusDoTs()
+        pendingBossDoT = nil
         retireBossStatusTell()
+        bossKillLatch.arm(boss.map { ObjectIdentifier($0) })
         guard let b = boss else { return }
+        // v2.1 A4b: the boss-kill chokepoint — every boss reports its killing
+        // blow here, synchronously, before its death plays out.
+        let id = ObjectIdentifier(b)
+        b.onLethalHit = { [weak self] finishing in
+            self?.bossLethalHit(id: id, finishingDamage: finishing)
+        }
         let tell = BossStatusTellNode()
         tell.position = b.statusTellAnchor
         tell.setScale(b.statusTellScale)
         b.addChild(tell)
         bossStatusTell = tell
+    }
+
+    /// v2.1 A4b — a boss kill earns its rewards (Brandon, Sep 21; CL-29/30).
+    /// Runs ON the killing blow, synchronously: everything the rewards read is
+    /// snapshotted first (a dying Unmade Star clears the slot and `bossStatus`
+    /// moments later), the boss is marked credited BEFORE any effect runs, and
+    /// nothing here waits — run completion is never delayed.
+    private func bossLethalHit(id: ObjectIdentifier, finishingDamage: Int) {
+        guard let b = boss, ObjectIdentifier(b) == id else { return }
+        let ctx = KillContext.boss(at: b.position, finishingDamage: finishingDamage, dot: pendingBossDoT,
+                                   liveBleeding: bossStatus.bleed.isBleeding,
+                                   liveGeneration: bossStatus.bleed.generation)
+        guard bossKillLatch.claim(id) else {
+            #if DEBUG
+            combatLedger.recordBossDuplicate()
+            #endif
+            return
+        }
+        bossDefeatedThisRun = true   // CL-30: protects the forge-XP bonus through the death animation
+        #if DEBUG
+        combatLedger.recordBossKill(ctx)
+        #endif
+        resolveKillRewards(ctx)
+        resolveDeathBursts(ctx)
+    }
+
+    /// v2.1 A4b (CL-21): a hit the barrier FULLY absorbed flashes the barrier
+    /// strip only; a partial absorption flashes both — the HP damage still shows.
+    private func flashHitFeedback(_ outcome: PlayerDamagePipeline.Outcome) {
+        if outcome.absorbed > 0 { hpBar.flashBarrier(absorbed: outcome.absorbed, maxHP: playerStats.maxHP) }
+        if !outcome.barrierOnly { hpBar.flashDamage() }
+    }
+
+    /// DEBUG backstop: every boss death must already have been credited at its
+    /// killing blow. Called from each boss's `onDeath`, before the slot clears.
+    private func checkBossCredited() {
+        #if DEBUG
+        if !bossKillLatch.credited { NSLog("[A4] ⚠ boss died UNCREDITED  %@", combatLedger.summary) }
+        #endif
     }
 
     /// The status row fades out with the HP bar (presentation only).
@@ -10900,11 +11100,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let b = boss else { return }
         // A dying boss's row leaves with its HP bar instead of freezing on the corpse.
         guard !b.isDead else { retireBossStatusTell(); return }
-        // Red Smile's legacy low-HP Bleed bonus (1.0 unless owned) — reworked in A4.
+        // Red Smile's legacy low-HP Bleed bonus (1.0 unless owned) — reworked in A4c.
         let bleedMultiplier = playerStats.hpPercent < playerStats.bleedLowHpThreshold
             ? playerStats.bleedLowHpBonus : 1.0
+        // The state as this step BEGINS — the final Bleed tick can end the
+        // Bleed and kill in the same step (Lyra correction 4).
+        let wasBleeding = bossStatus.bleed.isBleeding
+        let wasGeneration = bossStatus.bleed.generation
         var status = bossStatus
         let pay = status.tick(dt, scale: GameConfig.BossClass.dotScale, bleedMultiplier: bleedMultiplier,
+                              openWounds: playerStats.bleedingEnemyDamageTaken,
                               burnDecayInterval: GameConfig.Fire.burnStackDecayInterval,
                               bleedInterval: GameConfig.Bleed.tickInterval)
         bossStatus = status
@@ -10920,7 +11125,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             #if DEBUG
             combatLedger.recordBossDoT(.burn, damage: pay.burn, stacks: status.burn.stacks)
             #endif
+            // Published BEFORE the hit: the Unmade Star dies inside takeDamage.
+            pendingBossDoT = .init(channel: .burn, wasBleeding: wasBleeding, generation: wasGeneration)
             b.takeDamage(pay.burn, ignoresChallengeDEF: true)
+            pendingBossDoT = nil
             #if DEBUG
             if b.isDead { combatLedger.recordBossDotKill(.burn) }
             #endif
@@ -10929,9 +11137,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             #if DEBUG
             combatLedger.recordBossDoT(.bleed, damage: pay.bleed, stacks: status.burn.stacks)
             #endif
+            pendingBossDoT = .init(channel: .bleed, wasBleeding: wasBleeding, generation: wasGeneration)
             b.takeDamage(pay.bleed, ignoresChallengeDEF: true)
+            pendingBossDoT = nil
             #if DEBUG
-            if b.isDead { combatLedger.recordBossDotKill(.bleed) }
+            if b.isDead {
+                combatLedger.recordBossDotKill(.bleed)
+                if playerStats.glassBloodActive { combatLedger.recordGlassBloodDeath(generation: wasGeneration) }
+            }
             #endif
         }
     }
@@ -11252,6 +11465,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hpBar.updateFill(playerStats.hpPercent,
                          currentHP: playerStats.currentHP,
                          maxHP: playerStats.maxHP)
+        hpBar.updateBarrier(playerStats.bloodBarrier.amount, maxHP: playerStats.maxHP)   // v2.1 A4b
 
         // v2.0: a WON run doesn't kill Spark. Both victory endings (a cleared
         // gauntlet, a cleared arena) route through here for the shared result
@@ -11695,7 +11909,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         buffTracker.update(tagCounts: upgradeManager.tagCounts)
         waveManager.reset()
         adReviveManager.reset()
-        timeSinceLastShot = 0
+        fireClock.reset()
         lastUpdateTime = 0
         passiveDOTAccumulator = 0
         everglowPulseTimer = 0

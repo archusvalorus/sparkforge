@@ -80,6 +80,43 @@ struct CombatLedger {
         NSLog("[A4] boss killed by %@  %@", channel.rawValue, summary)
     }
 
+    // v2.1 A4b: boss kills credited at the killing blow (+ rejected repeats),
+    // bleeding kills (Frenzy / Bloodlust), Blood Barrier, Glass Blood.
+    private(set) var bossKills = 0
+    private(set) var bossDupes = 0
+    var bleedingKills = 0
+    private(set) var barrierFromSanguinarian = 0
+    private(set) var barrierFromSiphon = 0
+    private(set) var barrierRequested = 0
+    /// Glass Blood (Lyra's correction 3): every Bleed-tick death while owned,
+    /// split into ELIGIBLE (generation 0/1 — must burst) and CAPPED (generation
+    /// 2 — must not). The check is `glassBursts == glassEligible`.
+    private(set) var glassBleedDeaths = 0
+    private(set) var glassEligible = 0
+    private(set) var glassCapped = 0
+    private(set) var glassMaxGeneration = 0
+    var glassBursts = 0
+    mutating func recordBossKill(_ ctx: KillContext) {
+        bossKills += 1
+        NSLog("[A4] boss kill credited at the killing blow (bleeding=%@ byBleed=%@ gen=%d finish=%d)  %@",
+              ctx.diedBleeding ? "yes" : "no", ctx.killedByBleed ? "yes" : "no",
+              ctx.bleedGeneration, ctx.finishingDamage, summary)
+    }
+    mutating func recordBossDuplicate() {
+        bossDupes += 1
+        NSLog("[A4] ⚠ duplicate boss credit rejected  %@", summary)
+    }
+    mutating func recordBarrier(requested: Int, added: Int, fromSiphon: Bool) {
+        barrierRequested += requested
+        if fromSiphon { barrierFromSiphon += added } else { barrierFromSanguinarian += added }
+    }
+    /// Counted where the Bleed death happens — independent of the burst code.
+    mutating func recordGlassBloodDeath(generation: Int) {
+        glassBleedDeaths += 1
+        if generation < GameConfig.Bleed.glassBloodMaxGeneration { glassEligible += 1 } else { glassCapped += 1 }
+        glassMaxGeneration = max(glassMaxGeneration, generation)
+    }
+
     mutating func recordKill(_ source: KillSource) {
         kills[source, default: 0] += 1
     }
@@ -110,7 +147,9 @@ struct CombatLedger {
             + "bleed[started=\(bleedsStarted) ticks=\(bleedTicks) "
             + "dotKills=burn:\(dotKills[.burn] ?? 0)/bleed:\(dotKills[.bleed] ?? 0)] "
             + "boss[burn=\(bossBurnDamage) bleed=\(bossBleedDamage) stacks=\(bossBurnMaxStacks) "
-            + "dotKill=\(bossDotKill?.rawValue ?? "-")]"
+            + "dotKill=\(bossDotKill?.rawValue ?? "-") credited=\(bossKills) dupes=\(bossDupes)] "
+            + "a4b[bleedingKills=\(bleedingKills) barrier[sang=\(barrierFromSanguinarian) siphon=\(barrierFromSiphon) asked=\(barrierRequested)] "
+            + "glass[deaths=\(glassBleedDeaths) eligible=\(glassEligible) bursts=\(glassBursts) capped=\(glassCapped) maxGen=\(glassMaxGeneration)]]"
     }
 }
 #endif

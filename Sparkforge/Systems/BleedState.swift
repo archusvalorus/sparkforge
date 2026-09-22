@@ -16,6 +16,12 @@
 //   • The tick damage is the latest application's — it tracks Spark's ATK as
 //     it changes, instead of freezing the strongest value ever seen.
 //   • Ticks run on game time only — unticked (paused, level-up) = frozen.
+//   • v2.1 A4b Glass Blood lineage (CL-28): every Bleed carries a
+//     GENERATION. A primary source (Bloodthirsty) is generation 0 — a fresh
+//     root. A Glass Blood fragment inflicts its own generation (parent + 1).
+//     A fresh Bleed takes the application's generation; a refresh keeps the
+//     LOWER one, so a fragment never turns a wound into a fresh root, while a
+//     genuine primary hit may re-root it at 0. It resets when the Bleed ends.
 
 import CoreGraphics
 import Foundation
@@ -29,18 +35,26 @@ struct BleedState {
     private(set) var untilTick: TimeInterval = 0
     /// Ticks landed by the most recent `tick` call — drives the tell's pulse.
     private(set) var ticksThisFrame = 0
+    /// Glass Blood lineage: 0 = a primary wound; n = n fragment hops from one.
+    private(set) var generation = 0
 
     var isBleeding: Bool { active.isActive }
 
     /// Inflict or refresh Bleed. Returns true when this started a new Bleed
     /// (false for a refresh or an invalid application).
     @discardableResult
-    mutating func inflict(tickDamage: CGFloat, duration: TimeInterval, interval: TimeInterval) -> Bool {
+    mutating func inflict(tickDamage: CGFloat, duration: TimeInterval, interval: TimeInterval,
+                          generation: Int = 0) -> Bool {
         guard tickDamage > 0, duration > 0, interval > 0 else { return false }
         let fresh = !active.isActive
         active.start(duration)                 // refresh RESETS the duration
         self.tickDamage = tickDamage           // never stacks — latest ATK wins
-        if fresh { untilTick = interval }      // a refresh never delays the next tick
+        if fresh {
+            untilTick = interval               // a refresh never delays the next tick
+            self.generation = max(0, generation)
+        } else {
+            self.generation = min(self.generation, max(0, generation))   // lower lineage wins
+        }
         return fresh
     }
 
@@ -74,6 +88,7 @@ struct BleedState {
         if !active.isActive {
             tickDamage = 0
             untilTick = 0
+            generation = 0
         }
         return dealt
     }

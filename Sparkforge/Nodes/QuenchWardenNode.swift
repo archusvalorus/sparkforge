@@ -72,6 +72,9 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
     /// strength: points/sec toward the boss when positive; away when negative
     var onFieldPulse: ((_ strength: CGFloat, _ duration: TimeInterval) -> Void)?
     var onDeath: ((_ position: CGPoint, _ xpReward: Int) -> Void)?
+    /// v2.1 A4b: fires once, synchronously, on the killing blow — before the
+    /// death plays out — with the damage it dealt to remaining HP.
+    var onLethalHit: ((Int) -> Void)?
 
     // MARK: - Phase Machine
 
@@ -573,7 +576,9 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        let healthBefore = health
+        let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        health -= dealt
 
         let flash = SKAction.sequence([
             SKAction.run { [weak self] in
@@ -592,6 +597,7 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
         if health <= 0 {
             health = 0
             die()
+            onLethalHit?(min(dealt, healthBefore))   // v2.1 A4b: credited on the killing blow
             return true
         }
         return false

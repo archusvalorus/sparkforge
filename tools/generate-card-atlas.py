@@ -36,7 +36,7 @@ FAM = {
 SYN = {
  'fire':  [(3,'Spreading Flame','Burns leap to nearby enemies'),(5,'Wildfire Heart','Burns spread farther and hit harder'),(7,'Inferno Crown','Every enemy in the arena is burning')],
  'shock': [(3,'Chain Current','Lightning chains to one more enemy'),(5,'Tesla Field','A charged aura damages nearby enemies'),(7,'Storm Engine','Every 3rd shot fires a chaining spread')],
- 'bleed': [(3,'Open Wounds','Bleeding enemies take more damage'),(5,'Exsanguinate','Low-HP enemies take double damage'),(7,'Red Harvest','Bleed kills restore HP')],
+ 'bleed': [(3,'Open Wounds','Bleeding enemies take 25% more damage'),(5,'Exsanguinate','Enemies below 25% HP take 2× damage'),(7,'Red Harvest','Killing a bleeding enemy restores 1 HP')],
  'guardT':[(3,'Ironhide','Gain DEF while enemies crowd you'),(5,'Thornwall','Enemies that touch you take damage back'),(7,'Unbroken Core','Your DEF fuels damage and steadies your core')],
  'voidT': [(3,'Undertow','Void pulls nearby enemies inward'),(5,'Event Horizon','Enemies caught in Void struggle to escape'),(7,'Singularity','Void collapses enemies into ruin')],
  'chill': [(3,'Frostbite','Chilled enemies move even slower'),(5,'Shatter','Frozen enemies burst when struck'),(7,'Absolute Zero','The arena slows; shatters come easy')],
@@ -88,7 +88,8 @@ def extract_cards():
     return cards
 
 # Q-S2: linked cards — owning one and maxing the other upgrades it, no extra pick.
-LINKED = {'shock_4': 'Chain Lightning (maxed → 35% / 2s)', 'shock_2': 'Overload (upgrades it at T4)'}
+LINKED = {'shock_4': 'Chain Lightning (maxed → 35% / 2s)', 'shock_2': 'Overload (upgrades it at T4)',
+          'v21_sanguinarian': "Siphon (Siphon's overheal → Blood Barrier)", 'bleed_4': 'Sanguinarian (overheal → Blood Barrier)'}
 
 def esc(s): return html.escape(s or '')
 

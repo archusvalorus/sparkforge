@@ -17,6 +17,9 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 cp "$ROOT/Sparkforge/Systems/BleedState.swift" \
+   "$ROOT/Sparkforge/Systems/KillContext.swift" \
+   "$ROOT/Sparkforge/Systems/BarrierTellState.swift" \
+   "$ROOT/Sparkforge/Systems/FireClock.swift" \
    "$ROOT/Sparkforge/Systems/StatusDoTs.swift" \
    "$ROOT/Sparkforge/Systems/BurnState.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
@@ -26,7 +29,9 @@ cp "$ROOT/Sparkforge/Systems/BleedState.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
    "$HERE/main.swift" "$BUILD/"
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
-       "$BUILD/BleedState.swift" "$BUILD/StatusDoTs.swift" "$BUILD/BurnState.swift" \
+       "$BUILD/BleedState.swift" "$BUILD/KillContext.swift" "$BUILD/FireClock.swift" \
+       "$BUILD/BarrierTellState.swift" \
+       "$BUILD/StatusDoTs.swift" "$BUILD/BurnState.swift" \
        "$BUILD/GameTimer.swift" "$BUILD/PlayerDamagePipeline.swift" \
        "$BUILD/PlayerStats.swift" "$BUILD/UpgradeManager.swift"
 "$BUILD/harness"

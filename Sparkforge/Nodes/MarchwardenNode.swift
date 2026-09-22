@@ -58,6 +58,9 @@ final class MarchwardenNode: SKNode, ArenaBossNode {
     var onCharge: (() -> Void)?
     var onStandardLanded: (() -> Void)?
     var onDeath: ((CGPoint, Int) -> Void)?
+    /// v2.1 A4b: fires once, synchronously, on the killing blow — before the
+    /// death plays out — with the damage it dealt to remaining HP.
+    var onLethalHit: ((Int) -> Void)?
 
     // MARK: - Phase machine
 
@@ -535,14 +538,16 @@ final class MarchwardenNode: SKNode, ArenaBossNode {
     func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
         guard !isDead else { return false }
         let scaled = vulnerabilityMultiplier == 1.0 ? amount : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        let healthBefore = health
+        let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
+        health -= dealt
         core.removeAction(forKey: "hit")
         core.run(SKAction.sequence([
             SKAction.run { [weak self] in self?.core.fillColor = SKColor(hex: 0x3F8F8A, alpha: 0.6) },
             SKAction.wait(forDuration: 0.06),
             SKAction.run { [weak self] in self?.core.fillColor = SKColor(hex: 0x1A1816) }
         ]), withKey: "hit")
-        if health <= 0 { health = 0; die(); return true }
+        if health <= 0 { health = 0; die(); onLethalHit?(min(dealt, healthBefore)); return true }
         return false
     }
 

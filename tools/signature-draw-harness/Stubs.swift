@@ -106,9 +106,26 @@ enum GameConfig {
         static let tickAttackFraction: CGFloat = 0.10
         static let tickInterval: TimeInterval = 0.5
         static let duration: TimeInterval = 3.0
+        static let gougeCritTotals: [CGFloat] = [0.10, 0.20]
+        static let hemorrhageCritBonus: CGFloat = 1.0
+        static let frenzyAttackSpeed: CGFloat = 0.15
+        static let frenzyDuration: TimeInterval = 4.0
+        static let berserkMaxAttackSpeed: CGFloat = 0.50
+        static let bloodlustPerKill: CGFloat = 0.001
+        static let bloodlustCap: CGFloat = 0.30
+        static let siphonHealTotals: [Int] = [1, 2, 4, 5]
+        static let sanguinarianFraction: CGFloat = 0.20
+        static let sanguinarianMinGrant: Int = 1
+        static let openWoundsBonus: CGFloat = 0.25
+        static let exsanguinateThreshold: CGFloat = 0.25
+        static let exsanguinateMultiplier: CGFloat = 2.0
+        static let glassBloodMaxGeneration: Int = 2
     }
     enum BossClass {
         static let dotScale: CGFloat = 0.5
+    }
+    enum DamagePipeline {
+        static let barrierCapFraction: CGFloat = 0.5
     }
     enum Erasure {
         static let unstableTriggerCooldown: TimeInterval = 2.0

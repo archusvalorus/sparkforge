@@ -47,11 +47,16 @@ struct StatusDoTs {
     /// Advance by `dt` of game time.
     /// - Parameters:
     ///   - scale: boss-class DoT scale (1 for normal enemies).
-    ///   - bleedMultiplier: situational Bleed scaling (legacy Glass Blood /
-    ///     Red Smile until their A4 rework); 1 = none.
+    ///   - bleedMultiplier: situational Bleed scaling (legacy Red Smile until
+    ///     its A4c rework); 1 = none.
+    ///   - openWounds: v2.1 A4b (CL-25) — while the target is bleeding (as the
+    ///     step begins), BOTH channels deal this much more, applied before any
+    ///     rounding and never boss-scaled. 0 = none.
     mutating func tick(_ dt: TimeInterval, scale: CGFloat, bleedMultiplier: CGFloat,
+                       openWounds: CGFloat = 0,
                        burnDecayInterval: TimeInterval, bleedInterval: TimeInterval) -> Payout {
         var out = Payout()
+        let wounds: CGFloat = bleed.isBleeding ? 1 + max(0, openWounds) : 1
         if burn.stacks > 0 {
             // CL-17 scales Kindle's Burn only. A flat source on the burn channel
             // (the Shock tesla field) is not Burn and keeps its full DPS; the
@@ -59,7 +64,7 @@ struct StatusDoTs {
             // before the tick — the frame Burn expires on still burns.
             let rate = max(burn.kindleRate * scale, burn.flatRate)
             _ = burn.tick(dt, decayInterval: burnDecayInterval)
-            burnCarry += rate * CGFloat(dt)
+            burnCarry += rate * CGFloat(dt) * wounds
             if burnCarry >= 1 {
                 out.burn = Int(burnCarry)
                 burnCarry -= CGFloat(out.burn)
@@ -69,7 +74,7 @@ struct StatusDoTs {
         let bled = bleed.tick(dt, interval: bleedInterval)
         out.bleedTicks = bleed.ticksThisFrame
         if bled > 0 {
-            bleedCarry += bled * bleedMultiplier * scale
+            bleedCarry += bled * bleedMultiplier * scale * wounds
             if bleedCarry >= 1 {
                 out.bleed = Int(bleedCarry)
                 bleedCarry -= CGFloat(out.bleed)
