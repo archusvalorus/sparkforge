@@ -52,6 +52,34 @@ struct CombatLedger {
         }
     }
 
+    // v2.1 A4a: Bleed (applications that started a fresh Bleed, ticks landed,
+    // kills by channel) and DoTs on the arena boss.
+    var bleedsStarted = 0
+    var bleedTicks = 0
+    private(set) var dotKills: [StatusDoTs.Channel: Int] = [:]
+    private(set) var bossBurnDamage = 0
+    private(set) var bossBleedDamage = 0
+    private(set) var bossBurnMaxStacks = 0
+    private(set) var bossDotKill: StatusDoTs.Channel?
+    mutating func recordDotKill(_ channel: StatusDoTs.Channel) {
+        dotKills[channel, default: 0] += 1
+    }
+    mutating func recordBossDoT(_ channel: StatusDoTs.Channel, damage: Int, stacks: Int) {
+        switch channel {
+        case .burn:
+            if bossBurnDamage == 0 { NSLog("[A4] boss took its first Burn tick (%d, %d stacks)", damage, stacks) }
+            bossBurnDamage += damage
+        case .bleed:
+            if bossBleedDamage == 0 { NSLog("[A4] boss took its first Bleed tick (%d)", damage) }
+            bossBleedDamage += damage
+        }
+        if stacks > bossBurnMaxStacks { bossBurnMaxStacks = stacks }
+    }
+    mutating func recordBossDotKill(_ channel: StatusDoTs.Channel) {
+        bossDotKill = channel
+        NSLog("[A4] boss killed by %@  %@", channel.rawValue, summary)
+    }
+
     mutating func recordKill(_ source: KillSource) {
         kills[source, default: 0] += 1
     }
@@ -78,7 +106,11 @@ struct CombatLedger {
             + "dupes=\(duplicateCredits) kills[\(bySource)] "
             + "burn[stacks+=\(burnStacksAdded) max=\(burnMaxStacks)] "
             + "chill[snowmen=\(snowmen) spikes=\(spikes)] "
-            + "shock[chains=\(chains) longest=\(longestChain) stuns=\(overloadStuns) coils=\(coilShocks)]"
+            + "shock[chains=\(chains) longest=\(longestChain) stuns=\(overloadStuns) coils=\(coilShocks)] "
+            + "bleed[started=\(bleedsStarted) ticks=\(bleedTicks) "
+            + "dotKills=burn:\(dotKills[.burn] ?? 0)/bleed:\(dotKills[.bleed] ?? 0)] "
+            + "boss[burn=\(bossBurnDamage) bleed=\(bossBleedDamage) stacks=\(bossBurnMaxStacks) "
+            + "dotKill=\(bossDotKill?.rawValue ?? "-")]"
     }
 }
 #endif

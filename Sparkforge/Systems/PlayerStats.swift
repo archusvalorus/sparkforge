@@ -356,12 +356,18 @@ final class PlayerStats {
     /// Slow threshold for shatter eligibility
     var shatterSlowThreshold: CGFloat = 0.4
     
-    /// Whether crits apply bleed
-    var critAppliesBleed: Bool = false
-    /// Bleed DPS from crits (base: 0)
-    var bleedDPS: CGFloat = 0.0
-    /// Bleed duration
-    var bleedDuration: TimeInterval = 3.0
+    /// v2.1 A4a: Bloodthirsty (the Bleed signature, CL-1 Option B) — chance
+    /// per PRIMARY hit to inflict the ticking Bleed. 0 = no Bleed source.
+    /// (Replaces Needlepoint's crit-applies-bleed, retired with the card.)
+    var bleedApplyChance: CGFloat = 0.0
+    /// Damage each Bleed tick deals: 10% of effective ATK (1 at base).
+    var bleedTickDamage: CGFloat { effectiveAttack * GameConfig.Bleed.tickAttackFraction }
+
+    /// Does this hit inflict Bleed? `roll` is uniform in 0..<1. Only primary
+    /// hits qualify — shards, echoes, summons and capstones never do.
+    func bloodthirstyApplies(isPrimaryHit: Bool, roll: CGFloat) -> Bool {
+        bleedApplyChance > 0 && isPrimaryHit && roll < bleedApplyChance
+    }
 
     // MARK: - v1.8 Unit 5b: reworked synergy tree fields
     // Starting values live in UpgradeManager.applySynergy; the balance pass
@@ -1166,9 +1172,7 @@ final class PlayerStats {
         slowedDamageBonus = 0.0
         shatterChance = 0.0
         shatterSlowThreshold = 0.4
-        critAppliesBleed = false
-        bleedDPS = 0.0
-        bleedDuration = 3.0
+        bleedApplyChance = 0.0
         // v1.8 Unit 5b reworked-tree fields
         bleedingEnemyDamageTaken = 0.0
         bleedKillHeal = 0

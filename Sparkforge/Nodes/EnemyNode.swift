@@ -72,14 +72,27 @@ class EnemyNode: SKNode {
     
     private(set) var currentSlow: CGFloat = 0.0
     private var slowTimer: TimeInterval = 0
-    /// v2.1 A1: Burn — Crucible's per-enemy stacks + dormant decay (CL-16).
-    private(set) var burn = BurnState()
+    /// v2.1 A4a: Burn (A1: Crucible stacks + CL-16 dormant decay) and the
+    /// ticking Bleed (CL-1) as separate channels — a DoT death knows which.
+    private(set) var dots = StatusDoTs()
+    var burn: BurnState { dots.burn }
     /// Lazily built row of ember pips — only enemies that reach 2+ stacks pay for it.
     private var burnPips: [SKShapeNode] = []
     private var drawnBurnStacks = 0
-    private var drawnBurnDormant = false
-    private(set) var bleedDPS: CGFloat = 0.0
-    private var bleedTimer: TimeInterval = 0
+    private var drawnBurnHot = false
+    private var drawnPipsLive = false
+    /// v2.1 A4a placeholder tell (A9 art): claw marks while bleeding, pulsing per tick.
+    private var bleedMark: SKNode?
+    /// True once a Bleed TICK dealt the killing blow (Glass Blood's strict rule, A4).
+    private(set) var killedByBleed = false
+    /// v2.1 A4a (Brandon, Sep 21): was this enemy ALREADY bleeding when the
+    /// killing damage began? The one eligibility rule for every "kill a
+    /// bleeding enemy" reward (Red Harvest, Open Vein; Frenzy, Bloodlust in
+    /// A4b) — a wound established first, then capitalised on. A hit that
+    /// kills never counts its own Bleed; the corpse's look decides nothing.
+    private(set) var diedBleeding = false
+    /// Bleed ticks that landed during the last `updateStatusEffects` (DEBUG proof).
+    var bleedTicksThisFrame: Int { dots.bleed.ticksThisFrame }
     /// v1.8 (Unit 14): situational bleed scaling set by GameScene each frame —
     /// Glass Blood (vs chilled/slowed) and Red Smile (player low HP). 1.0 = none.
     var bleedDamageMultiplier: CGFloat = 1.0
@@ -99,7 +112,6 @@ class EnemyNode: SKNode {
     private var freezeTimer: TimeInterval = 0
     var isFrozen: Bool { freezeTimer > 0 }
     private var stunTimer: TimeInterval = 0
-    private var dotAccumulator: CGFloat = 0.0
     /// v2.1 A0: timed vulnerability windows on GAME time. These were SKAction
     /// waits, which kept running under the pause menu and the level-up screen.
     /// They still share `vulnerabilityMultiplier` (last writer wins) as before.
@@ -119,8 +131,11 @@ class EnemyNode: SKNode {
     var isBurning: Bool { burn.isBurning }
     var burnStacks: Int { burn.stacks }
     var isSlowed: Bool { currentSlow > 0 && slowTimer > 0 }
-    var isBleeding: Bool { bleedDPS > 0 && bleedTimer > 0 }
+    /// Live status (tells, Open Wounds, Bloodhound). Kill rewards read `diedBleeding`.
+    var isBleeding: Bool { dots.bleed.isBleeding }
     var isStunned: Bool { stunTimer > 0 }
+    /// v2.1 A4a (CL-17): boss-class takes Burn and Bleed at `BossClass.dotScale`.
+    private var dotScale: CGFloat { isMiniBoss ? GameConfig.BossClass.dotScale : 1.0 }
     
     var healthPercent: CGFloat {
         guard maxHealth > 0 else { return 0 }
@@ -386,8 +401,8 @@ class EnemyNode: SKNode {
     @discardableResult
     func applyBurn(_ dps: CGFloat, duration: TimeInterval,
                    source: BurnState.Source = .other, stackCap: Int = 1) -> Bool {
-        let added = burn.ignite(dps: dps, duration: duration, source: source, stackCap: stackCap,
-                                stackInterval: GameConfig.Fire.crucibleStackInterval)
+        let added = dots.burn.ignite(dps: dps, duration: duration, source: source, stackCap: stackCap,
+                                     stackInterval: GameConfig.Fire.crucibleStackInterval)
         refreshBurnVisual()
         return added
     }
@@ -395,15 +410,21 @@ class EnemyNode: SKNode {
     /// v2.1 A1 placeholder tell: the rim burns hotter per stack, and from two
     /// stacks up a row of ember pips counts them. Dormant stacks (Burn ended,
     /// fading one by one) keep their pips, dimmed, with the rim gone cold.
+    /// v2.1 A4a (Brandon, Sep 21): brightness = ACTIVE damage. The pips (and
+    /// the per-stack heat) light only while Kindle's stacked Burn is dealing
+    /// damage; stacks the tesla field merely preserves stay dim, under a rim
+    /// that glows for the tesla's own flat burn.
     private func refreshBurnVisual() {
         let stacks = burn.stacks
-        let dormant = burn.isDormant
+        let hot = burn.isBurning
+        let live = burn.kindleRate > 0
         drawnBurnStacks = stacks
-        drawnBurnDormant = dormant
+        drawnBurnHot = hot
+        drawnPipsLive = live
 
-        if burn.isBurning {
+        if hot {
             rimGlowNode.strokeColor = SKColor(hex: 0xFF6633, alpha: 0.9)
-            rimGlowNode.glowWidth = 6 + CGFloat(max(0, stacks - 1)) * 1.5
+            rimGlowNode.glowWidth = 6 + (live ? CGFloat(max(0, stacks - 1)) * 1.5 : 0)
         } else {
             rimGlowNode.strokeColor = SKColor(hex: 0x661111, alpha: 0.7)
             rimGlowNode.glowWidth = 4
@@ -424,14 +445,60 @@ class EnemyNode: SKNode {
         for (i, pip) in burnPips.enumerated() {
             pip.isHidden = i >= shown
             pip.position = CGPoint(x: startX + CGFloat(i) * spacing, y: r + 6)
-            pip.fillColor = SKColor(hex: dormant ? 0x8A4A2A : 0xFFB84D, alpha: dormant ? 0.55 : 1.0)
-            pip.glowWidth = dormant ? 0 : 2
+            pip.fillColor = SKColor(hex: live ? 0xFFB84D : 0x8A4A2A, alpha: live ? 1.0 : 0.55)
+            pip.glowWidth = live ? 2 : 0
         }
     }
     
-    func applyBleed(_ dps: CGFloat, duration: TimeInterval) {
-        bleedDPS = max(bleedDPS, dps)
-        bleedTimer = max(bleedTimer, duration)
+    /// v2.1 A4a: inflict (or refresh) the ticking Bleed — CL-1: `tickDamage`
+    /// every 0.5s for 3s; a refresh restarts the duration without stacking or
+    /// delaying the next tick. Returns true when this started a new Bleed.
+    @discardableResult
+    func applyBleed(tickDamage: CGFloat) -> Bool {
+        guard !isDying else { return false }
+        let fresh = dots.bleed.inflict(tickDamage: tickDamage, duration: GameConfig.Bleed.duration,
+                                       interval: GameConfig.Bleed.tickInterval)
+        refreshBleedMark()
+        return fresh
+    }
+
+    /// Placeholder tell (A9 art): three red claw marks across the body while
+    /// bleeding. Built lazily — only enemies that ever bleed pay for it.
+    private func refreshBleedMark() {
+        let bleeding = dots.bleed.isBleeding
+        if bleeding, bleedMark == nil {
+            let r = GameConfig.Enemy.visualRadius
+            let mark = SKNode()
+            // Above every subclass's body art (chassis layers reach z 7–9).
+            mark.zPosition = 9.5
+            for k in -1...1 {
+                let slash = SKShapeNode()
+                let path = CGMutablePath()
+                let dx = CGFloat(k) * r * 0.32
+                path.move(to: CGPoint(x: dx - r * 0.22, y: r * 0.5))
+                path.addLine(to: CGPoint(x: dx + r * 0.22, y: -r * 0.45))
+                slash.path = path
+                slash.strokeColor = SKColor(hex: 0xE0203A)
+                slash.lineWidth = 1.6
+                slash.lineCap = .round
+                mark.addChild(slash)
+            }
+            addChild(mark)
+            bleedMark = mark
+        }
+        bleedMark?.isHidden = !bleeding
+    }
+
+    /// A Bleed tick landed: the claw marks flare.
+    private func pulseBleedMark() {
+        guard let mark = bleedMark else { return }
+        mark.removeAction(forKey: "bleedTick")
+        mark.setScale(1.3)
+        mark.alpha = 1
+        mark.run(SKAction.group([
+            SKAction.scale(to: 1.0, duration: 0.18),
+            SKAction.fadeAlpha(to: 0.75, duration: 0.18)
+        ]), withKey: "bleedTick")
     }
     
     func applyStun(_ duration: TimeInterval) {
@@ -571,9 +638,10 @@ class EnemyNode: SKNode {
     /// v1.9: seconds this enemy has been alive in the arena (Apex "Marked" uses it).
     private(set) var timeAlive: TimeInterval = 0
 
-    func updateStatusEffects(deltaTime: TimeInterval) -> Bool {
+    /// Ticks every status timer. Returns the DoT channel that killed this
+    /// enemy this frame, or nil if it survived (or died to nothing here).
+    func updateStatusEffects(deltaTime: TimeInterval) -> StatusDoTs.Channel? {
         timeAlive += deltaTime
-        var totalDOT: CGFloat = 0
 
         // v1.6: stun timer ticks here so ALL enemy types respect it
         if stunTimer > 0 {
@@ -600,19 +668,19 @@ class EnemyNode: SKNode {
         case .none: break
         }
 
-        if burn.stacks > 0 {
-            totalDOT += burn.tick(deltaTime, decayInterval: GameConfig.Fire.burnStackDecayInterval)
-            if burn.stacks != drawnBurnStacks || burn.isDormant != drawnBurnDormant {
-                refreshBurnVisual()
-            }
+        // v2.1 A4a: Burn and Bleed pay out as separate hits (Burn first, the
+        // legacy order), each at the boss-class scale for a mini-boss (CL-17).
+        let wasBleeding = dots.bleed.isBleeding
+        let pay = dots.tick(deltaTime, scale: dotScale, bleedMultiplier: bleedDamageMultiplier,
+                            burnDecayInterval: GameConfig.Fire.burnStackDecayInterval,
+                            bleedInterval: GameConfig.Bleed.tickInterval)
+        if burn.stacks != drawnBurnStacks || burn.isBurning != drawnBurnHot
+            || (burn.kindleRate > 0) != drawnPipsLive {
+            refreshBurnVisual()
         }
-        
-        if bleedTimer > 0 {
-            bleedTimer -= deltaTime
-            totalDOT += bleedDPS * bleedDamageMultiplier
-            if bleedTimer <= 0 { bleedDPS = 0 }
-        }
-        
+        if pay.bleedTicks > 0 { pulseBleedMark() }
+        if wasBleeding != dots.bleed.isBleeding { refreshBleedMark() }
+
         if slowTimer > 0 {
             slowTimer -= deltaTime
             if slowTimer <= 0 {
@@ -623,16 +691,18 @@ class EnemyNode: SKNode {
             }
         }
         
-        if totalDOT > 0 {
-            dotAccumulator += totalDOT * CGFloat(deltaTime)
-            if dotAccumulator >= 1.0 {
-                let dmg = Int(dotAccumulator)
-                dotAccumulator -= CGFloat(dmg)
-                return takeDamage(dmg)
-            }
+        // A DoT death was bleeding if it was when this frame began — the final
+        // Bleed tick can land on the instant the Bleed ends.
+        if pay.burn > 0, takeDamage(pay.burn) {
+            diedBleeding = wasBleeding
+            return .burn
         }
-        
-        return false
+        if pay.bleed > 0, takeDamage(pay.bleed) {
+            killedByBleed = true
+            diedBleeding = true
+            return .bleed
+        }
+        return nil
     }
     
     // MARK: - Damage
@@ -707,6 +777,9 @@ class EnemyNode: SKNode {
     
     private func onDeath() {
         isDying = true
+        // Status BEFORE the killing damage — primary-hit riders like
+        // Bloodthirsty land only on survivors, so a killing hit never counts.
+        diedBleeding = dots.bleed.isBleeding
         physicsBody?.categoryBitMask = 0
 
         // Eyes flare out, body shrinks

@@ -1046,6 +1046,13 @@ enum GameConfig {
     enum BossClass {
         static let debuffScale: CGFloat = 0.5   // stat-reduction effects at 50%
         static let damageScale: CGFloat = 0.5   // capstone ability damage at 50%
+        /// v2.1 A4a (CL-17, Brandon Sep 21): Burn and Bleed damage on
+        /// boss-class — arena bosses AND mini-bosses — at 50%. Applied to the
+        /// fractional DoT before rounding (`StatusDoTs`), never via
+        /// `scaledDamage`, which can't halve a 1-point tick. Durations and
+        /// Crucible stacks are unscaled. (CL-18: DoTs also ignore the Boss Mode
+        /// DEF dial; the HP dial still applies.)
+        static let dotScale: CGFloat = 0.5
         /// Boss-class (miniboss + boss) can be EXECUTED by a capstone finisher
         /// (e.g. Apex's pounce) only at/below this HP fraction — a rare "holy
         /// shit" finish, never a shortcut. Normal enemies use each capstone's
@@ -1261,6 +1268,20 @@ enum GameConfig {
         /// T3: an elite melted by damage takes this much of its max HP on top
         /// of the hit that melted it.
         static let snowmanEliteMeltFraction: CGFloat = 0.20
+    }
+
+    // MARK: - v2.1 Abilities A4: Bleed rework
+    /// Approved values: closure table CL-1 (Option B, Sep 15) — the ticking
+    /// Bleed Bloodthirsty inflicts. Boss-class scaling is `BossClass.dotScale`.
+    enum Bleed {
+        /// Bloodthirsty: chance per PRIMARY hit to inflict Bleed.
+        static let applyChance: CGFloat = 0.50
+        /// Each tick deals this fraction of effective ATK (10 ATK → 1 per tick).
+        static let tickAttackFraction: CGFloat = 0.10
+        /// One tick this often…
+        static let tickInterval: TimeInterval = 0.5
+        /// …for this long: six ticks, 60% ATK per application.
+        static let duration: TimeInterval = 3.0
     }
 
     // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)

@@ -30,6 +30,11 @@ final class ProjectileNode: SKNode {
     var seedGeneration: Int = 0
     /// v2.1 A0: what a kill by this projectile credits as. Set at spawn.
     var killSource: KillSource = .primary
+    /// v2.1 A4a (Brandon, Sep 21): does this hit count as a PRIMARY hit for
+    /// primary-hit riders (Bloodthirsty)? Polar Vortex's icicle replaces
+    /// Spark's primary shot, so it inherits the eligibility — its kill still
+    /// credits as `.capstone` — while the shards it shatters into do not.
+    var isPrimaryHit: Bool { killSource == .primary || isIcicle }
     /// v2.1 A2 (CL-3): whether this projectile applies Frost Touch's slow.
     /// True for everything EXCEPT Iceburst shards and icicle fragments, which
     /// earn it at Frost Touch T3 — opted in specifically, not by a blanket flag.

@@ -180,6 +180,29 @@ do {
           paused.stacks == before.0 && paused.active.remaining == before.1 && paused.isBurning)
 }
 
+// B5e–g — v2.1 A4a (Brandon, Sep 21): the tesla field keeps its OWN timer.
+// Re-applied every frame on Kindle's shared timer, it kept a stacked Kindle
+// Burn alive for as long as Spark stood close — Burn never ended (CL-16).
+do {
+    var b = BurnState()
+    while b.stacks < cap { b.hit(); b.run(0.5) }
+    b.hit()                                    // the last Kindle hit: its Burn ends 2s from here
+    var total: CGFloat = 0
+    for _ in 0..<Int((6.0 / frame).rounded()) {     // tesla every frame for 6s, no Kindle
+        // exactly as GameScene applies it: flat 0.3 DPS for 0.5s
+        b.ignite(dps: 0.3, duration: 0.5, source: .other, stackCap: cap, stackInterval: gate)
+        total += b.tick(frame, decayInterval: decay) * CGFloat(frame)
+    }
+    check("B5e a flat source re-applied every frame never prolongs Kindle's stacked Burn",
+          near(b.dps, 0.3) && b.stacks == cap && b.isBurning, "dps=\(b.dps) stacks=\(b.stacks)")
+    let expected = CGFloat(dur) * kindle * CGFloat(cap) + CGFloat(6.0 - dur) * 0.3
+    check("B5f …it burned 2s of stacked Kindle, then only the flat DPS",
+          abs(total - expected) < 1e-6, "total=\(total) expected=\(expected)")
+    b.run(0.5)
+    check("B5g …and once the flat source stops, Burn ends and the stacks go dormant",
+          !b.isBurning && b.isDormant && b.stacks == cap)
+}
+
 // C — the reworked cards, through the real pool.
 func card(_ um: UpgradeManager, _ id: String) -> UpgradeManager.UpgradeCard {
     guard let c = um.allCards.first(where: { $0.id == id }) else { fatalError("missing card \(id)") }

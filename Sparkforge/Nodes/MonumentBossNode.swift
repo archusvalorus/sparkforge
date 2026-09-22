@@ -121,6 +121,9 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     private var hpBarFill: SKShapeNode?
     private var hpBarBG: SKShapeNode?
     private var hpBarWidth: CGFloat = 0
+    /// v2.1 A4a: the Burn/Bleed status row sits just right of the bar (below the body).
+    private(set) var statusTellAnchor: CGPoint = .zero
+    var statusTellScale: CGFloat { 1.8 }
 
     /// Monuments show their attrition. The mystique of a huge unknowable thing is
     /// good, but players are being taught compounding builds — they've earned the
@@ -132,6 +135,7 @@ class MonumentBossNode: SKNode, ArenaBossNode {
         let w = r * 1.7, h: CGFloat = 11
         hpBarWidth = w
         let y = -(r + 34)
+        statusTellAnchor = CGPoint(x: w / 2 + 12, y: y)
 
         let bg = SKShapeNode(rectOf: CGSize(width: w, height: h), cornerRadius: 3)
         bg.fillColor = SKColor(hex: 0x140F26, alpha: 0.9)
@@ -182,12 +186,12 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     }
 
     @discardableResult
-    func takeDamage(_ amount: Int) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
         guard !isDead else { return true }
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount)
+        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
 
         refreshHealthBar()
 

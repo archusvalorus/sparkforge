@@ -77,7 +77,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Boss Mechanics
 
     // v1.6: any arena's boss lives here (Slag Titan or Quench Warden)
-    private var boss: (any ArenaBossNode)? = nil
+    private var boss: (any ArenaBossNode)? = nil {
+        didSet { if boss !== oldValue { resetBossStatus() } }
+    }
+    /// v2.1 A4a: the arena boss's Burn and Bleed. Scene-owned — there is only
+    /// ever one boss — and wiped whenever a different boss (or none) takes the
+    /// slot: a spawn, a gauntlet hand-off, a death, a restart.
+    private var bossStatus = StatusDoTs()
+    private var bossStatusTell: BossStatusTellNode?
     private var bossDefeatedThisRun: Bool = false
     /// v2.0: the real arena boss is per-run and kill-driven — this guards it to
     /// one spawn per run so climbing past the kill threshold can't re-trigger it.
@@ -4756,6 +4763,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.4: Update boss AI
         boss?.update(deltaTime: dt, playerPosition: player.position)
+        // v2.1 A4a: …then its Burn and Bleed — before the gauntlet hand-off
+        // below can put a fresh boss in the slot.
+        updateBossStatus(dt)
 
         // v2.0 (B3 fix): a stage handoff that came due behind a level-up or
         // pause screen resumes here — update() only runs while .playing, so
@@ -4931,10 +4941,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             enemy.bleedDamageMultiplier = bleedMult
 
-            let diedDOT = enemy.updateStatusEffects(deltaTime: dt)
-            if diedDOT {
+            // v2.1 A4a: a DoT death names its channel (Burn or Bleed).
+            if let channel = enemy.updateStatusEffects(deltaTime: dt) {
                 diedFromDOT.append(enemy)
+                #if DEBUG
+                combatLedger.recordDotKill(channel)
+                #endif
             }
+            #if DEBUG
+            combatLedger.bleedTicks += enemy.bleedTicksThisFrame
+            #endif
 
             if playerStats.burnSpreads && enemy.isBurning {
                 spreadBurn(from: enemy)
@@ -10163,12 +10179,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         // v1.8 Red Harvest (Bleed 7) — killing a BLEEDING enemy restores HP
-        if playerStats.bleedKillHeal > 0, let enemy = enemy, enemy.isBleeding {
+        if playerStats.bleedKillHeal > 0, let enemy = enemy, enemy.diedBleeding {   // A4a: bleeding BEFORE the kill
             playerStats.heal(playerStats.bleedKillHeal)
         }
 
         // v1.6: Open Vein — bleeding enemies burst on death
-        if playerStats.openVeinDamage > 0, let enemy = enemy, enemy.isBleeding {
+        if playerStats.openVeinDamage > 0, let enemy = enemy, enemy.diedBleeding {
             damageEnemiesInRadius(playerStats.openVeinRadius, around: position,
                                   damage: playerStats.openVeinDamage)
             showRingPulse(at: position, radius: playerStats.openVeinRadius, colorHex: 0xCC2233)
@@ -10676,9 +10692,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.slowAmount > 0, projectileNode.appliesFrostTouch {
             enemyNode.applySlow(playerStats.effectiveSlow(playerStats.slowAmount), duration: playerStats.slowDuration)
         }
-        if playerStats.critAppliesBleed && projectileNode.isCrit {
-            enemyNode.applyBleed(playerStats.bleedDPS, duration: playerStats.bleedDuration)
-        }
         if playerStats.knockbackForce > 0 {
             enemyNode.applyKnockback(from: player.position, force: playerStats.knockbackForce)
         }
@@ -10751,6 +10764,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode, source: projectileNode.killSource,
                           iceburstGeneration: projectileNode.iceburstGeneration)
         }
+        // v2.1 A4a: Bloodthirsty (CL-1) — a primary hit may inflict the ticking
+        // Bleed, on a SURVIVOR only (Brandon, Sep 21): a killing hit never
+        // counts its own Bleed toward "killed a bleeding enemy" rewards.
+        if !killed, playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
+                                                    roll: CGFloat.random(in: 0..<1)) {
+            if enemyNode.applyBleed(tickDamage: playerStats.bleedTickDamage) { noteBleedStarted() }
+        }
         // v2.1 A2 Whiteout: any player projectile that lands may make a snowman.
         if !killed, playerStats.whiteoutTier >= 1,
            CGFloat.random(in: 0...1) < GameConfig.Chill.snowmanChance,
@@ -10779,8 +10799,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - v1.6: Projectile ↔ Boss
 
-    /// Boss damage pipeline. Crits, execution effects, and bloodlust apply;
-    /// status effects (burn/slow/bleed/knockback) do not — the boss resists them.
+    /// Boss damage pipeline. Crits, execution effects, and bloodlust apply.
+    /// v2.1 A4a: bosses now take Burn and Bleed (at the boss-class scale,
+    /// ticked in `updateBossStatus`); slows, stuns and knockback they still resist.
     private func handleProjectileHitBoss(projectileBody: SKPhysicsBody) {
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let bossNode = boss, !bossNode.isDead else { return }
@@ -10812,6 +10833,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                    healthPercent: bossNode.healthPercent,
                                    bossClass: true, impaired: false, relentlessTarget: nil)
 
+        // v2.1 A4a: bosses take DoTs (Brandon, Sep 17) — the same Kindle hit
+        // (Crucible stacks included) and Bloodthirsty roll an enemy gets. Kindle
+        // ignites BEFORE the damage, as on enemies; if a monument dies inside
+        // takeDamage the slot (and this status) is cleared on the spot anyway.
+        if playerStats.burnDPS > 0 {
+            bossStatus.burn.ignite(dps: playerStats.effectiveBurnDPS, duration: playerStats.burnDuration,
+                                   source: .kindleHit, stackCap: playerStats.burnStackCap,
+                                   stackInterval: GameConfig.Fire.crucibleStackInterval)
+        }
+
         let consumed = projectileNode.onHitEnemy()
         if consumed {
             if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
@@ -10822,7 +10853,87 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // Death flow (XP shower, bossKills, shake) runs via the boss's onDeath callback
         bossNode.takeDamage(damage)
+        // Bloodthirsty lands on a boss that SURVIVED the hit — never on a dead
+        // one (a monument's slot is already clear by now).
+        if !bossNode.isDead, playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
+                                                             roll: CGFloat.random(in: 0..<1)) {
+            if bossStatus.bleed.inflict(tickDamage: playerStats.bleedTickDamage,
+                                        duration: GameConfig.Bleed.duration,
+                                        interval: GameConfig.Bleed.tickInterval) { noteBleedStarted() }
+        }
         erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too
+    }
+
+    // MARK: - v2.1 A4a: Boss status (Burn + Bleed)
+
+    /// DEBUG proof: a hit started a fresh Bleed (a refresh doesn't count).
+    private func noteBleedStarted() {
+        #if DEBUG
+        combatLedger.bleedsStarted += 1
+        #endif
+    }
+
+    /// A different boss (or none) took the slot: its status starts clean, and
+    /// the placeholder tell row (A9 art) is pinned beside the new boss's HP bar.
+    private func resetBossStatus() {
+        bossStatus = StatusDoTs()
+        retireBossStatusTell()
+        guard let b = boss else { return }
+        let tell = BossStatusTellNode()
+        tell.position = b.statusTellAnchor
+        tell.setScale(b.statusTellScale)
+        b.addChild(tell)
+        bossStatusTell = tell
+    }
+
+    /// The status row fades out with the HP bar (presentation only).
+    private func retireBossStatusTell() {
+        guard let tell = bossStatusTell else { return }
+        bossStatusTell = nil
+        tell.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.2), SKAction.removeFromParent()]))
+    }
+
+    /// Bosses take DoTs: Burn and Bleed tick here on game time (update() only
+    /// runs while .playing), at the boss-class scale (CL-17), and land as two
+    /// separate hits that skip the Boss Mode DEF dial (CL-18).
+    private func updateBossStatus(_ dt: TimeInterval) {
+        guard let b = boss else { return }
+        // A dying boss's row leaves with its HP bar instead of freezing on the corpse.
+        guard !b.isDead else { retireBossStatusTell(); return }
+        // Red Smile's legacy low-HP Bleed bonus (1.0 unless owned) — reworked in A4.
+        let bleedMultiplier = playerStats.hpPercent < playerStats.bleedLowHpThreshold
+            ? playerStats.bleedLowHpBonus : 1.0
+        var status = bossStatus
+        let pay = status.tick(dt, scale: GameConfig.BossClass.dotScale, bleedMultiplier: bleedMultiplier,
+                              burnDecayInterval: GameConfig.Fire.burnStackDecayInterval,
+                              bleedInterval: GameConfig.Bleed.tickInterval)
+        bossStatus = status
+        bossStatusTell?.refresh(burnStacks: status.burn.stacks, burning: status.burn.kindleRate > 0,
+                                bleeding: status.bleed.isBleeding)
+        if pay.bleedTicks > 0 { bossStatusTell?.pulseBleed() }
+        #if DEBUG
+        combatLedger.bleedTicks += pay.bleedTicks
+        #endif
+
+        // Damage last — a monument dies inside takeDamage and clears the slot.
+        if pay.burn > 0 {
+            #if DEBUG
+            combatLedger.recordBossDoT(.burn, damage: pay.burn, stacks: status.burn.stacks)
+            #endif
+            b.takeDamage(pay.burn, ignoresChallengeDEF: true)
+            #if DEBUG
+            if b.isDead { combatLedger.recordBossDotKill(.burn) }
+            #endif
+        }
+        if pay.bleed > 0, !b.isDead {
+            #if DEBUG
+            combatLedger.recordBossDoT(.bleed, damage: pay.bleed, stacks: status.burn.stacks)
+            #endif
+            b.takeDamage(pay.bleed, ignoresChallengeDEF: true)
+            #if DEBUG
+            if b.isDead { combatLedger.recordBossDotKill(.bleed) }
+            #endif
+        }
     }
 
     // MARK: - Chain Lightning

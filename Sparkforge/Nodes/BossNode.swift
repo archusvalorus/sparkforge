@@ -466,14 +466,17 @@ final class BossNode: SKNode {
         health = maxHealth
     }
 
+    /// v2.1 A4a: status row pinned just right of the HP bar.
+    var statusTellAnchor: CGPoint { CGPoint(x: config.bodyRadius + 6, y: config.bodyRadius + 15) }
+
     @discardableResult
-    func takeDamage(_ amount: Int) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
         guard !isDead else { return false }
         // v1.9: vulnerability scales every incoming hit (1.0 = no change).
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount)
+        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
 
         // Hit flash
         let flash = SKAction.sequence([

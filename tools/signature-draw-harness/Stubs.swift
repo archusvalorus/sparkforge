@@ -101,6 +101,15 @@ enum GameConfig {
         static let crownDamageFraction: CGFloat = 1.50
         static let pulseDamageFraction: CGFloat = 0.40
     }
+    enum Bleed {
+        static let applyChance: CGFloat = 0.50
+        static let tickAttackFraction: CGFloat = 0.10
+        static let tickInterval: TimeInterval = 0.5
+        static let duration: TimeInterval = 3.0
+    }
+    enum BossClass {
+        static let dotScale: CGFloat = 0.5
+    }
     enum Erasure {
         static let unstableTriggerCooldown: TimeInterval = 2.0
         static let unstableTriggerCooldownT2: TimeInterval = 1.2

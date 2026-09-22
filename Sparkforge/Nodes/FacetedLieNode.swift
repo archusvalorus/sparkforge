@@ -597,7 +597,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
         if paneBeat == 0 && phaseTimer >= paneShiftTell {
             paneBeat = 1
             physicsBody?.categoryBitMask = 0  // untouchable while gone
-            run(SKAction.fadeAlpha(to: 0.0, duration: FacetedLieNode.paneShiftVanishTime))
+            run(SKAction.fadeAlpha(to: 0.0, duration: FacetedLieNode.paneShiftVanishTime), withKey: "paneFade")
         }
 
         // Beat 2: reappear on the marked pane and burst.
@@ -605,7 +605,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
             paneBeat = 2
             position = paneReentry
             physicsBody?.categoryBitMask = GameConfig.Physics.enemy
-            run(SKAction.fadeAlpha(to: 1.0, duration: 0.12))
+            run(SKAction.fadeAlpha(to: 1.0, duration: 0.12), withKey: "paneFade")
             emitReentryBurst()
 
             let reach = FacetedLieNode.paneBurstRadius + GameConfig.Player.collisionRadius
@@ -691,13 +691,16 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
         health = maxHealth
     }
 
+    /// v2.1 A4a: status row pinned just right of the HP bar.
+    var statusTellAnchor: CGPoint { CGPoint(x: FacetedLieNode.bodyRadius + 6, y: FacetedLieNode.bodyRadius + 18) }
+
     @discardableResult
-    func takeDamage(_ amount: Int) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
         guard !isDead else { return false }
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount)
+        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
 
         // Damage reads as a pale crack flash — never red/orange (Lyra).
         let flash = SKAction.sequence([
@@ -730,6 +733,11 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
         isDead = true
         physicsBody?.categoryBitMask = 0
         phase = .idle
+        // v2.1 A4a: an untargeted hit (a Burn/Bleed tick, a capstone strike)
+        // can land mid-Pane Shift, while the Lie is faded out. Stop the vanish
+        // and show the body, or the whole death plays invisible.
+        removeAction(forKey: "paneFade")
+        alpha = 1
         clearFalseSafe()
         clearPaneMarks()
 

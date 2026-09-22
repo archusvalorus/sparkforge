@@ -40,6 +40,19 @@ protocol ArenaBossNode: SKNode {
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool
 
+    /// v2.1 A4a: the one damage entry every conformer implements. `takeDamage(_:)`
+    /// forwards here with `false`. Burn and Bleed ticks pass `true` — CL-18
+    /// (Brandon, Sep 21): DoTs ignore the Boss Mode DEF dial's flat per-hit
+    /// reduction (vulnerability and the HP dial still apply).
+    @discardableResult
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool
+
+    /// v2.1 A4a: where the scene pins the Burn/Bleed status row, in the boss's
+    /// own coordinates — beside the HP bar, so every boss reads the same way.
+    var statusTellAnchor: CGPoint { get }
+    /// Size of the status row (a monument's sits at monument scale).
+    var statusTellScale: CGFloat { get }
+
     /// Called each frame with the player's position for AI targeting
     func update(deltaTime: TimeInterval, playerPosition: CGPoint)
 
@@ -62,6 +75,16 @@ extension ArenaBossNode {
     /// boss never *requires* dial support to compile.
     func applyChallengeHealthScale(_ factor: CGFloat) {}
 
+    /// Every ordinary hit: the DEF dial applies.
+    @discardableResult
+    func takeDamage(_ amount: Int) -> Bool {
+        takeDamage(amount, ignoresChallengeDEF: false)
+    }
+
+    /// Default: just above the body; each boss overrides to sit beside its bar.
+    var statusTellAnchor: CGPoint { CGPoint(x: 0, y: 60) }
+    var statusTellScale: CGFloat { 1.0 }
+
     /// The health a hit should actually remove, after the DEF dial's flat
     /// reduction. Shared so all five bosses reduce identically.
     ///
@@ -70,8 +93,8 @@ extension ArenaBossNode {
     /// (Erasure's delete, a scripted kill) and bypasses reduction entirely —
     /// blunting those would silently break capstone finishers. Reduced hits
     /// never fall below 1, so a dialled-up boss still takes chip damage.
-    func challengedDamage(_ scaled: Int, raw: Int) -> Int {
-        guard challengeFlatReduction > 0 else { return scaled }
+    func challengedDamage(_ scaled: Int, raw: Int, ignoresChallengeDEF: Bool = false) -> Int {
+        guard challengeFlatReduction > 0, !ignoresChallengeDEF else { return scaled }
         if raw >= health { return scaled }          // execute — always lands full
         return max(1, scaled - challengeFlatReduction)
     }

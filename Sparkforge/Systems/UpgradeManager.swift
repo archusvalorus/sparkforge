@@ -972,18 +972,19 @@ final class UpgradeManager {
 
         // v2.1 (abilities) — SIGNATURE FLAGS. One per tree, per the signature
         // spec: Kindle / Frost Touch / Arc (→ Chain Lightning in the rework) /
-        // Terra are Brandon's confirmed entry points. Bleed and Guard are
-        // INTERIM until his rework notes land: Needlepoint is today's bleed
-        // source (the crown moves to the new Bloodthirsty when the rework
-        // removes it), Repulse is today's closest "basic attacks gain a
-        // defensive rider". Void's is Phase, the rework's named entry point.
+        // Terra are Brandon's confirmed entry points; Bleed's is Bloodthirsty
+        // (v2.1 A4a — the interim Needlepoint is retired). Guard is INTERIM
+        // until its rework lands: Repulse is today's closest "basic attacks
+        // gain a defensive rider". Void's is Phase, the rework's named entry point.
         // The rest of each tree stays UNGATED for now — the `requires`
         // authoring rides the rework pass, one pass over the pool, not two.
 
         cards.append(UpgradeCard(
             id: "fire_1", name: "Kindle", tag: .fire,
-            description: "Projectiles ignite enemies (+0.5 burn DPS, 2s)",
+            description: "Projectiles ignite enemies: +0.5 burn DPS, 2s",
             apply: { stats in stats.burnDPS += 0.5 },
+            // v2.1 A4a (CL-17): Burn now reaches bosses — at half.
+            detail: "Projectiles ignite enemies (+0.5 burn DPS, 2s). Bosses and mini-bosses take 50% less Burn damage.",
             isSignature: true,
             provides: [.fireUnlocked]
         ))
@@ -1129,7 +1130,20 @@ final class UpgradeManager {
         // ═══════════════════════════════════
         // 🩸 BLEED
         // ═══════════════════════════════════
-        
+
+        // v2.1 A4a — the Bleed SIGNATURE (CL-1 Option B, approved copy verbatim
+        // in `detail`). The ticking Bleed lives in BleedState; Needlepoint,
+        // the interim crit-bleed signature, is retired. Boss-class takes half
+        // (CL-17). The rest of the tree gains its `requires` in A4b.
+        cards.append(UpgradeCard(
+            id: "v21_bloodthirsty", name: "Bloodthirsty", tag: .bleed,
+            description: "Primary hits: 50% chance to Bleed: 10% ATK/0.5s, 3s",
+            apply: { stats in stats.bleedApplyChance = GameConfig.Bleed.applyChance },
+            detail: "Primary hits have a 50% chance to inflict Bleed, dealing 10% ATK every 0.5s for 3s. Reapplying Bleed refreshes its duration without stacking damage or delaying the next tick. Bosses and mini-bosses take 50% less Bleed damage.",
+            isSignature: true,
+            provides: [.bleedUnlocked]
+        ))
+
         // v1.9 Unit 3: signature crit ladder (2-tier).
         cards.append(UpgradeCard(
             id: "bleed_1", name: "Nick", tag: .bleed,
@@ -1757,22 +1771,11 @@ final class UpgradeManager {
         // ═══════════════════════════════════
         // v1.8 Unit 5b — rehome cards: preserve mechanics the synergy rework
         // moves off the tiers (crit-bleed, capped killstreak, pierce). Numbers
-        // are starting values; balance pass tunes them.
+        // are starting values; balance pass tunes them. (Crit-bleed's card,
+        // Needlepoint, was retired in v2.1 A4a — Bloodthirsty is the Bleed source.)
         // ═══════════════════════════════════
 
-        // INTERIM signature (see the Fire block's note) — today's bleed
-        // source; the crown moves to Bloodthirsty when the rework pass
-        // removes Needlepoint.
-        cards.append(UpgradeCard(
-            id: "v18_needlepoint", name: "Needlepoint", tag: .bleed,
-            description: "Crits apply Bleed.",
-            apply: { stats in
-                stats.critAppliesBleed = true
-                stats.bleedDPS += 0.5
-            },
-            isSignature: true,
-            provides: [.bleedUnlocked]
-        ))
+        // v18_needlepoint (Needlepoint) — retired in v2.1 A4a; Bloodthirsty is the Bleed signature.
 
         cards.append(UpgradeCard(
             id: "v18_bloodlust", name: "Bloodlust", tag: .bleed,

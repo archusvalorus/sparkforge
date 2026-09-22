@@ -674,13 +674,16 @@ final class DynamoChoirNode: SKNode, ArenaBossNode {
         health = maxHealth
     }
 
+    /// v2.1 A4a: status row pinned just right of the HP bar.
+    var statusTellAnchor: CGPoint { CGPoint(x: DynamoChoirNode.bodyRadius + 6, y: DynamoChoirNode.bodyRadius + 18) }
+
     @discardableResult
-    func takeDamage(_ amount: Int) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
         guard !isDead else { return false }
         let scaled = vulnerabilityMultiplier == 1.0
             ? amount
             : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
-        health -= challengedDamage(scaled, raw: amount)
+        health -= challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
 
         let flash = SKAction.sequence([
             SKAction.run { [weak self] in

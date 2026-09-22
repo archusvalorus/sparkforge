@@ -19,6 +19,10 @@
 //     through all of it. No stacks left → the next application starts at one.
 //   • A non-Kindle source (the Shock tesla field rides the burn channel) is a
 //     flat DPS that never multiplies by stacks.
+//   • v2.1 A4a: Kindle and flat sources keep SEPARATE timers. The tesla field
+//     re-applies every frame; on one shared timer it kept a stacked Kindle
+//     Burn alive for as long as Spark stood close — Burn never ended (CL-16).
+//     A flat source may still hold dormant stacks at its own DPS (B5b).
 
 import CoreGraphics
 import Foundation
@@ -39,25 +43,34 @@ struct BurnState {
     private(set) var kindleDPS: CGFloat = 0
     /// Flat DPS from non-Kindle sources; 0 while dormant.
     private(set) var flatDPS: CGFloat = 0
-    private(set) var active = GameTimer()
+    /// How long Kindle's (stacked) Burn keeps burning.
+    private(set) var kindleActive = GameTimer()
+    /// How long the flat source keeps burning — never prolongs Kindle's.
+    private(set) var flatActive = GameTimer()
     private var stackGate = GameTimer()
     private var decayProgress: TimeInterval = 0
 
+    /// Whichever source burns longest — the Burn as a whole.
+    var active: GameTimer { kindleActive.remaining >= flatActive.remaining ? kindleActive : flatActive }
     var isBurning: Bool { active.isActive && dps > 0 }
     /// Burn has ended but stacks remain, fading.
     var isDormant: Bool { stacks > 0 && !active.isActive }
-    /// Damage per second right now.
-    var dps: CGFloat {
-        guard active.isActive else { return 0 }
-        return max(kindleDPS * CGFloat(stacks), flatDPS)
-    }
+    /// Kindle's stacked Burn per second right now (0 once it has ended).
+    var kindleRate: CGFloat { kindleActive.isActive ? kindleDPS * CGFloat(stacks) : 0 }
+    /// The flat (non-Kindle) source's DPS right now.
+    var flatRate: CGFloat { flatActive.isActive ? flatDPS : 0 }
+    /// Damage per second right now — the stronger source, never the sum.
+    var dps: CGFloat { max(kindleRate, flatRate) }
 
     /// Apply Burn. Returns true when this application added a stack.
     @discardableResult
     mutating func ignite(dps: CGFloat, duration: TimeInterval, source: Source,
                          stackCap: Int, stackInterval: TimeInterval) -> Bool {
         guard dps > 0, duration > 0 else { return false }
-        active.extend(atLeast: duration)
+        switch source {
+        case .kindleHit, .kindleSpread: kindleActive.extend(atLeast: duration)
+        case .other: flatActive.extend(atLeast: duration)
+        }
         decayProgress = 0
 
         var added = false
@@ -85,11 +98,9 @@ struct BurnState {
         stackGate.tick(dt)
         if active.isActive {
             let burned = dps
-            if active.tick(dt) {
-                kindleDPS = 0
-                flatDPS = 0
-                decayProgress = 0
-            }
+            if kindleActive.isActive, kindleActive.tick(dt) { kindleDPS = 0 }
+            if flatActive.isActive, flatActive.tick(dt) { flatDPS = 0 }
+            if !active.isActive { decayProgress = 0 }
             return burned
         }
         if stacks > 0, decayInterval > 0 {
