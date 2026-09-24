@@ -6,6 +6,13 @@
 import CoreGraphics
 import Foundation
 
+// v2.1 A5: the REAL `GameConfig.Guard` block is extracted from the app source
+// by extract-guard-config.sh (every run.sh), so Guard numbers are never mirrored
+// here. It reads DeviceScale for two radii — the phone value is 1.
+enum DeviceScale {
+    static var gameplay: CGFloat { 1 }
+}
+
 enum GameConfig {
     enum Drafting {
         static let gatewayPityLevels: Int = 3
@@ -123,6 +130,7 @@ enum GameConfig {
     }
     enum BossClass {
         static let dotScale: CGFloat = 0.5
+        static let damageScale: CGFloat = 0.5
     }
     enum DamagePipeline {
         static let barrierCapFraction: CGFloat = 0.5

@@ -51,6 +51,16 @@ final class PlayerNode: SKNode {
     private var kaijuBody: SKSpriteNode?     // the sprite itself, for walk/facing
     private var kaijuWalkPhase: CGFloat = 0
     private var redSmileFeatures: SKNode?    // v2.1 A4c: the Thing From Below (placeholder)
+    // v2.1 A5 (CL-57/58/68): Guard's two shields — Aegis (astral blue, left)
+    // and Unbroken Core's projectile shield (steel + gold, right). ONE base
+    // silhouette, mirrored; both can show at once, neither replaces the other.
+    private var guardShieldLayer: SKNode?
+    private var aegisShieldNode: SKShapeNode?
+    private var unbrokenShieldNode: SKShapeNode?
+    private var guardShieldAegisTier = 0
+    private var guardShieldUnbroken = false
+    private var unbrokenReadinessShown: CGFloat = -1
+    private var unbrokenRim: SKShapeNode?    // v2.1 A5 (CL-55): the 10s window
     private var redSmileWedge: SKShapeNode?  // its facing arc — turned every frame
     /// v2.0 art pass: a SPRITE skin's body, when the selected skin has art.
     /// Palette skins leave this nil and stay fully procedural.
@@ -452,6 +462,11 @@ final class PlayerNode: SKNode {
         let replaced = hidden || skinSprite != nil
         emberWrap.alpha = replaced ? 0 : 1
         eyesNode.alpha = replaced ? 0 : 1
+        // v2.1 A5 (CL-68): the kaiju is the spectacle (and draws at 3×) — the
+        // Guard shields and the Unbroken rim step aside for it. They stay up
+        // through Red Smile.
+        guardShieldLayer?.isHidden = kaiju
+        unbrokenRim?.isHidden = kaiju
     }
 
     /// Wear a skin. Purely cosmetic — no stat, hitbox or ability effect. Stores
@@ -1041,18 +1056,8 @@ final class PlayerNode: SKNode {
 
     // MARK: - Lethal Save
 
-    /// Try to survive at 0 HP. Returns true if saved.
-    /// v1.4: Only called when currentHP <= 0
-    func tryLethalSave() -> Bool {
-        guard let stats = stats, stats.lethalSaves > 0 else { return false }
-        stats.lethalSaves -= 1
-        stats.currentHP = 1  // Survive with 1 HP
-        playLethalSaveFlash()
-        return true
-    }
-
-    /// v2.1 A0: the survive-at-1-HP flash, shared by Brace (and Unbroken Core
-    /// until A5 gives it its own window).
+    /// v2.1 A0: the survive-at-1-HP flash — Brace's, and the first beat of
+    /// Unbroken Core's rescue (whose window then adds its gold rim, A5).
     func playLethalSaveFlash() {
         let flash = SKAction.sequence([
             SKAction.fadeAlpha(to: 0.2, duration: 0.05),
@@ -1063,6 +1068,114 @@ final class PlayerNode: SKNode {
             SKAction.fadeAlpha(to: 1.0, duration: 0.1)
         ])
         run(flash)
+    }
+
+    // MARK: - v2.1 A5: Guard shields + the Unbroken window (placeholder tells)
+
+    /// The shared silhouette: a small heater shield, point down, centred on 0.
+    private static func shieldPath(height h: CGFloat) -> CGPath {
+        let w = h * 0.78
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: -w / 2, y: h / 2))
+        path.addLine(to: CGPoint(x: w / 2, y: h / 2))
+        path.addLine(to: CGPoint(x: w / 2, y: 0))
+        path.addQuadCurve(to: CGPoint(x: 0, y: -h / 2), control: CGPoint(x: w / 2, y: -h * 0.32))
+        path.addQuadCurve(to: CGPoint(x: -w / 2, y: 0), control: CGPoint(x: -w / 2, y: -h * 0.32))
+        path.closeSubpath()
+        return path
+    }
+
+    /// Show / refresh Guard's shields. Cheap to call every frame: nodes are
+    /// rebuilt only when ownership or the Aegis tier changes.
+    func setGuardShields(aegisTier: Int, unbrokenOwned: Bool, unbrokenReadiness: CGFloat) {
+        if aegisTier != guardShieldAegisTier || unbrokenOwned != guardShieldUnbroken {
+            guardShieldAegisTier = aegisTier
+            guardShieldUnbroken = unbrokenOwned
+            guardShieldLayer?.removeFromParent()
+            guardShieldLayer = nil
+            aegisShieldNode = nil
+            unbrokenShieldNode = nil
+            unbrokenReadinessShown = -1
+            if aegisTier > 0 || unbrokenOwned {
+                let layer = SKNode()
+                layer.zPosition = 11
+                let r = GameConfig.Player.visualRadius
+                let h = r * 0.95
+                let offset = r + h * 0.39 + 3
+                if aegisTier > 0 {
+                    let aegis = SKShapeNode(path: Self.shieldPath(height: h))
+                    aegis.fillColor = SKColor(hex: GameConfig.Guard.aegisBlueHex, alpha: 0.55)
+                    aegis.strokeColor = SKColor(white: 1.0, alpha: 0.9)
+                    aegis.lineWidth = 1.2
+                    aegis.glowWidth = 1.5
+                    aegis.position = CGPoint(x: -offset, y: 0)
+                    // Mirrored base silhouette (Q-G4); T3 is the bigger shield.
+                    let size: CGFloat = aegisTier >= 3 ? 1.3 : 1.0
+                    aegis.xScale = -size
+                    aegis.yScale = size
+                    layer.addChild(aegis)
+                    aegisShieldNode = aegis
+                }
+                if unbrokenOwned {
+                    let steel = SKShapeNode(path: Self.shieldPath(height: h))
+                    steel.fillColor = SKColor(hex: GameConfig.Guard.steelHex, alpha: 0.6)
+                    steel.lineWidth = 1.2
+                    steel.position = CGPoint(x: offset, y: 0)
+                    layer.addChild(steel)
+                    unbrokenShieldNode = steel
+                }
+                addChild(layer)
+                guardShieldLayer = layer
+                refreshBodyVisibility()
+            }
+        }
+        // The projectile shield: gold rim while ready, dim steel while rearming.
+        if let steel = unbrokenShieldNode {
+            let q = (min(max(unbrokenReadiness, 0), 1) * 20).rounded() / 20
+            if q != unbrokenReadinessShown {
+                unbrokenReadinessShown = q
+                let ready = q >= 1
+                steel.strokeColor = ready
+                    ? SKColor(hex: GameConfig.Guard.goldHex, alpha: 0.95)
+                    : SKColor(white: 0.55, alpha: 0.8)
+                steel.glowWidth = ready ? 2 : 0
+                steel.alpha = 0.35 + 0.65 * q
+            }
+        }
+    }
+
+    /// Unbroken's shield just ate a projectile.
+    func flashUnbrokenShieldBlock() {
+        guard let steel = unbrokenShieldNode else { return }
+        steel.removeAction(forKey: "block")
+        steel.run(SKAction.sequence([
+            SKAction.scale(to: 1.45, duration: 0.06),
+            SKAction.scale(to: 1.0, duration: 0.14)
+        ]), withKey: "block")
+    }
+
+    /// The 10s Unbroken window: a pulsing gold rim around Spark.
+    func setUnbrokenWindow(_ active: Bool) {
+        if active {
+            guard unbrokenRim == nil else { return }
+            let rim = SKShapeNode(circleOfRadius: GameConfig.Player.visualRadius + 4)
+            rim.strokeColor = SKColor(hex: GameConfig.Guard.goldHex, alpha: 0.9)
+            rim.fillColor = .clear
+            rim.lineWidth = 2
+            rim.glowWidth = 4
+            rim.zPosition = 13
+            rim.run(SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.55, duration: 0.35),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.35)
+            ])))
+            addChild(rim)
+            unbrokenRim = rim
+            refreshBodyVisibility()
+        } else if let rim = unbrokenRim {
+            unbrokenRim = nil
+            rim.removeAllActions()
+            rim.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.2), SKAction.removeFromParent()]))
+        }
     }
 
     // MARK: - Death
@@ -1570,6 +1683,8 @@ final class PlayerNode: SKNode {
         setApexFeatures(false)
         setPolarVortexFeatures(false)
         setRedSmile(false)
+        setGuardShields(aegisTier: 0, unbrokenOwned: false, unbrokenReadiness: 0)   // v2.1 A5
+        setUnbrokenWindow(false)
         isDead = false
         currentLevel = 1
         currentXP = 0

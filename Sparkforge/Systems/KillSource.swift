@@ -34,6 +34,9 @@ enum KillSource: String, CaseIterable {
     /// takes a primary hit), full credit. Named `melee` because `sweep` above
     /// is the reward-only prune, not an attack.
     case melee
+    /// v2.1 A5 (CL-63): Repulse T3 — a launched enemy crashing into another.
+    /// Full credit: the player aimed the shot that threw it.
+    case impact
 
     /// Credit tier — legacy-preserving. Radius bursts and the sweep have only
     /// ever paid the XP orb: no kill count, bestiary, arena gates or on-kill

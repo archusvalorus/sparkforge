@@ -991,8 +991,8 @@ enum GameConfig {
         // in this engine projectile damage is driven by the damage MULTIPLIER,
         // not baseAttack (baseAttack only feeds the HUD + ATK%-scaled capstone
         // abilities). To make "weaponize defense" actually bite, Iron Skin routes
-        // DEF→offense through the same multiplier lever Unbroken Core uses
-        // (defAsDamageMult). Flagged for Brandon's balance pass.
+        // DEF→offense through the damage multiplier (the lever the old Unbroken
+        // Core used before v2.1 A5 retired it). Flagged for Brandon's balance pass.
         static let defToDmgT1: CGFloat = 0.0125    // +1.25% damage per DEF (~+25% at 20 DEF)
         static let defBonusT1: CGFloat = 0.05      // +5% DEF, one-time at pickup
         static let thornsT1: Int = 5               // flat damage to touchers
@@ -1353,6 +1353,83 @@ enum GameConfig {
         /// Placeholder palette (CL-47) — never Void purple (purple = danger).
         static let bodyColorHex: UInt32 = 0x120A0D
         static let crimsonHex: UInt32 = 0xD01C34
+    }
+
+    // MARK: - v2.1 Abilities A5: Guard (closure table §B4, CL-49…CL-69)
+    /// The reworked Guard tree. Every number here is Brandon's Sep 24 ruling;
+    /// the pure rules live in `GuardState.swift` (proven by tools/guard-harness).
+    enum Guard {
+        // ×3 Ironhide (CL-52): 9% per qualifying hostile, 10 contributors max.
+        static let ironhidePerHostile: CGFloat = 0.09
+        static let ironhideMaxContributors: Int = 10
+        /// Counted to each body's surface.
+        static var ironhideRadius: CGFloat { 150 * DeviceScale.gameplay }
+
+        // ×5 Thornwall (CL-53): 1.50× the valid contact's pre-mitigation hit.
+        // Arena bosses take it once through `BossClass.damageScale` (50%).
+        static let thornwallReflect: CGFloat = 1.50
+
+        // ×7 Unbroken Core (CL-54…57).
+        static let unbrokenWindow: TimeInterval = 10.0
+        static let shieldRearm: TimeInterval = 6.0
+
+        // Aegis (CL-58), index = tier − 1.
+        static let aegisReduction: [CGFloat] = [0.25, 0.25, 0.35]
+        static let aegisBounce: [CGFloat] = [0, 40, 70]
+        static let aegisSpikeDEF: [CGFloat] = [0, 0.50, 0.75]
+
+        // Harden (CL-59).
+        static let hardenShrink: CGFloat = 0.70
+        static let hardenBounce: CGFloat = 40
+
+        // Iron Bloom (CL-60 / CL-61): every 4s, 50% current DEF, piercing =
+        // bypasses flat enemy DEF only (the Boss Mode DEF dial).
+        static let ironBloomInterval: TimeInterval = 4.0
+        static let ironBloomDEFFraction: CGFloat = 0.50
+        static var ironBloomRadius: CGFloat { 70 * DeviceScale.gameplay }
+
+        // Repulse (CL-62 / CL-63): shoves T1 20pt / T2 60pt; T3 launches.
+        static let repulseShove: [CGFloat] = [20, 60]
+        static let repulseLaunchDistance: CGFloat = 400
+        static let repulseLaunchDuration: TimeInterval = 0.35
+        static let repulseMaxStrikes: Int = 3
+        static let repulseCollisionATK: CGFloat = 0.25
+
+        // Fortify (CL-64): +1 temp DEF each 0.5s without stick input, cap 30.
+        static let fortifyStep: TimeInterval = 0.5
+        static let fortifyPerStep: Int = 1
+        static let fortifyCap: Int = 30
+
+        // Grounded Core (CL-65): +1 permanent DEF per uninterrupted 7.5s still
+        // in active combat, cap +30 per run.
+        static let groundedInterval: TimeInterval = 7.5
+        static let groundedCap: Int = 30
+
+        // Phase Skin (CL-66): cooldown from the trigger.
+        static let phaseSkinCooldown: TimeInterval = 3.5
+        static let phaseSkinDuration: TimeInterval = 1.0
+
+        // Placeholder palette (CL-68) — astral blue, steel, gold; never purple.
+        static let aegisBlueHex: UInt32 = 0xA8C8FF
+        static let steelHex: UInt32 = 0xB8B2A6
+        static let goldHex: UInt32 = 0xFFD98A
+
+        static var fortifyTuning: FortifyDEF.Tuning {
+            FortifyDEF.Tuning(step: fortifyStep, perStep: fortifyPerStep, cap: fortifyCap)
+        }
+        static var groundedTuning: GroundedCoreBank.Tuning {
+            GroundedCoreBank.Tuning(interval: groundedInterval, cap: groundedCap)
+        }
+        static var ironhideTuning: Ironhide.Tuning {
+            Ironhide.Tuning(perHostile: ironhidePerHostile, maxContributors: ironhideMaxContributors)
+        }
+        static var bounceTuning: ContactBounce.Tuning {
+            ContactBounce.Tuning(harden: hardenBounce, aegisByTier: aegisBounce, spikeByTier: aegisSpikeDEF)
+        }
+        static var launchTuning: RepulseFlight.Tuning {
+            RepulseFlight.Tuning(distance: repulseLaunchDistance, duration: repulseLaunchDuration,
+                                 maxStrikes: repulseMaxStrikes)
+        }
     }
 
     // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)

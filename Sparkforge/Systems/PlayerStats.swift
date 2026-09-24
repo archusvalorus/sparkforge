@@ -188,13 +188,21 @@ final class PlayerStats {
 
     /// Flat DEF a hit is reduced by: base DEF plus every conditional source.
     var effectiveFlatDEF: Int {
-        // v1.7 Grounded Core: the brace adds DEF while standing still
-        // v1.8 Ironhide: pressure-DEF while crowded (set per-frame by GameScene)
+        // v2.1 A5 (CL-51): Grounded Core's earned points are already IN
+        // `defense` (run-permanent base DEF); Ironhide is a percentage now
+        // (the pipeline's `ironhide` slot), not flat DEF.
         defense
-            + (groundedCoreBraced ? groundedCoreBonusDEF : 0)
-            + (pressureDefActive ? pressureDefBonus : 0)
+            + fortifyTempDEF   // v2.1 A5 Fortify: temporary, standing still
             + groundDefBonus   // C1.7 Deeproot: DEF while on cultivated ground
     }
+
+    /// v2.1 A5 (CL-51): "current DEF" — the combined value the new Guard
+    /// formulas read (Unbroken's snapshot, Iron Bloom, the Aegis spike),
+    /// temporary Fortify DEF included.
+    var currentDEF: Int { effectiveFlatDEF }
+
+    /// The temporary part of current DEF — the HUD's "+N" (CL-51).
+    var temporaryDEF: Int { fortifyTempDEF + groundDefBonus }
 
     /// Take damage after DEF reduction. Returns true if player died (HP <= 0).
     /// v2.1 A0: enemy hits go through `PlayerDamagePipeline` + `commit`; this
@@ -228,6 +236,25 @@ final class PlayerStats {
     /// Guard ×7 Unbroken Core's lethal rescue: armed by the synergy (A5),
     /// spent once per run, always AFTER Brace (Q-G1).
     var unbrokenRescueAvailable = false
+    /// v2.1 A5 (CL-55/56): the 10s window the Unbroken rescue opens — full
+    /// invulnerability on its own timer, and the snapped bonus multiplier.
+    var unbrokenWindow = UnbrokenWindow()
+    /// v2.1 A5 (CL-57): Guard ×7's persistent projectile shield.
+    var projectileShield = ProjectileShieldCharge(rearm: GameConfig.Guard.shieldRearm)
+
+    /// The ATK value Unbroken's conversion reads (CL-56): the ATK stat in HUD
+    /// units, before the build multiplier.
+    var unbrokenConversionATK: CGFloat { CGFloat(baseAttack) + apexBonusAttackFromHP }
+
+    /// Spend a lethal rescue (the pipeline's hits and Unstable Core's
+    /// self-damage alike).
+    func spendRescue(_ rescue: PlayerDamagePipeline.Rescue) {
+        switch rescue {
+        case .brace: lethalSaves = max(0, lethalSaves - 1)
+        case .unbrokenCore: unbrokenRescueAvailable = false
+        case .none: break
+        }
+    }
 
     /// The state an incoming hit resolves against.
     var damageDefender: PlayerDamagePipeline.Defender {
@@ -243,11 +270,7 @@ final class PlayerStats {
     func commit(_ outcome: PlayerDamagePipeline.Outcome) {
         currentHP = outcome.hpAfter
         bloodBarrier.spend(outcome.absorbed)
-        switch outcome.rescue {
-        case .brace: lethalSaves = max(0, lethalSaves - 1)
-        case .unbrokenCore: unbrokenRescueAvailable = false
-        case .none: break
-        }
+        spendRescue(outcome.rescue)
         growEverglowOnHit()
     }
     
@@ -395,18 +418,16 @@ final class PlayerStats {
     /// Red Harvest: HP restored when a BLEEDING enemy dies
     var bleedKillHeal: Int = 0
 
-    // Guard
-    /// Ironhide: DEF gained while crowded (applied via pressureDefActive)
-    var pressureDefBonus: Int = 0
-    var pressureDefRadius: CGFloat = 90.0
-    var pressureDefEnemyCount: Int = 3
-    /// Set per-frame by GameScene when the crowd condition is met
-    var pressureDefActive: Bool = false
-    /// Thornwall: fraction of contact damage reflected to the toucher
+    // Guard (v2.1 A5 ladder — closure table §B4)
+    /// ×3 Ironhide: 9% damage reduction per qualifying nearby hostile, up to
+    /// 90% (CL-52). The scene counts each frame; the pipeline applies it.
+    var ironhideActive = false
+    /// ×5 Thornwall: multiple of the valid contact's pre-mitigation hit
+    /// reflected to the toucher (CL-53: 1.50; arena bosses take 50% of that).
     var thornsContactReflect: CGFloat = 0.0
-    /// Unbroken Core: added to the damage multiplier per point of DEF
-    /// (spec: +1% dmg per 3 DEF → 0.01/3 per DEF)
-    var defAsDamageMult: CGFloat = 0.0
+    /// ×7 Unbroken Core: the rescue is armed and the projectile shield equipped
+    /// (CL-54/57). Replaces the old always-on DEF→damage conversion.
+    var unbrokenCoreOwned = false
 
     // Void
     /// Undertow: passive per-second pull of nearby enemies toward the player
@@ -417,9 +438,13 @@ final class PlayerStats {
 
     // MARK: - Knockback
     
-    /// Knockback distance on projectile hit (base: 0)
+    /// Knockback distance on projectile hit (base: 0) — Repulse's T1/T2
+    /// shove (v2.1 A5, CL-62: 20 / 60pt, × DeviceScale at the scene).
     var knockbackForce: CGFloat = 0.0
-    
+    /// v2.1 A5: Repulse's tier (the Guard signature, 3 tiers). T3 launches.
+    var repulseTier: Int = 0
+    var repulseLaunches: Bool { repulseTier >= 3 }
+
     // MARK: - Survival
     
     /// Number of lethal hits that can be survived (base: 0)
@@ -427,6 +452,15 @@ final class PlayerStats {
     var lethalSaves: Int = 0
     /// Collision radius shrink multiplier (base: 1.0, lower = smaller)
     var collisionShrink: CGFloat = 1.0
+    /// v2.1 A5 Harden (CL-59): contacting enemies bounce off Spark.
+    var hardenOwned = false
+    /// v2.1 A5 Aegis (CL-58): shield tier 0…3 — % reduction, then the bounce
+    /// and the spike from T2.
+    var aegisTier: Int = 0
+    var aegisReduction: CGFloat {
+        let table = GameConfig.Guard.aegisReduction
+        return aegisTier >= 1 && aegisTier <= table.count ? table[aegisTier - 1] : 0
+    }
     /// Global enemy speed reduction (base: 0, additive %)
     var globalEnemySlow: CGFloat = 0.0
     
@@ -520,28 +554,55 @@ final class PlayerStats {
     /// Dead Circuit — player-created void zones linger longer
     var voidZoneDurationMultiplier: CGFloat = 1.0
 
-    /// Grounded Core — standing still builds DEF
+    /// Grounded Core — v2.1 A5 (CL-65): +1 PERMANENT DEF per uninterrupted
+    /// 7.5s still in active combat, cap +30 per run. Replaces the v1.7 0.7s
+    /// brace (+8 while braced).
     var groundedCoreActive: Bool = false
-    var groundedCoreBonusDEF: Int = 8
-    /// Seconds of stillness before the brace engages
-    var groundedCoreWindow: TimeInterval = 0.7
-    private(set) var groundedCoreBraced: Bool = false
-    private var stationaryTime: TimeInterval = 0
+    private(set) var groundedCore = GroundedCoreBank(tuning: GameConfig.Guard.groundedTuning)
 
-    /// Micro-adjustments don't break the brace — the caller treats tiny
-    /// stick deflection as stillness (Lyra tuning guardrail)
-    func updateGroundedCore(isMoving: Bool, dt: TimeInterval) {
-        guard groundedCoreActive else {
-            groundedCoreBraced = false
-            return
-        }
-        if isMoving {
-            stationaryTime = 0
-            groundedCoreBraced = false
+    /// Tick the bank. Each earned point becomes run-permanent BASE DEF (CL-51)
+    /// — it shows on the HUD and feeds everything that scales off DEF.
+    /// Returns the points earned this frame.
+    @discardableResult
+    func updateGroundedCore(_ dt: TimeInterval, still: Bool, inCombat: Bool) -> Int {
+        guard groundedCoreActive else { return 0 }
+        let gained = groundedCore.update(dt, still: still, inCombat: inCombat)
+        if gained > 0 { defense += gained }
+        return gained
+    }
+
+    /// Death / revive: earned DEF persists, unfinished progress resets (CL-65).
+    func resetGroundedCoreProgress() { groundedCore.resetProgress() }
+
+    /// Fortify — v2.1 A5 (CL-64): +1 temporary DEF each 0.5s without stick
+    /// input, cap +30; any input resets it. Combat is not required.
+    var fortifyOwned: Bool = false
+    private(set) var fortifyTempDEF: Int = 0
+    /// Fortify's own stillness — it only runs while the card is owned, so
+    /// standing still before the pick banks nothing.
+    private(set) var fortifyClock = StillnessClock()
+
+    /// Advance Fortify one frame from the stick signal. Returns the change in
+    /// its temporary DEF (positive on each new point — the tell's tick).
+    @discardableResult
+    func updateFortify(_ dt: TimeInterval, hasInput: Bool) -> Int {
+        if fortifyOwned {
+            fortifyClock.update(dt, hasInput: hasInput)
         } else {
-            stationaryTime += dt
-            groundedCoreBraced = stationaryTime >= groundedCoreWindow
+            fortifyClock.reset()
         }
+        let value = fortifyOwned
+            ? FortifyDEF.temporaryDEF(stillSeconds: fortifyClock.stillSeconds, tuning: GameConfig.Guard.fortifyTuning)
+            : 0
+        let delta = value - fortifyTempDEF
+        fortifyTempDEF = value
+        return delta
+    }
+
+    /// Death: the stance is broken (the temporary stack is gone).
+    func resetFortify() {
+        fortifyClock.reset()
+        fortifyTempDEF = 0
     }
 
     // MARK: - Special Mechanics
@@ -662,16 +723,24 @@ final class PlayerStats {
     var openVeinDamage: Int = 0
     var openVeinRadius: CGFloat = 40.0
 
-    /// Iron Bloom: contact attackers take DEF-scaled thorns damage
+    /// Iron Bloom — v2.1 A5 (CL-60/61): every 4s a radial spike pulse for 50%
+    /// of current DEF, piercing flat enemy DEF. (Its v1.6 contact thorns are
+    /// retired; the 4s pulse is the old Aegis Pulse's, moved here.)
     var ironBloomActive: Bool = false
-    var ironBloomDamage: Int { max(1, defense / 3) }
+    private(set) var ironBloomClock: TimeInterval = 0
+    var ironBloomDamage: Int {
+        IronBloom.pulseDamage(currentDEF: currentDEF, fraction: GameConfig.Guard.ironBloomDEFFraction)
+    }
 
-    /// Aegis Pulse: periodic pulse around player, damage scales with DEF
-    var aegisPulseActive: Bool = false
-    var aegisPulseInterval: TimeInterval = 4.0
-    var aegisPulseRadius: CGFloat = 70.0
-    var aegisPulseDamage: Int { max(1, defense / 5) }
-    private var aegisPulseTimer: TimeInterval = 0.0
+    /// Tick the pulse cadence on game time (the remainder carries, so the
+    /// cadence never drifts). Returns true when a pulse fires.
+    func updateIronBloom(_ dt: TimeInterval) -> Bool {
+        guard ironBloomActive else { return false }
+        ironBloomClock += max(0, dt)
+        guard ironBloomClock >= GameConfig.Guard.ironBloomInterval else { return false }
+        ironBloomClock -= GameConfig.Guard.ironBloomInterval
+        return true
+    }
 
     /// Null Bloom: chance on kill to leave a slowing zone
     // MARK: - v2.0 Phase C: Growth
@@ -960,10 +1029,9 @@ final class PlayerStats {
         if bloodPriceBonus > 0 && currentHP * 2 <= maxHP {
             total += bloodPriceBonus
         }
-        // v1.8 Unbroken Core: DEF fuels damage (+1% per 3 DEF)
-        if defAsDamageMult > 0 {
-            total += CGFloat(defense) * defAsDamageMult
-        }
+        // v2.1 A5 (CL-56): Unbroken Core's window — DEF / ATK snapped at the
+        // rescue, fixed for its 10s (0 outside the window).
+        total += unbrokenWindow.bonusMultiplier
         // v1.9 Iron Skin (Guard capstone): DEF fuels damage — "weaponize defense".
         if ironSkinDefToDmg > 0 {
             total += CGFloat(defense) * ironSkinDefToDmg
@@ -974,29 +1042,18 @@ final class PlayerStats {
     }
 
     /// Multiplier for the HUD's "effective ATK" readout: the persistent build
-    /// multiplier PLUS the permanent DEF-fueled conversions (Unbroken Core, Iron
-    /// Skin) and per-run ATK growth. Excludes volatile combat buffs
+    /// multiplier PLUS the permanent DEF-fueled conversion (Iron Skin) and
+    /// per-run ATK growth. Excludes volatile combat buffs
     /// (overcharge/blood price) so the number reflects build power and
     /// updates the moment DEF changes — without flickering frame to frame.
+    /// v2.1 A5 (CL-56): Unbroken's window IS shown — a fixed 10s bonus, so the
+    /// ATK row rises by exactly the snapped DEF for its duration.
     var displayDamageMultiplier: CGFloat {
         var total = damageMultiplier
-        if defAsDamageMult > 0 { total += CGFloat(defense) * defAsDamageMult }
+        total += unbrokenWindow.bonusMultiplier
         if ironSkinDefToDmg > 0 { total += CGFloat(defense) * ironSkinDefToDmg }
         total += everglowAtkGrowth
         return total
-    }
-
-    // MARK: - v1.6: Aegis Pulse
-
-    /// Tick the pulse timer. Returns true when a pulse should fire.
-    func updateAegisPulse(_ dt: TimeInterval) -> Bool {
-        guard aegisPulseActive else { return false }
-        aegisPulseTimer += dt
-        if aegisPulseTimer >= aegisPulseInterval {
-            aegisPulseTimer = 0
-            return true
-        }
-        return false
     }
 
     // MARK: - v1.6: Regen (Hoarfrost + Cauterize)
@@ -1202,20 +1259,22 @@ final class PlayerStats {
         // v1.8 Unit 5b reworked-tree fields
         bleedingEnemyDamageTaken = 0.0
         bleedKillHeal = 0
-        pressureDefBonus = 0
-        pressureDefRadius = 90.0
-        pressureDefEnemyCount = 3
-        pressureDefActive = false
+        ironhideActive = false
         thornsContactReflect = 0.0
-        defAsDamageMult = 0.0
+        unbrokenCoreOwned = false
         voidPullForce = 0.0
         voidPullRadius = 0.0
         inWellSlow = 0.0
         knockbackForce = 0.0
+        repulseTier = 0
         lethalSaves = 0
         bloodBarrier.clear()
         unbrokenRescueAvailable = false
+        unbrokenWindow.end()
+        projectileShield.reset()
         collisionShrink = 1.0
+        hardenOwned = false
+        aegisTier = 0
         globalEnemySlow = 0.0
         chainTargets = 0
         chainLightningTier = 0
@@ -1232,8 +1291,10 @@ final class PlayerStats {
         overclockTimer = 0
         voidZoneDurationMultiplier = 1.0
         groundedCoreActive = false
-        groundedCoreBraced = false
-        stationaryTime = 0
+        groundedCore.reset()
+        fortifyOwned = false
+        fortifyTempDEF = 0
+        fortifyClock.reset()
         killsExplode = false
         explosionRadius = GameConfig.Fire.emberBurstRadius
         explosionDamagePercent = GameConfig.Fire.emberBurstDamageFraction
@@ -1281,10 +1342,7 @@ final class PlayerStats {
         openVeinDamage = 0
         openVeinRadius = 40.0
         ironBloomActive = false
-        aegisPulseActive = false
-        aegisPulseInterval = 4.0
-        aegisPulseRadius = 70.0
-        aegisPulseTimer = 0.0
+        ironBloomClock = 0
         terraZoneRadius = 0.0
         terraSlow = 0.30
         thornsoilDPS = 0

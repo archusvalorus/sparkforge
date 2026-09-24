@@ -404,11 +404,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v2.1 A4c: Red Smile's cycle, form and melee clock (CL-34/42/44).
     private var redSmile = RedSmileState(tuning: .init(period: GameConfig.RedSmile.cyclePeriod,
                                                        duration: GameConfig.RedSmile.formDuration))
+
+    // v2.1 A5: Guard (closure table §B4, CL-49…CL-69)
+    /// CL-52: this frame's Ironhide reduction and how many hostiles earned it.
+    private var ironhideReduction: CGFloat = 0
+    private var ironhideContributors = 0
+    /// CL-63: Repulse T3 launches in flight, keyed by the launched enemy.
+    private var repulseFlights: [ObjectIdentifier: (enemy: EnemyNode, flight: RepulseFlight)] = [:]
+    /// The "UNBROKEN" countdown row is up.
+    private var unbrokenRowShown = false
     
     // MARK: - Invulnerability (post-revive)
     
     private var invulnerableTimer: TimeInterval = 0
-    private var isInvulnerable: Bool { invulnerableTimer > 0 || playerStats.isPhaseSkinActive }
+    /// v2.1 A5 (CL-55): Unbroken Core's window is its OWN timer, ORed in here —
+    /// never `invulnerableTimer`, which unpause / level-up / the boss reveal /
+    /// the Remove-Ads prompt overwrite.
+    private var isInvulnerable: Bool {
+        invulnerableTimer > 0 || playerStats.isPhaseSkinActive || playerStats.unbrokenWindow.isActive
+    }
     
     // MARK: - Reroll
 
@@ -4705,6 +4719,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if damageCooldownTimer > 0 {
             damageCooldownTimer -= dt
         }
+
+        // v2.1 A5: Unbroken's window + the projectile shield's rearm, on game time.
+        if playerStats.unbrokenWindow.tick(dt) { endUnbrokenWindowPresentation() }
+        playerStats.projectileShield.tick(dt)
         
         let preMovePosition = player.position
         player.move(direction: joystick.direction, deltaTime: dt)
@@ -4713,13 +4731,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if joystick.direction != .zero {
             lastMoveDirection = joystick.direction.normalized
         }
-        // v1.7 Coilworks cards: movement charges Induction Step;
-        // stillness (micro-adjustments included) braces Grounded Core
+        // v1.7 Coilworks cards: movement charges Induction Step
         playerStats.addInductionCharge(distance: player.position.distance(to: preMovePosition))
-        playerStats.updateGroundedCore(isMoving: joystick.direction.length > 0.15, dt: dt)
-        updateGroundedCoreRing()
+        updateRepulseFlights(dt) // v2.1 A5 (CL-63) — before the chase, which fliers skip
         updateEnemies(dt)
         updateActiveCombat(dt)   // v2.1 A4c (CL-33) — after this frame's DoT deaths
+        updateGuardStance(dt)    // v2.1 A5 — Fortify + Grounded Core read THIS frame's combat
         updateRedSmile(dt)       // v2.1 A4c — before the gun, which it pauses
         updateAutoAttack(dt)
         updateProjectiles(dt)
@@ -4882,7 +4899,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func updateEnemies(_ dt: TimeInterval) {
         var diedFromDOT: [EnemyNode] = []
-        var crowdCount = 0  // v1.8 Ironhide: enemies pressing the player
+        // v2.1 A5 (CL-52) Ironhide: qualifying hostiles within 150pt of Spark.
+        let ironhideOn = playerStats.ironhideActive
+        let ironhideRadius = GameConfig.Guard.ironhideRadius
+        var contributors = 0
 
         // v2.1 (2b): route occupancy for the crowding term. Skipped entirely
         // on open arenas (no route nodes → the steer pass never scores).
@@ -4897,7 +4917,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // (Ranged mobs inherit routing too — their LoS-aware FIRING
             // behavior is Unit 2 scope, per Ruling 4.)
             let steerTarget = routeSteerTarget(for: enemy, toward: player.position, dt: dt)
-            if let ranged = enemy as? RangedEnemyNode {
+            if repulseFlights[ObjectIdentifier(enemy)] != nil {
+                // v2.1 A5 (CL-63): a launched enemy is in the air — no chase,
+                // no attack, until it lands.
+            } else if let ranged = enemy as? RangedEnemyNode {
                 // v2.1 (Unit 2, Ruling 4): a shooter denied line of sight keeps
                 // moving instead of firing into the wreck forever. One segment
                 // test; open arenas short-circuit to true.
@@ -4923,7 +4946,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // v2.0 (Unit 2b): Gravemote — a telegraphed localized pull DRAGS the
             // player toward the mote (the first enemy to displace the player).
             // Gentle: a movable player fights it easily; it just steals clean lines.
-            if let mote = enemy as? GravemoteNode {
+            let airborne = repulseFlights[ObjectIdentifier(enemy)] != nil   // v2.1 A5: no attack mid-launch
+            if !airborne, let mote = enemy as? GravemoteNode {
                 let strength = mote.updatePull(deltaTime: dt)
                 if strength > 0 {
                     let d = player.position.distance(to: mote.position)
@@ -4937,18 +4961,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
             // v2.0 (Unit 2b): Anvilborn — anchors, winds up, then SLAMS a
             // localized shockwave. Elite, NOT boss-class (no Giantkiller DR).
-            if let anvil = enemy as? AnvilbornNode {
+            if !airborne, let anvil = enemy as? AnvilbornNode {
                 if anvil.updateSlam(deltaTime: dt),
                    player.position.distance(to: anvil.position) < AnvilbornNode.slamRadius {
                     applyBossHazardDamage(AnvilbornNode.slamDamage,
                                           shakeIntensity: 8, fromBossClass: false)
                 }
-            }
-
-            // v1.8 Ironhide (Guard 3): tally the crowd pressing the player
-            if playerStats.pressureDefBonus > 0
-                && enemy.position.distance(to: player.position) < playerStats.pressureDefRadius {
-                crowdCount += 1
             }
 
             // v2.1 A4a: a DoT death names its channel (Burn or Bleed).
@@ -4968,6 +4986,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             combatLedger.bleedTicks += enemy.bleedTicksThisFrame
             #endif
 
+            // v2.1 A5 (CL-52) Ironhide: counted AFTER this frame's DoTs (a body
+            // that just died isn't a contributor), to the body's surface.
+            // Phased/vanished actors and harmless snowmen never count.
+            if ironhideOn,
+               Ironhide.qualifies(surfaceDistance: enemy.position.distance(to: player.position) - enemy.hitBodyRadius,
+                                  radius: ironhideRadius, hittable: isHittable(enemy), snowman: enemy.isSnowman) {
+                contributors += 1
+            }
+
             if playerStats.burnSpreads && enemy.isBurning {
                 spreadBurn(from: enemy)
             }
@@ -4979,9 +5006,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        // v1.8 Ironhide: pressure-DEF holds while the crowd condition is met
-        playerStats.pressureDefActive = playerStats.pressureDefBonus > 0
-            && crowdCount >= playerStats.pressureDefEnemyCount
+        // v2.1 A5 (CL-52): an arena boss counts as one qualifying hostile.
+        if ironhideOn, let b = boss,
+           Ironhide.qualifies(surfaceDistance: b.position.distance(to: player.position) - b.hitBodyRadius,
+                              radius: ironhideRadius, hittable: isHittable(b), snowman: false) {
+            contributors += 1
+        }
+        ironhideContributors = ironhideOn ? contributors : 0
+        ironhideReduction = Ironhide.reduction(contributors: ironhideContributors,
+                                               tuning: GameConfig.Guard.ironhideTuning)
+        #if DEBUG
+        combatLedger.recordIronhide(contributors: ironhideContributors)
+        #endif
 
         // v2.1 A0: by identity. Removing by the indices collected above broke
         // when a death's on-kill burst removed other enemies first — the wrong
@@ -5162,31 +5198,195 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    // MARK: - v1.7: Grounded Core brace indicator
+    // MARK: - v2.1 A5: Guard stance — Fortify + Grounded Core (CL-64 / CL-65)
+
+    /// One stillness signal for the whole tree: NO meaningful stick input (the
+    /// joystick is zero inside its dead zone, a unit vector outside it). A
+    /// shove or a pull never breaks it; pushing into a wall always does.
+    private func updateGuardStance(_ dt: TimeInterval) {
+        let hasInput = joystick.direction != .zero
+
+        // Fortify: temporary DEF from its own stillness clock, which runs only
+        // while the card is owned (combat not required).
+        if playerStats.updateFortify(dt, hasInput: hasInput) > 0, !kaijuActive {
+            showFortifyTick()
+        }
+        #if DEBUG
+        combatLedger.recordFortify(playerStats.fortifyTempDEF)
+        #endif
+
+        // Grounded Core: permanent DEF for holding ground IN active combat;
+        // leaving combat or moving resets the unfinished interval.
+        let gained = playerStats.updateGroundedCore(dt, still: !hasInput, inCombat: inActiveCombat)
+        if gained > 0 {
+            showGroundedCoreGain(gained)
+            #if DEBUG
+            combatLedger.recordGroundedPoint(total: playerStats.groundedCore.earned)
+            #endif
+        }
+        updateGroundedCoreRing()
+        updateGuardPresentation()
+    }
 
     private var groundedCoreRing: SKShapeNode?
+    private var groundedRingShown: CGFloat = -1
 
-    /// A quiet guard-green ring at the spark's feet while braced
+    /// Grounded Core's tell: a guard-green arc at Spark's feet filling toward
+    /// the next +1 (it empties the moment progress resets); a faint full ring
+    /// once the run's +30 is banked.
     private func updateGroundedCoreRing() {
-        if playerStats.groundedCoreBraced {
-            if groundedCoreRing == nil {
-                let ring = SKShapeNode(circleOfRadius: GameConfig.Player.visualRadius + 7)
-                ring.strokeColor = SKColor(hex: 0x88AA44, alpha: 0.65)
-                ring.fillColor = .clear
-                ring.lineWidth = 1.5
-                ring.glowWidth = 2
-                ring.zPosition = 9
-                ring.setScale(1.3)
-                player.addChild(ring)
-                ring.run(SKAction.scale(to: 1.0, duration: 0.15))
-                groundedCoreRing = ring
-            }
-        } else if let ring = groundedCoreRing {
+        let bank = playerStats.groundedCore
+        let value: CGFloat
+        if !playerStats.groundedCoreActive {
+            value = -1
+        } else if bank.isCapped {
+            value = 2   // capped
+        } else {
+            value = bank.progress > 0 ? max(0.02, (bank.fraction * 48).rounded() / 48) : -1
+        }
+        // The kaiju draws the player node at 3× — Guard's rings step aside.
+        groundedCoreRing?.isHidden = kaijuActive
+        guard value != groundedRingShown else { return }
+        groundedRingShown = value
+        guard value >= 0 else {
+            groundedCoreRing?.removeFromParent()
             groundedCoreRing = nil
-            ring.run(SKAction.sequence([
-                SKAction.fadeOut(withDuration: 0.12),
-                SKAction.removeFromParent()
-            ]))
+            return
+        }
+        let ring: SKShapeNode
+        if let existing = groundedCoreRing {
+            ring = existing
+        } else {
+            ring = SKShapeNode()
+            ring.strokeColor = SKColor(hex: 0x88AA44, alpha: 0.75)
+            ring.fillColor = .clear
+            ring.lineWidth = 2
+            ring.glowWidth = 1.5
+            ring.lineCap = .round
+            ring.zPosition = 9
+            ring.isHidden = kaijuActive
+            player.addChild(ring)
+            groundedCoreRing = ring
+        }
+        let r = GameConfig.Player.visualRadius + 7
+        let path = CGMutablePath()
+        if value >= 2 {
+            path.addEllipse(in: CGRect(x: -r, y: -r, width: 2 * r, height: 2 * r))
+            ring.alpha = 0.35
+        } else {
+            let start = CGFloat.pi / 2
+            path.addArc(center: .zero, radius: r, startAngle: start,
+                        endAngle: start - value * 2 * .pi, clockwise: true)
+            ring.alpha = 1
+        }
+        ring.path = path
+    }
+
+    /// Fortify's tick: a quick steel blip on Spark for each new point.
+    private func showFortifyTick() {
+        let blip = SKShapeNode(circleOfRadius: GameConfig.Player.visualRadius + 3)
+        blip.strokeColor = SKColor(hex: GameConfig.Guard.steelHex, alpha: 0.55)
+        blip.fillColor = .clear
+        blip.lineWidth = 1
+        blip.zPosition = 8
+        player.addChild(blip)
+        blip.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.25, duration: 0.2), SKAction.fadeOut(withDuration: 0.2)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// Grounded Core banked a point: "+1 DEF" rises off Spark.
+    private func showGroundedCoreGain(_ points: Int) {
+        showGuardFloatingText("+\(points) DEF", colorHex: 0x88AA44)
+    }
+
+    /// Small floating text above Spark (Guard's gains and the Unbroken snap).
+    private func showGuardFloatingText(_ text: String, colorHex: UInt32) {
+        let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        label.text = text
+        label.fontSize = 13
+        label.fontColor = SKColor(hex: colorHex)
+        label.verticalAlignmentMode = .center
+        label.position = CGPoint(x: player.position.x, y: player.position.y + GameConfig.Player.visualRadius + 16)
+        label.zPosition = 60
+        worldNode.addChild(label)
+        label.run(SKAction.sequence([
+            SKAction.group([SKAction.moveBy(x: 0, y: 26, duration: 0.8),
+                            SKAction.sequence([SKAction.wait(forDuration: 0.4),
+                                               SKAction.fadeOut(withDuration: 0.4)])]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    // MARK: - v2.1 A5: Guard presentation (CL-68)
+
+    private var ironhideRing: SKShapeNode?
+    private var ironhideShown: CGFloat = -1
+
+    /// Per-frame Guard tells: the two shields, Ironhide's steel ring (opacity
+    /// tracks the current %), and the UNBROKEN countdown row.
+    private func updateGuardPresentation() {
+        player.setGuardShields(aegisTier: playerStats.aegisTier,
+                               unbrokenOwned: playerStats.projectileShield.isOwned,
+                               unbrokenReadiness: playerStats.projectileShield.readiness)
+
+        ironhideRing?.isHidden = kaijuActive   // steps aside for the 3× kaiju
+        let q = (ironhideReduction * 20).rounded() / 20
+        if q != ironhideShown {
+            ironhideShown = q
+            if q <= 0 {
+                ironhideRing?.removeFromParent()
+                ironhideRing = nil
+            } else {
+                if ironhideRing == nil {
+                    let ring = SKShapeNode(circleOfRadius: GameConfig.Player.visualRadius + 11)
+                    ring.strokeColor = SKColor(hex: GameConfig.Guard.steelHex)
+                    ring.fillColor = .clear
+                    ring.lineWidth = 1.5
+                    ring.zPosition = 8
+                    ring.isHidden = kaijuActive
+                    player.addChild(ring)
+                    ironhideRing = ring
+                }
+                ironhideRing?.alpha = 0.15 + 0.6 * (q / 0.9)
+            }
+        }
+
+        if playerStats.unbrokenWindow.isActive {
+            capstoneTimers.set("unbroken", label: "UNBROKEN", colorHex: GameConfig.Guard.goldHex,
+                               remaining: playerStats.unbrokenWindow.remaining)
+            unbrokenRowShown = true
+        } else if unbrokenRowShown {
+            capstoneTimers.clear("unbroken")
+            unbrokenRowShown = false
+        }
+    }
+
+    // MARK: - v2.1 A5: Unbroken Core's window (CL-55 / CL-56)
+
+    /// The Unbroken rescue fired (HP is already 1): open the 10s window with
+    /// the snapped DEF and ATK — the bonus is fixed for the whole window.
+    private func openUnbrokenWindow() {
+        let def = playerStats.currentDEF
+        let atk = playerStats.unbrokenConversionATK
+        playerStats.unbrokenWindow.open(duration: GameConfig.Guard.unbrokenWindow, def: def, atk: atk)
+        player.playLethalSaveFlash()
+        player.setUnbrokenWindow(true)
+        showGuardFloatingText("UNBROKEN  +\(def) ATK", colorHex: GameConfig.Guard.goldHex)
+        updateGuardPresentation()
+        #if DEBUG
+        combatLedger.recordUnbrokenWindow(def: def, atk: atk,
+                                          bonus: playerStats.unbrokenWindow.bonusMultiplier)
+        #endif
+    }
+
+    /// The window closed (ran out, death or restart).
+    private func endUnbrokenWindowPresentation() {
+        player.setUnbrokenWindow(false)
+        if unbrokenRowShown {
+            capstoneTimers.clear("unbroken")
+            unbrokenRowShown = false
         }
     }
     
@@ -5565,14 +5765,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        // v1.6: Aegis Pulse — periodic DEF-scaled pulse around the player
-        if playerStats.updateAegisPulse(dt) {
-            damageEnemiesInRadius(playerStats.aegisPulseRadius,
-                                  around: player.position,
-                                  damage: playerStats.aegisPulseDamage)
-            showRingPulse(at: player.position,
-                          radius: playerStats.aegisPulseRadius,
-                          colorHex: 0xCCC8AA)
+        // v2.1 A5 (CL-60): Iron Bloom — a 4s radial spike pulse (the cadence the
+        // old Aegis Pulse had; Aegis is a shield now).
+        if playerStats.updateIronBloom(dt), gameState == .playing {
+            ironBloomPulse()
         }
 
         // v1.9: Everglow (Fire capstone) — the player becomes a heat source.
@@ -5857,6 +6053,264 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
+    /// Mini-boss or arena boss — the capstone boss-resistance lever's reach.
+    private func isBossClass(_ body: SKPhysicsBody) -> Bool {
+        if body.node is (any ArenaBossNode) { return true }
+        return (body.node as? EnemyNode)?.isMiniBoss == true
+    }
+
+    // MARK: - v2.1 A5: contact bounce — Harden + Aegis (CL-58 / CL-59)
+
+    /// On EVERY real touch-begin (the confirmed CL-59 reading: before the
+    /// i-frame and cooldown guards, so a pile-on right after a hit is still
+    /// pushed off; contact is edge-triggered, so there is no resting-body case
+    /// to throttle). It never creates damage to Spark — the contact rules that
+    /// follow stay authoritative. Aegis T2+ adds its spike of current DEF
+    /// (ordinary direct damage: no Void, terrain or defense bypass). Bosses
+    /// aren't moved but still take the spike; snowmen never reach here.
+    private func guardContactBounce(_ enemyBody: SKPhysicsBody) {
+        let tuning = GameConfig.Guard.bounceTuning
+        let aegis = playerStats.aegisTier
+        let distance = ContactBounce.distance(hardenOwned: playerStats.hardenOwned,
+                                              aegisTier: aegis, tuning: tuning)
+        guard distance > 0, let node = enemyBody.node else { return }
+        let spike = ContactBounce.spikeDamage(aegisTier: aegis, currentDEF: playerStats.currentDEF,
+                                              tuning: tuning)
+        if let bossNode = node as? (any ArenaBossNode) {
+            guard isHittable(bossNode) else { return }
+            if spike > 0 {
+                bossNode.takeDamage(spike)
+                #if DEBUG
+                combatLedger.aegisSpikes += 1
+                #endif
+            }
+        } else if let enemy = node as? EnemyNode, isHittable(enemy) {
+            let away = (enemy.position - player.position).normalized
+            guardShove(enemy, distance: distance * DeviceScale.gameplay)
+            showRingPulse(at: player.position + away * (GameConfig.Player.visualRadius + 4),
+                          radius: 9, colorHex: aegis >= 2 ? GameConfig.Guard.aegisBlueHex : GameConfig.Guard.steelHex)
+            #if DEBUG
+            combatLedger.bounces += 1
+            #endif
+            if spike > 0 {
+                dealDirectDamage(spike, toEnemy: enemy, source: .retaliation)
+                #if DEBUG
+                combatLedger.aegisSpikes += 1
+                #endif
+            }
+        }
+    }
+
+    // MARK: - v2.1 A5: Iron Bloom (CL-60 / CL-61)
+
+    /// Every 4s: spikes hit every hittable enemy whose body is within 70pt, and
+    /// the arena boss, for 50% of current DEF. The Carrier blocks them (the
+    /// sweep's exact test). Piercing = the boss's flat DEF dial is skipped
+    /// (the existing `ignoresChallengeDEF` route) — nothing else is bypassed.
+    /// Kills are full credit (`.retaliation`, as Iron Bloom's always were).
+    private func ironBloomPulse() {
+        let origin = player.position
+        let radius = GameConfig.Guard.ironBloomRadius
+        let damage = playerStats.ironBloomDamage
+        func reaches(_ center: CGPoint, _ bodyRadius: CGFloat) -> Bool {
+            guard origin.distance(to: center) - bodyRadius < radius else { return false }
+            if arenaGeometry.segmentBlockedExact(origin, center,
+                                                 travelRadius: GameConfig.Geometry.projectileTravelRadius) {
+                #if DEBUG
+                combatLedger.ironBloomTerrainBlocks += 1
+                #endif
+                return false
+            }
+            return true
+        }
+        let struck = enemies.filter { isHittable($0) && reaches($0.position, $0.hitBodyRadius) }
+        for enemy in struck where isHittable(enemy) {
+            dealDirectDamage(damage, toEnemy: enemy, source: .retaliation)
+        }
+        var bossStruck = false
+        if let b = boss, isHittable(b), reaches(b.position, b.hitBodyRadius) {
+            b.takeDamage(damage, ignoresChallengeDEF: true)
+            bossStruck = true
+        }
+        showIronBloomPulse(radius: radius)
+        #if DEBUG
+        combatLedger.recordIronBloom(hits: struck.count + (bossStruck ? 1 : 0), damage: damage)
+        #endif
+    }
+
+    /// Steel ring + eight short spikes thrown out from Spark.
+    private func showIronBloomPulse(radius: CGFloat) {
+        showRingPulse(at: player.position, radius: radius, colorHex: GameConfig.Guard.steelHex)
+        for i in 0..<8 {
+            let angle = CGFloat(i) * .pi / 4
+            let dir = CGPoint(x: cos(angle), y: sin(angle))
+            let spike = SKShapeNode()
+            let path = CGMutablePath()
+            path.move(to: .zero)
+            path.addLine(to: dir * 9)
+            spike.path = path
+            spike.strokeColor = SKColor(hex: GameConfig.Guard.steelHex, alpha: 0.9)
+            spike.lineWidth = 2
+            spike.position = player.position + dir * GameConfig.Player.visualRadius
+            spike.zPosition = 7
+            worldNode.addChild(spike)
+            spike.run(SKAction.sequence([
+                SKAction.group([SKAction.move(by: CGVector(dx: dir.x * (radius - 12), dy: dir.y * (radius - 12)),
+                                              duration: 0.22),
+                                SKAction.fadeOut(withDuration: 0.25)]),
+                SKAction.removeFromParent()
+            ]))
+        }
+    }
+
+    // MARK: - v2.1 A5: Repulse — the Guard signature (CL-62 / CL-63)
+
+    /// A projectile hit shoves the enemy away from Spark (T1 20pt / T2 60pt).
+    /// At T3 an ordinary enemy (normal or elite) is LAUNCHED instead. Mini-bosses
+    /// are never launched and take a fixed 20pt at every tier (gate ruling Q4);
+    /// snowmen are fully knockback-immune (Q3); arena bosses never reach here
+    /// (they resist knockback). An enemy already in the air isn't launched
+    /// again until it lands.
+    private func applyRepulse(to enemy: EnemyNode) {
+        let id = ObjectIdentifier(enemy)
+        guard repulseFlights[id] == nil, !enemy.isDying else { return }
+        let scale = DeviceScale.gameplay
+        let launchable = RepulseFlight.isLaunchable(isMiniBoss: enemy.isMiniBoss, isSnowman: enemy.isSnowman)
+        if playerStats.repulseLaunches, launchable {
+            var tuning = GameConfig.Guard.launchTuning
+            tuning.distance *= scale
+            repulseFlights[id] = (enemy, RepulseFlight(direction: enemy.position - player.position, tuning: tuning))
+            #if DEBUG
+            combatLedger.launches += 1
+            #endif
+            return
+        }
+        let shove = RepulseFlight.shoveDistance(tierShove: playerStats.knockbackForce,
+                                                t1Shove: GameConfig.Guard.repulseShove[0],
+                                                isMiniBoss: enemy.isMiniBoss, isSnowman: enemy.isSnowman)
+        guardShove(enemy, distance: shove * scale)
+    }
+
+    /// Guard's instant shoves (Repulse T1/T2, the Harden/Aegis bounce) are
+    /// path-tested: two in one frame (a 2-pellet volley, a bounce plus a hit)
+    /// could otherwise carry a body clean through the Carrier before the
+    /// frame's geometry resolve, which would pop it out the far side. The shove
+    /// stops at the last free point instead. (Away from Spark, like the legacy
+    /// `applyKnockback`; open arenas skip the test.)
+    private func guardShove(_ enemy: EnemyNode, distance: CGFloat) {
+        guard distance > 0 else { return }
+        let from = enemy.position
+        let to = from + (from - player.position).normalized * distance
+        let r = enemy.hitBodyRadius
+        enemy.position = arenaGeometry.segmentBlockedExact(from, to, travelRadius: r)
+            ? lastFreePoint(from: from, to: to, radius: r)
+            : to
+    }
+
+    /// The farthest point on from→to a body of `radius` reaches before solid
+    /// geometry (a short bisection — `from` is assumed free).
+    private func lastFreePoint(from: CGPoint, to: CGPoint, radius: CGFloat) -> CGPoint {
+        var lo: CGFloat = 0, hi: CGFloat = 1
+        for _ in 0..<6 {
+            let mid = (lo + hi) / 2
+            if arenaGeometry.segmentBlockedExact(from, from + (to - from) * mid, travelRadius: radius) {
+                hi = mid
+            } else {
+                lo = mid
+            }
+        }
+        return from + (to - from) * lo
+    }
+
+    /// Repulse T3's placeholder trail: a small steel mote left where the
+    /// launched body just was, gone in a blink.
+    private func showLaunchTrail(at position: CGPoint) {
+        let mote = SKShapeNode(circleOfRadius: 3)
+        mote.fillColor = SKColor(hex: GameConfig.Guard.steelHex, alpha: 0.6)
+        mote.strokeColor = .clear
+        mote.position = position
+        mote.zPosition = 5
+        worldNode.addChild(mote)
+        mote.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 0.3, duration: 0.18), SKAction.fadeOut(withDuration: 0.18)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// Advance every launch. Walls (the arena edge, the Carrier) stop it; a
+    /// launched enemy strikes up to 3 other ordinary enemies, each at most once
+    /// per launch, for 25% of current ATK (min 1). Arena bosses and mini-bosses
+    /// are never bowling pins. Damage lands after the pass (kills mutate
+    /// `enemies`).
+    private func updateRepulseFlights(_ dt: TimeInterval) {
+        guard !repulseFlights.isEmpty else { return }
+        let wall = GameConfig.Arena.radius
+        var impacts: [EnemyNode] = []
+        for (id, entry) in repulseFlights {
+            let enemy = entry.enemy
+            // A snowman never flies (CL-63) — Whiteout can transform a body on
+            // the very hit that launched it, or mid-launch.
+            guard enemy.parent != nil, !enemy.isDying, !enemy.isSnowman else {
+                repulseFlights[id] = nil
+                continue
+            }
+            var flight = entry.flight
+            let r = enemy.hitBodyRadius
+            let from = enemy.position
+            var to = from + flight.advance(dt)
+            var stops = false
+            // The arena wall: a launch never carries an enemy out of the arena
+            // (and one that began outside it — still walking in — just lands).
+            let limit = wall - r
+            if from.length > limit {
+                to = from
+                stops = true
+            } else if to.length > limit {
+                to = to.normalized * limit
+                stops = true
+                #if DEBUG
+                combatLedger.launchWallStops += 1
+                #endif
+            }
+            // The Carrier: stop at the last free point along the step.
+            if to != from, arenaGeometry.segmentBlockedExact(from, to, travelRadius: r) {
+                to = lastFreePoint(from: from, to: to, radius: r)
+                stops = true
+                #if DEBUG
+                combatLedger.launchCarrierStops += 1
+                #endif
+            }
+            enemy.position = to
+            if to != from { showLaunchTrail(at: from) }
+            #if DEBUG
+            if flight.elapsed <= dt + 1e-9, to != from { combatLedger.launchesFlown += 1 }
+            #endif
+            // Pins along this step's whole path — the step that lands included.
+            for other in enemies where other !== enemy
+                && RepulseFlight.isPin(isMiniBoss: other.isMiniBoss, isSnowman: other.isSnowman,
+                                       isHittable: isHittable(other)) {
+                guard flight.canStrike else { break }
+                if RepulseFlight.sweepOverlaps(from: from, to: to, center: other.position,
+                                               radius: r + other.hitBodyRadius),
+                   flight.strike(ObjectIdentifier(other)) {
+                    impacts.append(other)
+                }
+            }
+            if stops { flight.land() }
+            repulseFlights[id] = flight.isLanded ? nil : (enemy, flight)
+        }
+        guard !impacts.isEmpty else { return }
+        let damage = RepulseFlight.collisionDamage(effectiveAttack: playerStats.effectiveAttack,
+                                                   fraction: GameConfig.Guard.repulseCollisionATK)
+        for other in impacts where isHittable(other) {
+            showRingPulse(at: other.position, radius: 14, colorHex: GameConfig.Guard.steelHex)
+            dealDirectDamage(damage, toEnemy: other, source: .impact)
+            #if DEBUG
+            combatLedger.impacts += 1
+            #endif
+        }
+    }
+
     /// v1.9 Forge Path (Unit 2a): route ALL player damage through here so the
     /// Vitality survival nodes apply — the damage-reduction bucket + the
     /// emergency nodes (Second Breath / Unyielding).
@@ -5906,6 +6360,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // matter. v2.1 (CL-5 ruling): inside the 90% ceiling — alone it keeps
         // its full 85%; stacked, it tops out with everything else.
         hit.kaijuActive = kaijuActive
+        // v2.1 A5: Ironhide (CL-52, this frame's count) and Aegis (CL-58) —
+        // percentage reductions inside the shared 90% ceiling.
+        hit.ironhide = ironhideReduction
+        hit.aegis = playerStats.aegisReduction
         hit.flatDEF = playerStats.effectiveFlatDEF
 
         let outcome = PlayerDamagePipeline.resolve(hit, against: playerStats.damageDefender,
@@ -5927,9 +6385,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         player.playHitFeedback(damage: outcome.percentDamage)
         switch outcome.rescue {
-        case .brace, .unbrokenCore:
-            // Unbroken Core's 10s invulnerability / bonus-ATK window lands in A5.
+        case .brace:
             player.playLethalSaveFlash()
+        case .unbrokenCore:
+            openUnbrokenWindow()   // v2.1 A5 (CL-55/56)
         case .none:
             break
         }
@@ -8125,16 +8584,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
-        // v1.4: Self-damage is HP-based instead of losing a lethal save
-        let died = playerStats.takeDamage(playerStats.unstableCoreSelfDamage)
-        hpBar.flashDamage()
-        AudioManager.shared.play(.playerDamage)
-        if died {
-            if player.tryLethalSave() {
-                // Survived — continue
-            } else {
-                playerDied()
-                return
+        // v1.4: Self-damage is HP-based instead of losing a lethal save.
+        // v2.1 A5: Unbroken's full invulnerability covers self-damage too
+        // (CL-55); a lethal self-hit follows the shared rescue order — Brace
+        // first, then Unbroken Core, never both (CL-54).
+        if !playerStats.unbrokenWindow.isActive {
+            let died = playerStats.takeDamage(playerStats.unstableCoreSelfDamage)
+            hpBar.flashDamage()
+            AudioManager.shared.play(.playerDamage)
+            if died {
+                let rescue = PlayerDamagePipeline.lethalRescue(for: playerStats.damageDefender)
+                switch rescue {
+                case .none:
+                    playerDied()
+                    return
+                case .brace, .unbrokenCore:
+                    playerStats.currentHP = 1
+                    playerStats.spendRescue(rescue)
+                    // The same grace every other rescue path gives (review).
+                    damageCooldownTimer = 1.0
+                    if rescue == .unbrokenCore { openUnbrokenWindow() } else { player.playLethalSaveFlash() }
+                    #if DEBUG
+                    combatLedger.recordSelfDamageRescue(rescue)
+                    #endif
+                }
             }
         }
         
@@ -10513,24 +10986,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // before the i-frame guards, because the CONTACT is the outcome.
         (enemyBody.node as? EnemyNode)?.didStrikePlayer()
         (enemyBody.node as? MarchwardenNode)?.chargeConnected()   // v2.1 Unit 3: Right of Way shove
+        // v2.1 A5 (CL-58/59): Harden / Aegis bounce on every real touch-begin —
+        // before the damage guards, and it never creates damage to Spark.
+        guardContactBounce(enemyBody)
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
         if consumeSilverSkin() { return }
 
-        // v1.6: Iron Bloom — attackers take DEF-scaled thorns damage.
-        // Fires before Phase Skin so absorbed hits still bite back.
-        if playerStats.ironBloomActive {
-            if let bossNode = enemyBody.node as? (any ArenaBossNode) {
-                bossNode.takeDamage(playerStats.ironBloomDamage)
-            } else if let enemy = enemyBody.node as? EnemyNode {
-                if enemy.takeDamage(playerStats.ironBloomDamage) {
-                    if let index = enemies.firstIndex(where: { $0 === enemy }) {
-                        enemies.remove(at: index)
-                    }
-                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .retaliation)
-                }
-            }
-        }
+        // (v2.1 A5, CL-60: Iron Bloom's v1.6 contact thorns are retired — it is
+        // a 4s spike pulse now. Thornwall and Iron Maiden keep contact punishment.)
         
         // v1.3: Phase Skin — absorb hit with brief invulnerability
         if playerStats.triggerPhaseSkin() {
@@ -10569,21 +11033,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         AudioManager.shared.play(.playerDamage)
         worldNode.shake(intensity: 6, duration: 0.2)
 
-        // v1.8 Thornwall (Guard 5): reflect a fraction of the contact damage
-        // back to whatever touched you (mirrors the Iron Bloom thorns pattern).
+        // v1.8 Thornwall (Guard 5): reflect the valid contact's pre-mitigation
+        // hit back to whatever touched you. v2.1 A5 (CL-53): 1.50×; an ARENA
+        // boss takes it once through the boss lever (50%), before rounding.
+        // Only a damaging contact reaches here — never an invulnerable one.
         if playerStats.thornsContactReflect > 0 {
-            let reflect = max(1, Int(CGFloat(damage) * playerStats.thornsContactReflect))
-            dealRetaliationDamage(reflect, to: enemyBody)
+            dealRetaliationDamage(GuardRetaliation.thornwall(raw: damage,
+                                                             multiplier: playerStats.thornsContactReflect,
+                                                             isArenaBoss: enemyBody.node is (any ArenaBossNode),
+                                                             bossScale: GameConfig.BossClass.damageScale),
+                                  to: enemyBody)
         }
 
         // v1.9 Iron Maiden (Guard capstone): incoming force → stored punishment.
+        // v2.1 A5 (CL-67): thorns and Retaliate take the capstone boss lever
+        // (50%, once, before rounding) against mini-bosses AND arena bosses.
         if playerStats.ironMaidenTier >= 1 {
+            let bossClass = isBossClass(enemyBody)
             // Thorns — flat bite to the toucher (T1+).
-            dealRetaliationDamage(playerStats.ironThorns, to: enemyBody)
+            dealRetaliationDamage(GuardRetaliation.ironThorns(playerStats.ironThorns, isBossClass: bossClass,
+                                                              bossScale: GameConfig.BossClass.damageScale),
+                                  to: enemyBody)
             // Retaliate — counter for a fraction of pre-mitigation damage (T3+),
             // on a global (not per-enemy) cooldown.
             if playerStats.ironRetaliate > 0 && ironRetaliateCooldown <= 0 {
-                dealRetaliationDamage(Int(CGFloat(damage) * playerStats.ironRetaliate), to: enemyBody)
+                dealRetaliationDamage(GuardRetaliation.ironRetaliate(raw: damage, fraction: playerStats.ironRetaliate,
+                                                                     isBossClass: bossClass,
+                                                                     bossScale: GameConfig.BossClass.damageScale),
+                                      to: enemyBody)
                 ironRetaliateCooldown = GameConfig.IronMaiden.retaliateCooldown
             }
             // Kinetic — build a stack; release the radial burst at threshold (T4+).
@@ -10630,6 +11107,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         projNode.removeFromParent()
 
         guard damageCooldownTimer <= 0 else { return }
+
+        // v2.1 A5 (CL-57): Unbroken Core's shield blocks one hostile projectile,
+        // then rearms (6s). It sits after the i-frame and cooldown guards, so a
+        // projectile that couldn't hurt Spark never spends it; before Silver
+        // Skin and Phase Skin, which it spares.
+        if playerStats.projectileShield.tryBlock(invulnerable: isInvulnerable) {
+            player.flashUnbrokenShieldBlock()
+            showRingPulse(at: projNode.position, radius: 12, colorHex: GameConfig.Guard.goldHex)
+            #if DEBUG
+            combatLedger.recordShieldBlock()
+            #endif
+            return
+        }
         if consumeSilverSkin() { return }
 
         // v1.3: Phase Skin — absorb the hit
@@ -10787,7 +11277,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             enemyNode.applySlow(playerStats.effectiveSlow(playerStats.slowAmount), duration: playerStats.slowDuration)
         }
         if playerStats.knockbackForce > 0 {
-            enemyNode.applyKnockback(from: player.position, force: playerStats.knockbackForce)
+            applyRepulse(to: enemyNode)   // v2.1 A5: the Guard signature (CL-62/63)
         }
         // v1.6: Overload — real stun (was a mislabeled slow)
         rollOverload(on: enemyNode)
@@ -11799,8 +12289,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #endif
         redSmile.reset()
         player.setRedSmile(false)
+        // v2.1 A5: death ends Unbroken's window; Grounded Core keeps its earned
+        // DEF but loses the unfinished interval (CL-65); stances and launches clear.
+        playerStats.unbrokenWindow.end()
+        endUnbrokenWindowPresentation()
+        playerStats.resetGroundedCoreProgress()
+        playerStats.resetFortify()
+        repulseFlights.removeAll()
         #if DEBUG
         NSLog("[A0] run ended  %@", combatLedger.summary)
+        NSLog("[A5] run ended  %@", combatLedger.guardSummary)
         #endif
 
         // v1.9: the killing blow zeroed currentHP, but updateHUD only runs while
@@ -12261,6 +12759,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         combatPresence.reset()
         inActiveCombat = false
         lastMoveDirection = CGPoint(x: 0, y: 1)
+        // v2.1 A5: Guard's scene-side state never carries across runs
+        // (`playerStats.reset()` above cleared the stats half).
+        ironhideReduction = 0
+        ironhideContributors = 0
+        ironhideShown = -1
+        ironhideRing?.removeFromParent()
+        ironhideRing = nil
+        groundedRingShown = -1
+        groundedCoreRing?.removeFromParent()
+        groundedCoreRing = nil
+        repulseFlights.removeAll()
+        endUnbrokenWindowPresentation()
         // `playerDied` hides the countdown rows for the result screen and only a
         // resume or revive showed them again — so after a death + RESTART the
         // RED SMILE row (CL-47) never appeared. A new run shows them.

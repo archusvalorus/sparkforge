@@ -24,14 +24,17 @@ cp "$ROOT/Sparkforge/Systems/BleedState.swift" \
    "$ROOT/Sparkforge/Systems/BurnState.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$ROOT/Sparkforge/Systems/PlayerDamagePipeline.swift" \
+   "$ROOT/Sparkforge/Systems/GuardState.swift" \
    "$ROOT/Sparkforge/Systems/PlayerStats.swift" \
    "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
    "$HERE/main.swift" "$BUILD/"
+sh "$ROOT/tools/signature-draw-harness/extract-guard-config.sh" \
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/GuardConfig.swift"
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
        "$BUILD/BleedState.swift" "$BUILD/KillContext.swift" "$BUILD/FireClock.swift" \
        "$BUILD/BarrierTellState.swift" \
        "$BUILD/StatusDoTs.swift" "$BUILD/BurnState.swift" \
-       "$BUILD/GameTimer.swift" "$BUILD/PlayerDamagePipeline.swift" \
+       "$BUILD/GameTimer.swift" "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/GuardConfig.swift" \
        "$BUILD/PlayerStats.swift" "$BUILD/UpgradeManager.swift"
 "$BUILD/harness"

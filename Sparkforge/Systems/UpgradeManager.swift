@@ -860,14 +860,20 @@ final class UpgradeManager {
         case (.bleed, 7):
             stats.bleedKillHeal = 1                  // Red Harvest (start 1; test 2)
 
-        // GUARD — endure → punish contact → weaponize defense (defensive-first)
+        // GUARD — endure → punish contact → survive and strike back
+        // (v2.1 A5 ladder, closure table §B4)
         case (.guardT, 3):
-            stats.pressureDefBonus = 10             // Ironhide — pressure-DEF ONLY
+            stats.ironhideActive = true             // Ironhide: 9%/nearby hostile, ≤90% (CL-52)
         case (.guardT, 5):
-            stats.thornsContactReflect = 0.30       // Thornwall (start 0.30)
+            stats.thornsContactReflect = GameConfig.Guard.thornwallReflect  // Thornwall 1.50 (CL-53)
         case (.guardT, 7):
-            stats.defAsDamageMult = 0.01 / 3.0      // Unbroken Core: +1% dmg / 3 DEF
-            stats.collisionShrink *= 0.85           // keep the defensive shrink
+            // Unbroken Core (CL-54/57): arm the second rescue + equip the
+            // projectile shield. The old DEF→damage conversion is retired; the
+            // collision shrink stays.
+            stats.unbrokenCoreOwned = true
+            stats.unbrokenRescueAvailable = true
+            stats.projectileShield.grant()
+            stats.collisionShrink *= 0.85
 
         // VOID — pull → contain → collapse (v1.8 5b)
         case (.voidT, 3):
@@ -941,9 +947,9 @@ final class UpgradeManager {
                     SynergyTier(threshold: 5, title: "Exsanguinate", effect: "Enemies below 25% HP take 2× damage"),
                     SynergyTier(threshold: 7, title: "Red Harvest", effect: "Killing a bleeding enemy restores 1 HP")]
         case .guardT:
-            return [SynergyTier(threshold: 3, title: "Ironhide", effect: "Gain DEF while enemies crowd you"),
-                    SynergyTier(threshold: 5, title: "Thornwall", effect: "Enemies that touch you take damage back"),
-                    SynergyTier(threshold: 7, title: "Unbroken Core", effect: "Your DEF fuels damage and steadies your core")]
+            return [SynergyTier(threshold: 3, title: "Ironhide", effect: "Nearby enemies cut damage taken, up to 90%"),
+                    SynergyTier(threshold: 5, title: "Thornwall", effect: "Enemies that touch you take 150% of the hit back"),
+                    SynergyTier(threshold: 7, title: "Unbroken Core", effect: "Survive a lethal hit: 10s invulnerable, +ATK equal to DEF. A shield blocks projectiles.")]
         case .voidT:
             return [SynergyTier(threshold: 3, title: "Undertow", effect: "Void pulls nearby enemies inward"),
                     SynergyTier(threshold: 5, title: "Event Horizon", effect: "Enemies caught in Void struggle to escape"),
@@ -973,9 +979,10 @@ final class UpgradeManager {
         // v2.1 (abilities) — SIGNATURE FLAGS. One per tree, per the signature
         // spec: Kindle / Frost Touch / Arc (→ Chain Lightning in the rework) /
         // Terra are Brandon's confirmed entry points; Bleed's is Bloodthirsty
-        // (v2.1 A4a — the interim Needlepoint is retired). Guard is INTERIM
-        // until its rework lands: Repulse is today's closest "basic attacks
-        // gain a defensive rider". Void's is Phase, the rework's named entry point.
+        // (v2.1 A4a — the interim Needlepoint is retired). Guard's is Repulse,
+        // made PERMANENT by the v2.1 A5 rework (CL-49: battlefield control —
+        // keeping threats away from Spark). Void's is Phase, the rework's named
+        // entry point.
         // The rest of each tree stays UNGATED for now — the `requires`
         // authoring rides the rework pass, one pass over the pool, not two.
 
@@ -1226,43 +1233,66 @@ final class UpgradeManager {
         // 🛡️ GUARD
         // ═══════════════════════════════════
         
+        // v2.1 A5 (Guard rework, closure table §B4): prerequisites ship with
+        // the tree — every card past Repulse `requires` it, Brace and the
+        // capstone included (CL-50). Numbers live in `GameConfig.Guard`.
+
         cards.append(UpgradeCard(
             id: "guard_1", name: "Brace", tag: .guardT,
-            description: "Survive one lethal hit (triggers at 0 HP)"
-        ) { stats in
-            stats.lethalSaves = max(stats.lethalSaves, 1)
-        })
-        
-        // INTERIM signature (see the Fire block's note) — Brandon's Guard
-        // rework notes name no entry point yet; Repulse is today's closest
-        // "basic attacks gain a defensive rider".
+            description: "Survive one lethal hit.",   // A5 gate ruling Q5: the rest lives in MORE
+            apply: { stats in stats.lethalSaves = max(stats.lethalSaves, 1) },
+            detail: "Survive one lethal hit (triggers at 0 HP). Brace saves you first, Unbroken Core second — never both on one hit.",
+            requires: [.guardUnlocked]
+        ))
+
+        // The Guard SIGNATURE (CL-49, permanent): battlefield control — keeping
+        // threats away from Spark. Still projectile-scoped ("Projectiles…"), so
+        // Red Smile's sweeps never carry it (CL-39 / CL-62). T1/T2 shove; T3
+        // launches (CL-63).
+        let shove = GameConfig.Guard.repulseShove
         cards.append(UpgradeCard(
             id: "guard_2", name: "Repulse", tag: .guardT,
             description: "Projectiles knock enemies back",
-            apply: { stats in stats.knockbackForce = 20.0 },
+            apply: { stats in
+                stats.repulseTier = 1
+                stats.knockbackForce += shove[0]
+            },
+            higherTiers: [
+                { stats in
+                    stats.repulseTier = 2
+                    stats.knockbackForce += shove[1] - shove[0]
+                },
+                { stats in stats.repulseTier = 3 }
+            ],
+            tierDescriptions: [
+                "Projectiles knock enemies back",
+                "Knockback goes farther",
+                "Knocked enemies fly and bowl others over"
+            ],
+            detail: "Projectiles knock enemies back 20pt (T2: 60pt). T3: they are launched up to 400pt instead, and each one damages up to 3 enemies it crashes into for 25% ATK. Walls stop them. Mini-bosses are only knocked back 20pt; bosses and snowmen can't be moved.",
             isSignature: true,
             provides: [.guardUnlocked]
         ))
-        
+
         cards.append(UpgradeCard(
             id: "guard_3", name: "Harden", tag: .guardT,
-            description: "Collision radius shrinks 20%"
-        ) { stats in
-            stats.collisionShrink *= 0.80
-        })
-        
-        // v1.9 Unit 3: signature slow ladder (2-tier).
+            description: "Collision radius −30%. Enemies bounce off you",
+            apply: { stats in
+                stats.collisionShrink *= GameConfig.Guard.hardenShrink
+                stats.hardenOwned = true
+            },
+            detail: "Your collision radius shrinks 30%. Enemies that touch you are shoved 40pt away. The bounce never hurts you, but a bounced enemy can come back.",
+            requires: [.guardUnlocked]
+        ))
+
+        // v2.1 A5 (CL-64): the old 2-tier global slow is gone — Fortify is one
+        // tier of temporary DEF for standing still.
         cards.append(UpgradeCard(
             id: "guard_4", name: "Fortify", tag: .guardT,
-            description: "All enemies slowed 8%",
-            apply: { stats in stats.globalEnemySlow += 0.08 },
-            higherTiers: [
-                { stats in stats.globalEnemySlow += 0.08 }
-            ],
-            tierDescriptions: [
-                "All enemies slowed 8%",
-                "Enemies slowed a further 8%"
-            ]
+            description: "Stand still: +2 DEF per second (max 30)",
+            apply: { stats in stats.fortifyOwned = true },
+            detail: "Standing still grants +1 temporary DEF every 0.5s, up to +30. Any movement resets it.",
+            requires: [.guardUnlocked]
         ))
         
         // ═══════════════════════════════════
@@ -1500,14 +1530,16 @@ final class UpgradeManager {
             requires: [.fireUnlocked]
         ))
         
-        // 5. Phase Skin — brief invulnerability on hit
+        // 5. Phase Skin — brief invulnerability on hit (v2.1 A5, CL-66: 3.5s cd)
         cards.append(UpgradeCard(
             id: "v13_phase_skin", name: "Phase Skin", tag: .guardT,
-            description: "Taking damage grants 1s invulnerability (5s cd)"
-        ) { stats in
-            stats.phaseSkinCooldown = 5.0
-            stats.phaseSkinDuration = 1.0
-        })
+            description: "Taking damage grants 1s invulnerability (3.5s cd)",
+            apply: { stats in
+                stats.phaseSkinCooldown = GameConfig.Guard.phaseSkinCooldown
+                stats.phaseSkinDuration = GameConfig.Guard.phaseSkinDuration
+            },
+            requires: [.guardUnlocked]
+        ))
         
         // v2.1 A2: Static Field (`v13_static_field`) REMOVED — Glacial Spikes took
         // its slot. The id is retired, never reused; old Codex records simply stop
@@ -1557,19 +1589,35 @@ final class UpgradeManager {
             requires: [.bleedUnlocked]   // v2.1 A4b
         ))
 
+        // v2.1 A5 (CL-60/61): the 4s pulse moves here from Aegis; the contact
+        // thorns retire. Piercing = ignores flat enemy DEF only.
         cards.append(UpgradeCard(
             id: "v16_iron_bloom", name: "Iron Bloom", tag: .guardT,
-            description: "Attackers take damage scaling with DEF"
-        ) { stats in
-            stats.ironBloomActive = true
-        })
+            description: "Every 4s, iron spikes deal 50% DEF around you",
+            apply: { stats in stats.ironBloomActive = true },
+            detail: "Every 4s, iron spikes strike every enemy within 70pt for 50% of your current DEF (at least 1). Piercing: ignores flat enemy DEF. Walls block the spikes.",
+            requires: [.guardUnlocked]
+        ))
 
+        // v2.1 A5 (CL-58): Aegis Pulse → the Aegis shield (id kept, so Codex
+        // discovery carries over). The % rides the pipeline's `aegis` slot
+        // inside the 90% ceiling; T2+ bounce and spike (shared with Harden).
         cards.append(UpgradeCard(
-            id: "v16_aegis_pulse", name: "Aegis Pulse", tag: .guardT,
-            description: "Pulse every 4s, damage scales with DEF"
-        ) { stats in
-            stats.aegisPulseActive = true
-        })
+            id: "v16_aegis_pulse", name: "Aegis", tag: .guardT,
+            description: "Astral shield: take 25% less damage",
+            apply: { stats in stats.aegisTier = 1 },
+            higherTiers: [
+                { stats in stats.aegisTier = 2 },
+                { stats in stats.aegisTier = 3 }
+            ],
+            tierDescriptions: [
+                "Astral shield: take 25% less damage",
+                "Melee attackers bounce off and take spikes",
+                "Bigger shield: 35% less damage, harder spikes"
+            ],
+            detail: "T1: take 25% less damage. T2: enemies that touch you bounce 40pt and take spikes for 50% of your current DEF. T3: 35% less damage; they bounce 70pt and the spikes deal 75% DEF. Shares the 90% damage-reduction cap.",
+            requires: [.guardUnlocked]
+        ))
 
         // ═══════════════════════════════════
         // 🌱 GROWTH  (v2.0 Phase C)
@@ -1798,12 +1846,14 @@ final class UpgradeManager {
             stats.voidZoneDurationMultiplier += 0.5
         })
 
+        // v2.1 A5 (CL-65): permanent DEF for holding ground in combat.
         cards.append(UpgradeCard(
             id: "v17_grounded_core", name: "Grounded Core", tag: .guardT,
-            description: "Standing still builds DEF"
-        ) { stats in
-            stats.groundedCoreActive = true
-        })
+            description: "In combat, stand still: +1 DEF per 7.5s (max 30)",
+            apply: { stats in stats.groundedCoreActive = true },
+            detail: "Each uninterrupted 7.5s standing still in combat grants +1 DEF, permanent for the run (up to +30). Moving or leaving combat resets progress toward the next point.",
+            requires: [.guardUnlocked]
+        ))
 
         // ═══════════════════════════════════
         // v1.8 Unit 5b — rehome cards: preserve mechanics the synergy rework
@@ -1855,12 +1905,13 @@ final class UpgradeManager {
             requires: [.bleedUnlocked]
         ))
 
+        // v2.1 A5 (CL-50): the Guard → Void bridge sits behind Guard only.
         cards.append(UpgradeCard(
             id: "v18_silver_skin", name: "Silver Skin", tag: .guardT, secondaryTag: .voidT,
-            description: "After a level-up, block the next hit."
-        ) { stats in
-            stats.hasSilverSkin = true
-        })
+            description: "After a level-up, block the next hit.",
+            apply: { stats in stats.hasSilverSkin = true },
+            requires: [.guardUnlocked]
+        ))
 
         cards.append(UpgradeCard(
             id: "v18_fracture_shot", name: "Fracture Shot", tag: .neutral,
@@ -1968,10 +2019,14 @@ final class UpgradeManager {
                 "Iron Skin: DEF fuels damage; +5% DEF; Thorns bite touchers",
                 "Barbed Armor: Thorns +250%; more DEF→damage",
                 "Retaliate: counter attackers for 150% of the hit",
-                "Kinetic Reserve: hits store energy; release a 200% DEF burst at 5",
+                "Kinetic Reserve: hits store energy; release a 200% DEF burst at 4",
                 "Iron Maiden: +15% DEF; every 20s fire stored energy at a priority foe"
             ],
-            isCapstone: true
+            // v2.1 A5: the T4/T5 faces overflow the card; the full ladder lives
+            // here. T4's threshold corrected to the config's 4 (CL-67).
+            detail: "T1 Iron Skin: DEF fuels damage, +5% DEF, and thorns bite enemies that touch you. T2 Barbed Armor: thorns +250%, more DEF→damage. T3 Retaliate: counter attackers for 150% of the hit (1s cooldown). T4 Kinetic Reserve: damaging hits store energy; release a 200% DEF burst at 4. T5 Iron Maiden: +15% DEF; every 20s fire the stored energy at a priority foe. Bosses and mini-bosses take 50% less thorn and Retaliate damage.",
+            isCapstone: true,
+            requires: [.guardUnlocked]   // v2.1 A5 (CL-50)
         ))
 
         // ⚡ Skybeam — designate prey; call judgment from above.

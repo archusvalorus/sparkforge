@@ -228,6 +228,77 @@ struct CombatLedger {
         }
     }
 
+    // v2.1 A5: Guard (closure table §B4) — Ironhide contributors, Fortify and
+    // Grounded Core gains, Unbroken windows and shield blocks, Iron Bloom,
+    // bounces and spikes, Repulse launches and impacts, self-damage rescues.
+    private(set) var ironhideMax = 0
+    private(set) var fortifyMax = 0
+    private(set) var groundedPoints = 0
+    private(set) var unbrokenWindows = 0
+    private(set) var unbrokenLastBonus: CGFloat = 0
+    private(set) var shieldBlocks = 0
+    private(set) var ironBloomPulses = 0
+    private(set) var ironBloomHits = 0
+    private(set) var selfDamageRescues = 0
+    var bounces = 0
+    var aegisSpikes = 0
+    var launches = 0
+    /// Launches that actually left the ground (the shot didn't kill the body).
+    var launchesFlown = 0
+    var launchWallStops = 0
+    var launchCarrierStops = 0
+    var ironBloomTerrainBlocks = 0
+    var impacts = 0
+
+    mutating func recordIronhide(contributors: Int) {
+        guard contributors > ironhideMax else { return }
+        ironhideMax = contributors
+        NSLog("[A5] Ironhide reached %d contributors (%.0f%%)", contributors,
+              Double(min(contributors, 10)) * 9)
+    }
+    mutating func recordFortify(_ temporaryDEF: Int) {
+        guard temporaryDEF > fortifyMax else { return }
+        fortifyMax = temporaryDEF
+        if temporaryDEF % 10 == 0 { NSLog("[A5] Fortify reached +%d DEF", temporaryDEF) }
+    }
+    mutating func recordGroundedPoint(total: Int) {
+        groundedPoints = total
+        NSLog("[A5] Grounded Core banked a point (total +%d)", total)
+    }
+    mutating func recordUnbrokenWindow(def: Int, atk: CGFloat, bonus: CGFloat) {
+        unbrokenWindows += 1
+        unbrokenLastBonus = bonus
+        NSLog("[A5] Unbroken window opened: DEF %d / ATK %.1f → +%.2f multiplier for 10s", def, Double(atk), Double(bonus))
+    }
+    mutating func recordShieldBlock() {
+        shieldBlocks += 1
+        NSLog("[A5] projectile shield blocked #%d", shieldBlocks)
+    }
+    mutating func recordIronBloom(hits: Int, damage: Int) {
+        ironBloomPulses += 1
+        ironBloomHits += hits
+        if ironBloomPulses <= 3 { NSLog("[A5] Iron Bloom pulse %d: %d hit for %d", ironBloomPulses, hits, damage) }
+    }
+    mutating func recordSelfDamageRescue(_ rescue: PlayerDamagePipeline.Rescue) {
+        selfDamageRescues += 1
+        switch rescue {
+        case .brace: braceRescues += 1
+        case .unbrokenCore: unbrokenRescues += 1
+        case .none: break
+        }
+        NSLog("[A5] Unstable Core self-damage was lethal → %@", rescue == .brace ? "Brace" : "Unbroken Core")
+    }
+
+    var guardSummary: String {
+        "guard[ironhideMax=\(ironhideMax) fortifyMax=\(fortifyMax) grounded=\(groundedPoints) "
+            + "windows=\(unbrokenWindows) bonus=\(String(format: "%.2f", Double(unbrokenLastBonus))) "
+            + "shieldBlocks=\(shieldBlocks) bloom=\(ironBloomPulses)/\(ironBloomHits) "
+            + "bounces=\(bounces) spikes=\(aegisSpikes) launches=\(launches)/flown=\(launchesFlown) "
+            + "stops[wall=\(launchWallStops) carrier=\(launchCarrierStops)] impacts=\(impacts) "
+            + "bloomTerrain=\(ironBloomTerrainBlocks) "
+            + "selfRescues=\(selfDamageRescues) impactKills=\(kills[.impact] ?? 0)]"
+    }
+
     mutating func recordDuplicate(_ source: KillSource) {
         duplicateCredits += 1
         NSLog("[A0] duplicate kill credit rejected (%@)  %@", source.rawValue, summary)

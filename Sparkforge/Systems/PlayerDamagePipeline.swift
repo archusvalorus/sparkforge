@@ -59,9 +59,9 @@ enum PlayerDamagePipeline {
         var forgeBucket: CGFloat = 0
         /// Unyielding owned AND off cooldown.
         var unyieldingReady = false
-        /// Ironhide % (A5 rework: crowd-scaled 0…0.90). 0 until A5.
+        /// Ironhide % (v2.1 A5, CL-52): 9% per qualifying nearby hostile, ≤ 0.90.
         var ironhide: CGFloat = 0
-        /// Aegis shield % (A5 rework: 0 / 0.25 / 0.35). 0 until A5.
+        /// Aegis shield % (v2.1 A5, CL-58): 0 / 0.25 / 0.25 / 0.35 by tier.
         var aegis: CGFloat = 0
         var kaijuActive = false
         /// DEF plus every temporary/conditional flat DEF source.
@@ -75,7 +75,7 @@ enum PlayerDamagePipeline {
         var barrier: Int = 0
         /// Brace (guard_1) has a save left.
         var braceAvailable = false
-        /// Unbroken Core's once-per-run rescue is armed (A5).
+        /// Unbroken Core's once-per-run rescue is armed (Guard ×7, v2.1 A5).
         var unbrokenAvailable = false
     }
 
@@ -110,6 +110,16 @@ enum PlayerDamagePipeline {
         var isHit: Bool { damage > 0 }
         /// Fully absorbed by Blood Barrier: a hit, but nothing reached health.
         var barrierOnly: Bool { damage > 0 && toHP == 0 }
+    }
+
+    /// Which rescue a lethal result spends: Brace first, then Unbroken Core,
+    /// never both on one lethal event (Q-G1). The ONE ordering rule — v2.1 A5
+    /// (CL-54): Unstable Core's self-damage, which doesn't resolve through
+    /// the pipeline, asks this too.
+    static func lethalRescue(for defender: Defender) -> Rescue {
+        if defender.braceAvailable { return .brace }
+        if defender.unbrokenAvailable { return .unbrokenCore }
+        return .none
     }
 
     static func resolve(_ hit: Hit, against defender: Defender, tuning: Tuning) -> Outcome {
@@ -149,13 +159,8 @@ enum PlayerDamagePipeline {
         let wasLethal = toHP > 0 && hp <= 0
         var rescue = Rescue.none
         if wasLethal {
-            if defender.braceAvailable {
-                rescue = .brace
-                hp = 1
-            } else if defender.unbrokenAvailable {
-                rescue = .unbrokenCore
-                hp = 1
-            }
+            rescue = lethalRescue(for: defender)
+            if rescue != .none { hp = 1 }
         }
         let died = wasLethal && rescue == .none
         if hp < 0 { hp = 0 }

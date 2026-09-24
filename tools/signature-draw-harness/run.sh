@@ -16,9 +16,12 @@ trap 'rm -rf "$BUILD"' EXIT
 cp "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/Sparkforge/Systems/PlayerStats.swift" \
    "$ROOT/Sparkforge/Systems/PlayerDamagePipeline.swift" \
+   "$ROOT/Sparkforge/Systems/GuardState.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$HERE/Stubs.swift" "$HERE/main.swift" "$BUILD/"
+sh "$ROOT/tools/signature-draw-harness/extract-guard-config.sh" \
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/GuardConfig.swift"
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
        "$BUILD/UpgradeManager.swift" "$BUILD/PlayerStats.swift" \
-       "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GameTimer.swift"
+       "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/GuardConfig.swift" "$BUILD/GameTimer.swift"
 "$BUILD/harness"

@@ -81,10 +81,14 @@ final class StatHUDNode: SKNode {
     /// Refresh from live stats. Cheap — safe to call every frame.
     func update(from stats: PlayerStats) {
         // Effective per-shot attack: (base + HP-fed ATK) × the build multiplier,
-        // including DEF→damage conversions (Unbroken Core, Iron Skin) so a
-        // shield/DEF build sees its ATK climb as DEF is stacked.
+        // including the DEF→damage conversion (Iron Skin) so a shield/DEF build
+        // sees its ATK climb as DEF is stacked — and Unbroken Core's 10s window
+        // (+ATK equal to the snapped DEF, v2.1 A5).
         atkRow.set("\(stats.displayAttack)")
-        defRow.set("\(stats.defense)")
+        // v2.1 A5 (CL-51): base DEF (Grounded Core's banked points included),
+        // with the temporary part — Fortify, Deeproot's ground — as "+N".
+        let temp = stats.temporaryDEF
+        defRow.set(temp > 0 ? "\(stats.defense) +\(temp)" : "\(stats.defense)")
         // Shots per second from the effective interval.
         let shotsPerSec = stats.effectiveFireInterval > 0 ? 1.0 / stats.effectiveFireInterval : 0
         atkSpdRow.set(String(format: "%.1f/s", shotsPerSec))
