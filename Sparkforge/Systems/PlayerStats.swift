@@ -743,9 +743,10 @@ final class PlayerStats {
     /// v2.1 A4b Glass Blood (reworked): Bleed-killed enemies burst into fragments.
     var glassBloodActive = false
 
-    /// Red Smile (Bleed): below the HP threshold, bleed deals more.
-    var bleedLowHpBonus: CGFloat = 1.0           // 1.0 = no bonus
-    var bleedLowHpThreshold: CGFloat = 0.5
+    /// v2.1 A4c Red Smile (Bleed/Void bridge): the Thing From Below form. The
+    /// scene owns its clocks (`RedSmileState`); this only says it's owned.
+    /// (Replaces the legacy low-HP Bleed bonus.)
+    var redSmileOwned = false
 
     /// Silver Skin (Guard/Void): a level-up arms a one-hit block.
     var hasSilverSkin: Bool = false
@@ -1314,8 +1315,7 @@ final class PlayerStats {
         echoDamageMultiplier = 0.5
         echoDelay = 0.15
         glassBloodActive = false
-        bleedLowHpBonus = 1.0
-        bleedLowHpThreshold = 0.5
+        redSmileOwned = false
         hasSilverSkin = false
         silverSkinArmed = false
         splitCount = 0

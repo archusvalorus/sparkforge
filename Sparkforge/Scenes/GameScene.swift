@@ -395,6 +395,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v2.1 A4b (CL-23): the auto-attack cadence — carries the leftover
     /// partial frame, with bounded catch-up and no debt while idle or paused.
     private var fireClock = FireClock()
+
+    /// v2.1 A4c (CL-33): the ONE shared "active combat" state — a hittable
+    /// hostile exists anywhere in the encounter, with a 0.5s linger. Red Smile
+    /// reads it now; Grounded Core (A5) will too.
+    private var combatPresence = CombatPresence(linger: GameConfig.Combat.activeLinger)
+    private(set) var inActiveCombat = false
+    /// v2.1 A4c: Red Smile's cycle, form and melee clock (CL-34/42/44).
+    private var redSmile = RedSmileState(tuning: .init(period: GameConfig.RedSmile.cyclePeriod,
+                                                       duration: GameConfig.RedSmile.formDuration))
     
     // MARK: - Invulnerability (post-revive)
     
@@ -3298,6 +3307,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func beginKaiju() {
         guard kaijuRemaining <= 0 else { return }
         kaijuRemaining = GameConfig.Panda.kaijuDuration
+        // v2.1 A4c (CL-44): the kaiju has priority — a live Red Smile form ends
+        // on the spot (its cycle pauses while the kaiju is up, then resumes).
+        if redSmile.interrupt() { endRedSmileForm(interrupted: true) }
         kaijuHitTimer = 0
         kaijuMeleeTimer = 0
         playerStats.kaijuMoveScale = GameConfig.Panda.kaijuMoveScale
@@ -4707,6 +4719,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         playerStats.updateGroundedCore(isMoving: joystick.direction.length > 0.15, dt: dt)
         updateGroundedCoreRing()
         updateEnemies(dt)
+        updateActiveCombat(dt)   // v2.1 A4c (CL-33) — after this frame's DoT deaths
+        updateRedSmile(dt)       // v2.1 A4c — before the gun, which it pauses
         updateAutoAttack(dt)
         updateProjectiles(dt)
         updateEnemyProjectiles(dt)
@@ -4936,12 +4950,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 && enemy.position.distance(to: player.position) < playerStats.pressureDefRadius {
                 crowdCount += 1
             }
-
-            // v1.8 (Unit 14): situational bleed scaling — legacy Red Smile
-            // (player below the HP threshold) until its A4c rework. 1.0 unless
-            // owned. (Glass Blood's vs-slowed bonus retired with its A4b rework.)
-            enemy.bleedDamageMultiplier = playerStats.hpPercent < playerStats.bleedLowHpThreshold
-                ? playerStats.bleedLowHpBonus : 1.0
 
             // v2.1 A4a: a DoT death names its channel (Burn or Bleed).
             // v2.1 A4b: Open Wounds rides the DoT ticks, before rounding (CL-25).
@@ -5203,6 +5211,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // leaving projectiles running would undercut the whole transformation,
         // and it's the difference between "a big Spark" and a rampage.
         guard !kaijuActive else { return }
+        // v2.1 A4c (CL-43): the same for Red Smile's form — returning before
+        // the clock advances FREEZES its remainder (no shot debt), and the gun
+        // resumes from exactly there when the form ends. Only the auto-attack
+        // stops: `fireProjectile` itself stays open for echoes, fragments,
+        // turrets and every other independent source.
+        guard !redSmile.formActive else { return }
 
         // v2.1 A4b: ONE shared firing calculation (CL-22) — Frenzy, Berserk and
         // Bloodlust live inside `effectiveFireInterval` beside Bloodrush.
@@ -5222,6 +5236,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // shared here so future spread content wires into one place instead of
         // its own branch that would need separate tuning later.
         fireShotSpread(count: shotCount, baseDirection: baseDirection)
+        #if DEBUG
+        combatLedger.gunVolleys += 1   // A4c proof: must not move while Red Smile's form holds
+        #endif
     }
 
     /// The canonical multishot/spread pattern (v1.9). Shape scales by count,
@@ -10944,6 +10961,328 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too
     }
 
+    // MARK: - v2.1 A4c: shared hittability + active combat (CL-33, CL-40)
+
+    /// The ONE hittability predicate: alive and not momentarily out of the
+    /// world (a phased PaneStalker, the vanished Faceted Lie). Used by effects
+    /// that must respect presence — Red Smile's sweep — and by active combat.
+    /// (The gun's physics contact already can't land on either; its TARGETING
+    /// of them is unchanged in A4c.)
+    private func isHittable(_ enemy: EnemyNode) -> Bool {
+        !enemy.isDying && !enemy.isIntangible
+    }
+    private func isHittable(_ boss: any ArenaBossNode) -> Bool {
+        !boss.isDead && !boss.isIntangible
+    }
+
+    /// CL-33: active combat = at least one hittable hostile exists in the
+    /// encounter — distance, line of sight and gun range don't matter (hiding
+    /// behind the Carrier is not leaving combat). Holds 0.5s after the last one.
+    private func updateActiveCombat(_ dt: TimeInterval) {
+        var present = enemies.contains { isHittable($0) }
+        if !present, let b = boss { present = isHittable(b) }
+        inActiveCombat = combatPresence.update(dt, hostilePresent: present)
+    }
+
+    // MARK: - v2.1 A4c: Red Smile — the Thing From Below (Bleed/Void bridge)
+    //
+    // Rulings: closure table §B3 (CL-33…CL-48). Every 10s of active combat
+    // (start-to-start) Spark transforms for 3s; the gun's auto-attack pauses
+    // with its clock frozen, and a melee sweep lands on the form's first frame
+    // and then at the shared attack interval — in the direction he last moved.
+    // A sweep is a primary ATTACK: every body it strikes takes a primary hit,
+    // but a swing is never a shot or a projectile (CL-39).
+
+    private func updateRedSmile(_ dt: TimeInterval) {
+        guard playerStats.redSmileOwned else { return }
+        let step = redSmile.tick(dt, inCombat: inActiveCombat, kaijuActive: kaijuActive,
+                                 swingInterval: playerStats.effectiveFireInterval)
+        if step.formEnded { endRedSmileForm(interrupted: false) }
+        if step.formStarted { beginRedSmileForm() }
+        if step.swings > 0 { redSmileSwing() }
+
+        if redSmile.formActive { player.updateRedSmileFacing(MeleeSector.unit(lastMoveDirection)) }
+        refreshRedSmileRow()
+    }
+
+    /// The countdown row (CL-47): the time to the next form, or what's left of
+    /// this one. A cycle that isn't moving (a lull, the kaiju) holds still
+    /// rather than flashing "urgent". Short labels: the row shares its height
+    /// with the level-up "CHOOSE A STAT" header (it overlapped at 16 chars).
+    private func refreshRedSmileRow() {
+        guard playerStats.redSmileOwned else { return }
+        if redSmile.formActive {
+            capstoneTimers.set("redsmile", label: "RED SMILE!",
+                               colorHex: GameConfig.RedSmile.crimsonHex, remaining: redSmile.formRemaining)
+        } else {
+            capstoneTimers.set("redsmile", label: "RED SMILE", colorHex: 0xB85A66,
+                               remaining: redSmile.timeToNextForm,
+                               pulses: inActiveCombat && !kaijuActive)
+        }
+    }
+
+    private func beginRedSmileForm() {
+        player.setRedSmile(true, facing: MeleeSector.unit(lastMoveDirection),
+                           reach: GameConfig.RedSmile.reach, halfAngle: GameConfig.RedSmile.halfAngle)
+        AudioManager.shared.play(.bossExecute)
+        #if DEBUG
+        combatLedger.redSmileFormBegan(interval: playerStats.effectiveFireInterval)
+        #endif
+    }
+
+    /// Tear the form down. `interrupted` = the kaiju ended it early (CL-44).
+    private func endRedSmileForm(interrupted: Bool) {
+        player.setRedSmile(false)
+        refreshRedSmileRow()   // the kaiju can begin from a card pick, with update() paused
+        #if DEBUG
+        combatLedger.redSmileFormEnded(reason: interrupted ? "kaiju" : "expired")
+        #endif
+    }
+
+    /// One sweep. Bodies are collected first (hits can kill, and kills mutate
+    /// `enemies`), nearest first, then struck one by one — re-checking each,
+    /// since an earlier hit's Overkill or Shatter may already have felled it.
+    private func redSmileSwing() {
+        let origin = player.position
+        let facing = MeleeSector.unit(lastMoveDirection)
+        let reach = GameConfig.RedSmile.reach
+        let half = GameConfig.RedSmile.halfAngle
+        player.redSmileSwing(facing: facing, reach: reach, halfAngle: half)
+        #if DEBUG
+        combatLedger.redSmileSwingBegan()
+        #endif
+
+        // CL-38: the Carrier blocks the sweep like any direct attack —
+        // independent of Void affinity. EXACT test: the stepped
+        // `segmentBlocked` only checks the endpoints of a segment this short,
+        // so a sweep round the Carrier's rounded ends would never be blocked.
+        func blocked(_ target: CGPoint) -> Bool {
+            arenaGeometry.segmentBlockedExact(origin, target,
+                                              travelRadius: GameConfig.Geometry.projectileTravelRadius)
+        }
+        func inArc(_ center: CGPoint, _ radius: CGFloat) -> Bool {
+            MeleeSector.overlaps(origin: origin, facing: facing, halfAngle: half, reach: reach,
+                                 center: center, radius: radius)
+        }
+
+        var struck: [EnemyNode] = []
+        for enemy in enemies where !enemy.isDying && inArc(enemy.position, enemy.hitBodyRadius) {
+            if enemy.isIntangible {
+                #if DEBUG
+                combatLedger.redSmileIntangibleSkips += 1
+                #endif
+                continue
+            }
+            if blocked(enemy.position) {
+                #if DEBUG
+                combatLedger.redSmileTerrainBlocks += 1
+                #endif
+                continue
+            }
+            struck.append(enemy)
+        }
+        struck.sort { $0.position.distance(to: origin) < $1.position.distance(to: origin) }
+
+        // Forge Path Calculated Strike: "Every 5th direct attack is a guaranteed
+        // crit". A swing is ONE direct attack (as each gun pellet is one), and a
+        // guaranteed-crit swing crits everything it strikes — as a critting
+        // piercing shot does. Empty swings are attacks too.
+        var guaranteedCrit = false
+        if playerStats.forgeCalculatedStrike {
+            forgeCalcStrikeCount += 1
+            guaranteedCrit = forgeCalcStrikeCount % 5 == 0
+        }
+
+        var chainSource: (enemy: EnemyNode, damage: Int)?
+        var enemyHits = 0
+        for enemy in struck where isHittable(enemy) {
+            enemyHits += 1
+            if let dealt = redSmileHit(enemy, guaranteedCrit: guaranteedCrit), chainSource == nil {
+                chainSource = (enemy, dealt)
+            }
+        }
+
+        var bossHit = false
+        if let b = boss, !b.isDead, inArc(b.position, b.hitBodyRadius) {
+            if b.isIntangible {
+                #if DEBUG
+                combatLedger.redSmileIntangibleSkips += 1
+                #endif
+            } else if blocked(b.position) {
+                #if DEBUG
+                combatLedger.redSmileTerrainBlocks += 1
+                #endif
+            } else {
+                redSmileHitBoss(b, guaranteedCrit: guaranteedCrit)
+                bossHit = true
+            }
+        }
+
+        // CL-39: Chain Lightning ("Hits chain…") fires AT MOST ONCE per swing,
+        // however many bodies it struck — from the nearest enemy hit, at that
+        // hit's damage (a lethal hit still chains, as for the gun).
+        var chained = false
+        if playerStats.chainTargets > 0, let source = chainSource {
+            chainLightning(from: source.enemy, primaryDamage: source.damage)
+            chained = true
+        }
+        #if DEBUG
+        combatLedger.redSmileSwing(enemyHits: enemyHits, bossHit: bossHit, chained: chained)
+        #endif
+    }
+
+    /// One primary hit on an enemy (CL-36/37/39). Returns the hit's damage when
+    /// it may seed the swing's single Chain Lightning, or nil for a Shatter
+    /// (which, exactly as for the gun, ends the hit and never chains).
+    ///
+    /// Classified by each effect's text (CL-39) — carried: crit (+Lucky Break),
+    /// the executes, Permafrost, Brittle Cold, Open Wounds, the Forge offense
+    /// (per-hit charges and Relentless as usual), Overload and Whiteout ("Hits…"),
+    /// Shatter ("…when struck"), Overkill, the Apex/Erasure hit meters, and the
+    /// guaranteed Bleed, and Calculated Strike (counted per swing by the
+    /// caller). NOT carried: Kindle, Frost Touch and Repulse ("Projectiles…"),
+    /// Seed Spore Shot ("Your shots…"), and every shot counter or effect that
+    /// spawns extra projectiles because a shot occurred (Storm Engine, Glacial
+    /// Condensation, Erasure Echo, Fracture, Mirror Edge's echo).
+    private func redSmileHit(_ enemy: EnemyNode, guaranteedCrit: Bool) -> Int? {
+        // CL-37: Void damage — its ONE special consequence is that the
+        // Braceguard's directional shield doesn't halve it. The shield still
+        // flashes; it just doesn't stop the Void.
+        if let braceguard = enemy as? BraceguardNode, braceguard.blocksHit(from: player.position) {
+            braceguard.flashShield()
+            #if DEBUG
+            combatLedger.redSmileVoidBypasses += 1
+            #endif
+        }
+
+        // CL-36: 2× the CURRENT shot damage, read live (not 200% ATK).
+        var damage = playerStats.shotFractionDamage(GameConfig.RedSmile.damageFraction)
+
+        // Crit rolls per target, at the swing (a sweep has no fire-time roll).
+        if guaranteedCrit || CGFloat.random(in: 0...1) < playerStats.critChance {
+            damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
+            if playerStats.forgeLuckyBreak && CGFloat.random(in: 0...1) < 0.10 {
+                damage = Int(CGFloat(damage) * 1.5)   // Lucky Break
+            }
+        }
+        // The damage-taken chain, exactly as a projectile hit builds it.
+        let execute = playerStats.executeMultiplier(healthPercent: enemy.healthPercent)
+        if execute > 1 { damage = Int(CGFloat(damage) * execute) }
+        if playerStats.slowedDamageBonus > 0 && (enemy.isSlowed || playerStats.globalEnemySlow > 0) {
+            damage = Int(CGFloat(damage) * (1.0 + playerStats.slowedDamageBonus))      // Permafrost
+        }
+        if playerStats.brittleCold && (enemy.isSlowed || enemy.isFrozen || enemy.isStunned) {
+            damage = Int(CGFloat(damage) * GameConfig.PolarVortex.brittleColdVuln)     // Brittle Cold
+        }
+        if playerStats.bleedingEnemyDamageTaken > 0 && enemy.isBleeding {
+            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))  // Open Wounds
+        }
+        damage = applyForgeOffense(damage,
+                                   healthPercent: enemy.healthPercent,
+                                   bossClass: enemy.isMiniBoss,
+                                   impaired: enemy.isSlowed || enemy.isFrozen || enemy.isStunned,
+                                   relentlessTarget: enemy)
+
+        rollOverload(on: enemy)   // Overload: "Hits have a 20% chance to stun"
+
+        // Shatter: "Frozen enemies burst when struck" — the gun's execute, as is.
+        if playerStats.shatterChance > 0 && enemy.isSlowed {
+            let totalSlow = enemy.currentSlow + playerStats.globalEnemySlow
+            if totalSlow >= playerStats.shatterSlowThreshold &&
+               CGFloat.random(in: 0...1) < playerStats.shatterChance {
+                if enemy.takeDamage(enemy.health) {
+                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .melee)
+                }
+                // A landed Shatter is still a primary hit: its ONE meter
+                // registration, then out — it never seeds the swing's chain.
+                chargeRedSmileHitMeters(.shatter)
+                return nil
+            }
+        }
+
+        let hpBefore = enemy.health
+        let killed = enemy.takeDamage(damage)
+
+        // Forge Path Overkill: "On kill, excess damage bursts to nearby foes".
+        if killed, playerStats.forgeOverkill {
+            let excess = damage - max(0, hpBefore)
+            if excess > 0 {
+                let transfer = min(Int(CGFloat(excess) * 0.25), Int(playerStats.effectiveAttack * 2))
+                if transfer > 0 {
+                    damageEnemiesInRadius(GameConfig.ForgePath.holdLineRadius, around: enemy.position,
+                                          damage: transfer, bossClassScaled: true)
+                }
+            }
+        }
+
+        if killed {
+            // A primary root for any kill-conditioned effect (Iceburst gen 0).
+            onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .melee)
+        } else {
+            // CL-36: EVERY survivor bleeds — a fresh primary root (generation 0,
+            // CL-28). Survivors only, so "bleeding before the killing damage"
+            // keeps its meaning. (It covers Bloodthirsty's primary-hit roll.)
+            if enemy.applyBleed(tickDamage: playerStats.bleedTickDamage) { noteBleedStarted() }
+            // Whiteout: "Hits have a 12% chance to make a snowman".
+            if playerStats.whiteoutTier >= 1,
+               CGFloat.random(in: 0...1) < GameConfig.Chill.snowmanChance,
+               enemy.becomeSnowman(duration: playerStats.snowmanDuration,
+                                   meltsOnDamage: playerStats.whiteoutTier >= 3) {
+                #if DEBUG
+                combatLedger.snowmen += 1
+                #endif
+            }
+        }
+        chargeRedSmileHitMeters(.enemy)
+        return damage
+    }
+
+    /// One primary hit on the arena boss — the gun's boss path, minus what is
+    /// projectile-only (Kindle). The Boss Mode DEF dial applies, as to any
+    /// ordinary direct hit (CL-36); there's no special boss penalty.
+    private func redSmileHitBoss(_ bossNode: any ArenaBossNode, guaranteedCrit: Bool) {
+        var damage = playerStats.shotFractionDamage(GameConfig.RedSmile.damageFraction)
+        if guaranteedCrit || CGFloat.random(in: 0...1) < playerStats.critChance {
+            damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
+            if playerStats.forgeLuckyBreak && CGFloat.random(in: 0...1) < 0.10 {
+                damage = Int(CGFloat(damage) * 1.5)
+            }
+        }
+        let execute = playerStats.executeMultiplier(healthPercent: bossNode.healthPercent)
+        if execute > 1 { damage = Int(CGFloat(damage) * execute) }
+        if playerStats.bleedingEnemyDamageTaken > 0 && bossStatus.bleed.isBleeding {
+            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
+        }
+        damage = applyForgeOffense(damage, healthPercent: bossNode.healthPercent,
+                                   bossClass: true, impaired: false, relentlessTarget: nil)
+        // A kill is credited by the boss's own `onLethalHit` chokepoint.
+        bossNode.takeDamage(damage)
+        inflictBossBleed(generation: 0)   // survivors only — guarded inside
+        chargeRedSmileHitMeters(.boss)    // Apex AND Erasure (corrective F1)
+    }
+
+    /// CL-39 (corrective F1/F2): every LANDED Red Smile contact — an ordinary
+    /// enemy hit, a Shatter or the boss — gives each hit meter ONE registration
+    /// opportunity, through the meters' existing methods: The Hunter ("hits …
+    /// charge a gauge") and Unstable ("your hits charge the void"). Their own
+    /// cooldown and capacity stay authoritative. Every contact site ends here,
+    /// so no branch can return past the meters again.
+    private func chargeRedSmileHitMeters(_ contact: RedSmileContact) {
+        #if DEBUG
+        let apexBefore = apexPounceStacks, erasureBefore = erasureStacks
+        let apexEligible = playerStats.apexHunter && apexStackTimer <= 0
+            && apexPounceStacks < GameConfig.Apex.pounceGaugeCapacity
+        let erasureEligible = playerStats.erasureActive && erasureStackTimer <= 0
+            && erasureStacks < GameConfig.Erasure.unstableGaugeCapacity
+        #endif
+        contact.chargeHitMeters(apex: { apexRegisterAttack() }, erasure: { erasureRegisterHit() })
+        #if DEBUG
+        combatLedger.redSmileMeterCharge(contact,
+                                         apexEligible: apexEligible, apexGained: apexPounceStacks - apexBefore,
+                                         erasureEligible: erasureEligible, erasureGained: erasureStacks - erasureBefore)
+        #endif
+    }
+
     // MARK: - v2.1 A4b: Glass Blood + boss Bleed
 
     /// Remove a projectile that hit (if it doesn't pierce on).
@@ -11100,15 +11439,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let b = boss else { return }
         // A dying boss's row leaves with its HP bar instead of freezing on the corpse.
         guard !b.isDead else { retireBossStatusTell(); return }
-        // Red Smile's legacy low-HP Bleed bonus (1.0 unless owned) — reworked in A4c.
-        let bleedMultiplier = playerStats.hpPercent < playerStats.bleedLowHpThreshold
-            ? playerStats.bleedLowHpBonus : 1.0
         // The state as this step BEGINS — the final Bleed tick can end the
         // Bleed and kill in the same step (Lyra correction 4).
         let wasBleeding = bossStatus.bleed.isBleeding
         let wasGeneration = bossStatus.bleed.generation
         var status = bossStatus
-        let pay = status.tick(dt, scale: GameConfig.BossClass.dotScale, bleedMultiplier: bleedMultiplier,
+        let pay = status.tick(dt, scale: GameConfig.BossClass.dotScale,
                               openWounds: playerStats.bleedingEnemyDamageTaken,
                               burnDecayInterval: GameConfig.Fire.burnStackDecayInterval,
                               bleedInterval: GameConfig.Bleed.tickInterval)
@@ -11456,6 +11792,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func playerDied() {
         guard gameState == .playing else { return }
         gameState = .dead
+        // v2.1 A4c (CL-34): death ends the form and zeroes the cycle — a revive
+        // starts it over (restart does too).
+        #if DEBUG
+        if redSmile.formActive { combatLedger.redSmileFormEnded(reason: "death") }
+        #endif
+        redSmile.reset()
+        player.setRedSmile(false)
         #if DEBUG
         NSLog("[A0] run ended  %@", combatLedger.summary)
         #endif
@@ -11910,6 +12253,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         waveManager.reset()
         adReviveManager.reset()
         fireClock.reset()
+        // v2.1 A4c: a new run — no form, a fresh cycle, out of combat, and
+        // facing back to its deterministic up-screen default (CL-35: facing
+        // must never carry across restarts). `player.reset()` above already
+        // dropped the form's body.
+        redSmile.reset()
+        combatPresence.reset()
+        inActiveCombat = false
+        lastMoveDirection = CGPoint(x: 0, y: 1)
+        // `playerDied` hides the countdown rows for the result screen and only a
+        // resume or revive showed them again — so after a death + RESTART the
+        // RED SMILE row (CL-47) never appeared. A new run shows them.
+        capstoneTimers.isHidden = false
         lastUpdateTime = 0
         passiveDOTAccumulator = 0
         everglowPulseTimer = 0

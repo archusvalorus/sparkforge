@@ -40,6 +40,16 @@ class EnemyNode: SKNode {
     }
     var geometryFootprintOverride: CGFloat? = nil
 
+    /// v2.1 A4c (CL-40): momentarily out of the world — no incoming hits from
+    /// anything that respects intangibility (Red Smile's sweep), and it never
+    /// counts toward active combat (CL-33). Default false; PaneStalker
+    /// overrides while phased. (The gun's physics contact already can't land.)
+    var isIntangible: Bool { false }
+
+    /// v2.1 A4c (CL-41): the body a melee sweep can land on — the combat hit
+    /// circle at the enemy's current drawn scale (a 2.2× mini-boss is ~26pt).
+    var hitBodyRadius: CGFloat { GameConfig.Enemy.collisionRadius * abs(xScale) }
+
     // v2.1 (Geometry 1B): route-guidance state. nil = pursuing directly.
     // The scene's steer pass owns these; enemies never read them.
     var routeNodeID: Int? = nil
@@ -95,10 +105,6 @@ class EnemyNode: SKNode {
     private(set) var diedBleedGeneration = 0
     /// Bleed ticks that landed during the last `updateStatusEffects` (DEBUG proof).
     var bleedTicksThisFrame: Int { dots.bleed.ticksThisFrame }
-    /// v1.8 (Unit 14): situational bleed scaling set by GameScene each frame —
-    /// legacy Red Smile (player low HP) until its A4c rework. 1.0 = none.
-    /// (Glass Blood's vs-slowed bonus retired with its A4b rework.)
-    var bleedDamageMultiplier: CGFloat = 1.0
     /// v1.9: general vulnerability — scales ALL incoming damage (every source
     /// routes through takeDamage). 1.0 = none. Reusable temporary-vulnerability
     /// primitive: Skybeam "Called", later Apex "Marked", Polar Vortex "Frostbitten".
@@ -677,7 +683,7 @@ class EnemyNode: SKNode {
         // legacy order), each at the boss-class scale for a mini-boss (CL-17).
         let wasBleeding = dots.bleed.isBleeding
         let wasGeneration = dots.bleed.generation
-        let pay = dots.tick(deltaTime, scale: dotScale, bleedMultiplier: bleedDamageMultiplier,
+        let pay = dots.tick(deltaTime, scale: dotScale,
                             openWounds: openWounds,
                             burnDecayInterval: GameConfig.Fire.burnStackDecayInterval,
                             bleedInterval: GameConfig.Bleed.tickInterval)

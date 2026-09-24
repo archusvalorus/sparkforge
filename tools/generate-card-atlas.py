@@ -71,6 +71,12 @@ def extract_cards():
     for ch in pool.split('UpgradeCard(')[1:]:
         def grab(pat, default=None):
             m = re.search(pat, ch); return m.group(1) if m else default
+        # v2.1 A4c: a capability LIST — Red Smile is the first card that needs
+        # two (`requires: [.bleedUnlocked, .voidUnlocked]`); the old single-name
+        # pattern silently dropped its "needs ▸" chip.
+        def caps(field):
+            m = re.search(field + r':\s*\[([^\]]*)\]', ch)
+            return ' + '.join(re.findall(r'\.(\w+)', m.group(1))) if m else ''
         cid = grab(r'id:\s*"([^"]+)"') or ('v20_panda' if 'GameConfig.Panda.cardID' in ch.split('apply:')[0] else None)
         if not cid: continue
         tiers = re.search(r'tierDescriptions:\s*\[(.*?)\]\s*,?\n', ch, re.S)
@@ -80,8 +86,8 @@ def extract_cards():
             tag2=grab(r'secondaryTag:\s*\.(\w+)'), desc=grab(r'description:\s*"([^"]*)"'),
             capstone=('isCapstone: true' in ch), secret=('isSecret: true' in ch),
             signature=('isSignature: true' in ch),
-            provides=(grab(r'provides:\s*\[\.(\w+)\]') or ''),
-            requires=(grab(r'requires:\s*\[\.(\w+)\]') or ''),
+            provides=caps('provides'),
+            requires=caps('requires'),
             detail=(grab(r'\bdetail:\s*"([^"]*)"') or ''),
             tiers=(re.findall(r'"([^"]*)"', tiers.group(1)) if tiers else []),
             tierNames=(re.findall(r'"([^"]*)"', tnames.group(1)) if tnames else [])))

@@ -201,6 +201,20 @@ struct ArenaGeometry {
         return blockedFootprints.contains { $0.intersectsSegment(a, b, travelRadius: travelRadius) }
     }
 
+    /// v2.1 A4c (CL-38): the EXACT version, for short direct attacks (Red
+    /// Smile's sweep). `segmentBlocked` marches at the footprint's
+    /// half-thickness — right for per-frame motion, but a segment shorter than
+    /// that is only tested at its endpoints and can pass a rounded corner
+    /// unblocked. This one measures the segment's true distance to each box.
+    func segmentBlockedExact(_ a: CGPoint, _ b: CGPoint, travelRadius: CGFloat = 0) -> Bool {
+        guard hasBlockedGeometry else { return false }
+        return blockedFootprints.contains {
+            MeleeSector.segmentCrossesRoundedBox(a, b, center: $0.center, halfExtents: $0.halfExtents,
+                                                 cornerRadius: $0.cornerRadius, rotation: $0.rotation,
+                                                 margin: travelRadius)
+        }
+    }
+
     /// The safe anchor with this label, if authored.
     func anchor(_ label: String) -> CGPoint? {
         safeAnchors.first { $0.label == label }?.position

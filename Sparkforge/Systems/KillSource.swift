@@ -30,6 +30,10 @@ enum KillSource: String, CaseIterable {
     case burst
     /// The frame-top prune of an enemy that died without being credited.
     case sweep
+    /// v2.1 A4c: Red Smile's melee sweep — a primary ATTACK (each body struck
+    /// takes a primary hit), full credit. Named `melee` because `sweep` above
+    /// is the reward-only prune, not an attack.
+    case melee
 
     /// Credit tier — legacy-preserving. Radius bursts and the sweep have only
     /// ever paid the XP orb: no kill count, bestiary, arena gates or on-kill

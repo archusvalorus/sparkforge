@@ -33,6 +33,10 @@ final class PaneStalkerNode: EnemyNode {
     /// re-entry is fiction, not travel. Exempt from footprint resolution WHILE
     /// PHASED (0 = exempt); solid while solid, so it can never sit embedded in
     /// the Fallen Carrier once it re-enters (persistent state is always valid).
+    /// v2.1 A4c (CL-40): phased = out of the world for the shared hittability
+    /// predicate too (same window as the dropped hitbox).
+    override var isIntangible: Bool { phase == .phased }
+
     override var geometryFootprintRadius: CGFloat {
         phase == .phased ? 0 : super.geometryFootprintRadius
     }

@@ -110,6 +110,8 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     /// v2.1 (1A): a monument IS solid geometry; it never resolves against
     /// arena footprints (it lives in the top third, off any authored route).
     var geometryFootprintRadius: CGFloat { 0 }
+    /// v2.1 A4c (CL-41): a monument's hit body is its huge solid surface.
+    var hitBodyRadius: CGFloat { targetingRadius }
 
     // MARK: - Anchoring
 

@@ -569,6 +569,8 @@ final class QuenchWardenNode: SKNode, ArenaBossNode {
 
     /// v2.1 A4a: status row pinned just right of the HP bar.
     var statusTellAnchor: CGPoint { CGPoint(x: QuenchWardenNode.bodyRadius + 6, y: QuenchWardenNode.bodyRadius + 18) }
+    /// v2.1 A4c (CL-41): the hit circle a melee sweep lands on (= its physics body).
+    var hitBodyRadius: CGFloat { QuenchWardenNode.bodyRadius }
 
     @discardableResult
     func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {

@@ -42,7 +42,10 @@ final class CapstoneTimerHUD: SKNode {
 
     /// Show or refresh a capstone's countdown row. Call every frame while the
     /// capstone is active; cheap (only re-renders when the displayed text changes).
-    func set(_ id: String, label: String, colorHex: UInt32, remaining: TimeInterval) {
+    /// `pulses: false` holds a frozen countdown still (v2.1 A4c: Red Smile's
+    /// cycle pauses outside combat and under the kaiju — a stopped clock must
+    /// not flash "urgent" for as long as it stays stopped).
+    func set(_ id: String, label: String, colorHex: UInt32, remaining: TimeInterval, pulses: Bool = true) {
         let row: Row
         if let existing = rows[id] {
             row = existing
@@ -63,10 +66,11 @@ final class CapstoneTimerHUD: SKNode {
 
         let secs = max(0, remaining)
         let text = "\(label)  \(String(format: "%.1f", secs))s"
-        guard row.node.text != text else { return }
+        let urgent = pulses && secs <= urgentThreshold
+        let pulsing = row.node.action(forKey: "urgent") != nil
+        guard row.node.text != text || urgent != pulsing else { return }
         row.node.text = text
 
-        let urgent = secs <= urgentThreshold
         row.node.fontColor = SKColor(hex: colorHex, alpha: urgent ? 1.0 : 0.85)
         if urgent && row.node.action(forKey: "urgent") == nil {
             row.node.run(SKAction.repeatForever(SKAction.sequence([

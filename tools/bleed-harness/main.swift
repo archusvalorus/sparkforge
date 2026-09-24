@@ -107,11 +107,10 @@ do {
 }
 
 // D — the two-channel DoT host (StatusDoTs) and the boss-class scale (CL-17).
-func runHost(_ h: inout StatusDoTs, _ seconds: TimeInterval, scale: CGFloat = 1,
-             bleedMult: CGFloat = 1) -> StatusDoTs.Payout {
+func runHost(_ h: inout StatusDoTs, _ seconds: TimeInterval, scale: CGFloat = 1) -> StatusDoTs.Payout {
     var total = StatusDoTs.Payout()
     for _ in 0..<Int((seconds / frame).rounded()) {
-        let p = h.tick(frame, scale: scale, bleedMultiplier: bleedMult,
+        let p = h.tick(frame, scale: scale,
                        burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: B.tickInterval)
         total.burn += p.burn; total.bleed += p.bleed; total.bleedTicks += p.bleedTicks
     }
@@ -168,8 +167,10 @@ do {
 
     var red = StatusDoTs()
     red.bleed.inflict(tickDamage: tickAt10, duration: B.duration, interval: B.tickInterval)
-    check("D4 the situational Bleed multiplier (legacy Glass Blood / Red Smile ×1.5) rides each tick",
-          runHost(&red, 4, bleedMult: 1.5).bleed == 9)
+    // v2.1 A4c: the legacy low-HP multiplier (old Red Smile ×1.5) is GONE —
+    // the parameter no longer exists, and a Bleed pays exactly its ticks.
+    check("D4 A4c: no situational Bleed multiplier remains — 6 ticks of 1 pay exactly 6",
+          runHost(&red, 4).bleed == 6)
 
     var frac = StatusDoTs()
     frac.bleed.inflict(tickDamage: 1.5, duration: B.duration, interval: B.tickInterval)
@@ -199,7 +200,7 @@ do {
             legacyAcc += legacy.tick(frame, decayInterval: GameConfig.Fire.burnStackDecayInterval) * CGFloat(frame)
             if legacyAcc >= 1 { let d = Int(legacyAcc); legacyAcc -= CGFloat(d); legacyPaid += d }
         }
-        newPaid += host.tick(frame, scale: 1, bleedMultiplier: 1,
+        newPaid += host.tick(frame, scale: 1,
                              burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: B.tickInterval).burn
         t += frame
     }
@@ -212,7 +213,7 @@ do {
         var h = StatusDoTs(), paid = 0
         for _ in 0..<Int((10.0 / frame).rounded()) {
             h.burn.ignite(dps: 0.3, duration: 0.5, source: .other, stackCap: 1, stackInterval: 3)
-            paid += h.tick(frame, scale: scale, bleedMultiplier: 1,
+            paid += h.tick(frame, scale: scale,
                            burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: B.tickInterval).burn
         }
         return paid
@@ -327,7 +328,7 @@ do {
     status.bleed.inflict(tickDamage: 1, duration: B.duration, interval: B.tickInterval, generation: 1)
     _ = runHost(&status, 2.95, scale: GameConfig.BossClass.dotScale)
     let wasBleeding = status.bleed.isBleeding, wasGen = status.bleed.generation
-    let pay = status.tick(0.1, scale: GameConfig.BossClass.dotScale, bleedMultiplier: 1,
+    let pay = status.tick(0.1, scale: GameConfig.BossClass.dotScale,
                           burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: B.tickInterval)
     let dot = KillContext.DoTHit(channel: .bleed, wasBleeding: wasBleeding, generation: wasGen)
     let finalTick = KillContext.boss(at: CGPoint(x: 5, y: 7), finishingDamage: 1, dot: dot,
@@ -517,7 +518,7 @@ do {
     h.bleed.inflict(tickDamage: 1, duration: B.duration, interval: B.tickInterval)
     var paid = 0
     for _ in 0..<Int((4.0 / frame).rounded()) {
-        paid += h.tick(frame, scale: 1, bleedMultiplier: 1, openWounds: GameConfig.Bleed.openWoundsBonus,
+        paid += h.tick(frame, scale: 1, openWounds: GameConfig.Bleed.openWoundsBonus,
                        burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: B.tickInterval).bleed
     }
     check("W1 six 1-point Bleed ticks on a bleeding target pay 7 (7.5 before rounding) — the DoT share survives rounding",
@@ -526,7 +527,7 @@ do {
     for _ in 0..<10 {
         boss.bleed.inflict(tickDamage: 1, duration: B.duration, interval: B.tickInterval)
         for _ in 0..<Int((3.0 / frame).rounded()) {
-            bossPaid += boss.tick(frame, scale: GameConfig.BossClass.dotScale, bleedMultiplier: 1,
+            bossPaid += boss.tick(frame, scale: GameConfig.BossClass.dotScale,
                                   openWounds: GameConfig.Bleed.openWoundsBonus,
                                   burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: B.tickInterval).bleed
         }
@@ -538,9 +539,9 @@ do {
     wet.burn.ignite(dps: 2, duration: 2, source: .kindleHit, stackCap: 1, stackInterval: 3)
     wet.bleed.inflict(tickDamage: 0.01, duration: 10, interval: 100)
     for _ in 0..<Int((2.0 / frame).rounded()) {
-        dryPaid += dry.tick(frame, scale: 1, bleedMultiplier: 1, openWounds: 0.25,
+        dryPaid += dry.tick(frame, scale: 1, openWounds: 0.25,
                             burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: B.tickInterval).burn
-        wetPaid += wet.tick(frame, scale: 1, bleedMultiplier: 1, openWounds: 0.25,
+        wetPaid += wet.tick(frame, scale: 1, openWounds: 0.25,
                             burnDecayInterval: GameConfig.Fire.burnStackDecayInterval, bleedInterval: 100).burn
     }
     check("W3 Burn on a BLEEDING target gets Open Wounds too; on a dry one it doesn't", wetPaid == 5 && (3...4).contains(dryPaid),

@@ -1869,12 +1869,18 @@ final class UpgradeManager {
             stats.splitCount = 2
         })
 
-        // Legacy until its A4c rework (form change + melee, Bleed/Void bridge).
+        // v2.1 A4c: the Bleed/Void BRIDGE (Q-B4, closure table §B3). Every 10s
+        // of active combat Spark becomes the Thing From Below for 3s: melee
+        // sweeps (primary hits, not shots or projectiles) at 2× shot damage,
+        // Void (ignores the Braceguard shield), guaranteed Bleed. Counts toward
+        // both ladders (CL-45); needs BOTH signatures. The id is kept, so Codex
+        // discovery carries over. The legacy low-HP Bleed bonus is gone.
         cards.append(UpgradeCard(
-            id: "v18_red_smile", name: "Red Smile", tag: .bleed,
-            description: "Low HP increases Bleed damage.",
-            apply: { stats in stats.bleedLowHpBonus = 1.5 },
-            requires: [.bleedUnlocked]   // v2.1 A4b
+            id: "v18_red_smile", name: "Red Smile", tag: .bleed, secondaryTag: .voidT,
+            description: "Every 10s: 3s of Void melee. 2× damage + Bleed.",
+            apply: { stats in stats.redSmileOwned = true },
+            detail: "Every 10s in combat, become the Thing From Below for 3s. Replace projectile attacks with sweeping melee attacks that deal 200% of projectile damage as Void damage and always inflict Bleed. Requires both Bleed and Void signatures. Existing projectiles remain active during transformation. Sweeps strike in your last move direction. They count as primary hits, not shots or projectiles.",
+            requires: [.bleedUnlocked, .voidUnlocked]
         ))
 
         cards.append(UpgradeCard(

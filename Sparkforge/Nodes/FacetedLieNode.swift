@@ -600,6 +600,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
         if paneBeat == 0 && phaseTimer >= paneShiftTell {
             paneBeat = 1
             physicsBody?.categoryBitMask = 0  // untouchable while gone
+            isIntangible = true
             run(SKAction.fadeAlpha(to: 0.0, duration: FacetedLieNode.paneShiftVanishTime), withKey: "paneFade")
         }
 
@@ -608,6 +609,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
             paneBeat = 2
             position = paneReentry
             physicsBody?.categoryBitMask = GameConfig.Physics.enemy
+            isIntangible = false
             run(SKAction.fadeAlpha(to: 1.0, duration: 0.12), withKey: "paneFade")
             emitReentryBurst()
 
@@ -696,6 +698,11 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
 
     /// v2.1 A4a: status row pinned just right of the HP bar.
     var statusTellAnchor: CGPoint { CGPoint(x: FacetedLieNode.bodyRadius + 6, y: FacetedLieNode.bodyRadius + 18) }
+    /// v2.1 A4c (CL-41): the hit circle a melee sweep lands on (= its physics body).
+    var hitBodyRadius: CGFloat { FacetedLieNode.bodyRadius * 0.7 }
+    /// v2.1 A4c (CL-40): out of the world for the Pane Shift vanish — the same
+    /// window its hitbox is dropped (beat 1), cleared on re-entry or death.
+    private(set) var isIntangible = false
 
     @discardableResult
     func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
@@ -738,6 +745,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
     private func die() {
         isDead = true
         physicsBody?.categoryBitMask = 0
+        isIntangible = false   // dead, not vanished — `isDead` gates hits now
         phase = .idle
         // v2.1 A4a: an untargeted hit (a Burn/Bleed tick, a capstone strike)
         // can land mid-Pane Shift, while the Lie is faded out. Stop the vanish

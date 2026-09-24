@@ -121,6 +121,105 @@ struct CombatLedger {
         kills[source, default: 0] += 1
     }
 
+    // v2.1 A4c: Red Smile — per-form proof (swings, primary hits, the gun's
+    // volleys while the form holds, which must be 0) plus run totals.
+    var gunVolleys = 0                 // auto-attack volleys fired, whole run
+    private(set) var redSmileForms = 0
+    private(set) var redSmileInterrupts = 0
+    private(set) var redSmileSwings = 0
+    private(set) var redSmileEmptySwings = 0
+    private(set) var redSmileHits = 0
+    private(set) var redSmileBossHits = 0
+    private(set) var redSmileChains = 0
+    var redSmileVoidBypasses = 0       // Braceguard shields the sweep ignored (CL-37)
+    var redSmileIntangibleSkips = 0    // phased / vanished bodies in the arc (CL-40)
+    var redSmileTerrainBlocks = 0      // bodies in the arc behind the Carrier (CL-38)
+    private var formSwings = 0
+    private var formHits = 0
+    private var formVolleysAtStart = 0
+    mutating func redSmileFormBegan(interval: TimeInterval) {
+        redSmileForms += 1
+        formSwings = 0
+        formHits = 0
+        formVolleysAtStart = gunVolleys
+        NSLog("[A4c] form #%d begins (swing interval %.3fs)", redSmileForms, interval)
+    }
+    mutating func redSmileSwing(enemyHits: Int, bossHit: Bool, chained: Bool) {
+        // Corrective F1/F2 cross-checks against this swing's meter contacts.
+        let shatters = swingContacts[.shatter] ?? 0, ordinary = swingContacts[.enemy] ?? 0
+        if ordinary + shatters != enemyHits || (swingContacts[.boss] ?? 0) != (bossHit ? 1 : 0) {
+            meterViolations += 1
+            NSLog("[A4c] ⚠ meter contacts %d/%d/%d ≠ swing hits %d + boss %@", ordinary, shatters,
+                  swingContacts[.boss] ?? 0, enemyHits, bossHit ? "yes" : "no")
+        }
+        if chained && ordinary == 0 { chainWithoutSeed += 1 }
+        if shatters == 1 && ordinary == 0 && !bossHit {
+            soloShatterSwings += 1
+            soloShatterMeterGains += swingGains
+        }
+        redSmileSwings += 1
+        formSwings += 1
+        let struck = enemyHits + (bossHit ? 1 : 0)
+        if struck == 0 { redSmileEmptySwings += 1 }
+        redSmileHits += struck
+        formHits += struck
+        if bossHit { redSmileBossHits += 1 }
+        if chained { redSmileChains += 1 }
+    }
+    /// `reason`: "expired", "kaiju" (an interrupt) or "death".
+    mutating func redSmileFormEnded(reason: String) {
+        if reason == "kaiju" { redSmileInterrupts += 1 }
+        NSLog("[A4c] form #%d ends (%@) swings=%d hits=%d gunVolleysDuringForm=%d  %@",
+              redSmileForms, reason, formSwings, formHits,
+              gunVolleys - formVolleysAtStart, redSmileSummary)
+    }
+    // v2.1 A4c corrective (F1/F2): hit-meter registrations by contact kind.
+    // Proof, from the REAL contact paths: every landed contact asks each meter
+    // once (contacts by kind must match the swing tallies), a charge sticks
+    // exactly when the meter's own rules allowed it (never twice), and a swing
+    // never chains without an ordinary (non-Shatter) enemy contact.
+    private(set) var meterContacts: [RedSmileContact: Int] = [:]
+    private(set) var apexGains: [RedSmileContact: Int] = [:]
+    private(set) var erasureGains: [RedSmileContact: Int] = [:]
+    private(set) var meterRejections = 0          // eligible = false → no gain (cooldown / capacity / off)
+    private(set) var meterViolations = 0          // gain ≠ eligibility, or a double gain
+    private(set) var soloShatterSwings = 0        // swings whose ONLY contact was a Shatter…
+    private(set) var soloShatterMeterGains = 0    // …and the meter gains those swings made
+    private(set) var chainWithoutSeed = 0         // a chain with no ordinary enemy contact: must stay 0
+    private var swingContacts: [RedSmileContact: Int] = [:]
+    private var swingGains = 0
+    mutating func redSmileSwingBegan() {
+        swingContacts = [:]
+        swingGains = 0
+    }
+    mutating func redSmileMeterCharge(_ contact: RedSmileContact, apexEligible: Bool, apexGained: Int,
+                                      erasureEligible: Bool, erasureGained: Int) {
+        meterContacts[contact, default: 0] += 1
+        swingContacts[contact, default: 0] += 1
+        apexGains[contact, default: 0] += apexGained
+        erasureGains[contact, default: 0] += erasureGained
+        swingGains += apexGained + erasureGained
+        for (eligible, gained, name) in [(apexEligible, apexGained, "apex"), (erasureEligible, erasureGained, "erasure")] {
+            if !eligible && gained == 0 { meterRejections += 1 }
+            if gained != (eligible ? 1 : 0) {
+                meterViolations += 1
+                NSLog("[A4c] ⚠ %@ meter: %@ contact eligible=%@ gained=%d", name, contact.rawValue,
+                      eligible ? "yes" : "no", gained)
+            }
+        }
+    }
+    var redSmileSummary: String {
+        "redSmile[forms=\(redSmileForms) interrupts=\(redSmileInterrupts) swings=\(redSmileSwings) "
+            + "empty=\(redSmileEmptySwings) hits=\(redSmileHits) boss=\(redSmileBossHits) "
+            + "chains=\(redSmileChains) meleeKills=\(kills[.melee] ?? 0) voidBypass=\(redSmileVoidBypasses) "
+            + "intangibleSkips=\(redSmileIntangibleSkips) terrainBlocks=\(redSmileTerrainBlocks)] "
+            + "meters[contacts e/s/b=\(meterContacts[.enemy] ?? 0)/\(meterContacts[.shatter] ?? 0)/\(meterContacts[.boss] ?? 0) "
+            + "apex+=\(apexGains[.enemy] ?? 0)/\(apexGains[.shatter] ?? 0)/\(apexGains[.boss] ?? 0) "
+            + "erasure+=\(erasureGains[.enemy] ?? 0)/\(erasureGains[.shatter] ?? 0)/\(erasureGains[.boss] ?? 0) "
+            + "rejected=\(meterRejections) soloShatter=\(soloShatterSwings)/+\(soloShatterMeterGains) "
+            + "chainNoSeed=\(chainWithoutSeed) VIOLATIONS=\(meterViolations)]"
+    }
+
     mutating func recordBurnStack(_ stacks: Int) {
         burnStacksAdded += 1
         if stacks > burnMaxStacks {
@@ -149,7 +248,8 @@ struct CombatLedger {
             + "boss[burn=\(bossBurnDamage) bleed=\(bossBleedDamage) stacks=\(bossBurnMaxStacks) "
             + "dotKill=\(bossDotKill?.rawValue ?? "-") credited=\(bossKills) dupes=\(bossDupes)] "
             + "a4b[bleedingKills=\(bleedingKills) barrier[sang=\(barrierFromSanguinarian) siphon=\(barrierFromSiphon) asked=\(barrierRequested)] "
-            + "glass[deaths=\(glassBleedDeaths) eligible=\(glassEligible) bursts=\(glassBursts) capped=\(glassCapped) maxGen=\(glassMaxGeneration)]]"
+            + "glass[deaths=\(glassBleedDeaths) eligible=\(glassEligible) bursts=\(glassBursts) capped=\(glassCapped) maxGen=\(glassMaxGeneration)]] "
+            + redSmileSummary
     }
 }
 #endif

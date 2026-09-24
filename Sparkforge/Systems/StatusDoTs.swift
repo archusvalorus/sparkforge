@@ -47,12 +47,10 @@ struct StatusDoTs {
     /// Advance by `dt` of game time.
     /// - Parameters:
     ///   - scale: boss-class DoT scale (1 for normal enemies).
-    ///   - bleedMultiplier: situational Bleed scaling (legacy Red Smile until
-    ///     its A4c rework); 1 = none.
     ///   - openWounds: v2.1 A4b (CL-25) — while the target is bleeding (as the
     ///     step begins), BOTH channels deal this much more, applied before any
     ///     rounding and never boss-scaled. 0 = none.
-    mutating func tick(_ dt: TimeInterval, scale: CGFloat, bleedMultiplier: CGFloat,
+    mutating func tick(_ dt: TimeInterval, scale: CGFloat,
                        openWounds: CGFloat = 0,
                        burnDecayInterval: TimeInterval, bleedInterval: TimeInterval) -> Payout {
         var out = Payout()
@@ -74,7 +72,7 @@ struct StatusDoTs {
         let bled = bleed.tick(dt, interval: bleedInterval)
         out.bleedTicks = bleed.ticksThisFrame
         if bled > 0 {
-            bleedCarry += bled * bleedMultiplier * scale * wounds
+            bleedCarry += bled * scale * wounds
             if bleedCarry >= 1 {
                 out.bleed = Int(bleedCarry)
                 bleedCarry -= CGFloat(out.bleed)

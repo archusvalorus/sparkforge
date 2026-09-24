@@ -1320,6 +1320,41 @@ enum GameConfig {
         static let glassBloodMaxGeneration: Int = 2
     }
 
+    // MARK: - v2.1 Abilities A4c: active combat (closure table CL-33)
+    /// The ONE shared "active combat" definition (Red Smile now, Grounded Core
+    /// in A5): a currently hittable hostile exists anywhere in the encounter —
+    /// distance, line of sight and gun range don't matter.
+    enum Combat {
+        /// After the last qualifying hostile stops qualifying, active combat
+        /// holds this long before it drops.
+        static let activeLinger: TimeInterval = 0.5
+    }
+
+    // MARK: - v2.1 Abilities A4c: Red Smile (Bleed/Void bridge, CL-33…CL-48)
+    /// Every 10s of active combat (start-to-start), Spark becomes the Thing
+    /// From Below for 3s: automatic melee sweeps in his last move direction at
+    /// the shared attack interval. Sweeps are primary hits, not shots or
+    /// projectiles (CL-39), and Void damage ignores the Braceguard shield only.
+    enum RedSmile {
+        /// Start-to-start cycle, counted only in active combat (CL-34).
+        static let cyclePeriod: TimeInterval = 10.0
+        /// Form duration — always runs out in full unless the kaiju ends it.
+        static let formDuration: TimeInterval = 3.0
+        /// Sweep reach to the target's body (CL-15 / CL-41).
+        static var reach: CGFloat { 80 * DeviceScale.gameplay }
+        /// Total arc of the sweep, centred on facing (CL-15).
+        static let arcDegrees: CGFloat = 110
+        /// Either side of facing, in radians — the one conversion the hit test
+        /// and the tells both read.
+        static var halfAngle: CGFloat { arcDegrees * .pi / 360 }
+        /// Each target takes `shotFractionDamage(this)` — 2× current shot
+        /// damage, not 200% ATK (CL-36).
+        static let damageFraction: CGFloat = 2.0
+        /// Placeholder palette (CL-47) — never Void purple (purple = danger).
+        static let bodyColorHex: UInt32 = 0x120A0D
+        static let crimsonHex: UInt32 = 0xD01C34
+    }
+
     // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)
     /// The shared order every enemy hit on Spark resolves through
     /// (`PlayerDamagePipeline`): input scaling → percentage reductions

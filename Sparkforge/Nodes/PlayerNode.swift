@@ -50,6 +50,8 @@ final class PlayerNode: SKNode {
     private var kaijuFeatures: SKNode?       // v2.0 (C2): PANDA. sprite + fire
     private var kaijuBody: SKSpriteNode?     // the sprite itself, for walk/facing
     private var kaijuWalkPhase: CGFloat = 0
+    private var redSmileFeatures: SKNode?    // v2.1 A4c: the Thing From Below (placeholder)
+    private var redSmileWedge: SKShapeNode?  // its facing arc — turned every frame
     /// v2.0 art pass: a SPRITE skin's body, when the selected skin has art.
     /// Palette skins leave this nil and stay fully procedural.
     private var skinSprite: SKSpriteNode?
@@ -439,9 +441,15 @@ final class PlayerNode: SKNode {
     /// up with an invisible Spark after a transformation ends.
     private func refreshBodyVisibility() {
         let kaiju = kaijuFeatures != nil
-        skinSprite?.isHidden = kaiju
-        skinOverlay?.isHidden = kaiju
-        let replaced = kaiju || skinSprite != nil
+        // v2.1 A4c: the Thing From Below replaces the body too (a skin's art
+        // would otherwise peek out around the near-black form).
+        let hidden = kaiju || redSmileFeatures != nil
+        skinSprite?.isHidden = hidden
+        skinOverlay?.isHidden = hidden
+        // The skin's halo would ring the near-black form in its own colour —
+        // violet on the Star-Crossed skins, and purple means DANGER (CL-47).
+        glowNode.isHidden = redSmileFeatures != nil
+        let replaced = hidden || skinSprite != nil
         emberWrap.alpha = replaced ? 0 : 1
         eyesNode.alpha = replaced ? 0 : 1
     }
@@ -1278,6 +1286,141 @@ final class PlayerNode: SKNode {
         ]))
     }
 
+    // MARK: - v2.1 A4c: Red Smile — the Thing From Below (placeholder, CL-47)
+    //
+    // A readable stand-in until Lyra's form lands (A9): Spark goes near-black
+    // with a crimson grin, a faint crimson wedge shows the sweep's facing arc
+    // for the whole form, and every swing (empty ones included) flashes a
+    // crimson crescent over that arc. Never Void purple — in the arena purple
+    // means DANGER. Purely cosmetic: no hitbox, speed or defence change (CL-46).
+
+    /// Enter / leave the form. `reach` and `halfAngle` size the facing wedge to
+    /// the real sweep, so the tell never promises more than the hit test.
+    func setRedSmile(_ on: Bool, facing: CGPoint = CGPoint(x: 0, y: 1),
+                     reach: CGFloat = GameConfig.RedSmile.reach,
+                     halfAngle: CGFloat = GameConfig.RedSmile.halfAngle) {
+        let crimson = GameConfig.RedSmile.crimsonHex
+        if !on {
+            guard let features = redSmileFeatures else { return }
+            redSmileFeatures = nil
+            redSmileWedge = nil
+            trailEmitter.particleColor = SKColor(hex: appearance.trailColorHex)   // the skin's trail again
+            features.removeAllActions()
+            features.run(SKAction.sequence([
+                SKAction.fadeOut(withDuration: 0.12),
+                SKAction.removeFromParent()
+            ]))
+            refreshBodyVisibility()
+            return
+        }
+        guard redSmileFeatures == nil else { return }
+        let R = GameConfig.Player.visualRadius
+        let root = SKNode()
+
+        // The facing wedge sits UNDER the body (its zPosition is relative to root).
+        let wedge = SKShapeNode(path: Self.sectorPath(radius: reach, halfAngle: halfAngle))
+        wedge.fillColor = SKColor(hex: crimson, alpha: 0.08)
+        wedge.strokeColor = SKColor(hex: crimson, alpha: 0.38)
+        wedge.lineWidth = 1
+        wedge.zPosition = 7
+        wedge.zRotation = atan2(facing.y, facing.x)
+        root.addChild(wedge)
+
+        let form = SKNode()
+        form.zPosition = 14   // above the core, inner core and eyes
+        let body = SKShapeNode(circleOfRadius: R * 1.05)
+        body.fillColor = SKColor(hex: GameConfig.RedSmile.bodyColorHex)
+        body.strokeColor = SKColor(hex: crimson, alpha: 0.55)
+        body.lineWidth = 1.5
+        form.addChild(body)
+        // The grin — wide, thin, a little too happy.
+        let grin = SKShapeNode()
+        let gp = CGMutablePath()
+        gp.addArc(center: CGPoint(x: 0, y: R * 0.22), radius: R * 0.62,
+                  startAngle: .pi * 1.18, endAngle: .pi * 1.82, clockwise: false)
+        grin.path = gp
+        grin.strokeColor = SKColor(hex: crimson)
+        grin.lineWidth = 2.4
+        grin.lineCap = .round
+        grin.glowWidth = 3
+        grin.fillColor = .clear
+        form.addChild(grin)
+        root.addChild(form)
+
+        // Arrival: the form pops in and a crimson ring snaps out to the reach.
+        form.setScale(0.4)
+        form.run(SKAction.scale(to: 1.0, duration: 0.12))
+        let ring = SKShapeNode(circleOfRadius: R)
+        ring.strokeColor = SKColor(hex: crimson, alpha: 0.8)
+        ring.fillColor = .clear
+        ring.lineWidth = 2
+        ring.zPosition = 16
+        root.addChild(ring)
+        ring.run(SKAction.sequence([
+            // In world points, whatever Spark's own scale is right now.
+            SKAction.group([SKAction.scale(to: reach / R / max(abs(xScale), 0.01), duration: 0.22),
+                            SKAction.fadeOut(withDuration: 0.25)]),
+            SKAction.removeFromParent()
+        ]))
+
+        addChild(root)
+        redSmileFeatures = root
+        redSmileWedge = wedge
+        trailEmitter.particleColor = SKColor(hex: crimson)   // never a skin's violet (CL-47)
+        refreshBodyVisibility()
+    }
+
+    /// Turn the facing wedge (every frame of the form). It is counter-scaled so
+    /// it always shows the true reach, even while the node's scale is easing
+    /// back from a kaiju.
+    func updateRedSmileFacing(_ facing: CGPoint) {
+        guard let wedge = redSmileWedge else { return }
+        wedge.zRotation = atan2(facing.y, facing.x)
+        wedge.setScale(1 / max(abs(xScale), 0.01))
+    }
+
+    /// One swing's tell: a crimson crescent over the sweep's arc. Plays on
+    /// empty swings too — it doubles as the facing tell.
+    func redSmileSwing(facing: CGPoint, reach: CGFloat, halfAngle: CGFloat) {
+        guard redSmileFeatures != nil else { return }
+        let crimson = GameConfig.RedSmile.crimsonHex
+        let crescent = SKShapeNode(path: Self.crescentPath(outer: reach, inner: reach * 0.6,
+                                                           halfAngle: halfAngle))
+        crescent.fillColor = SKColor(hex: crimson, alpha: 0.5)
+        crescent.strokeColor = SKColor(hex: crimson, alpha: 0.9)
+        crescent.lineWidth = 1.5
+        crescent.glowWidth = 3
+        crescent.zPosition = 16
+        crescent.zRotation = atan2(facing.y, facing.x)
+        let unit = 1 / max(abs(xScale), 0.01)
+        crescent.setScale(unit * 0.8)
+        addChild(crescent)
+        crescent.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: unit, duration: 0.1),
+                            SKAction.fadeOut(withDuration: 0.18)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// A sector pointing along +x: apex at the origin, `radius` long,
+    /// `halfAngle` either side.
+    private static func sectorPath(radius: CGFloat, halfAngle: CGFloat) -> CGPath {
+        let p = CGMutablePath()
+        p.move(to: .zero)
+        p.addArc(center: .zero, radius: radius, startAngle: -halfAngle, endAngle: halfAngle, clockwise: false)
+        p.closeSubpath()
+        return p
+    }
+
+    /// A band between two radii across the same arc — the swing's crescent.
+    private static func crescentPath(outer: CGFloat, inner: CGFloat, halfAngle: CGFloat) -> CGPath {
+        let p = CGMutablePath()
+        p.addArc(center: .zero, radius: outer, startAngle: -halfAngle, endAngle: halfAngle, clockwise: false)
+        p.addArc(center: .zero, radius: inner, startAngle: halfAngle, endAngle: -halfAngle, clockwise: true)
+        p.closeSubpath()
+        return p
+    }
+
     /// v1.9 Apex (The Hunter): Spark sprouts tiny black horns, white fangs, and
     /// flapping wings — beginning to resemble the familiar (they don't fuse).
     /// Toggled on at T5. Reusable creature-morph vector for future sets.
@@ -1420,8 +1563,13 @@ final class PlayerNode: SKNode {
         // quick RESTART lets the leftover fade complete AFTER reset and hide the
         // spark. removeAllActions must precede the alpha/visual restore below.
         removeAllActions()
+        // v2.1 A4c: `removeAllActions` above cancels a kaiju's 0.3s shrink-back
+        // (and the victory pose's 1.15), which used to leave the next run drawn
+        // at 3× — and every Red Smile tell with it. A reset is full size.
+        setScale(1.0)
         setApexFeatures(false)
         setPolarVortexFeatures(false)
+        setRedSmile(false)
         isDead = false
         currentLevel = 1
         currentXP = 0

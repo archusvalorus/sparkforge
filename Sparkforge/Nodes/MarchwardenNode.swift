@@ -39,6 +39,8 @@ final class MarchwardenNode: SKNode, ArenaBossNode {
     var healthPercent: CGFloat { maxHealth > 0 ? CGFloat(health) / CGFloat(maxHealth) : 0 }
     let contactDamage: Int = GameConfig.Marchwarden.contactDamage
     var geometryFootprintRadius: CGFloat { GameConfig.Marchwarden.bodyRadius }
+    /// v2.1 A4c (CL-41): the hit circle a melee sweep lands on (= its physics body).
+    var hitBodyRadius: CGFloat { GameConfig.Marchwarden.bodyRadius * 0.85 }
 
     var isAdvancing: Bool { healthPercent < GameConfig.Marchwarden.advanceThreshold && !isDead }
     private var advanceTriggered = false

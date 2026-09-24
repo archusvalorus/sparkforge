@@ -679,6 +679,8 @@ final class DynamoChoirNode: SKNode, ArenaBossNode {
 
     /// v2.1 A4a: status row pinned just right of the HP bar.
     var statusTellAnchor: CGPoint { CGPoint(x: DynamoChoirNode.bodyRadius + 6, y: DynamoChoirNode.bodyRadius + 18) }
+    /// v2.1 A4c (CL-41): the hit circle a melee sweep lands on (= its physics body).
+    var hitBodyRadius: CGFloat { DynamoChoirNode.bodyRadius }
 
     @discardableResult
     func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {

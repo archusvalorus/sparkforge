@@ -70,6 +70,16 @@ protocol ArenaBossNode: SKNode {
     /// §7.2: routing must never rebalance damage contacts). 0 = exempt (a
     /// monument IS geometry; it never resolves against other geometry).
     var geometryFootprintRadius: CGFloat { get }
+
+    /// v2.1 A4c (CL-40): momentarily out of the world (the Faceted Lie's Pane
+    /// Shift vanish). Sweeps that respect intangibility skip it, and it never
+    /// counts toward active combat (CL-33).
+    var isIntangible: Bool { get }
+
+    /// v2.1 A4c (CL-41): the body a melee sweep can land on, in world points —
+    /// each boss's own hit circle (a monument's is its huge surface). No
+    /// default on purpose: a new boss must say how big it is.
+    var hitBodyRadius: CGFloat { get }
 }
 
 /// Default: a normal-scale boss's centre is effectively its surface.
@@ -92,6 +102,9 @@ extension ArenaBossNode {
     /// Default: just above the body; each boss overrides to sit beside its bar.
     var statusTellAnchor: CGPoint { CGPoint(x: 0, y: 60) }
     var statusTellScale: CGFloat { 1.0 }
+
+    /// Default: bosses stay in the world; the Faceted Lie overrides.
+    var isIntangible: Bool { false }
 
     /// The health a hit should actually remove, after the DEF dial's flat
     /// reduction. Shared so all five bosses reduce identically.
