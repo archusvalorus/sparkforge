@@ -187,8 +187,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - v1.6: Gravity Wells + Chill Trail (True Cards)
 
-    private var gravityWells: [GravityWellNode] = []
-    private var singularityTimer: TimeInterval = 0
+    // v2.1 A6 Void (closure table §B5): every player black hole (CL-77), the
+    // run's ONE primary-volley counter (CL-76), the boss's Anomaly (CL-73) and
+    // Singularity decomposition (CL-9).
+    private var voidWells: [VoidWellNode] = []
+    private var nextVoidWellID = 0
+    private var volleyCounter = VolleyCounter()
+    /// This volley's emission and lead shot (CL-76) — a pure type the void
+    /// harness executes (review F5).
+    private var volley = VolleyEmission<ProjectileNode>()
+    private var bossAnomaly = AnomalyState()
+    private var bossDecompose = BossDecompose()
+    /// Dead Circuit collapse kills feed NO well (QC).
+    private var suppressWellMatter = false
     // v1.9: Everglow capstone — close-range heat pulse + periodic arena eruption.
     private var everglowPulseTimer: TimeInterval = 0
     private var everglowEruptionTimer: TimeInterval = 0
@@ -279,7 +290,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private var arcWakeSparks: [(position: CGPoint, expiry: TimeInterval)] = []
     private var arcWakeDropTimer: TimeInterval = 0
-    private var nullBloomZones: [(position: CGPoint, expiry: TimeInterval)] = []
 
     // MARK: - v2.0 Phase C (C1.1): Growth — cultivated ground
     //
@@ -4743,11 +4753,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateEnemyProjectiles(dt)
         updateXPOrbs(dt)
         updatePassiveEffects(dt)
-        updateGravityWells(dt)
+        updateVoidWells(dt)      // v2.1 A6 — after the hostile shots moved (absorb)
         updateChillTrail(dt)
         updateShockSystems(dt)
         updateArcWake(dt)
-        updateNullBlooms(dt)
         updateCultivatedGround(dt)
         updateFlowers(dt)
         updateVineWall(dt)
@@ -4912,15 +4921,39 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         for enemy in enemies {
+            // v2.1 A6: a trapped enemy is held in its black hole (CL-79); a
+            // frightened one runs from Spark (CL-80). Neither chases or attacks.
+            let airborne = repulseFlights[ObjectIdentifier(enemy)] != nil
+            let trapped = enemy.isVoidTrapped
+            let fleeing = !airborne && !trapped && enemy.isFeared
+            let fleeTo = fleeing ? fleeGoal(for: enemy) : nil
             // v2.1 (1B): steer through the route graph when the direct line
             // is blocked; identical to player.position on open arenas.
             // (Ranged mobs inherit routing too — their LoS-aware FIRING
-            // behavior is Unit 2 scope, per Ruling 4.)
-            let steerTarget = routeSteerTarget(for: enemy, toward: player.position, dt: dt)
-            if repulseFlights[ObjectIdentifier(enemy)] != nil {
+            // behavior is Unit 2 scope, per Ruling 4.) A fleeing enemy routes
+            // toward its escape point instead, so fear respects the Carrier.
+            let steerTarget = routeSteerTarget(for: enemy,
+                                               toward: fleeing ? (fleeTo ?? enemy.position) : player.position, dt: dt)
+            if airborne {
                 // v2.1 A5 (CL-63): a launched enemy is in the air — no chase,
                 // no attack, until it lands.
+            } else if trapped {
+                // v2.1 A6 (CL-79): held — the black hole's pull is its only motion.
+            } else if fleeing {
+                // v2.1 A6 (CL-80): its own behaviour pauses like a stun and it
+                // runs — route-aware, but a step toward Spark is vetoed
+                // (review F1); the end-of-frame resolve slides it along solids.
+                // A step may not sink into a solid's footprint band (a hair of
+                // slack so a body resting on a face can still slide along it):
+                // a face-slide is the step's own doing, not the resolve's.
+                let solid = arenaGeometry.hasBlockedGeometry
+                let margin = max(0, enemy.geometryFootprintRadius - 0.5)
+                enemy.flee(from: player.position, preferred: fleeTo == nil ? nil : steerTarget,
+                           deltaTime: dt, globalSlow: playerStats.globalEnemySlow) { [arenaGeometry] q in
+                    solid && arenaGeometry.isBlocked(q, margin: margin)
+                }
             } else if let ranged = enemy as? RangedEnemyNode {
+                if enemy.voidHeldLastFrame { enemy.geometryDisplacedThisFrame = false }   // A6: not its own wall hit
                 // v2.1 (Unit 2, Ruling 4): a shooter denied line of sight keeps
                 // moving instead of firing into the wreck forever. One segment
                 // test; open arenas short-circuit to true.
@@ -4931,23 +4964,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 ranged.rangedChase(target: steerTarget, deltaTime: dt,
                                    globalSlow: playerStats.globalEnemySlow, canFire: hasLoS)
             } else {
+                // v2.1 A6: a flight or a trap may have slid this body along the
+                // Carrier — that's not its own charge hitting the wall.
+                if enemy.voidHeldLastFrame { enemy.geometryDisplacedThisFrame = false }
                 enemy.chase(target: steerTarget, deltaTime: dt, globalSlow: playerStats.globalEnemySlow)
             }
-
-            // v1.8 Undertow (Void 3): a subtle passive pull toward the player
-            if playerStats.voidPullForce > 0 {
-                let dist = enemy.position.distance(to: player.position)
-                if dist < playerStats.voidPullRadius && dist > 1 {
-                    let dir = (player.position - enemy.position).normalized
-                    enemy.position += dir * (playerStats.voidPullForce * CGFloat(dt))
-                }
-            }
+            enemy.voidHeldLastFrame = trapped || fleeing
 
             // v2.0 (Unit 2b): Gravemote — a telegraphed localized pull DRAGS the
             // player toward the mote (the first enemy to displace the player).
             // Gentle: a movable player fights it easily; it just steals clean lines.
-            let airborne = repulseFlights[ObjectIdentifier(enemy)] != nil   // v2.1 A5: no attack mid-launch
-            if !airborne, let mote = enemy as? GravemoteNode {
+            // v2.1 A5: no attack mid-launch; A6: nor while trapped or fleeing.
+            let pinned = airborne || trapped || fleeing
+            if !pinned, let mote = enemy as? GravemoteNode {
                 let strength = mote.updatePull(deltaTime: dt)
                 if strength > 0 {
                     let d = player.position.distance(to: mote.position)
@@ -4961,7 +4990,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
             // v2.0 (Unit 2b): Anvilborn — anchors, winds up, then SLAMS a
             // localized shockwave. Elite, NOT boss-class (no Giantkiller DR).
-            if !airborne, let anvil = enemy as? AnvilbornNode {
+            if !pinned, let anvil = enemy as? AnvilbornNode {
                 if anvil.updateSlam(deltaTime: dt),
                    player.position.distance(to: anvil.position) < AnvilbornNode.slamRadius {
                     applyBossHazardDamage(AnvilbornNode.slamDamage,
@@ -5033,6 +5062,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             relayArcSources.removeAll()
         }
+
+        // v2.1 A6 (CL-77): black holes pull BEFORE the resolve below, so a
+        // pulled body never sits inside the Carrier for a frame.
+        applyVoidWellPull(dt)
 
         // v2.1 (Geometry 1A): after every chase / pull / knockback this frame,
         // no ground-bound enemy may remain embedded in solid geometry. One
@@ -5435,9 +5468,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // the Storm Engine spread-shot differ only in pellet COUNT — shape is
         // shared here so future spread content wires into one place instead of
         // its own branch that would need separate tuning later.
+        // v2.1 A6 (CL-76): ONE primary-volley counter per run. A volley counts
+        // only if a primary projectile actually left the gun (an absorbed
+        // Glacial volley with no icicle is no volley — ruled Sep 24). Every
+        // 5th seeds a Blackhole on its lead shot; every 7th fires Shadow Edge.
+        volley.begin()
         fireShotSpread(count: shotCount, baseDirection: baseDirection)
+        let verdict = volleyCounter.register(emitted: volley.emitted,
+                                             blackholeOwned: playerStats.voidBlackhole,
+                                             bladeOwned: playerStats.shadowEdgeActive,
+                                             tuning: GameConfig.VoidTree.volleyTuning)
+        let emitted = volley.emitted
+        let seeded = volley.finish(verdict)
+        if verdict.blade { fireShadowEdge(direction: baseDirection) }
         #if DEBUG
         combatLedger.gunVolleys += 1   // A4c proof: must not move while Red Smile's form holds
+        combatLedger.recordVolley(emitted: emitted, blackhole: seeded != nil,
+                                  blade: verdict.blade, count: volleyCounter.volleys)
         #endif
     }
 
@@ -5538,7 +5585,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.glacialActive && allowModifiers {
             playerStats.glacialShotCounter += 1
             if playerStats.glacialShotCounter % GameConfig.PolarVortex.glacialEveryN == 0 {
-                fireIcicle(direction: direction, originOffset: originOffset)
+                // v2.1 A6 (R3): the icicle REPLACES the primary shot, so it is one.
+                configurePrimaryShot(fireIcicle(direction: direction, originOffset: originOffset), pellet: false)
             }
             return
         }
@@ -5557,11 +5605,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             pierces: playerStats.pierceCount,
             damageMultiplier: playerStats.effectiveDamageMultiplier * damageScale,
             isCrit: isCrit,
-            spawnsGravityWell: playerStats.gravityWellOnExpire,
+            // v2.1 A6 (CL-87): primary shots only — echoes, fragments, needles,
+            // shards and Backwash no longer leave wells.
+            spawnsGravityWell: allowModifiers && playerStats.gravityWellOnExpire,
             voidStyle: playerStats.erasureVoidTouched,
             frostStyle: playerStats.polarVortexTier >= 1
         )
         projectile.killSource = source ?? (allowModifiers ? .primary : .fragment)
+        // Every caller but the volley passes allowModifiers: false, so this is
+        // exactly the gun's primary pellet.
+        if allowModifiers { configurePrimaryShot(projectile, pellet: true) }
         configure?(projectile)
         projectile.position = player.position + originOffset
         projectile.zPosition = 8
@@ -5652,14 +5705,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         for index in toRemove.reversed() {
             let projectile = projectiles[index]
-            // v1.6: Gravity Well — projectiles that expire at max range leave a pull zone
+            // v1.6: Gravity Well — a spent primary shot (max range or a wall)
+            // leaves a pull zone. v2.1 A6: one of the player's black holes.
             if projectile.spawnsGravityWell {
-                // v1.7 Dead Circuit: void zones linger longer
-                spawnGravityWell(at: projectile.position,
-                                 radius: playerStats.gravityWellRadius,
-                                 duration: playerStats.gravityWellDuration * playerStats.voidZoneDurationMultiplier,
-                                 dps: playerStats.gravityWellDPS)
+                spawnVoidWell(.gravityWell, at: projectile.position)
             }
+            openBlackholeIfSeeded(projectile)   // v2.1 A6 (CL-76): where it stopped
             projectile.removeFromParent()
             projectiles.remove(at: index)
         }
@@ -5696,7 +5747,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - XP Orb Updates
     
     private func updateXPOrbs(_ dt: TimeInterval) {
+        // v2.1 A6 Devour (CL-84): XP orbs START their pull from 2× the pickup
+        // radius. Collection is unchanged (the orb still has to reach Spark),
+        // and health orbs stay non-magnetized (canon).
         let pickupRadius = playerStats.effectivePickupRadius
+            * (playerStats.devourActive ? GameConfig.VoidTree.devourXPMagnet : 1)
         for orb in xpOrbs {
             orb.updateMagnet(playerPosition: player.position, pickupRadius: pickupRadius, deltaTime: dt)
         }
@@ -5745,24 +5800,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.3: Unstable Core — periodic burst
         if playerStats.updateUnstableCore(dt) {
             performUnstableCoreBurst()
-        }
-
-        // v1.6: Singularity (Void tier-7) — periodic massive gravity wells
-        if playerStats.singularityActive {
-            singularityTimer += dt
-            if singularityTimer >= playerStats.singularityInterval {
-                singularityTimer = 0
-                // v2.1 (1A): a well is a persistent ground object — never
-                // inside solid geometry (shared sampler, well-radius margin).
-                let pos = PlacementSampler.randomPoint(
-                    in: arenaGeometry, minRadius: 0,
-                    maxRadius: GameConfig.Arena.radius * 0.6,
-                    margin: playerStats.singularityRadius * 0.5)
-                spawnGravityWell(at: pos,
-                                 radius: playerStats.singularityRadius,
-                                 duration: playerStats.singularityDuration,
-                                 dps: playerStats.singularityDPS)
-            }
         }
 
         // v2.1 A5 (CL-60): Iron Bloom — a 4s radial spike pulse (the cadence the
@@ -6173,13 +6210,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// again until it lands.
     private func applyRepulse(to enemy: EnemyNode) {
         let id = ObjectIdentifier(enemy)
-        guard repulseFlights[id] == nil, !enemy.isDying else { return }
+        // v2.1 A6 (CL-79): a body trapped in a black hole is held — Repulse
+        // can't shove or launch it out.
+        guard repulseFlights[id] == nil, !enemy.isDying, !enemy.isVoidTrapped else { return }
         let scale = DeviceScale.gameplay
         let launchable = RepulseFlight.isLaunchable(isMiniBoss: enemy.isMiniBoss, isSnowman: enemy.isSnowman)
         if playerStats.repulseLaunches, launchable {
             var tuning = GameConfig.Guard.launchTuning
             tuning.distance *= scale
             repulseFlights[id] = (enemy, RepulseFlight(direction: enemy.position - player.position, tuning: tuning))
+            enemy.cancelFear()   // v2.1 A6 (CL-80): a launch is a stronger control
             #if DEBUG
             combatLedger.launches += 1
             #endif
@@ -7374,8 +7414,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if let b = boss, !b.isDead { b.takeDamage(b.health) }
         for p in enemyProjectiles { p.removeFromParent() }
         enemyProjectiles.removeAll()
-        for well in gravityWells { well.removeFromParent() }
-        gravityWells.removeAll()
+        for well in voidWells { well.removeFromParent() }
+        voidWells.removeAll()
 
         // Halt spawns for a brief breather, then let the arena refill — the void
         // gives a clear board + a breath, then takes it back while the clock ticks.
@@ -7395,10 +7435,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hideEventHorizonCountdown()
         flashScreen(colorHex: 0x3A1050, alpha: 0.7, duration: 0.6)
         worldNode.shake(intensity: 20, duration: 0.7)
-        showRingPulse(at: player.position, radius: 220, colorHex: 0x6C3483)
+        showRingPulse(at: player.position, radius: 220, colorHex: GameConfig.VoidTree.indigoHex)
         let collapse = SKShapeNode(circleOfRadius: 30)
-        collapse.fillColor = SKColor(hex: 0x1A0028, alpha: 0.9)
-        collapse.strokeColor = SKColor(hex: 0xC060FF, alpha: 0.95)
+        // v2.1 A6 (CL-86 / F4): a world-space player-Void effect — indigo. (The
+        // screen tint above is the approved UI exception.)
+        collapse.fillColor = SKColor(hex: 0x05060F, alpha: 0.9)
+        collapse.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.95)
         collapse.glowWidth = 22
         collapse.position = player.position
         collapse.zPosition = 20
@@ -7494,13 +7536,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         path.move(to: origin - dir * span)
         path.addLine(to: origin + dir * span)
         let beam = SKShapeNode(path: path)
-        beam.strokeColor = SKColor(hex: 0xC060FF, alpha: 0.95)
+        beam.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.95)   // v2.1 A6 (CL-86 / F4)
         beam.lineWidth = 5
         beam.glowWidth = 14
         beam.zPosition = 9
         worldNode.addChild(beam)
         beam.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.35), SKAction.removeFromParent()]))
-        showRingPulse(at: origin, radius: 52, colorHex: 0x9B59B6)
+        showRingPulse(at: origin, radius: 52, colorHex: GameConfig.VoidTree.indigoLightHex)
         worldNode.shake(intensity: 6, duration: 0.2)
     }
 
@@ -7511,7 +7553,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let dir = (pos - e.position).normalized
             e.position += dir * GameConfig.Erasure.implosionPull
         }
-        showRingPulse(at: pos, radius: r, colorHex: 0x9B59B6)
+        showRingPulse(at: pos, radius: r, colorHex: GameConfig.VoidTree.indigoLightHex)
     }
 
     /// 2. Rift Burst — Void damage in a small radius.
@@ -7519,7 +7561,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.riftBurstMult))
         damageEnemiesInRadius(GameConfig.Erasure.effectRadius, around: pos,
                               damage: dmg, bossClassScaled: true)
-        showRingPulse(at: pos, radius: GameConfig.Erasure.effectRadius, colorHex: 0x8E44AD)
+        showRingPulse(at: pos, radius: GameConfig.Erasure.effectRadius, colorHex: GameConfig.VoidTree.indigoHex)
     }
 
     /// 3. Phase Lock — immobilize normals, slow boss-class, in a radius.
@@ -7533,7 +7575,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 e.applyStun(GameConfig.Erasure.phaseLockDuration)
             }
         }
-        showRingPulse(at: pos, radius: r, colorHex: 0x6C3483)
+        showRingPulse(at: pos, radius: r, colorHex: GameConfig.VoidTree.indigoHex)
     }
 
     /// 4. Damage Echo — a delayed Void detonation on the target (ATK-scaled).
@@ -7544,7 +7586,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.run { [weak self, weak enemy] in
                 guard let self = self, let enemy = enemy, !enemy.isDying,
                       self.enemies.contains(where: { $0 === enemy }) else { return }
-                self.showRingPulse(at: enemy.position, radius: 28, colorHex: 0x8E44AD)
+                self.showRingPulse(at: enemy.position, radius: 28, colorHex: GameConfig.VoidTree.indigoHex)
                 if enemy.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: enemy.isMiniBoss)) {
                     if let i = self.enemies.firstIndex(where: { $0 === enemy }) { self.enemies.remove(at: i) }
                     self.onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .capstone)
@@ -7560,7 +7602,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 (1A): a teleport can't END inside solid geometry.
         enemy.position = arenaGeometry.resolve(enemy.position, actorRadius: enemy.geometryFootprintRadius)
         geometryDebug.recordResolve(actor: "enemy", cause: .teleport)
-        showRingPulse(at: enemy.position, radius: 24, colorHex: 0x9B59B6)
+        showRingPulse(at: enemy.position, radius: 24, colorHex: GameConfig.VoidTree.indigoLightHex)
     }
 
     /// 6. Fracture — the target briefly takes more damage (timed vulnerability).
@@ -7569,7 +7611,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         enemy.applyFracture(GameConfig.BossClass.scaledDebuff(
                                 GameConfig.Erasure.fractureVulnerability, isBossClass: enemy.isMiniBoss),
                             duration: GameConfig.Erasure.fractureDuration)
-        showRingPulse(at: enemy.position, radius: 26, colorHex: 0xC39BD3)
+        showRingPulse(at: enemy.position, radius: 26, colorHex: GameConfig.VoidTree.indigoLightHex)   // v2.1 A6 (F4)
     }
 
     /// 7. Backwash — a Void-shard burst radiates from the target (reuses the
@@ -7588,10 +7630,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// The Void implosion pop at an Unstable trigger.
     private func showUnstablePop(at pos: CGPoint) {
-        showRingPulse(at: pos, radius: 42, colorHex: 0x9B59B6)
+        showRingPulse(at: pos, radius: 42, colorHex: GameConfig.VoidTree.indigoLightHex)
         let core = SKShapeNode(circleOfRadius: 8)
-        core.fillColor = SKColor(hex: 0x6C3483, alpha: 0.8)
-        core.strokeColor = SKColor(hex: 0xC39BD3, alpha: 0.9)
+        core.fillColor = SKColor(hex: GameConfig.VoidTree.indigoDeepHex, alpha: 0.8)
+        core.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.9)   // v2.1 A6 (F4)
         core.glowWidth = 8
         core.position = pos
         core.zPosition = 8
@@ -7605,7 +7647,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Polar Vortex (Chill capstone)
 
     /// T4: fire one condensed icicle (200% ATK) that shatters into shards on impact.
-    private func fireIcicle(direction: CGPoint, originOffset: CGPoint) {
+    @discardableResult
+    private func fireIcicle(direction: CGPoint, originOffset: CGPoint) -> ProjectileNode {
         let icicle = ProjectileNode(
             direction: direction,
             speed: playerStats.effectiveProjectileSpeed,
@@ -7613,7 +7656,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             pierces: 0,
             damageMultiplier: playerStats.effectiveDamageMultiplier * GameConfig.PolarVortex.icicleMult,
             isCrit: false,
-            spawnsGravityWell: false,
+            spawnsGravityWell: false,   // v2.1 A6 (CL-87): Gravity Well stays pellet-scoped
             voidStyle: false,
             isIcicle: true
         )
@@ -7622,6 +7665,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         icicle.killSource = .capstone   // v2.1 A0: the condensed capstone shot
         projectiles.append(icicle)
         worldNode.addChild(icicle)
+        return icicle
     }
 
     /// T1: a burst of ice shards from a chilled foe's death (reuses the projectile
@@ -7751,51 +7795,528 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         e.scheduleFrostbite(vuln, after: freezeDur, lasting: GameConfig.PolarVortex.frostbiteDuration)
     }
 
-    // MARK: - v1.6: Gravity Wells
+    // MARK: - v2.1 A6: Void — black holes (CL-10, CL-77…79, CL-87, CL-9)
 
-    private func spawnGravityWell(at position: CGPoint, radius: CGFloat, duration: TimeInterval, dps: CGFloat) {
-        let well = GravityWellNode(radius: radius, duration: duration, dps: dps)
-        well.position = position
+    /// Open a player black hole. The cap comes first: at four live, the oldest
+    /// ordinary Gravity Well goes, else the oldest hole — never more than four
+    /// (CL-10). Dead Circuit makes every hole linger ×1.5 and grow (CL-78).
+    private func spawnVoidWell(_ preset: VoidWellPreset, at point: CGPoint) {
+        let V = GameConfig.VoidTree.self
+        if let evict = VoidWellCap.evictionIndex(presets: voidWells.map { $0.state.preset },
+                                                 live: voidWells.map { $0.state.isLive },
+                                                 cap: V.maxLiveWells) {
+            endVoidWell(voidWells[evict], collapsed: false)
+            #if DEBUG
+            combatLedger.wellEvictions += 1
+            #endif
+        }
+        let radius: CGFloat
+        var lifetime: TimeInterval
+        switch preset {
+        case .gravityWell: radius = V.gravityWellRadius; lifetime = V.gravityWellLifetime
+        case .nullBloom: radius = V.blackholeRadius * V.nullBloomRadiusFraction; lifetime = V.nullBloomLifetime
+        case .blackhole: radius = V.blackholeRadius; lifetime = V.blackholeLifetime
+        }
+        if playerStats.deadCircuitActive { lifetime *= V.deadCircuitLinger }
+        nextVoidWellID += 1
+        let well = VoidWellNode(state: VoidWellState(
+            id: nextVoidWellID, preset: preset, baseRadius: radius, lifetime: lifetime,
+            capacity: V.absorbCapacity,
+            deadCircuit: playerStats.deadCircuitActive ? V.deadCircuitTuning : nil))
+        // A hole's centre never sits inside solid geometry (CL-77), nor out
+        // past the arena wall (a missed shot flies beyond the rim).
+        var center = point
+        let wall = GameConfig.Arena.radius
+        let r = hypot(center.x, center.y)
+        if r > wall, r > 0 { center = CGPoint(x: center.x * wall / r, y: center.y * wall / r) }
+        well.position = arenaGeometry.resolve(center, actorRadius: radius * 0.5)
         well.zPosition = 3
-        gravityWells.append(well)
+        voidWells.append(well)
         worldNode.addChild(well)
+        #if DEBUG
+        combatLedger.recordVoidWell(preset, live: voidWells.count)
+        #endif
     }
 
-    private func updateGravityWells(_ dt: TimeInterval) {
-        guard !gravityWells.isEmpty else { return }
+    /// ×3 Blackhole (CL-76): the seeded lead shot opens one where it stopped.
+    private func openBlackholeIfSeeded(_ projectile: ProjectileNode) {
+        guard BlackholeSeed.take(projectile) else { return }
+        spawnVoidWell(.blackhole, at: projectile.position)
+    }
 
-        var expired: [Int] = []
-        for (index, well) in gravityWells.enumerated() {
-            let result = well.update(deltaTime: dt, enemies: enemies)
+    /// Who a black hole moves: live, hittable enemies — never snowmen, never
+    /// one in a Repulse flight, never a phased/vanished actor (CL-77/79).
+    private func voidWellAffects(_ enemy: EnemyNode) -> Bool {
+        isHittable(enemy) && !enemy.isSnowman && repulseFlights[ObjectIdentifier(enemy)] == nil
+    }
 
-            // Event Horizon / Singularity: DOT on enemies inside the well
-            // (reference-based removal — onEnemyKilled side effects can mutate the array)
-            if result.dotDamage > 0 {
-                var killed: [EnemyNode] = []
-                for enemy in enemies
-                where enemy.position.distance(to: well.position) < well.radius {
-                    // v1.8 Event Horizon (Void 5): enemies inside struggle to escape
-                    if playerStats.inWellSlow > 0 {
-                        enemy.applySlow(playerStats.effectiveSlow(playerStats.inWellSlow), duration: 0.5)
-                    }
-                    if enemy.takeDamage(result.dotDamage) {
-                        killed.append(enemy)
-                    }
+    /// Every hole pulls the bodies inside toward its centre (mini-bosses at the
+    /// BossClass debuff scale). Runs inside `updateEnemies`, BEFORE the frame's
+    /// geometry resolve. ×3 also impairs: a slow while inside, every frame.
+    private func applyVoidWellPull(_ dt: TimeInterval) {
+        guard !voidWells.isEmpty else { return }
+        let V = GameConfig.VoidTree.self
+        for well in voidWells where well.state.isLive {
+            let center = well.position
+            let radius = well.state.radius
+            for enemy in enemies where voidWellAffects(enemy) {
+                let d = enemy.position.distance(to: center)
+                guard d < radius else { continue }
+                if d > 0.5 {
+                    let scale = enemy.isMiniBoss ? GameConfig.BossClass.debuffScale : 1
+                    enemy.position += (center - enemy.position).normalized * min(d, V.pullSpeed * scale * CGFloat(dt))
                 }
-                for enemy in killed {
-                    if let i = enemies.firstIndex(where: { $0 === enemy }) {
-                        enemies.remove(at: i)
-                        onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .ground)
+                if playerStats.voidBlackhole {
+                    enemy.applySlow(playerStats.effectiveSlow(V.impairSlow), duration: 0.2)
+                }
+            }
+        }
+    }
+
+    /// The rest of a hole's life, after this frame's hostile shots moved:
+    /// lifetimes, ×3 absorption, ×5 capture and returns, Dead Circuit damage,
+    /// ×7 decomposition, then collapses and ends.
+    private func updateVoidWells(_ dt: TimeInterval) {
+        let V = GameConfig.VoidTree.self
+        var expired: [VoidWellNode] = []
+        for well in voidWells {
+            if well.state.tick(dt) { expired.append(well) }
+        }
+
+        // ×3 Blackhole: absorb HOSTILE projectiles only (Q-V4). Area strikes
+        // aren't projectiles. Each absorb is Dead Circuit matter; with ×5 the
+        // shot is held to be returned.
+        if playerStats.voidBlackhole, !enemyProjectiles.isEmpty, !voidWells.isEmpty {
+            var taken: [Int] = []
+            for (index, shot) in enemyProjectiles.enumerated() {
+                for well in voidWells where well.state.contains(shot.position, center: well.position) {
+                    guard well.state.tryAbsorb(holdForReturn: playerStats.voidListlessness,
+                                               returnDelay: V.returnDelay) else { continue }
+                    well.showAbsorb(at: shot.position)
+                    if well.state.deadCircuit != nil {
+                        well.state.addMatter()   // Dead Circuit: an absorbed shot is matter
+                        noteMatter()
+                    }
+                    taken.append(index)
+                    break
+                }
+            }
+            for index in taken.reversed() {
+                enemyProjectiles[index].removeFromParent()
+                enemyProjectiles.remove(at: index)
+            }
+            #if DEBUG
+            combatLedger.absorbed += taken.count
+            #endif
+        }
+
+        if playerStats.voidListlessness {
+            // ×5: enemies entering a live hole are trapped (CL-79). A trap is a
+            // hard control, so capture ends any fear (CL-80).
+            for well in voidWells where well.state.isLive {
+                for enemy in enemies where voidWellAffects(enemy) && !enemy.isVoidTrapped
+                    && well.state.contains(enemy.position, center: well.position) {
+                    if enemy.captureInVoid(wellID: well.state.id, wellRemaining: well.state.remaining,
+                                           singularity: playerStats.voidSingularity, tuning: V.trapTuning) {
+                        #if DEBUG
+                        combatLedger.traps += 1
+                        #endif
                     }
                 }
             }
-
-            if result.expired { expired.append(index) }
+            // …and absorbed shots come back the moment they're ready, at the
+            // nearest hittable target the hole can SEE (CL-4, gate ruling Q5).
+            // With no valid visible target a ready shot is DISCARDED — never
+            // left waiting, never fired through terrain.
+            for well in voidWells {
+                while well.state.takeReadyReturn() {
+                    if let target = nearestVoidReturnTarget(from: well.position) {
+                        fireReturnedShot(from: well.position, toward: target)
+                    } else {
+                        #if DEBUG
+                        combatLedger.returnsFizzled += 1
+                        #endif
+                    }
+                }
+            }
         }
 
-        for index in expired.reversed() {
-            gravityWells[index].collapseAndRemove()
-            gravityWells.remove(at: index)
+        // Dead Circuit (CL-78): damage to every enemy inside, fraction-first,
+        // at 1× current shot damage per second. Bosses excluded, like every hole.
+        if playerStats.deadCircuitActive {
+            let perSecond = playerStats.effectiveDamageMultiplier * V.deadCircuitDamage
+            for well in voidWells where well.state.isLive && well.state.deadCircuit != nil {
+                let damage = well.state.damageTick(dt, perSecond: perSecond)
+                guard damage > 0 else { continue }
+                // Review F2: a victim's death can open a Null Bloom that evicts
+                // THIS hole mid-pass — liveness is re-checked before every body,
+                // and so is containment (matter can grow the hole mid-pass).
+                VoidWellPass.forEachWhileLive(enemies, isLive: { well.state.isLive }) { enemy in
+                    guard isHittable(enemy), well.state.contains(enemy.position, center: well.position) else { return }
+                    dealDirectDamage(damage, toEnemy: enemy, source: .ground)
+                }
+            }
+        }
+
+        // CL-79 "detachment": a body some other effect shoved clean out of its
+        // (still live) hole is released — held means held IN the hole. A
+        // Singularity terminal hold whose hole is gone just finishes.
+        for enemy in enemies where enemy.isVoidTrapped && !enemy.isDying {
+            guard let id = enemy.voidTrapWellID,
+                  let well = voidWells.first(where: { $0.state.id == id && !$0.state.ended }) else { continue }
+            if enemy.position.distance(to: well.position) > well.state.radius + enemy.hitBodyRadius {
+                enemy.releaseVoidTrap()
+            }
+        }
+
+        // ×7 Singularity (CL-9): trapped enemies decompose — decomposition
+        // FIRST, then the hold ticks, so a terminal hold delivers its whole 2s.
+        for enemy in enemies where enemy.isVoidTrapped {
+            if playerStats.voidSingularity, !enemy.isDying {
+                let damage = enemy.decomposeInVoid(dt, tuning: V.trapTuning)
+                if damage > 0 {
+                    #if DEBUG
+                    combatLedger.decomposeDamage += damage
+                    #endif
+                    dealDirectDamage(damage, toEnemy: enemy, source: .ground)
+                }
+            }
+            if !enemy.isDying { enemy.tickVoidTrap(dt) }
+        }
+        // …and an arena boss is never trapped: 1% max HP/s while its body
+        // overlaps ANY live hole — one rate however many (a final value; skips
+        // the flat DEF dial, as decomposition delivers its percentage directly).
+        if playerStats.voidSingularity, let b = boss, isHittable(b) {
+            let overlapping = voidWells.contains {
+                $0.state.isLive && b.position.distance(to: $0.position) < $0.state.radius + b.hitBodyRadius
+            }
+            let damage = bossDecompose.tick(dt, overlapping: overlapping, maxHealth: b.maxHealth,
+                                            rate: V.decomposeBoss)
+            if damage > 0 {
+                #if DEBUG
+                combatLedger.bossDecomposeDamage += damage
+                #endif
+                b.takeDamage(damage, ignoresChallengeDEF: true)
+            }
+        }
+
+        for well in voidWells where well.state.collapsePending && !well.state.ended { collapseVoidWell(well) }
+        for well in expired where voidWells.contains(where: { $0 === well }) {
+            endVoidWell(well, collapsed: false)
+        }
+    }
+
+    /// Dead Circuit (CL-78): an eligible kill inside a live hole feeds EVERY
+    /// hole it's inside. Collapse-burst kills feed none (QC).
+    private func feedVoidWells(killAt position: CGPoint) {
+        guard playerStats.deadCircuitActive, !suppressWellMatter, !voidWells.isEmpty else { return }
+        for well in voidWells where well.state.contains(position, center: well.position) {
+            if well.state.isLive, well.state.deadCircuit != nil {
+                well.state.addMatter()
+                noteMatter()
+            }
+        }
+    }
+
+    private func noteMatter() {
+        #if DEBUG
+        combatLedger.matter += 1
+        #endif
+    }
+
+    /// Dead Circuit's collapse (CL-78): a void burst of 150% ATK in the grown
+    /// radius — ordinary area damage (the flat DEF dial applies to a boss),
+    /// Carrier-blocked per target, full kill credit, and no matter for anyone.
+    private func collapseVoidWell(_ well: VoidWellNode) {
+        let center = well.position
+        let radius = well.state.radius
+        let damage = max(1, Int(playerStats.effectiveAttack * GameConfig.VoidTree.deadCircuitBurstATK))
+        func blocked(_ target: CGPoint) -> Bool {
+            arenaGeometry.segmentBlockedExact(center, target, travelRadius: GameConfig.Geometry.projectileTravelRadius)
+        }
+        suppressWellMatter = true
+        for enemy in enemies where isHittable(enemy)
+            && enemy.position.distance(to: center) < radius + enemy.hitBodyRadius
+            && !blocked(enemy.position) {
+            dealDirectDamage(damage, toEnemy: enemy, source: .ground)
+        }
+        if let b = boss, isHittable(b),
+           b.position.distance(to: center) < radius + b.hitBodyRadius, !blocked(b.position) {
+            b.takeDamage(damage)
+        }
+        suppressWellMatter = false
+        #if DEBUG
+        combatLedger.collapses += 1
+        NSLog("[A6] Dead Circuit collapse: r=%.0f, %d damage", Double(radius), damage)
+        #endif
+        endVoidWell(well, collapsed: true)
+    }
+
+    /// A hole leaves (expiry, eviction, collapse). Held shots return at once
+    /// with ×5 — to a visible target, else discarded (Q5) — otherwise they're
+    /// gone (R5). Trapped enemies are released —
+    /// except a Singularity terminal hold, which finishes on its own.
+    private func endVoidWell(_ well: VoidWellNode, collapsed: Bool) {
+        guard well.state.end() else { return }   // once — an evicted hole can't end twice
+        let held = well.state.drainHeld()
+        if held > 0, playerStats.voidListlessness {
+            for _ in 0..<held {
+                if let target = nearestVoidReturnTarget(from: well.position) {
+                    fireReturnedShot(from: well.position, toward: target)
+                } else {
+                    #if DEBUG
+                    combatLedger.returnsFizzled += 1
+                    #endif
+                }
+            }
+        }
+        let id = well.state.id
+        for enemy in enemies where enemy.voidTrapWellID == id { enemy.voidWellEnded(id) }
+        if let index = voidWells.firstIndex(where: { $0 === well }) { voidWells.remove(at: index) }
+        well.collapseAndRemove(burst: collapsed)
+    }
+
+    /// Gate ruling Q5 (Brandon, Sep 24): the nearest CURRENTLY hittable enemy
+    /// or arena boss (to the body's surface) WITH line of sight from the
+    /// releasing hole. Phased/vanished actors are never targets. nil = nothing
+    /// valid is visible, and the caller discards the held shot.
+    private func nearestVoidReturnTarget(from origin: CGPoint) -> CGPoint? {
+        let solid = arenaGeometry.hasBlockedGeometry
+        var best: CGPoint?
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        func consider(_ position: CGPoint, surface d: CGFloat) {
+            guard d < bestDistance else { return }
+            // Line of sight from the releasing hole (gate ruling Q5). The EXACT
+            // test: the stepped one only checks the endpoints of a short
+            // segment, so it could see round a Carrier corner.
+            if solid, arenaGeometry.segmentBlockedExact(
+                origin, position, travelRadius: GameConfig.Geometry.projectileTravelRadius) { return }
+            bestDistance = d
+            best = position
+        }
+        for enemy in enemies where isHittable(enemy) {
+            consider(enemy.position, surface: enemy.position.distance(to: origin) - enemy.hitBodyRadius)
+        }
+        if let b = boss, isHittable(b) {
+            consider(b.position, surface: b.position.distance(to: origin) - b.hitBodyRadius)
+        }
+        return best
+    }
+
+    /// CL-4: an absorbed hostile shot comes back as a player-owned Void shot —
+    /// 1× current shot damage, Void affinity (+ Phase T2 penetration), and
+    /// Anomaly; nothing else. Never re-absorbed (wells take hostile shots only).
+    private func fireReturnedShot(from origin: CGPoint, toward target: CGPoint) {
+        // A trapped body sits on the hole's centre: a zero aim would normalize
+        // to .zero and park the shot forever. Any heading still overlaps it.
+        let aim = target - origin
+        let shot = ProjectileNode(direction: aim.length > 1 ? aim : CGPoint(x: 0, y: 1),
+                                  speed: playerStats.effectiveProjectileSpeed,
+                                  range: playerStats.effectiveProjectileRange,
+                                  damageMultiplier: playerStats.effectiveDamageMultiplier,
+                                  returnedStyle: true)
+        shot.voidKind = .returned
+        shot.voidHit = .returned(phaseT2: playerStats.phasePenetrates)
+        shot.killSource = .returned
+        shot.position = origin
+        shot.zPosition = 8
+        projectiles.append(shot)
+        worldNode.addChild(shot)
+        #if DEBUG
+        combatLedger.returnsFired += 1
+        #endif
+    }
+
+    // MARK: - v2.1 A6: Void — the gun's shots (CL-14, CL-70, CL-72, CL-75, CL-81)
+
+    /// The gun's own primary shot — a volley pellet, or the icicle that
+    /// replaces it: Phase T2's affinity + penetration (R3, CL-72) and this
+    /// volley's emission and lead shot (CL-76). Warp is the PELLET only
+    /// (CL-14: "the gun's own primary projectile"); R3's icicle reading was
+    /// ruled for Phase T2, so it isn't stretched to Warp or Gravity Well.
+    private func configurePrimaryShot(_ projectile: ProjectileNode, pellet: Bool) {
+        if pellet, playerStats.warpShotActive { projectile.enableWarp(GameConfig.VoidTree.warpCurve) }
+        projectile.voidHit = .primaryShot(phaseT2: playerStats.phasePenetrates)
+        volley.note(projectile)
+    }
+
+    /// A shot's damage before the damage-taken chain. Older trees keep their
+    /// truncation, `Int(multiplier)` (no retrofit). Where an A6 fraction takes
+    /// part — Warp's curve on a pellet, Riftline's falloff on a later body —
+    /// that fraction scales the truncated damage and only IT is rounded by
+    /// chance (CL-70), so falloff never climbs and full-speed Warp = plain.
+    private func shotBaseDamage(_ projectile: ProjectileNode) -> Int {
+        var fraction: CGFloat = 1
+        var voidFraction = false
+        if let warp = projectile.warp {
+            fraction *= warp.damageFraction(age: projectile.age)
+            voidFraction = true
+        }
+        if playerStats.riftlineActive, projectile.bodiesStruck > 0 {
+            fraction *= RiftlineFalloff.fraction(priorHits: projectile.bodiesStruck,
+                                                 falloff: GameConfig.VoidTree.riftlineFalloff)
+            voidFraction = true
+        }
+        guard voidFraction else { return max(1, Int(projectile.damageMultiplier)) }
+        // Review F3: the projectile's ONE threshold, shared by all its hits.
+        return projectile.a6Rounding.damage(multiplier: projectile.damageMultiplier, fraction: fraction)
+    }
+
+    /// Shadow Edge (CL-75): one wide blade alongside the volley — 125% shot
+    /// damage, up to 3 bodies, Void affinity. Not a shot, not a primary hit.
+    private func fireShadowEdge(direction: CGPoint) {
+        let V = GameConfig.VoidTree.self
+        // A target on Spark's exact spot gives a zero aim — a blade that would
+        // never move or expire. Any heading still sweeps through it.
+        let heading = direction.length > 0.5 ? direction : CGPoint(x: 0, y: 1)
+        let blade = ProjectileNode(direction: heading,
+                                   speed: playerStats.effectiveProjectileSpeed,
+                                   range: playerStats.effectiveProjectileRange,
+                                   pierces: V.bladeTargets - 1,
+                                   damageMultiplier: playerStats.effectiveDamageMultiplier,
+                                   bladeStyle: true,
+                                   bodyRadius: GameConfig.Projectile.radius * V.bladeScale * DeviceScale.gameplay)
+        blade.voidDamageFraction = V.bladeDamage   // 125% of the shot's legacy damage (CL-70)
+        blade.voidKind = .shadowEdge
+        blade.voidHit = .shadowEdge
+        blade.killSource = .shadowEdge
+        blade.position = player.position
+        blade.zPosition = 8
+        projectiles.append(blade)
+        worldNode.addChild(blade)
+    }
+
+    /// CL-4 / CL-75 (QB): A6's secondary Void attacks — named effects ONLY:
+    /// their damage (CL-70), Void affinity (Braceguard can't halve it), their
+    /// own kill source, and — for a returned shot — Anomaly. No crit, executes,
+    /// status riders, chains, meters, counters or spawns.
+    private func resolveVoidSecondaryHit(_ projectile: ProjectileNode, on enemy: EnemyNode) {
+        // Review F3: the projectile's ONE rounding threshold.
+        let damage = projectile.a6Rounding.damage(multiplier: projectile.damageMultiplier,
+                                                  fraction: projectile.voidDamageFraction)
+        let braceguard = enemy as? BraceguardNode
+        // Review F5: the pure routine the void harness executes; the scene
+        // only supplies what each named effect does.
+        VoidSecondaryHit.onEnemy(
+            kind: projectile.voidKind, hit: projectile.voidHit, damage: damage, isDying: enemy.isDying,
+            shielded: braceguard?.blocksHit(from: player.position) ?? false,
+            shieldMultiplier: BraceguardNode.shieldDamageMultiplier,
+            effects: VoidSecondaryHit.EnemyEffects(
+                flashShield: { braceguard?.flashShield() },
+                consume: { [weak self] in
+                    guard let self else { return }
+                    self.consumeProjectile(projectile)
+                    #if DEBUG
+                    if projectile.voidKind == .shadowEdge { self.combatLedger.bladeHits += 1 } else { self.combatLedger.returnedHits += 1 }
+                    #endif
+                },
+                takeDamage: { enemy.takeDamage($0) },
+                credit: { [weak self] in
+                    self?.onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: projectile.killSource)
+                },
+                stackAnomaly: { [weak self] in _ = self?.applyAnomaly(to: enemy, source: .returned) }))
+    }
+
+    private func resolveVoidSecondaryHitBoss(_ projectile: ProjectileNode, on bossNode: any ArenaBossNode) {
+        let damage = projectile.a6Rounding.damage(multiplier: projectile.damageMultiplier,
+                                                  fraction: projectile.voidDamageFraction)
+        VoidSecondaryHit.onBoss(
+            kind: projectile.voidKind, hit: projectile.voidHit, damage: damage,
+            effects: VoidSecondaryHit.BossEffects(
+                consume: { [weak self] in
+                    guard let self else { return }
+                    self.consumeProjectile(projectile)
+                    #if DEBUG
+                    if projectile.voidKind == .shadowEdge { self.combatLedger.bladeHits += 1 } else { self.combatLedger.returnedHits += 1 }
+                    #endif
+                },
+                takeDamage: { bossNode.takeDamage($0, ignoresChallengeDEF: $1) },
+                isDead: { bossNode.isDead },
+                stackAnomaly: { [weak self] in self?.applyBossAnomaly(bossNode) }))
+    }
+
+    // MARK: - v2.1 A6: Void — Anomaly and fear (CL-73, CL-74, CL-80)
+
+    /// Phase (CL-73): stack Anomaly on the SURVIVOR of a qualifying hit.
+    /// Normals are erased; an elite (mini-boss) takes 20% of max HP through the
+    /// Glacial Spikes route — a final value (CL-74). Credit goes to the hit's
+    /// own source. Returns true if the enemy died.
+    @discardableResult
+    private func applyAnomaly(to enemy: EnemyNode, source: KillSource) -> Bool {
+        guard playerStats.phaseTier >= 1, isHittable(enemy) else { return false }
+        switch enemy.addAnomaly(playerStats.anomalyStacksPerHit, tuning: GameConfig.VoidTree.anomalyTuning) {
+        case .none:
+            return false
+        case .erase:
+            #if DEBUG
+            combatLedger.anomalyErases += 1
+            #endif
+            dealDirectDamage(enemy.health, toEnemy: enemy, source: source)
+        case .chunk(let fraction):
+            #if DEBUG
+            combatLedger.anomalyChunks += 1
+            #endif
+            dealDirectDamage(AnomalyState.chunkDamage(maxHealth: enemy.maxHealth, fraction: fraction),
+                             toEnemy: enemy, source: source)
+        }
+        return enemy.isDying
+    }
+
+    /// The arena boss's Anomaly: 3% of its max HP per trigger (after the Boss
+    /// Mode HP dial), then 2s with no new stacks. Plain `takeDamage` — the
+    /// Glacial Spikes route, so the flat DEF dial still applies (R4).
+    private func applyBossAnomaly(_ bossNode: any ArenaBossNode) {
+        guard playerStats.phaseTier >= 1, isHittable(bossNode) else { return }
+        let outcome = bossAnomaly.add(playerStats.anomalyStacksPerHit, target: .boss,
+                                      tuning: GameConfig.VoidTree.anomalyTuning)
+        refreshBossAnomalyTell()
+        guard case .chunk(let fraction) = outcome else { return }
+        #if DEBUG
+        combatLedger.bossAnomalyChunks += 1
+        #endif
+        bossNode.takeDamage(AnomalyState.chunkDamage(maxHealth: bossNode.maxHealth, fraction: fraction))
+    }
+
+    private func refreshBossAnomalyTell() {
+        bossStatusTell?.refreshAnomaly(stacks: bossAnomaly.stacks, cooling: bossAnomaly.isCooling,
+                                       threshold: GameConfig.VoidTree.anomalyThreshold)
+    }
+
+    /// Void Horror (CL-80): 8% on a primary hit the target survived. Only
+    /// hittable actors not snowmen, airborne, trapped or under another hard
+    /// control; mini-bosses flee 0.25s; arena bosses never reach here.
+    private func rollVoidHorror(on enemy: EnemyNode) {
+        guard playerStats.voidHorrorActive, !enemy.isDying else { return }
+        let tuning = GameConfig.VoidTree.horrorTuning
+        let target = VoidHorror.Target(
+            targetClass: enemy.isMiniBoss ? .miniBoss : .normal,
+            hittable: isHittable(enemy), snowman: enemy.isSnowman,
+            airborne: repulseFlights[ObjectIdentifier(enemy)] != nil,
+            trapped: enemy.isVoidTrapped,
+            hardControlled: enemy.isStunned || enemy.isFrozen)
+        guard VoidHorror.eligible(target),
+              VoidHorror.rolls(unit: CGFloat.random(in: 0..<1), tuning: tuning),
+              let duration = VoidHorror.duration(for: target.targetClass, tuning: tuning),
+              enemy.tryFear(duration: duration) else { return }
+        #if DEBUG
+        combatLedger.fears += 1
+        #endif
+    }
+
+    /// Where a frightened enemy runs: away from Spark, inside the wall, never
+    /// INTO solid geometry — the route steer takes it round the Carrier.
+    private func fleeGoal(for enemy: EnemyNode) -> CGPoint? {
+        guard let goal = FleeRule.goal(from: enemy.position, awayFrom: player.position,
+                                       lookahead: GameConfig.VoidTree.fleeLookahead,
+                                       arenaRadius: GameConfig.Arena.radius,
+                                       footprint: enemy.geometryFootprintRadius) else { return nil }
+        guard arenaGeometry.hasBlockedGeometry else { return goal }
+        // Stop the escape ray at the last open ground on the enemy's OWN side
+        // of the Carrier (internal review H1): the route steer then runs it
+        // straight away from Spark, and the resolve slides it along the face.
+        let footprint = max(enemy.geometryFootprintRadius, 1)
+        return FleeRule.truncate(from: enemy.position, to: goal) { [arenaGeometry] p in
+            arenaGeometry.isBlocked(p, margin: footprint)
         }
     }
 
@@ -8373,11 +8894,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func spawnFalseOpeningPulse(at position: CGPoint) {
-        // A faint purple mark blooms into the pulse after the delay — readable,
-        // and the delay is what makes it a trap you lay behind you.
+        // A faint mark blooms into the pulse after the delay — readable, and the
+        // delay is what makes it a trap you lay behind you. v2.1 A6 (CL-86):
+        // player-Void indigo; it was the Faceted Lie's exact danger purple.
         let tell = SKShapeNode(circleOfRadius: playerStats.falseOpeningRadius * 0.5)
-        tell.strokeColor = SKColor(hex: 0x8E44FF, alpha: 0.5)
-        tell.fillColor = SKColor(hex: 0x8E44FF, alpha: 0.08)
+        tell.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.5)
+        tell.fillColor = SKColor(hex: GameConfig.VoidTree.indigoHex, alpha: 0.08)
         tell.lineWidth = 1.5
         tell.position = position
         tell.zPosition = 4
@@ -8392,7 +8914,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             SKAction.run { [weak self] in
                 guard let self = self, self.gameState == .playing else { return }
                 let r = self.playerStats.falseOpeningRadius
-                self.showRingPulse(at: position, radius: r, colorHex: 0x8E44FF)
+                self.showRingPulse(at: position, radius: r, colorHex: GameConfig.VoidTree.indigoLightHex)
                 self.damageEnemiesInRadius(r, around: position, damage: self.playerStats.falseOpeningDamage)
                 for enemy in self.enemies where enemy.position.distance(to: position) < r {
                     enemy.applySlow(self.playerStats.falseOpeningSlow,
@@ -8538,39 +9060,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    // MARK: - v1.6: Null Bloom (Unit 3)
-
-    private func updateNullBlooms(_ dt: TimeInterval) {
-        guard !nullBloomZones.isEmpty else { return }
-        let now = waveManager.elapsedTime
-
-        nullBloomZones.removeAll { $0.expiry <= now }
-
-        for zone in nullBloomZones {
-            for enemy in enemies
-            where enemy.position.distance(to: zone.position) < playerStats.nullBloomRadius {
-                enemy.applySlow(playerStats.effectiveSlow(playerStats.nullBloomSlow), duration: 0.3)
-            }
-        }
-    }
-
-    private func spawnNullBloom(at position: CGPoint) {
-        nullBloomZones.append((position: position,
-                               expiry: waveManager.elapsedTime + playerStats.nullBloomDuration))
-
-        let zone = SKShapeNode(circleOfRadius: playerStats.nullBloomRadius)
-        zone.fillColor = SKColor(hex: 0x223366, alpha: 0.18)
-        zone.strokeColor = SKColor(hex: 0x4466DD, alpha: 0.35)
-        zone.lineWidth = 1
-        zone.position = position
-        zone.zPosition = 2
-        worldNode.addChild(zone)
-        zone.run(SKAction.sequence([
-            SKAction.fadeOut(withDuration: playerStats.nullBloomDuration),
-            SKAction.removeFromParent()
-        ]))
-    }
-
     // MARK: - Unstable Core Burst
     
     private func performUnstableCoreBurst() {
@@ -8611,10 +9100,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
-        // Visual: red-purple pulse ring
+        // Visual: pulse ring. v2.1 A6 (CL-86 / QA): player-Void indigo — it
+        // was purple, which is danger.
         let ring = SKShapeNode(circleOfRadius: radius)
-        ring.strokeColor = SKColor(hex: 0x9933CC, alpha: 0.6)
-        ring.fillColor = SKColor(hex: 0x9933CC, alpha: 0.15)
+        ring.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.6)
+        ring.fillColor = SKColor(hex: GameConfig.VoidTree.indigoHex, alpha: 0.15)
         ring.lineWidth = 2
         ring.position = player.position
         ring.zPosition = 7
@@ -9096,6 +9586,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         enemies.removeAll()
         for p in enemyProjectiles { p.removeFromParent() }
         enemyProjectiles.removeAll()
+        // v2.1 A6: the player's black holes belong to that stage's arena too.
+        for well in voidWells { well.removeFromParent() }
+        voidWells.removeAll()
 
         guard let nextEntry = g.advance() else {
             gauntletCleared()
@@ -10591,6 +11084,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         killCount += 1
+        // v2.1 A6 Dead Circuit (CL-78): an eligible (full-credit) kill inside a
+        // live black hole is matter for it — never a collapse burst's kill (QC).
+        feedVoidWells(killAt: position)
 
         // v1.9 Polar Vortex Iceburst (T1): a chilled foe's death bursts into shards.
         // v2.1 A2: capped — a shard's kill may burst once more (gen 2), and a
@@ -10748,9 +11244,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             glassBloodBurst(at: ctx.position, generation: ctx.bleedGeneration + 1)
         }
 
-        // v1.6: Null Bloom — chance to leave a slowing zone
+        // v1.6: Null Bloom — v2.1 A6: a kill may leave a small black hole (CL-10/77).
         if playerStats.nullBloomChance > 0 && CGFloat.random(in: 0...1) < playerStats.nullBloomChance {
-            spawnNullBloom(at: ctx.position)
+            spawnVoidWell(.nullBloom, at: ctx.position)
         }
 
         if playerStats.killsExplode {
@@ -11184,6 +11680,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             resolveGlassBloodFragmentHit(projectileNode, on: enemyNode)
             return
         }
+        // v2.1 A6: returned shots and Shadow Edge — named effects only (CL-4, QB).
+        if projectileNode.voidKind != .none {
+            resolveVoidSecondaryHit(projectileNode, on: enemyNode)
+            return
+        }
 
         // v1.6 tuning: Braceguard's fixed shield halves damage from its arc
         // (was a full block — too punishing with auto-aim mid-chaos)
@@ -11194,7 +11695,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             braceguard.flashShield()
         }
 
-        var damage = max(1, Int(projectileNode.damageMultiplier))
+        // v2.1 A6: Warp's curve and Riftline's falloff join here (CL-70 rounding).
+        var damage = shotBaseDamage(projectileNode)
 
         // v1.7 Induction Step: a fully charged attack discharges as bonus Shock
         let inductionBonus = playerStats.consumeInductionCharge()
@@ -11257,7 +11759,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.6: shield reduction applies after all bonuses — flanking doubles output.
         // v1.9 Erasure Void-Touched (T2): shots pierce the shield entirely.
-        if braceguardShielded && !playerStats.erasureVoidTouched {
+        // v2.1 A6 (CL-71/72): so does a Void-affinity shot (Phase T2).
+        if braceguardShielded && !playerStats.erasureVoidTouched && !projectileNode.voidHit.affinity {
             damage = max(1, Int(CGFloat(damage) * BraceguardNode.shieldDamageMultiplier))
         }
 
@@ -11297,6 +11800,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
                     projectiles.remove(at: index)
                 }
+                openBlackholeIfSeeded(projectileNode)   // v2.1 A6: it stopped here
                 projectileNode.removeFromParent()
                 return
             }
@@ -11348,15 +11852,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode, source: projectileNode.killSource,
                           iceburstGeneration: projectileNode.iceburstGeneration)
         }
+        // v2.1 A6 (CL-73/80): Phase's Anomaly, then Void Horror, ride a PRIMARY
+        // hit on a SURVIVOR (the icicle included; echoes, fragments and shards
+        // are not primary). An erase is a kill — nothing after it lands.
+        var alive = !killed
+        if alive, projectileNode.isPrimaryHit {
+            if applyAnomaly(to: enemyNode, source: projectileNode.killSource) {
+                alive = false
+            } else {
+                rollVoidHorror(on: enemyNode)
+            }
+        }
         // v2.1 A4a: Bloodthirsty (CL-1) — a primary hit may inflict the ticking
         // Bleed, on a SURVIVOR only (Brandon, Sep 21): a killing hit never
         // counts its own Bleed toward "killed a bleeding enemy" rewards.
-        if !killed, playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
+        if alive, playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
                                                     roll: CGFloat.random(in: 0..<1)) {
             if enemyNode.applyBleed(tickDamage: playerStats.bleedTickDamage) { noteBleedStarted() }
         }
         // v2.1 A2 Whiteout: any player projectile that lands may make a snowman.
-        if !killed, playerStats.whiteoutTier >= 1,
+        if alive, playerStats.whiteoutTier >= 1,
            CGFloat.random(in: 0...1) < GameConfig.Chill.snowmanChance,
            enemyNode.becomeSnowman(duration: playerStats.snowmanDuration,
                                    meltsOnDamage: playerStats.whiteoutTier >= 3) {
@@ -11379,6 +11894,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.chainTargets > 0 {
             chainLightning(from: enemyNode, primaryDamage: damage)
         }
+        // v2.1 A6 (CL-76): the seeded lead shot stopped here. Opened LAST, after
+        // this hit's own kills — as on the Shatter path — so the shot that
+        // opens a hole never feeds it matter (internal review, lifecycle L3).
+        if consumed { openBlackholeIfSeeded(projectileNode) }
     }
     
     // MARK: - v1.6: Projectile ↔ Boss
@@ -11397,8 +11916,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             inflictBossBleed(generation: projectileNode.glassBloodGeneration)
             return
         }
+        // v2.1 A6: returned shots and Shadow Edge — named effects only (CL-4, QB).
+        if projectileNode.voidKind != .none {
+            resolveVoidSecondaryHitBoss(projectileNode, on: bossNode)
+            return
+        }
 
-        var damage = max(1, Int(projectileNode.damageMultiplier))
+        // v2.1 A6: Warp's curve and Riftline's falloff join here (CL-70 rounding).
+        var damage = shotBaseDamage(projectileNode)
 
         if projectileNode.isCrit {
             damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
@@ -11441,7 +11966,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         // Death flow (XP shower, bossKills, shake) runs via the boss's onDeath callback
-        bossNode.takeDamage(damage)
+        // v2.1 A6 (CL-71/72): Phase T2's shot-class penetration skips the flat
+        // Boss Mode DEF dial — nothing else.
+        bossNode.takeDamage(damage, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)
+        // v2.1 A6 (CL-73): a primary hit stacks the boss's Anomaly (survivor
+        // only) — BEFORE Bloodthirsty, as on enemies, so a boss the chunk kills
+        // never "died bleeding" from this same hit's Bleed.
+        if projectileNode.isPrimaryHit, !bossNode.isDead { applyBossAnomaly(bossNode) }
         // Bloodthirsty lands on a boss that SURVIVED the hit — never on a dead
         // one (a monument's slot is already clear by now).
         if playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
@@ -11449,6 +11980,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             inflictBossBleed(generation: 0)
         }
         erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too
+        if consumed { openBlackholeIfSeeded(projectileNode) }   // v2.1 A6: it stopped here, last
     }
 
     // MARK: - v2.1 A4c: shared hittability + active combat (CL-33, CL-40)
@@ -11638,10 +12170,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // CL-37: Void damage — its ONE special consequence is that the
         // Braceguard's directional shield doesn't halve it. The shield still
         // flashes; it just doesn't stop the Void.
+        // v2.1 A6 (CL-72): read through the real Void-affinity representation.
+        let voidHit = VoidHit.redSmile
+        var shielded = false
         if let braceguard = enemy as? BraceguardNode, braceguard.blocksHit(from: player.position) {
             braceguard.flashShield()
+            shielded = !voidHit.affinity
             #if DEBUG
-            combatLedger.redSmileVoidBypasses += 1
+            if voidHit.affinity { combatLedger.redSmileVoidBypasses += 1 }
             #endif
         }
 
@@ -11673,6 +12209,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                    impaired: enemy.isSlowed || enemy.isFrozen || enemy.isStunned,
                                    relentlessTarget: enemy)
 
+        if shielded { damage = max(1, Int(CGFloat(damage) * BraceguardNode.shieldDamageMultiplier)) }
         rollOverload(on: enemy)   // Overload: "Hits have a 20% chance to stun"
 
         // Shatter: "Frozen enemies burst when struck" — the gun's execute, as is.
@@ -11708,7 +12245,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if killed {
             // A primary root for any kill-conditioned effect (Iceburst gen 0).
             onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .melee)
-        } else {
+        } else if !applyAnomaly(to: enemy, source: .melee) {
+            // v2.1 A6 (CL-85): a sweep target takes a primary hit, so Phase's
+            // Anomaly stacks first (an erase ends it — no survivor riders).
             // CL-36: EVERY survivor bleeds — a fresh primary root (generation 0,
             // CL-28). Survivors only, so "bleeding before the killing damage"
             // keeps its meaning. (It covers Bloodthirsty's primary-hit roll.)
@@ -11722,6 +12261,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 combatLedger.snowmen += 1
                 #endif
             }
+            // v2.1 A6 (CL-85): Void Horror — "Primary hits…" by its text.
+            rollVoidHorror(on: enemy)
         }
         chargeRedSmileHitMeters(.enemy)
         return damage
@@ -11746,7 +12287,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         damage = applyForgeOffense(damage, healthPercent: bossNode.healthPercent,
                                    bossClass: true, impaired: false, relentlessTarget: nil)
         // A kill is credited by the boss's own `onLethalHit` chokepoint.
+        // v2.1 A6 (CL-72/85): a sweep is not a shot — no Phase T2 penetration.
         bossNode.takeDamage(damage)
+        if !bossNode.isDead { applyBossAnomaly(bossNode) }   // v2.1 A6 (CL-85) — before the Bleed
         inflictBossBleed(generation: 0)   // survivors only — guarded inside
         chargeRedSmileHitMeters(.boss)    // Apex AND Erasure (corrective F1)
     }
@@ -11781,6 +12324,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
             projectiles.remove(at: index)
         }
+        openBlackholeIfSeeded(projectileNode)   // v2.1 A6 (only primary shots carry seeds)
         projectileNode.removeFromParent()
     }
 
@@ -11860,6 +12404,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func resetBossStatus() {
         bossStatus = StatusDoTs()
         pendingBossDoT = nil
+        bossAnomaly.reset()      // v2.1 A6: a new boss starts with no Anomaly
+        bossDecompose.reset()
         retireBossStatusTell()
         bossKillLatch.arm(boss.map { ObjectIdentifier($0) })
         guard let b = boss else { return }
@@ -11941,6 +12487,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         bossStatus = status
         bossStatusTell?.refresh(burnStacks: status.burn.stacks, burning: status.burn.kindleRate > 0,
                                 bleeding: status.bleed.isBleeding)
+        bossAnomaly.tick(dt)     // v2.1 A6 (CL-73): the 2s trigger cooldown, on game time
+        refreshBossAnomalyTell()
         if pay.bleedTicks > 0 { bossStatusTell?.pulseBleed() }
         #if DEBUG
         combatLedger.bleedTicks += pay.bleedTicks
@@ -12698,8 +13246,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         fieldImpulseRemaining = 0
 
         // v1.6: Clean up gravity wells + chill trail + Quench card state
-        gravityWells.forEach { $0.removeFromParent() }
-        gravityWells.removeAll()
+        voidWells.forEach { $0.removeFromParent() }   // v2.1 A6
+        voidWells.removeAll()
+        volleyCounter.reset()
+        volley.begin()
+        bossAnomaly.reset()
+        bossDecompose.reset()
+        suppressWellMatter = false
         cultivatedZones.forEach { $0.removeFromParent() }
         cultivatedZones.removeAll()
         flowers.forEach { $0.removeFromParent() }
@@ -12735,11 +13288,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         player.setNourished(false)
         thawChillGround(newRun: true)
         clearShockSystems()
-        singularityTimer = 0
         chillTrailDropTimer = 0
         arcWakeSparks.removeAll()
         arcWakeDropTimer = 0
-        nullBloomZones.removeAll()
 
         player.reset()
         player.stats = playerStats

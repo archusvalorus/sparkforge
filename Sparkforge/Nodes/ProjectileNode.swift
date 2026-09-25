@@ -47,6 +47,32 @@ final class ProjectileNode: SKNode {
     /// born from a shard's own kill) doesn't burst again — the cascade cap.
     var iceburstGeneration = 0
 
+    // MARK: v2.1 A6 — Void
+
+    /// A6's own secondary Void attacks take a separate, named-effects-only hit
+    /// path (CL-4, CL-75/QB): never crit, never a primary hit, no riders.
+    var voidKind: VoidSecondaryKind = .none
+    /// CL-70 (independent review F3): ONE probabilistic-rounding threshold per
+    /// projectile, drawn at launch and shared by every A6 fractional damage it
+    /// resolves — so a falling exact sequence (Warp over flight, Riftline per
+    /// body) can never realize a rise, while each projectile stays unbiased.
+    let a6Rounding = A6Rounding()
+    /// The A6 fraction a secondary Void attack applies to the shot's legacy
+    /// damage (Shadow Edge 1.25; a returned shot 1.0) — CL-70 rounds only this.
+    var voidDamageFraction: CGFloat = 1
+    /// What this hit carries from the Void (CL-71/72).
+    var voidHit: VoidHit = .none
+    /// Warp Shot (CL-14): primary shots only. nil = a normal shot.
+    private(set) var warp: WarpCurve?
+    /// Game time since launch — Warp reads its speed and damage from it.
+    private(set) var age: TimeInterval = 0
+    /// ×3 Blackhole (CL-76): this volley's lead shot opens a black hole
+    /// wherever it finally stops.
+    var seedsBlackhole = false
+    /// Bodies this shot has already struck — Riftline's falloff (CL-81).
+    private(set) var bodiesStruck = 0
+    private var warpTrail: SKShapeNode?
+
     init(direction: CGPoint,
          speed: CGFloat = GameConfig.Projectile.speed,
          range: CGFloat = GameConfig.Projectile.maxRange,
@@ -58,7 +84,10 @@ final class ProjectileNode: SKNode {
          isIcicle: Bool = false,
          frostStyle: Bool = false,
          seedStyle: Bool = false,
-         bloodStyle: Bool = false) {
+         bloodStyle: Bool = false,
+         bladeStyle: Bool = false,
+         returnedStyle: Bool = false,
+         bodyRadius: CGFloat? = nil) {
         self.isIcicle = isIcicle
 
         self.direction = direction.normalized
@@ -80,12 +109,36 @@ final class ProjectileNode: SKNode {
             bulletNode.lineWidth = 1.5
             bulletNode.glowWidth = 7
             bulletNode.zRotation = atan2(direction.y, direction.x)
+        } else if bladeStyle {
+            // v2.1 A6 Shadow Edge (CL-86 placeholder): a long dark crescent with
+            // an indigo rim, broadside to travel — wide, like the blade it is.
+            let r = bodyRadius ?? radius * 7
+            let path = CGMutablePath()
+            path.addArc(center: CGPoint(x: -r * 0.55, y: 0), radius: r,
+                        startAngle: -.pi / 3, endAngle: .pi / 3, clockwise: false)
+            path.addArc(center: CGPoint(x: -r * 0.85, y: 0), radius: r * 0.92,
+                        startAngle: .pi / 3.2, endAngle: -.pi / 3.2, clockwise: true)
+            path.closeSubpath()
+            bulletNode = SKShapeNode(path: path)
+            bulletNode.fillColor = SKColor(hex: 0x0E0B1C, alpha: 0.95)
+            bulletNode.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.95)
+            bulletNode.lineWidth = 1.5
+            bulletNode.glowWidth = 5
+            bulletNode.zRotation = atan2(direction.y, direction.x)
+        } else if returnedStyle {
+            // v2.1 A6 returned shot (CL-86): indigo with a white core.
+            bulletNode = SKShapeNode(circleOfRadius: radius * 1.2)
+            bulletNode.fillColor = SKColor(hex: 0xFFFFFF)
+            bulletNode.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoHex, alpha: 0.95)
+            bulletNode.lineWidth = 2
+            bulletNode.glowWidth = 5
         } else if voidStyle {
-            // v1.9 Erasure Void-Touched (T2): an empowered, elongated purple bolt
+            // v1.9 Erasure Void-Touched (T2): an empowered, elongated bolt
             // oriented along travel — reads as "these shots pierce reality."
+            // v2.1 A6 (CL-86): player-Void indigo, never the danger purple.
             bulletNode = SKShapeNode(ellipseOf: CGSize(width: radius * 3.6, height: radius * 1.4))
-            bulletNode.fillColor = isCrit ? SKColor(hex: 0xE060FF) : SKColor(hex: 0xB565D8)
-            bulletNode.strokeColor = SKColor(hex: 0x6C3483, alpha: 0.9)
+            bulletNode.fillColor = isCrit ? SKColor(hex: 0x9FB4FF) : SKColor(hex: GameConfig.VoidTree.indigoLightHex)
+            bulletNode.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoDeepHex, alpha: 0.9)
             bulletNode.lineWidth = 1
             bulletNode.glowWidth = isCrit ? 7 : 5
             bulletNode.zRotation = atan2(direction.y, direction.x)
@@ -121,15 +174,15 @@ final class ProjectileNode: SKNode {
         super.init()
 
         addChild(bulletNode)
-        setupPhysics()
+        setupPhysics(radius: bodyRadius ?? GameConfig.Projectile.radius)
     }
     
     required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) not implemented")
     }
     
-    private func setupPhysics() {
-        let body = SKPhysicsBody(circleOfRadius: GameConfig.Projectile.radius)
+    private func setupPhysics(radius: CGFloat) {
+        let body = SKPhysicsBody(circleOfRadius: radius)
         body.isDynamic = true
         body.affectedByGravity = false
         body.categoryBitMask = GameConfig.Physics.projectile
@@ -139,15 +192,41 @@ final class ProjectileNode: SKNode {
     }
     
     /// Call each frame. Returns true if projectile should be removed.
+    /// v2.1 A6: a Warp shot moves at its curve's speed for its current age.
     func move(deltaTime: TimeInterval) -> Bool {
-        let displacement = direction * projectileSpeed * CGFloat(deltaTime)
+        let speedFraction = warp?.speedFraction(age: age) ?? 1
+        let displacement = direction * projectileSpeed * speedFraction * CGFloat(deltaTime)
         position += displacement
         distanceTraveled += displacement.length
+        age += deltaTime
+        if let warp = warp, let trail = warpTrail {
+            // The streak is the charge: long while slow (hitting harder),
+            // gone once the shot reaches full speed.
+            let left = 1 - warp.progress(age: age)
+            trail.xScale = max(0.01, left)
+            trail.alpha = 0.25 + 0.6 * left
+        }
         return distanceTraveled >= maxRange
     }
-    
+
+    /// v2.1 A6 (CL-14): make this a Warp shot, with its placeholder tell.
+    func enableWarp(_ curve: WarpCurve) {
+        warp = curve
+        let r = GameConfig.Projectile.radius
+        let trail = SKShapeNode(rectOf: CGSize(width: r * 6, height: r * 1.2), cornerRadius: r * 0.6)
+        trail.fillColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.8)
+        trail.strokeColor = .clear
+        trail.position = CGPoint(x: -direction.x * r * 3, y: -direction.y * r * 3)
+        trail.zRotation = atan2(direction.y, direction.x)
+        trail.zPosition = -1
+        addChild(trail)
+        warpTrail = trail
+    }
+
     /// Called when hitting an enemy. Returns true if projectile should be consumed.
+    /// (v2.1 A6: also counts the bodies struck, for Riftline's falloff.)
     func onHitEnemy() -> Bool {
+        bodiesStruck += 1
         if remainingPierces > 0 {
             remainingPierces -= 1
             // Brief flash to show pierce
@@ -161,3 +240,6 @@ final class ProjectileNode: SKNode {
         return true  // Consume projectile
     }
 }
+
+/// v2.1 A6 (CL-76): a ProjectileNode carries the ×3 Blackhole seed.
+extension ProjectileNode: BlackholeSeedCarrier {}

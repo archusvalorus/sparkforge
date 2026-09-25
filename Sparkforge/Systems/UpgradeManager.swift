@@ -62,6 +62,10 @@ final class UpgradeManager {
         case glacialDrift
         /// Granted by Whiteout (T1+); required by Glacial Drift's T5 Ice Rink (Q-C1).
         case whiteout
+        /// v2.1 A6 (CL-82): granted by a card that creates player black holes
+        /// (Gravity Well, Null Bloom); required by Dead Circuit, which only
+        /// amplifies them.
+        case voidWell
     }
 
     // MARK: - Card Definition
@@ -875,16 +879,15 @@ final class UpgradeManager {
             stats.projectileShield.grant()
             stats.collisionShrink *= 0.85
 
-        // VOID — pull → contain → collapse (v1.8 5b)
+        // VOID — v2.1 A6: one black-hole primitive, upgraded tier by tier on
+        // EVERY player black hole (CL-77). Undertow's pull toward Spark and the
+        // old Singularity's random wells are retired.
         case (.voidT, 3):
-            stats.voidPullForce = 30                // Undertow — subtle gather
-            stats.voidPullRadius = 120
+            stats.voidBlackhole = true              // Blackhole
         case (.voidT, 5):
-            stats.gravityWellDuration = 2.0         // Event Horizon
-            stats.gravityWellDPS = 0.5
-            stats.inWellSlow = 0.4
+            stats.voidListlessness = true           // Listlessness
         case (.voidT, 7):
-            stats.singularityActive = true          // Singularity
+            stats.voidSingularity = true            // Singularity
 
         // CHILL
         case (.chill, 3):
@@ -951,9 +954,9 @@ final class UpgradeManager {
                     SynergyTier(threshold: 5, title: "Thornwall", effect: "Enemies that touch you take 150% of the hit back"),
                     SynergyTier(threshold: 7, title: "Unbroken Core", effect: "Survive a lethal hit: 10s invulnerable, +ATK equal to DEF. A shield blocks projectiles.")]
         case .voidT:
-            return [SynergyTier(threshold: 3, title: "Undertow", effect: "Void pulls nearby enemies inward"),
-                    SynergyTier(threshold: 5, title: "Event Horizon", effect: "Enemies caught in Void struggle to escape"),
-                    SynergyTier(threshold: 7, title: "Singularity", effect: "Void collapses enemies into ruin")]
+            return [SynergyTier(threshold: 3, title: "Blackhole", effect: "Every 5th primary volley creates a black hole. Your black holes absorb hostile projectiles and impair enemy movement."),
+                    SynergyTier(threshold: 5, title: "Listlessness", effect: "Enemies entering your black holes become trapped (elites for half as long; bosses never). Absorbed hostile projectiles return toward enemies, infused with Void."),
+                    SynergyTier(threshold: 7, title: "Singularity", effect: "Trapped enemies decompose: normal enemies until they die, elites up to 20% max HP per trap. Bosses caught in a black hole take 1% max HP per second.")]
         case .chill:
             return [SynergyTier(threshold: 3, title: "Frostbite", effect: "Chilled enemies move even slower"),
                     SynergyTier(threshold: 5, title: "Shatter", effect: "Frozen enemies burst when struck"),
@@ -1299,48 +1302,73 @@ final class UpgradeManager {
         // 🕳️ VOID
         // ═══════════════════════════════════
         
+        // v2.1 A6 (CL-14): Warp's +1 projectile is retired (Q-V1) — the shot
+        // itself warps. Same id, so Codex discovery carries over.
         cards.append(UpgradeCard(
             id: "void_1", name: "Warp Shot", tag: .voidT,
-            description: "+1 projectile (fires in spread)"
-        ) { stats in
-            stats.extraProjectiles += 1
-        })
-        
+            description: "Slow shots that speed up. Slower = more damage.",
+            apply: { stats in stats.warpShotActive = true },
+            detail: "Your primary shots launch at 40% speed and reach full speed after 0.6s. They deal 150% damage at launch, falling to 100% at full speed. Damage between whole numbers rounds up by chance.",
+            requires: [.voidUnlocked]
+        ))
+
+        // v2.1 A6: primary-shot scoped (CL-87); its pull zone is a black hole
+        // for the synergies (CL-77) and a Dead Circuit enabler (CL-82).
         cards.append(UpgradeCard(
             id: "void_2", name: "Gravity Well", tag: .voidT,
-            description: "Expired projectiles leave a pull zone (1s)"
-        ) { stats in
-            stats.gravityWellOnExpire = true
-        })
-        
-        // v1.9 Unit 3: signature reach/pierce ladder (2-tier).
+            description: "Spent shots leave a pull zone (1s)",
+            apply: { stats in stats.gravityWellOnExpire = true },
+            detail: "Primary shots that reach max range or hit a wall leave a pull zone for 1s. Pull zones count as black holes for your Void synergies.",
+            provides: [.voidWell],
+            requires: [.voidUnlocked]
+        ))
+
+        // v2.1 A6: the Void signature, reworked (Q-V2, CL-71…74). Its old
+        // reach and pierce moved to Riftline; Phase carries no range now.
         cards.append(UpgradeCard(
             id: "void_3", name: "Phase", tag: .voidT,
-            description: "+25% range, projectiles pierce 1 enemy",
-            apply: { stats in
-                stats.projectileRangeMultiplier += 0.25
-                stats.pierceCount += 1
-            },
+            description: "Primary hits add Anomaly. Triggers at 4 stacks.",
+            apply: { stats in stats.phaseTier = 1 },
             higherTiers: [
-                { stats in
-                    stats.projectileRangeMultiplier += 0.20
-                    stats.pierceCount += 1
-                }
+                { stats in stats.phaseTier = 2 },
+                { stats in stats.phaseTier = 3 }
             ],
             tierDescriptions: [
-                "+25% range, pierce 1 enemy",
-                "+20% range, pierce 1 more enemy"
+                "Primary hits add Anomaly. Triggers at 4 stacks.",
+                "Your shots bypass Braceguard + DEF.",
+                "Each primary hit applies 2 Anomaly stacks."
             ],
+            detail: "Primary hits apply Anomaly. At 4 stacks, normal enemies are erased; elites take 20% max HP damage and bosses take 3%. Triggering Anomaly clears its stacks. Elites and bosses cannot gain new stacks for 2s afterward. Elites are mini-bosses. T2: your shots ignore Braceguard shields and the Boss Mode flat DEF setting. It does not bypass other defenses.",
             isSignature: true,
             provides: [.voidUnlocked]
         ))
-        
+
+        // v2.1 A6 (CL-84): functional at last — it set a field nothing read
+        // since v1.0. XP orbs only; collection is unchanged.
         cards.append(UpgradeCard(
             id: "void_4", name: "Devour", tag: .voidT,
-            description: "Kills pull XP orbs from 2x range"
-        ) { stats in
-            stats.killOrbPullMultiplier = 2.0
-        })
+            description: "XP orbs are pulled to you from 2x range.",
+            apply: { stats in stats.devourActive = true },
+            requires: [.voidUnlocked]
+        ))
+
+        // v2.1 A6 NEW (Q-V5, CL-80): Void Horror.
+        cards.append(UpgradeCard(
+            id: "v21_void_horror", name: "Void Horror", tag: .voidT,
+            description: "Primary hits may make enemies flee.",
+            apply: { stats in stats.voidHorrorActive = true },
+            detail: "Primary hits have an 8% chance to make enemies flee for 0.5s (elites 0.25s). Afterward, they resist fear for 2s. Bosses are immune.",
+            requires: [.voidUnlocked]
+        ))
+
+        // v2.1 A6 NEW (Q-V3, CL-75/QB): Shadow Edge.
+        cards.append(UpgradeCard(
+            id: "v21_shadow_edge", name: "Shadow Edge", tag: .voidT,
+            description: "Every 7th volley also fires a shadow blade.",
+            apply: { stats in stats.shadowEdgeActive = true },
+            detail: "Every 7th primary volley also fires a wide shadow blade. It deals 125% damage, strikes up to 3 enemies, and carries Void affinity, so Braceguard shields can't halve it. It is not a shot or a primary hit.",
+            requires: [.voidUnlocked]
+        ))
         
         // ═══════════════════════════════════
         // ❄️ CHILL
@@ -1557,10 +1585,10 @@ final class UpgradeManager {
         // v1.4: Self-damage is now 10 HP instead of losing a lethal save
         cards.append(UpgradeCard(
             id: "v13_unstable_core", name: "Unstable Core", tag: .voidT,
-            description: "Burst every 4s damages nearby enemies (costs 10 HP)"
-        ) { stats in
-            stats.unstableCoreActive = true
-        })
+            description: "Burst every 4s damages nearby enemies (costs 10 HP)",
+            apply: { stats in stats.unstableCoreActive = true },
+            requires: [.voidUnlocked]   // v2.1 A6 (CL-82)
+        ))
 
         // ═══════════════════════════════════
         // ⚒️ v1.6 — LYRA'S QUENCH CARDS
@@ -1765,22 +1793,19 @@ final class UpgradeManager {
             requires: [.growthUnlocked]
         ))
 
+        // v2.1 A6 (CL-10/77): the black-hole primitive, small.
         cards.append(UpgradeCard(
             id: "v16_null_bloom", name: "Null Bloom", tag: .voidT,
-            description: "Kills may leave brief slowing zones"
-        ) { stats in
-            stats.nullBloomChance = 0.30
-        })
+            description: "Kills may leave small black holes.",
+            apply: { stats in stats.nullBloomChance = GameConfig.VoidTree.nullBloomChance },
+            detail: "30% of kills leave a small black hole for 0.8s. It pulls enemies in, and your Void synergies upgrade it like any black hole.",
+            provides: [.voidWell],
+            requires: [.voidUnlocked]
+        ))
 
-        cards.append(UpgradeCard(
-            id: "v16_mass_tax", name: "Mass Tax", tag: .voidT,
-            description: "-20% max HP, +30% damage"
-        ) { stats in
-            let hpLoss = Int(Double(stats.maxHP) * 0.20)
-            stats.maxHP -= hpLoss
-            stats.currentHP = min(stats.currentHP, stats.maxHP)
-            stats.damageMultiplier += 0.30
-        })
+        // `v16_mass_tax` (Mass Tax) — REMOVED in v2.1 A6 (spec Void table,
+        // CL-83). The id is retired, never reused: old Codex records simply
+        // stop rendering.
 
         cards.append(UpgradeCard(
             id: "v16_hoarfrost", name: "Hoarfrost", tag: .chill,
@@ -1839,12 +1864,15 @@ final class UpgradeManager {
             stats.overclockActive = true
         })
 
+        // v2.1 A6 (CL-78): black holes linger, damage, grow, collapse. An
+        // amplifier only — offered once you own a black-hole source (CL-82).
         cards.append(UpgradeCard(
             id: "v17_dead_circuit", name: "Dead Circuit", tag: .voidT,
-            description: "Void zones linger longer"
-        ) { stats in
-            stats.voidZoneDurationMultiplier += 0.5
-        })
+            description: "Black holes grow as they feed, then burst.",
+            apply: { stats in stats.deadCircuitActive = true },
+            detail: "Your black holes last 50% longer and damage enemies inside. Each enemy killed inside one, or hostile projectile it absorbs, makes it grow. At 3, it collapses in a void burst for 150% ATK. Requires Gravity Well or Null Bloom.",
+            requires: [.voidUnlocked, .voidWell]
+        ))
 
         // v2.1 A5 (CL-65): permanent DEF for holding ground in combat.
         cards.append(UpgradeCard(
@@ -1875,12 +1903,18 @@ final class UpgradeManager {
             requires: [.bleedUnlocked]
         ))
 
+        // v2.1 A6 (CL-81): Phase's old reach and pierce live here now.
         cards.append(UpgradeCard(
             id: "v18_riftline", name: "Riftline", tag: .voidT,
-            description: "Shots pierce one extra enemy."
-        ) { stats in
-            stats.pierceCount += 1
-        })
+            description: "Shots pierce 2 enemies (3 hits). +25% range.",
+            apply: { stats in
+                stats.riftlineActive = true
+                stats.pierceCount += GameConfig.VoidTree.riftlinePierce
+                stats.projectileRangeMultiplier += GameConfig.VoidTree.riftlineRange
+            },
+            detail: "Shots pass through up to 2 enemies, so each shot can hit up to 3. Each enemy after the first takes 75% of the previous hit's damage (100% → 75% → 56%). +25% projectile range.",
+            requires: [.voidUnlocked]
+        ))
 
         // ═══════════════════════════════════
         // v1.8 Unit 14 — Mirrorwound cards (Lyra set): reflection, delayed
@@ -1890,10 +1924,10 @@ final class UpgradeManager {
 
         cards.append(UpgradeCard(
             id: "v18_mirror_edge", name: "Mirror Edge", tag: .voidT,
-            description: "Attacks can echo once for less damage."
-        ) { stats in
-            stats.echoChance = 0.35
-        })
+            description: "Attacks can echo once for less damage.",
+            apply: { stats in stats.echoChance = 0.35 },
+            requires: [.voidUnlocked]   // v2.1 A6 (CL-82)
+        ))
 
         // v2.1 A4b rework (CL-27/28): enemies whose finishing blow is a Bleed
         // tick burst into Bleed-carrying fragments. No longer a Chill bridge.
@@ -1936,10 +1970,10 @@ final class UpgradeManager {
 
         cards.append(UpgradeCard(
             id: "v18_false_opening", name: "False Opening", tag: .voidT,
-            description: "A sharp turn leaves a delayed Void pulse."
-        ) { stats in
-            stats.falseOpeningActive = true
-        })
+            description: "A sharp turn leaves a delayed Void pulse.",
+            apply: { stats in stats.falseOpeningActive = true },
+            requires: [.voidUnlocked]   // v2.1 A6 (CL-82)
+        ))
 
         // ═══════════════════════════════════
         // v1.9 CAPSTONES (Brandon + Lyra) — one tier-5 capstone per tree.
@@ -2140,7 +2174,8 @@ final class UpgradeManager {
                 "Echo: your shots echo 1.5s later from elsewhere (50% damage)",
                 "Event Horizon: at 75s the arena is erased; at 105s, so are you"
             ],
-            isCapstone: true
+            isCapstone: true,
+            requires: [.voidUnlocked]   // v2.1 A6 (CL-82): gated like every capstone
         ))
 
         // ❄️ Polar Vortex — carry the storm; freeze enemies to the soul.

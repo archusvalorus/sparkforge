@@ -190,7 +190,7 @@ struct BloodBarrier {
     mutating func gain(_ value: Int, maxHP: Int, tuning: PlayerDamagePipeline.Tuning) -> Int {
         guard value > 0 else { return 0 }
         let cap = max(0, Int(CGFloat(maxHP) * tuning.barrierCapFraction))
-        // v2.1 A4b: a pool left above a LOWERED cap (Glass Engine, Mass Tax)
+        // v2.1 A4b: a pool left above a LOWERED cap (Glass Engine)
         // trims to it on the next grant — refreshing never keeps it over cap.
         amount = min(amount, cap)
         let before = amount
@@ -200,7 +200,7 @@ struct BloodBarrier {
     }
 
     /// v2.1 A4b (independent review, finding 1): reconcile the pool when MAX HP
-    /// FALLS (Glass Engine, Mass Tax) and leaves it above its newly valid cap.
+    /// FALLS (Glass Engine) and leaves it above its newly valid cap.
     /// This is state reconciliation, NOT a grant: it never starts, extends or
     /// refreshes the expiry, and it never raises the amount.
     mutating func clampToCap(maxHP: Int, capFraction: CGFloat) {

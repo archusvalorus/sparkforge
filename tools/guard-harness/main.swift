@@ -393,8 +393,8 @@ do {
 do {
     let um = UpgradeManager()
     let guardCards = um.allCards.filter { $0.tag == .guardT }
-    check("CA1 Guard stays 10 cards (primary tag) and the pool stays 79",
-          guardCards.count == 10 && um.allCards.count == 79, "guard=\(guardCards.count) pool=\(um.allCards.count)")
+    check("CA1 Guard stays 10 cards (primary tag); the pool is 80 after A6 (CL-83)",
+          guardCards.count == 10 && um.allCards.count == 80, "guard=\(guardCards.count) pool=\(um.allCards.count)")
     let repulse = card("guard_2", um)
     check("CA2 Repulse is the PERMANENT Guard signature: 3 tiers, provides .guardUnlocked, no requires (CL-49)",
           repulse.isSignature && repulse.provides == [.guardUnlocked] && repulse.requires.isEmpty && repulse.maxTier == 3)
@@ -624,10 +624,16 @@ do {
     check("WR8 the bounce has no per-enemy throttle (every real touch-begin) and is path-tested (CL-59)",
           !bounce.contains("tryFire") && bounce.contains("guardShove(") && !src.contains("RetriggerGuard"))
     let enemiesBody = body("updateEnemies")
+    // A6 re-wired the per-enemy branch (trap + fear join the flight): the
+    // flight is still the FIRST branch, and slam/pull are gated by `pinned`,
+    // which still includes `airborne`.
     check("WR9 fliers don't chase, slam or pull; Ironhide counts through the pure qualifier (CL-52/63)",
-          enemiesBody.contains("if repulseFlights[ObjectIdentifier(enemy)] != nil {")
-            && enemiesBody.contains("if !airborne, let mote = enemy as? GravemoteNode")
-            && enemiesBody.contains("if !airborne, let anvil = enemy as? AnvilbornNode")
+          enemiesBody.contains("let airborne = repulseFlights[ObjectIdentifier(enemy)] != nil")
+            && order(enemiesBody, ["let airborne = repulseFlights[ObjectIdentifier(enemy)] != nil",
+                                   "if airborne {", "} else if trapped {", "enemy.chase(target:"])
+            && enemiesBody.contains("let pinned = airborne || trapped || fleeing")
+            && enemiesBody.contains("if !pinned, let mote = enemy as? GravemoteNode")
+            && enemiesBody.contains("if !pinned, let anvil = enemy as? AnvilbornNode")
             && enemiesBody.contains("Ironhide.qualifies("))
     let flights = body("updateRepulseFlights")
     check("WR10 launches: snowmen never fly, walls/Carrier stop them, pins tested along the path, .impact credit (CL-63)",

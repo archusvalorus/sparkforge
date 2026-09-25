@@ -11,6 +11,10 @@ import SpriteKit
 
 protocol ArenaBossNode: SKNode {
     var health: Int { get }
+    /// v2.1 A6 (CL-74): authoritative max HP — after any Boss Mode HP dial —
+    /// for the FINAL percentage effects (Anomaly's 3%, Singularity's 1%/s).
+    /// Every conformer already stored it; this just exposes it.
+    var maxHealth: Int { get }
     var isDead: Bool { get }
     var healthPercent: CGFloat { get }
     /// Damage dealt to the player on body contact

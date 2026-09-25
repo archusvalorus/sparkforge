@@ -37,6 +37,12 @@ enum KillSource: String, CaseIterable {
     /// v2.1 A5 (CL-63): Repulse T3 — a launched enemy crashing into another.
     /// Full credit: the player aimed the shot that threw it.
     case impact
+    /// v2.1 A6 (CL-4): a hostile projectile a black hole absorbed and sent
+    /// back as a player-owned Void shot. Full credit, its own source.
+    case returned
+    /// v2.1 A6 (CL-75 / QB): Shadow Edge's blade — a secondary Void attack.
+    /// Full credit, its own source.
+    case shadowEdge
 
     /// Credit tier — legacy-preserving. Radius bursts and the sweep have only
     /// ever paid the XP orb: no kill count, bestiary, arena gates or on-kill

@@ -299,6 +299,61 @@ struct CombatLedger {
             + "selfRescues=\(selfDamageRescues) impactKills=\(kills[.impact] ?? 0)]"
     }
 
+    // v2.1 A6: Void (closure table §B5) — the volley counter and what it
+    // fired, black holes by preset, the cap, absorbs and returns, traps and
+    // decomposition, fear, Anomaly triggers, Dead Circuit matter and collapses.
+    private(set) var qualifyingVolleys = 0
+    private(set) var emptyVolleys = 0
+    private(set) var blackholesSeeded = 0
+    private(set) var blades = 0
+    private(set) var convergences = 0
+    private(set) var wellsByPreset: [String: Int] = [:]
+    private(set) var wellsLiveMax = 0
+    var wellEvictions = 0
+    var absorbed = 0
+    var returnsFired = 0
+    var returnsFizzled = 0
+    var traps = 0
+    var fears = 0
+    var decomposeDamage = 0
+    var bossDecomposeDamage = 0
+    var anomalyErases = 0
+    var anomalyChunks = 0
+    var bossAnomalyChunks = 0
+    var matter = 0
+    var collapses = 0
+    var bladeHits = 0
+    var returnedHits = 0
+
+    mutating func recordVolley(emitted: Bool, blackhole: Bool, blade: Bool, count: Int) {
+        guard emitted else { emptyVolleys += 1; return }
+        qualifyingVolleys += 1
+        if blackhole { blackholesSeeded += 1 }
+        if blade { blades += 1 }
+        if blackhole && blade {
+            convergences += 1
+            NSLog("[A6] volley %d: Blackhole + Shadow Edge together", count)
+        }
+    }
+    mutating func recordVoidWell(_ preset: VoidWellPreset, live: Int) {
+        wellsByPreset["\(preset)", default: 0] += 1
+        if live > wellsLiveMax {
+            wellsLiveMax = live
+            NSLog("[A6] live black holes reached %d", live)
+        }
+    }
+
+    var voidSummary: String {
+        let presets = wellsByPreset.keys.sorted().map { "\($0)=\(wellsByPreset[$0] ?? 0)" }.joined(separator: " ")
+        return "void[volleys=\(qualifyingVolleys) empty=\(emptyVolleys) seeds=\(blackholesSeeded) "
+            + "blades=\(blades) both=\(convergences) wells[\(presets)] liveMax=\(wellsLiveMax) "
+            + "evicted=\(wellEvictions) absorbed=\(absorbed) returned=\(returnsFired) fizzled=\(returnsFizzled) "
+            + "traps=\(traps) decompose=\(decomposeDamage) bossDecompose=\(bossDecomposeDamage) "
+            + "fears=\(fears) anomaly[erase=\(anomalyErases) chunk=\(anomalyChunks) boss=\(bossAnomalyChunks)] "
+            + "matter=\(matter) collapses=\(collapses) hits[blade=\(bladeHits) returned=\(returnedHits)] "
+            + "kills[returned=\(kills[.returned] ?? 0) blade=\(kills[.shadowEdge] ?? 0)]]"
+    }
+
     mutating func recordDuplicate(_ source: KillSource) {
         duplicateCredits += 1
         NSLog("[A0] duplicate kill credit rejected (%@)  %@", source.rawValue, summary)

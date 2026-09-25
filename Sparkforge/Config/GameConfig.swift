@@ -1432,6 +1432,107 @@ enum GameConfig {
         }
     }
 
+    // MARK: - v2.1 Abilities A6: Void (closure table §B5, CL-70…CL-88)
+    /// The reworked Void tree. Every number is Brandon's Sep 24 ruling; the
+    /// pure rules live in `VoidState.swift` (proven by tools/void-harness).
+    /// Named `VoidTree` because a nested `Void` would shadow Swift's `Void`.
+    enum VoidTree {
+        // Warp Shot (CL-14): 40% → 100% speed over 0.6s; 150% → 100% damage.
+        static let warpStartSpeed: CGFloat = 0.40
+        static let warpRampTime: TimeInterval = 0.6
+        static let warpStartDamage: CGFloat = 1.50
+
+        // Phase → Anomaly (Q-V2, CL-73/74): FINAL target-class values.
+        static let anomalyThreshold: Int = 4
+        static let anomalyStacksT3: Int = 2
+        static let anomalyMiniBossFraction: CGFloat = 0.20
+        static let anomalyBossFraction: CGFloat = 0.03
+        static let anomalyCooldown: TimeInterval = 2.0
+
+        // Riftline (CL-81): pierce 2 = up to 3 bodies; ×0.75 per later body.
+        static let riftlinePierce: Int = 2
+        static let riftlineFalloff: CGFloat = 0.75
+        static let riftlineRange: CGFloat = 0.25
+
+        // Void Horror (Q-V5, CL-80).
+        static let horrorChance: CGFloat = 0.08
+        static let fearDuration: TimeInterval = 0.5
+        static let fearMiniBossDuration: TimeInterval = 0.25
+        static let fearImmunity: TimeInterval = 2.0
+        /// How far ahead a frightened enemy aims its escape.
+        static var fleeLookahead: CGFloat { 120 * DeviceScale.gameplay }
+
+        // Shadow Edge (CL-75): every 7th qualifying volley, one blade.
+        static let bladeEvery: Int = 7
+        static let bladeDamage: CGFloat = 1.25
+        static let bladeTargets: Int = 3
+        static let bladeScale: CGFloat = 7
+
+        // Black holes (CL-10, CL-77, CL-87).
+        static let blackholeEvery: Int = 5
+        static var blackholeRadius: CGFloat { 60 * DeviceScale.gameplay }
+        static let blackholeLifetime: TimeInterval = 2.5
+        /// Unchanged from v1.6 (CL-10): a flat 30pt.
+        static let gravityWellRadius: CGFloat = 30
+        static let gravityWellLifetime: TimeInterval = 1.0
+        static let nullBloomChance: CGFloat = 0.30
+        static let nullBloomRadiusFraction: CGFloat = 0.6
+        static let nullBloomLifetime: TimeInterval = 0.8
+        /// Pull toward the centre, points per second (mini-bosses at the
+        /// BossClass debuff scale).
+        static let pullSpeed: CGFloat = 70
+        /// ×3 "impairs enemy movement": the slow while inside.
+        static let impairSlow: CGFloat = 0.40
+        static let absorbCapacity: Int = 8
+        static let returnDelay: TimeInterval = 0.15
+        static let maxLiveWells: Int = 4
+
+        // Dead Circuit (CL-78).
+        static let deadCircuitLinger: Double = 1.5
+        /// Damage inside, per second, as a fraction of current shot damage.
+        static let deadCircuitDamage: CGFloat = 1.0
+        static let deadCircuitGrowth: CGFloat = 0.25
+        static let deadCircuitCollapseAt: Int = 3
+        static let deadCircuitBurstATK: CGFloat = 1.5
+
+        // Singularity (CL-9).
+        static let decomposeNormal: CGFloat = 0.50
+        static let terminalHold: TimeInterval = 2.0
+        static let decomposeMiniBoss: CGFloat = 0.08
+        static let decomposeMiniBossCap: CGFloat = 0.20
+        static let decomposeBoss: CGFloat = 0.01
+
+        // Devour (CL-84): XP orbs start their pull from 2× the pickup radius.
+        static let devourXPMagnet: CGFloat = 2.0
+
+        // Player-Void palette (CL-86): indigo, never a danger purple.
+        static let indigoHex: UInt32 = 0x4466DD
+        static let indigoLightHex: UInt32 = 0x6688FF
+        static let indigoDeepHex: UInt32 = 0x223366
+
+        static var warpCurve: WarpCurve {
+            WarpCurve(startSpeed: warpStartSpeed, rampTime: warpRampTime, startDamage: warpStartDamage)
+        }
+        static var anomalyTuning: AnomalyState.Tuning {
+            AnomalyState.Tuning(threshold: anomalyThreshold, miniBossFraction: anomalyMiniBossFraction,
+                                bossFraction: anomalyBossFraction, cooldown: anomalyCooldown)
+        }
+        static var horrorTuning: VoidHorror.Tuning {
+            VoidHorror.Tuning(chance: horrorChance, normalDuration: fearDuration,
+                              miniBossDuration: fearMiniBossDuration, immunity: fearImmunity)
+        }
+        static var volleyTuning: VolleyCounter.Tuning {
+            VolleyCounter.Tuning(blackholeEvery: blackholeEvery, bladeEvery: bladeEvery)
+        }
+        static var deadCircuitTuning: VoidWellState.DeadCircuit {
+            VoidWellState.DeadCircuit(growthPerMatter: deadCircuitGrowth, collapseAt: deadCircuitCollapseAt)
+        }
+        static var trapTuning: VoidTrapState.Tuning {
+            VoidTrapState.Tuning(terminalHold: terminalHold, decomposeNormal: decomposeNormal,
+                                 decomposeMiniBoss: decomposeMiniBoss, miniBossCapPerTrap: decomposeMiniBossCap)
+        }
+    }
+
     // MARK: - v2.1 Abilities A0: player damage pipeline (closure table CL-5)
     /// The shared order every enemy hit on Spark resolves through
     /// (`PlayerDamagePipeline`): input scaling → percentage reductions

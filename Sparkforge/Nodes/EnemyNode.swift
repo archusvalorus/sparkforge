@@ -133,6 +133,25 @@ class EnemyNode: SKNode {
     private var snowman = SnowmanState()
     private var snowmanNode: SKNode?
     var isSnowman: Bool { snowman.isSnowman }
+    // v2.1 A6 Void (closure table §B5): Phase's Anomaly, Void Horror's fear and
+    // Listlessness's trap — three separate states on game time. None of them
+    // writes the stun or freeze timers (R2), so none can lengthen or cut short
+    // another control.
+    private(set) var anomaly = AnomalyState()
+    private(set) var fear = FearState()
+    private(set) var voidTrap = VoidTrapState()
+    private var anomalyPips: [SKShapeNode] = []
+    private var drawnAnomaly = -1
+    private var drawnAnomalyCooling = false
+    private var fearMark: SKNode?
+    private var trapRing: SKNode?
+    var isFeared: Bool { fear.isFeared }
+    /// Held by fear or a trap LAST frame — the scene clears a stale "ran into
+    /// the Carrier" flag before this body's own behaviour resumes, so a
+    /// committed lunge/charge can't end on a wall hit the flight caused.
+    var voidHeldLastFrame = false
+    var isVoidTrapped: Bool { voidTrap.isTrapped }
+    var voidTrapWellID: Int? { voidTrap.wellID }
     private var fractureWindow = GameTimer()
     private var frostbiteWindow = DelayedWindow()
     private var frostbiteMultiplier: CGFloat = 1.0
@@ -513,6 +532,7 @@ class EnemyNode: SKNode {
     
     func applyStun(_ duration: TimeInterval) {
         stunTimer = max(stunTimer, duration)
+        cancelFear()   // v2.1 A6 (CL-80): a stronger control ends fear
     }
 
     /// v2.1 A3 Overload: stun with the CL-2 immunity rule. Returns false when
@@ -522,6 +542,7 @@ class EnemyNode: SKNode {
         guard !isDying, overloadStun.tryStun(duration: duration) else { return false }
         stunTimer = max(stunTimer, duration)
         showDazedStars()
+        cancelFear()   // v2.1 A6 (CL-80)
         return true
     }
 
@@ -550,6 +571,7 @@ class EnemyNode: SKNode {
     func applyFreeze(_ duration: TimeInterval) {
         freezeTimer = max(freezeTimer, duration)
         bodyNode.fillColor = SKColor(hex: 0x66CCFF)
+        cancelFear()   // v2.1 A6 (CL-80)
     }
 
     /// v2.1 A2 Whiteout: become a snowman for `duration` (boss-class at the
@@ -563,6 +585,9 @@ class EnemyNode: SKNode {
                                           bossClassScale: GameConfig.BossClass.debuffScale) else { return false }
         stunTimer = max(stunTimer, applied)
         showSnowman()
+        // v2.1 A6: a transformation ends fear (CL-80) and exits a trap (CL-79).
+        cancelFear()
+        releaseVoidTrap()
         return true
     }
 
@@ -643,6 +668,183 @@ class EnemyNode: SKNode {
         frostbiteWindow.schedule(after: delay, lasting: duration)
     }
     
+    // MARK: - v2.1 A6: Void (Anomaly, fear, trap)
+
+    /// Phase (CL-73): stack Anomaly from a qualifying hit on this SURVIVOR.
+    /// The scene resolves what the outcome does (erase, or a chunk).
+    func addAnomaly(_ count: Int, tuning: AnomalyState.Tuning) -> AnomalyState.Outcome {
+        guard !isDying else { return .none }
+        let outcome = anomaly.add(count, target: isMiniBoss ? .miniBoss : .normal, tuning: tuning)
+        refreshAnomalyPips()
+        if outcome != .none { flashAnomalyTrigger() }
+        return outcome
+    }
+
+    /// Placeholder tell (A9 art): indigo pips under the body, one per stack;
+    /// a dim ring while an elite's trigger cooldown runs. Never purple.
+    private func refreshAnomalyPips() {
+        guard anomaly.stacks != drawnAnomaly || anomaly.isCooling != drawnAnomalyCooling else { return }
+        drawnAnomaly = anomaly.stacks
+        drawnAnomalyCooling = anomaly.isCooling
+        let r = GameConfig.Enemy.visualRadius
+        let count = GameConfig.VoidTree.anomalyThreshold
+        while anomalyPips.count < count {
+            let pip = SKShapeNode(rectOf: CGSize(width: 3, height: 3))
+            pip.zRotation = .pi / 4
+            pip.strokeColor = .clear
+            pip.fillColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex)
+            pip.glowWidth = 1.5
+            pip.zPosition = 7
+            let spacing: CGFloat = 5
+            pip.position = CGPoint(x: (CGFloat(anomalyPips.count) - CGFloat(count - 1) / 2) * spacing, y: -(r + 6))
+            addChild(pip)
+            anomalyPips.append(pip)
+        }
+        for (i, pip) in anomalyPips.enumerated() {
+            pip.isHidden = !(i < anomaly.stacks || anomaly.isCooling)
+            pip.alpha = anomaly.isCooling ? 0.3 : 1.0
+        }
+    }
+
+    private func flashAnomalyTrigger() {
+        let ring = SKShapeNode(circleOfRadius: GameConfig.Enemy.visualRadius * 1.1)
+        ring.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.95)
+        ring.fillColor = SKColor(hex: GameConfig.VoidTree.indigoDeepHex, alpha: 0.3)
+        ring.lineWidth = 2
+        ring.glowWidth = 4
+        ring.zPosition = 9
+        addChild(ring)
+        ring.run(SKAction.sequence([
+            SKAction.group([SKAction.scale(to: 1.9, duration: 0.22), SKAction.fadeOut(withDuration: 0.22)]),
+            SKAction.removeFromParent()
+        ]))
+    }
+
+    /// Void Horror (CL-80): try to frighten. The scene has already checked
+    /// eligibility; fear itself refuses while feared or immune.
+    @discardableResult
+    func tryFear(duration: TimeInterval) -> Bool {
+        guard !isDying, fear.tryFear(duration: duration) else { return false }
+        routeNodeID = nil          // a committed route node would steer it back
+        routePrevNodeID = nil
+        showFearMark()
+        return true
+    }
+
+    /// A stronger hard control began (stun, freeze, snowman, trap, launch):
+    /// fear ends now and its immunity window starts (CL-80).
+    func cancelFear() {
+        guard fear.cancel(immunityDuration: GameConfig.VoidTree.fearImmunity) else { return }
+        fearEnded()
+    }
+
+    /// Fear is over (ran out or was cancelled): drop the tell and any escape
+    /// node the flight committed to, so the pursuit re-scores toward Spark
+    /// (CL-80: the route node is cleared at start AND end).
+    private func fearEnded() {
+        clearFearMark()
+        routeNodeID = nil
+        routePrevNodeID = nil
+    }
+
+    /// One frame of flight from Spark (CL-80, review F1): toward the steer
+    /// target the scene picked (route-aware) when that step keeps away —
+    /// otherwise the nearest heading to straight-away that does, else hold.
+    /// Never a step toward Spark, never into solid, never out past the wall.
+    func flee(from spark: CGPoint, preferred target: CGPoint?, deltaTime: TimeInterval, globalSlow: CGFloat,
+              blocked: (CGPoint) -> Bool) {
+        position = FleeRule.fleeStep(from: position, spark: spark, preferred: target, moveSpeed: moveSpeed,
+                                     slow: currentSlow + globalSlow, dt: deltaTime,
+                                     arenaRadius: GameConfig.Arena.radius, footprint: geometryFootprintRadius,
+                                     blocked: blocked)
+    }
+
+    /// Placeholder tell (A9 art): a white "!" and a nervous quiver.
+    private func showFearMark() {
+        clearFearMark()
+        let mark = SKLabelNode(text: "!")
+        mark.fontName = "Menlo-Bold"
+        mark.fontSize = 11
+        mark.fontColor = SKColor(hex: 0xFFFFFF)
+        mark.verticalAlignmentMode = .center
+        mark.position = CGPoint(x: 0, y: GameConfig.Enemy.visualRadius + 14)
+        mark.zPosition = 10
+        addChild(mark)
+        fearMark = mark
+        bodyNode.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.moveBy(x: 1.2, y: 0, duration: 0.04),
+            SKAction.moveBy(x: -2.4, y: 0, duration: 0.08),
+            SKAction.moveBy(x: 1.2, y: 0, duration: 0.04)
+        ])), withKey: "fearQuiver")
+    }
+
+    private func clearFearMark() {
+        fearMark?.removeFromParent()
+        fearMark = nil
+        bodyNode.removeAction(forKey: "fearQuiver")
+        bodyNode.position = .zero
+    }
+
+    /// Listlessness (CL-79): captured by a live black hole. A trap is a hard
+    /// control, so it ends any fear first.
+    @discardableResult
+    func captureInVoid(wellID: Int, wellRemaining: TimeInterval, singularity: Bool,
+                       tuning: VoidTrapState.Tuning) -> Bool {
+        guard !isDying, !isSnowman,
+              voidTrap.capture(wellID: wellID, wellRemaining: wellRemaining,
+                               target: isMiniBoss ? .miniBoss : .normal,
+                               singularity: singularity, tuning: tuning) else { return false }
+        cancelFear()
+        showTrapRing()
+        return true
+    }
+
+    /// The holding well ended — released unless in a Singularity terminal hold.
+    func voidWellEnded(_ id: Int) {
+        voidTrap.wellEnded(id)
+        if !voidTrap.isTrapped { clearTrapRing() }
+    }
+
+    /// Clean exit: death, transformation, launch, cleanup (CL-79).
+    func releaseVoidTrap() {
+        guard voidTrap.isTrapped else { return }
+        voidTrap.release()
+        clearTrapRing()
+    }
+
+    /// The hold's own clock — ticked by the scene after decomposition, so a
+    /// Singularity terminal hold delivers its full duration.
+    func tickVoidTrap(_ dt: TimeInterval) {
+        if voidTrap.tick(dt) { clearTrapRing() }
+    }
+
+    /// Singularity (CL-9): this frame's whole decomposition damage.
+    func decomposeInVoid(_ dt: TimeInterval, tuning: VoidTrapState.Tuning) -> Int {
+        voidTrap.decompose(dt, maxHealth: maxHealth, tuning: tuning)
+    }
+
+    /// Placeholder tell (A9 art): an indigo tether ring round the body.
+    private func showTrapRing() {
+        clearTrapRing()
+        let ring = SKShapeNode(circleOfRadius: GameConfig.Enemy.visualRadius * 1.45)
+        ring.strokeColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex, alpha: 0.85)
+        ring.fillColor = SKColor(hex: GameConfig.VoidTree.indigoDeepHex, alpha: 0.2)
+        ring.lineWidth = 1.5
+        ring.glowWidth = 3
+        ring.zPosition = 6
+        ring.run(SKAction.repeatForever(SKAction.sequence([
+            SKAction.scale(to: 0.85, duration: 0.25),
+            SKAction.scale(to: 1.0, duration: 0.25)
+        ])))
+        addChild(ring)
+        trapRing = ring
+    }
+
+    private func clearTrapRing() {
+        trapRing?.removeFromParent()
+        trapRing = nil
+    }
+
     // MARK: - Status Effect Update
     
     /// v1.9: seconds this enemy has been alive in the arena (Apex "Marked" uses it).
@@ -669,6 +871,11 @@ class EnemyNode: SKNode {
         }
 
         if snowman.tick(deltaTime) { endSnowman(melted: false) }
+        // v2.1 A6: the Void states, on game time.
+        anomaly.tick(deltaTime)
+        if anomaly.isCooling != drawnAnomalyCooling { refreshAnomalyPips() }
+        if fear.tick(deltaTime, immunityDuration: GameConfig.VoidTree.fearImmunity) { fearEnded() }
+        // (The trap's hold ticks from the scene, AFTER that frame's decomposition.)
         let wasDazed = overloadStun.isStunned
         overloadStun.tick(deltaTime, immunityDuration: GameConfig.Shock.overloadImmunity)
         if wasDazed, !overloadStun.isStunned { dazedStars?.removeFromParent(); dazedStars = nil }
@@ -792,6 +999,9 @@ class EnemyNode: SKNode {
     
     private func onDeath() {
         isDying = true
+        releaseVoidTrap()
+        fear.reset()
+        clearFearMark()
         // Status BEFORE the killing damage — primary-hit riders like
         // Bloodthirsty land only on survivors, so a killing hit never counts.
         diedBleeding = dots.bleed.isBleeding

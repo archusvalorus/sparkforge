@@ -38,7 +38,7 @@ SYN = {
  'shock': [(3,'Chain Current','Lightning chains to one more enemy'),(5,'Tesla Field','A charged aura damages nearby enemies'),(7,'Storm Engine','Every 3rd shot fires a chaining spread')],
  'bleed': [(3,'Open Wounds','Bleeding enemies take 25% more damage'),(5,'Exsanguinate','Enemies below 25% HP take 2× damage'),(7,'Red Harvest','Killing a bleeding enemy restores 1 HP')],
  'guardT':[(3,'Ironhide','Nearby enemies cut damage taken, up to 90%'),(5,'Thornwall','Enemies that touch you take 150% of the hit back'),(7,'Unbroken Core','Survive a lethal hit: 10s invulnerable, +ATK equal to DEF. A shield blocks projectiles.')],
- 'voidT': [(3,'Undertow','Void pulls nearby enemies inward'),(5,'Event Horizon','Enemies caught in Void struggle to escape'),(7,'Singularity','Void collapses enemies into ruin')],
+ 'voidT': [(3,'Blackhole','Every 5th primary volley creates a black hole. Your black holes absorb hostile projectiles and impair enemy movement.'),(5,'Listlessness','Enemies entering your black holes become trapped (elites for half as long; bosses never). Absorbed hostile projectiles return toward enemies, infused with Void.'),(7,'Singularity','Trapped enemies decompose: normal enemies until they die, elites up to 20% max HP per trap. Bosses caught in a black hole take 1% max HP per second.')],
  'chill': [(3,'Frostbite','Chilled enemies move even slower'),(5,'Shatter','Frozen enemies burst when struck'),(7,'Absolute Zero','The arena slows; shatters come easy')],
  'growth':[(3,'Rootbound','Cultivated ground grips harder — enemies on it are slower'),(5,'Verdant Rise','Your ground mends you faster'),(7,'Wildwood','The whole garden bites what stands on it')],
 }
@@ -47,7 +47,7 @@ CAP_LENS = {
  'Iron Maiden': ('Mixed','Thorns/Retaliate/T5 are single-target retaliation; T4 kinetic burst is AoE (misses the arena boss). Boss-scale retrofit DONE in A5: thorns + Retaliate take 50% on mini-bosses and bosses (CL-67).', False),
  'Skybeam':     ('ST ⚠','Single-target strikes only — the pre-boss swarm outruns it. Banked rework below.', True),
  'Apex':        ('ST ⚠','Familiar hunts one target; execute is single-target. AoE-audit candidate (splash ≈50% of primary, never a second damage source).', True),
- 'Erasure':     ('Global ✓','Event Horizon is arena-wide by design.', False),
+ 'Erasure':     ('Global ✓','Event Horizon (Erasure T5 — the ×5 Void synergy is Listlessness now) is arena-wide by design.', False),
  'Polar Vortex':('AoE ✓','Storm is a field effect.', False),
  'Tree':        ('Mixed','Summon roster varies — audit per-animal (memory: tree-capstone animal pool).', False),
 }

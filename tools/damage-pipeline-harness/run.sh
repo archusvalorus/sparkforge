@@ -16,16 +16,17 @@ BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 cp "$ROOT/Sparkforge/Systems/PlayerDamagePipeline.swift" \
    "$ROOT/Sparkforge/Systems/GuardState.swift" \
+   "$ROOT/Sparkforge/Systems/VoidState.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$ROOT/Sparkforge/Systems/KillSource.swift" \
    "$ROOT/Sparkforge/Systems/PlayerStats.swift" \
    "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
    "$HERE/main.swift" "$BUILD/"
-sh "$ROOT/tools/signature-draw-harness/extract-guard-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/GuardConfig.swift"
+sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
-       "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/GuardConfig.swift" "$BUILD/GameTimer.swift" \
+       "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/GameTimer.swift" \
        "$BUILD/KillSource.swift" "$BUILD/PlayerStats.swift" \
        "$BUILD/UpgradeManager.swift"
 "$BUILD/harness"

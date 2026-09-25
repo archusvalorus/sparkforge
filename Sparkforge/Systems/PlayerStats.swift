@@ -21,7 +21,7 @@ final class PlayerStats {
     /// Maximum health — cards and forge bonuses can increase this
     var maxHP: Int = GameConfig.Player.baseMaxHP {
         didSet {
-            // v2.1 A4b: a max-HP DROP (Glass Engine, Mass Tax) reconciles an
+            // v2.1 A4b: a max-HP DROP (Glass Engine) reconciles an
             // existing Blood Barrier to its new cap immediately — the expiry
             // is untouched, because this is not a grant.
             if maxHP < oldValue {
@@ -429,12 +429,33 @@ final class PlayerStats {
     /// (CL-54/57). Replaces the old always-on DEF→damage conversion.
     var unbrokenCoreOwned = false
 
-    // Void
-    /// Undertow: passive per-second pull of nearby enemies toward the player
-    var voidPullForce: CGFloat = 0.0
-    var voidPullRadius: CGFloat = 0.0
-    /// Event Horizon: extra slow applied to enemies inside a gravity well
-    var inWellSlow: CGFloat = 0.0
+    // Void — v2.1 A6 (closure table §B5). The synergy ladder upgrades EVERY
+    // player black hole (CL-77): ×3 Blackhole, ×5 Listlessness, ×7 Singularity.
+    /// ×3 Blackhole: every 5th primary volley opens one; black holes absorb
+    /// hostile projectiles and impair movement.
+    var voidBlackhole = false
+    /// ×5 Listlessness: black holes trap entering enemies and return what
+    /// they absorbed.
+    var voidListlessness = false
+    /// ×7 Singularity: trapped enemies decompose; bosses decompose in holes.
+    var voidSingularity = false
+    /// Phase (the Void signature, CL-71/73): T1 Anomaly, T2 shots bypass
+    /// Braceguard + the flat DEF dial, T3 two stacks per primary hit.
+    var phaseTier = 0
+    var anomalyStacksPerHit: Int { phaseTier >= 3 ? GameConfig.VoidTree.anomalyStacksT3 : 1 }
+    var phasePenetrates: Bool { phaseTier >= 2 }
+    /// Warp Shot (CL-14): primary shots start slow, speed up; slower hits harder.
+    var warpShotActive = false
+    /// Riftline (CL-81): pierce falls off ×0.75 per later body.
+    var riftlineActive = false
+    /// Void Horror (CL-80): primary hits may make enemies flee.
+    var voidHorrorActive = false
+    /// Shadow Edge (CL-75): every 7th qualifying volley also fires a blade.
+    var shadowEdgeActive = false
+    /// Dead Circuit (CL-78): black holes linger, damage, grow, collapse.
+    var deadCircuitActive = false
+    /// Devour (CL-84): XP orbs start their pull from 2× the pickup radius.
+    var devourActive = false
 
     // MARK: - Knockback
     
@@ -551,9 +572,6 @@ final class PlayerStats {
         overclockTimer = overclockDuration
     }
 
-    /// Dead Circuit — player-created void zones linger longer
-    var voidZoneDurationMultiplier: CGFloat = 1.0
-
     /// Grounded Core — v2.1 A5 (CL-65): +1 PERMANENT DEF per uninterrupted
     /// 7.5s still in active combat, cap +30 per run. Replaces the v1.7 0.7s
     /// brace (+8 while braced).
@@ -632,9 +650,6 @@ final class PlayerStats {
     /// Sanguinarian owned: kills grant Blood Barrier; Siphon's overheal converts.
     var sanguinarianOwned = false
 
-    /// XP orb pull range multiplier on kill (Devour)
-    var killOrbPullMultiplier: CGFloat = 1.0
-    
     /// Whether player leaves chill trail
     var chillTrail: Bool = false
     // v2.1 A2 Glacial Drift ladder (CL-11): 1 trail · 2 lingers · 3 longer +
@@ -677,14 +692,8 @@ final class PlayerStats {
     /// Passive arena-wide DPS (Meltdown)
     var passiveArenaDPS: CGFloat = 0.0
     
-    /// Gravity well on projectile expire
+    /// Gravity Well: a spent PRIMARY shot leaves a pull zone (CL-87 scope).
     var gravityWellOnExpire: Bool = false
-    /// Gravity well radius
-    var gravityWellRadius: CGFloat = 30.0
-    /// Gravity well duration
-    var gravityWellDuration: TimeInterval = 1.0
-    /// Gravity well DPS (if upgraded)
-    var gravityWellDPS: CGFloat = 0.0
     
     /// Whether enemies below HP threshold take double damage (Exsanguinate)
     var executionThreshold: CGFloat = 0.0
@@ -697,13 +706,6 @@ final class PlayerStats {
     var stunChance: CGFloat = 0.0
     /// Stun duration in seconds
     var stunDuration: TimeInterval = 0.5
-
-    /// v1.6: Singularity (Void tier-7) — periodic massive gravity wells
-    var singularityActive: Bool = false
-    var singularityInterval: TimeInterval = 8.0
-    var singularityRadius: CGFloat = 90.0
-    var singularityDuration: TimeInterval = 3.0
-    var singularityDPS: CGFloat = 1.0
 
     // MARK: - v1.6: Quench Cards (Lyra)
 
@@ -782,10 +784,8 @@ final class PlayerStats {
     var deeprootDEF: Int = 0
     var groundDefBonus: Int = 0
 
+    /// Null Bloom (v2.1 A6): the chance a full-credit kill leaves a small black hole.
     var nullBloomChance: CGFloat = 0.0
-    var nullBloomRadius: CGFloat = 35.0
-    var nullBloomSlow: CGFloat = 0.4
-    var nullBloomDuration: TimeInterval = 1.5
 
     /// Hoarfrost: flat regen — 1 HP per interval (0 = off)
     var hoarfrostInterval: TimeInterval = 0.0
@@ -1262,9 +1262,16 @@ final class PlayerStats {
         ironhideActive = false
         thornsContactReflect = 0.0
         unbrokenCoreOwned = false
-        voidPullForce = 0.0
-        voidPullRadius = 0.0
-        inWellSlow = 0.0
+        voidBlackhole = false
+        voidListlessness = false
+        voidSingularity = false
+        phaseTier = 0
+        warpShotActive = false
+        riftlineActive = false
+        voidHorrorActive = false
+        shadowEdgeActive = false
+        deadCircuitActive = false
+        devourActive = false
         knockbackForce = 0.0
         repulseTier = 0
         lethalSaves = 0
@@ -1289,7 +1296,6 @@ final class PlayerStats {
         relayBurnActive = false
         overclockActive = false
         overclockTimer = 0
-        voidZoneDurationMultiplier = 1.0
         groundedCoreActive = false
         groundedCore.reset()
         fortifyOwned = false
@@ -1305,7 +1311,6 @@ final class PlayerStats {
         bloodlustOwned = false
         bloodlustAttackSpeed = 0
         sanguinarianOwned = false
-        killOrbPullMultiplier = 1.0
         chillTrail = false
         glacialDriftTier = 0
         glacialSpikesActive = false
@@ -1318,19 +1323,11 @@ final class PlayerStats {
         teslaFieldRadius = 50.0
         passiveArenaDPS = 0.0
         gravityWellOnExpire = false
-        gravityWellRadius = 30.0
-        gravityWellDuration = 1.0
-        gravityWellDPS = 0.0
         executionThreshold = 0.0
         spreadShotInterval = 0
         spreadShotCount = 3
         stunChance = 0.0
         stunDuration = 0.5
-        singularityActive = false
-        singularityInterval = 8.0
-        singularityRadius = 90.0
-        singularityDuration = 3.0
-        singularityDPS = 1.0
 
         // v1.6 Quench cards
         arcWakeDamage = 0
@@ -1357,9 +1354,6 @@ final class PlayerStats {
         deeprootDEF = 0
         groundDefBonus = 0
         nullBloomChance = 0.0
-        nullBloomRadius = 35.0
-        nullBloomSlow = 0.4
-        nullBloomDuration = 1.5
         hoarfrostInterval = 0.0
         hoarfrostTimer = 0.0
         cauterizeActive = false

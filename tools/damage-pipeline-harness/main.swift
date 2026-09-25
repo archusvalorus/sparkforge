@@ -334,7 +334,7 @@ do {
     stats.bloodBarrier.gain(50, maxHP: stats.maxHP, tuning: tuning)
     stats.bloodBarrier.tick(1.0)
     let statsExpiry = stats.bloodBarrier.expiry.remaining
-    stats.maxHP = 50                                 // Glass Engine / Mass Tax
+    stats.maxHP = 50                                 // Glass Engine
     check("P10f PlayerStats reconciles the barrier whenever max HP falls, expiry intact",
           stats.bloodBarrier.amount == 25 && abs(stats.bloodBarrier.expiry.remaining - statsExpiry) < 1e-9,
           "barrier=\(stats.bloodBarrier.amount)")

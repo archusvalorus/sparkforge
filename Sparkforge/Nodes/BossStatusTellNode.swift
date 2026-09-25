@@ -66,6 +66,34 @@ final class BossStatusTellNode: SKNode {
         }
     }
 
+    /// v2.1 A6 (CL-73 placeholder tell): Phase's Anomaly on the boss — a second
+    /// row of indigo diamonds, one per stack, dimmed while the 2s trigger
+    /// cooldown runs. Never purple (purple = danger).
+    private var anomalyPips: [SKShapeNode] = []
+    private var drawnAnomaly = -1
+    private var drawnAnomalyCooling = false
+
+    func refreshAnomaly(stacks: Int, cooling: Bool, threshold: Int) {
+        guard stacks != drawnAnomaly || cooling != drawnAnomalyCooling else { return }
+        drawnAnomaly = stacks
+        drawnAnomalyCooling = cooling
+        while anomalyPips.count < threshold {
+            let pip = SKShapeNode(rectOf: CGSize(width: 3.4, height: 3.4))
+            pip.zRotation = .pi / 4
+            pip.strokeColor = .clear
+            pip.fillColor = SKColor(hex: GameConfig.VoidTree.indigoLightHex)
+            pip.glowWidth = 1.5
+            pip.position = CGPoint(x: BossStatusTellNode.dropSlot + CGFloat(anomalyPips.count) * BossStatusTellNode.pipSpacing,
+                                   y: -8)
+            addChild(pip)
+            anomalyPips.append(pip)
+        }
+        for (i, pip) in anomalyPips.enumerated() {
+            pip.isHidden = !(i < stacks || cooling)
+            pip.alpha = cooling ? 0.3 : 1.0
+        }
+    }
+
     /// A Bleed tick landed: the drop flares.
     func pulseBleed() {
         drop.removeAction(forKey: "bleedTick")

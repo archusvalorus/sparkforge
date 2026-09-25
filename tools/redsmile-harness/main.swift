@@ -421,8 +421,8 @@ do {
     }
     check("RC4 the face fits 3 lines of 17 beside the MORE chip", lines(red.description) <= 3,
           "lines=\(lines(red.description))")
-    check("RC5 still one card, one pool entry: Bleed 13 (by primary tag), pool 79",
-          um.allCards.filter { $0.tag == .bleed }.count == 13 && um.allCards.count == 79,
+    check("RC5 still one card, one pool entry: Bleed 13 (by primary tag), pool 80 (A6: −Mass Tax +Void Horror +Shadow Edge, CL-83)",
+          um.allCards.filter { $0.tag == .bleed }.count == 13 && um.allCards.count == 80,
           "bleed=\(um.allCards.filter { $0.tag == .bleed }.count) pool=\(um.allCards.count)")
 
     // The dual gate through the REAL draw: a run with both colours active.
