@@ -141,7 +141,12 @@ do {
 
 // D — Glacial Drift's ladder and its gates.
 do {
-    let um = UpgradeManager(), stats = PlayerStats()
+    // v2.1 A7a: a SEEDED run whose palette holds Chill. An unfiltered run left
+    // Chill out 1 time in 6, and D2a/D2b then passed without testing anything.
+    var seed: UInt64 = 1
+    var um = UpgradeManager(seed: seed)
+    while !um.activeFamilies.contains(.chill) { seed += 1; um = UpgradeManager(seed: seed) }
+    let stats = PlayerStats()
     um.pickCard(card(um, "chill_1"), stats: stats, level: 1)
     let drift = card(um, "chill_4")
     var lifetimes: [TimeInterval?] = [], radii: [CGFloat] = []
@@ -156,13 +161,14 @@ do {
     // Q-C1: T5 needs Whiteout. At T4 without it, Drift is never offered again.
     var offeredWithout = false
     for level in 6...40 where um.drawCards(count: 3, level: level).contains(where: { $0.id == "chill_4" }) { offeredWithout = true }
-    check("D2a Ice Rink is NOT offered without Whiteout", !offeredWithout && um.tier(of: "chill_4") == 4)
+    check("D2a Ice Rink is NOT offered without Whiteout (Chill is in the palette)",
+          um.activeFamilies.contains(.chill) && !offeredWithout && um.tier(of: "chill_4") == 4)
     um.pickCard(card(um, "v16_whiteout"), stats: stats, level: 41)
     var offeredWith = false
     for level in 42...120 where !offeredWith {
         if um.drawCards(count: 3, level: level).contains(where: { $0.id == "chill_4" }) { offeredWith = true }
     }
-    check("D2b with Whiteout T1 the rink opens up", offeredWith || !um.activeFamilies.contains(.chill))
+    check("D2b with Whiteout T1 the rink opens up", offeredWith)
     let slowBefore = stats.globalEnemySlow, moveBefore = stats.moveSpeedMultiplier
     um.pickCard(drift, stats: stats, level: 121)
     check("D3 Ice Rink: every enemy −50% speed, Spark +25% move, and it IS an arena-wide slow (lights Permafrost, Q-C5)",

@@ -1,9 +1,9 @@
 // UpgradeManager.swift
 // Sparkforge
 //
-// Manages the 50-card pool (24 tagged + 6 neutral + 8 v1.3 Lyra cards
-// + 12 v1.6 Quench cards). Every tag has exactly 7 cards, so every
-// tier-7 synergy is reachable through full tag devotion.
+// Manages the card pool: 80 cards = 79 draftable + the secret Panda, across
+// seven trees and Neutral (v2.1 A7a). The exact counts, and that every card
+// is reachable through the real draw, are proven by tools/catalog-harness.
 // Handles card definitions, random draw, and applying effects to PlayerStats.
 //
 // v1.4: Card rebalancing for HP system:
@@ -66,6 +66,25 @@ final class UpgradeManager {
         /// (Gravity Well, Null Bloom); required by Dead Circuit, which only
         /// amplifies them.
         case voidWell
+
+        // v2.1 A7a — the catalog audit's enabler edges (never an amplifier
+        // before its enabler; closure table §B6).
+        /// CL-91: granted by Gouge, the pool's crit source; required by
+        /// Hemorrhage, which only multiplies crits (base crit chance is 0).
+        case critSource
+        /// CL-92: granted by Polar Vortex; required by Frost Touch's T3, whose
+        /// shards and icicle fragments only exist with Polar Vortex.
+        case polarVortex
+        /// CL-93: granted by Polar Vortex T4 (Glacial Condensation), which
+        /// replaces the primary pellet with its icicle. Pellet-only cards are
+        /// `blockedBy` it: once owned they would do nothing.
+        case glacialCondensation
+        /// CL-93 is SYMMETRIC (Command Center correction, Sep 25): granted by
+        /// every pellet-only card (Warp Shot, Gravity Well, Mirror Edge,
+        /// Fracture Shot, Riftline). Polar Vortex T4 is `tierBlockedBy` it, so
+        /// owning one of them stops the capstone at T3 instead of a later pick
+        /// silently switching the earlier one off.
+        case pelletEffect
     }
 
     // MARK: - Card Definition
@@ -127,6 +146,18 @@ final class UpgradeManager {
         /// upgrade is offered (key = the tier being bought). Glacial Drift's
         /// T5 Ice Rink needs Whiteout; until then the card stops at T4.
         var tierRequires: [Int: Set<Capability>] = [:]
+        /// v2.1 A7a (CL-93): extra capabilities a specific TIER grants when it
+        /// is bought (key = the tier). `provides` stays the first-pick grant.
+        var tierProvides: [Int: Set<Capability>] = [:]
+        /// v2.1 A7a (CL-93): capabilities that switch this card's whole effect
+        /// OFF. Once the run holds any of them the card is no longer offered —
+        /// the negative edge `requires` can't express. A copy already owned
+        /// is untouched; the player chose what silenced it.
+        var blockedBy: Set<Capability> = []
+        /// v2.1 A7a (CL-93, symmetric): capabilities that close a specific
+        /// TIER (key = the tier being bought). Polar Vortex T4 closes once a
+        /// pellet-only card is owned; its earlier tiers stay open.
+        var tierBlockedBy: [Int: Set<Capability>] = [:]
 
         // MARK: v2.0 (C2) — outside the taxonomy
 
@@ -199,9 +230,43 @@ final class UpgradeManager {
     /// tick the pity counter (a reroll is one offer, not two).
     private var lastDrawLevel: Int = -1
 
+    /// Level-ups a gateway has waited unseen. Read-only; the catalog harness
+    /// uses it to prove a gateway the +1 Card shows counts as offered (CL-89).
+    func gatewayWait(_ id: String) -> Int { levelsSinceGatewayOffer[id] ?? 0 }
+
     /// v1.9: id → current tier this run (absent = not owned). Per-run,
     /// reset with everything else — no persistence, like pickedCardIDs.
     private(set) var cardTiers: [String: Int] = [:]
+
+    /// v2.1 A7a (CL-89): the cards taken at the level `cardsTakenLevel`. The
+    /// +1 Card bonus never re-offers one of them at the same level-up (after
+    /// the Extra Pick's first selection, it could otherwise hand the same card
+    /// its next tier twice in one level).
+    private var cardsTakenLevel: Int = -1
+    private var cardsTakenThisLevel: Set<String> = []
+
+    /// v2.1 A7a (CL-90): every random choice the draft makes — the palette,
+    /// the Panda roll, the shuffles and the bonus pick — goes through this one
+    /// source. Production passes no seed and gets the system generator; the
+    /// catalog harness seeds it so its reachability walks reproduce exactly.
+    struct DrawRandom: RandomNumberGenerator {
+        private var state: UInt64?
+        init(seed: UInt64?) { state = seed }
+        mutating func next() -> UInt64 {
+            guard var s = state else {
+                var system = SystemRandomNumberGenerator()
+                return system.next()
+            }
+            // SplitMix64: tiny, fast, and good enough for a card shuffle.
+            s &+= 0x9E37_79B9_7F4A_7C15
+            state = s
+            var z = s
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+    private var rng: DrawRandom
 
     // MARK: v2.1 (abilities) — the signature opening
 
@@ -311,7 +376,7 @@ final class UpgradeManager {
         // notice why. The cost is a 4-colour run in that narrow case, and it
         // self-corrects the moment another tree unlocks.
         let cap = min(GameConfig.Drafting.activeColorFamilies, max(1, candidates.count - 1))
-        activeFamilies = Set(candidates.shuffled().prefix(cap))
+        activeFamilies = Set(candidates.shuffled(using: &rng).prefix(cap))
         activeFamilies.insert(.neutral)   // non-negotiable, and not a colour
     }
 
@@ -334,15 +399,86 @@ final class UpgradeManager {
     
     // MARK: - Init
     
-    init() {
+    /// `seed` is for the catalog harness only (CL-90); the game never passes one.
+    init(seed: UInt64? = nil) {
         // v1.9 Unit 3: signature ladders now live in the release pool
         // (buildCardPool); the Unit 1 DEBUG proof ladder is retired.
+        rng = DrawRandom(seed: seed)
         allCards = UpgradeManager.buildCardPool()
         rollRunMutations()
     }
     
     // MARK: - Draw
-    
+
+    /// v2.1 A7a (CL-89; corrective F2): THE offer rule — may this card appear
+    /// in a spread during the level-up at `level`? Every draw path uses it (the
+    /// level-up spread, reroll, the random opener and the +1 Card bonus), and
+    /// acquisition checks it again (`isSelectable`), so a rule can't be added
+    /// to one path and forgotten in another — which is how the bonus came to
+    /// skip four rules and reroll the same-level one. Scheduled offers sit
+    /// OUTSIDE it on purpose: an active capstone's every-other-level guarantee
+    /// and the panda's slot.
+    private func isOfferable(_ card: UpgradeCard, capstoneInProgress: Bool, level: Int) -> Bool {
+        guard tier(of: card.id) < card.maxTier else { return false }
+        // Corrective F2: a card taken during THIS level-up never comes back at
+        // its next tier in the same level-up — spread, reroll or bonus alike.
+        guard !takenAt(level).contains(card.id) else { return false }
+        // v2.0 Phase C: hard eligibility gate. A card whose requirements the
+        // run hasn't met never enters the draw — not down-weighted, ABSENT.
+        // Growth cards before Terra would be dead picks, and a dead pick in
+        // a 3-card spread is a wasted level-up.
+        guard card.requires.isSubset(of: capabilities) else { return false }
+        // v2.1 A2 / A7a: …and so is a card whose NEXT TIER is closed.
+        guard nextTierOpen(card) else { return false }
+        // v2.1 A7a (CL-93): …and a card something the run owns has silenced.
+        guard card.blockedBy.isDisjoint(with: capabilities) else { return false }
+        // v2.0 (C2): a secret card is never in the random pool. It arrives
+        // only when its own scheduler puts it there.
+        if card.isSecret { return false }
+        // v2.0 (E1): a dormant colour is ABSENT this run, not unlucky.
+        // Neutral is always in `activeFamilies`, so neutral cards are
+        // unaffected — including the one the panda hides behind.
+        guard activeFamilies.contains(card.tag) else { return false }
+        // A dual-tag BRIDGE needs BOTH colours live (Brandon). A bridge into
+        // a tree that isn't in the run would hand out synergy progress in a
+        // family with no other cards to pair it with. It makes bridges
+        // rarer on purpose — the intended answer is MORE bridge cards in the
+        // v2.1 family pass, not a looser rule here.
+        if let second = card.secondaryTag, !activeFamilies.contains(second) { return false }
+        // Capstones never come from the random pool once one is in progress —
+        // the active one(s) are injected by parity; others are locked out.
+        if card.isCapstone && capstoneInProgress { return false }
+        return true
+    }
+
+    /// The next tier's own gates: its prerequisites are held (`tierRequires`,
+    /// e.g. Frost Touch T3, Ice Rink) and nothing the run owns closes it
+    /// (`tierBlockedBy`, e.g. Polar Vortex T4 after a pellet card).
+    private func nextTierOpen(_ card: UpgradeCard) -> Bool {
+        let next = tier(of: card.id) + 1
+        if let need = card.tierRequires[next], !need.isSubset(of: capabilities) { return false }
+        if let block = card.tierBlockedBy[next], !block.isDisjoint(with: capabilities) { return false }
+        return true
+    }
+
+    /// The cards taken during the level-up at `level` (empty for any other level).
+    private func takenAt(_ level: Int) -> Set<String> {
+        cardsTakenLevel == level ? cardsTakenThisLevel : []
+    }
+
+    /// Capstones started, not maxed, and whose next tier is still OPEN. Only
+    /// these hold the focus-and-finish lockout and get the every-other-level
+    /// guarantee. A capstone whose next tier something closed (Polar Vortex T4
+    /// once a pellet card is owned, CL-93) is STALLED: no guarantee — it would
+    /// force-offer a tier nobody may take — and no lockout, so the run can
+    /// still finish a different capstone (Brandon, Sep 25).
+    private var activeCapstones: [UpgradeCard] {
+        allCards.filter {
+            $0.isCapstone && tier(of: $0.id) > 0 && tier(of: $0.id) < $0.maxTier && nextTierOpen($0)
+        }
+    }
+    private var capstoneInProgress: Bool { !activeCapstones.isEmpty }
+
     /// Draw N random cards the player can still advance.
     /// v1.6: draws are tag-diverse — each card comes from a different tree.
     /// Duplicate trees appear only when the remaining pool can't offer
@@ -362,43 +498,17 @@ final class UpgradeManager {
         //  • That capstone is guaranteed one slot every OTHER level (rule 2) so
         //    climbing 1→5 is deterministic, not a coin flip. Reroll can't remove
         //    it (level parity is stable across a reroll of the same level).
-        //  • If two capstones are committed (both taken via the once-per-run +1
-        //    pick before either locked the other out), both get the guarantee on
-        //    offset parities. When NO capstone is in progress, capstones appear in
+        //  • If two capstones are committed, both get the guarantee on offset
+        //    parities. (Since A7a's acquisition-time rule — Brandon, Sep 25 — the
+        //    Extra Pick can no longer start two from one spread: the second is
+        //    revalidated away once the first is taken. The injection still
+        //    handles two.) When NO capstone is in progress, capstones appear in
         //    the random pool normally (so you can start one, or see two at once).
-        let inProgress = allCards.filter {
-            $0.isCapstone && tier(of: $0.id) > 0 && tier(of: $0.id) < $0.maxTier
-        }
+        //  • A STALLED capstone (next tier closed) is not "in progress" here.
+        let inProgress = activeCapstones
         let hasInProgress = !inProgress.isEmpty
 
-        let available = allCards.filter { card in
-            guard tier(of: card.id) < card.maxTier else { return false }
-            // v2.0 Phase C: hard eligibility gate. A card whose requirements the
-            // run hasn't met never enters the draw — not down-weighted, ABSENT.
-            // Growth cards before Terra would be dead picks, and a dead pick in
-            // a 3-card spread is a wasted level-up.
-            guard card.requires.isSubset(of: capabilities) else { return false }
-            // v2.1 A2: …and so is the NEXT TIER's own prerequisite, if it has one.
-            if let need = card.tierRequires[tier(of: card.id) + 1],
-               !need.isSubset(of: capabilities) { return false }
-            // v2.0 (C2): a secret card is never in the random pool. It arrives
-            // only when its own scheduler puts it there.
-            if card.isSecret { return false }
-            // v2.0 (E1): a dormant colour is ABSENT this run, not unlucky.
-            // Neutral is always in `activeFamilies`, so neutral cards are
-            // unaffected — including the one the panda hides behind.
-            guard activeFamilies.contains(card.tag) else { return false }
-            // A dual-tag BRIDGE needs BOTH colours live (Brandon). A bridge into
-            // a tree that isn't in the run would hand out synergy progress in a
-            // family with no other cards to pair it with. It makes bridges
-            // rarer on purpose — the intended answer is MORE bridge cards in the
-            // v2.1 family pass, not a looser rule here.
-            if let second = card.secondaryTag, !activeFamilies.contains(second) { return false }
-            // Capstones never come from the random pool once one is in progress —
-            // the in-progress one(s) are injected by parity; others are locked out.
-            if card.isCapstone && hasInProgress { return false }
-            return true
-        }
+        let available = allCards.filter { isOfferable($0, capstoneInProgress: hasInProgress, level: level) }
 
         guard !available.isEmpty || hasInProgress else { return [] }
 
@@ -426,14 +536,14 @@ final class UpgradeManager {
 
         if signatureSpread {
             let signatures = available.filter { $0.isSignature }
-            let unseen = signatures.filter { !signatureIDsSeenThisLevel.contains($0.id) }.shuffled()
-            let returning = signatures.filter { signatureIDsSeenThisLevel.contains($0.id) }.shuffled()
+            let unseen = signatures.filter { !signatureIDsSeenThisLevel.contains($0.id) }.shuffled(using: &rng)
+            let returning = signatures.filter { signatureIDsSeenThisLevel.contains($0.id) }.shuffled(using: &rng)
             drawn = Array((unseen + returning).prefix(count))
             // Transition scaffolding, dead once every tree carries a flagged
             // signature: if fewer signatures are active than the spread holds,
             // fill the gap from the normal pool rather than shrink the spread.
             if drawn.count < count {
-                for card in available.shuffled() where drawn.count < count {
+                for card in available.shuffled(using: &rng) where drawn.count < count {
                     if !drawn.contains(where: { $0.id == card.id }) { drawn.append(card) }
                 }
             }
@@ -441,7 +551,7 @@ final class UpgradeManager {
                 signatureIDsSeenThisLevel.insert(card.id)
             }
         } else {
-            let pool = available.shuffled()
+            let pool = available.shuffled(using: &rng)
             var usedTags: Set<Tag> = []
 
             // First pass: unique tags only (shuffled pool = tags weighted by
@@ -528,6 +638,8 @@ final class UpgradeManager {
         var forcedSlot = drawn.count - 1
         for (i, cap) in inProgress.enumerated() where (level + i) % 2 == 0 {
             if drawn.contains(where: { $0.id == cap.id }) { continue }
+            // Corrective F2: taken during this level-up → not re-seated by a reroll.
+            if takenAt(level).contains(cap.id) { continue }
             if forcedSlot >= 0 { drawn[forcedSlot] = cap; forcedSlot -= 1 }
             else { drawn.append(cap) }
         }
@@ -542,6 +654,7 @@ final class UpgradeManager {
         // panda-eligible run — a gateway you can't find is a tree that doesn't
         // exist, and the panda would have been eating exactly that guarantee.
         if allowSecret, let panda = pandaOffer(atLevel: level),
+           !takenAt(level).contains(panda.id),          // corrective F2: not re-seated by a reroll
            !drawn.contains(where: { $0.id == panda.id }) {
             if drawn.isEmpty {
                 drawn.append(panda)
@@ -610,12 +723,23 @@ final class UpgradeManager {
     func drawBonusCard(excluding displayed: [UpgradeCard]) -> UpgradeCard? {
         let displayedIDs = displayed.map { $0.id }
         let displayedTags = Set(displayed.map { $0.tag })
+        // v2.1 A7a (CL-89): the SAME offer rule as every other draw, at the
+        // level-up this bonus belongs to (the last spread's level). The active
+        // capstone is excluded by it too — its every-other-level guarantee is
+        // the only way it's offered — and so is anything taken this level-up.
+        let inProgress = capstoneInProgress
         let available = allCards.filter {
-            tier(of: $0.id) < $0.maxTier && !displayedIDs.contains($0.id) && !$0.isSecret
-                && activeFamilies.contains($0.tag)
-                && $0.requires.isSubset(of: capabilities)
+            !displayedIDs.contains($0.id) && isOfferable($0, capstoneInProgress: inProgress, level: lastDrawLevel)
         }
 
+        let bonus = pickBonus(from: available, displayedTags: displayedTags)
+        // A gateway the player is shown counts as offered, exactly as in a
+        // spread (the pity bookkeeping at the end of drawCards).
+        if let bonus, !bonus.provides.isEmpty { levelsSinceGatewayOffer[bonus.id] = 0 }
+        return bonus
+    }
+
+    private func pickBonus(from available: [UpgradeCard], displayedTags: Set<Tag>) -> UpgradeCard? {
         // v2.1 (abilities): the bonus card obeys the signature opening — while
         // the run holds no signature, +1 Card widens the identity choice (an
         // unseen signature when one remains) rather than smuggling in a
@@ -624,18 +748,54 @@ final class UpgradeManager {
             let signatures = available.filter { $0.isSignature }
             if !signatures.isEmpty {
                 let unseen = signatures.filter { !signatureIDsSeenThisLevel.contains($0.id) }
-                let bonus = (unseen.isEmpty ? signatures : unseen).randomElement()
+                let bonus = (unseen.isEmpty ? signatures : unseen).randomElement(using: &rng)
                 if let bonus { signatureIDsSeenThisLevel.insert(bonus.id) }
                 return bonus
             }
         }
 
-        if let freshTree = available.filter({ !displayedTags.contains($0.tag) }).randomElement() {
-            return freshTree
-        }
-        return available.randomElement()
+        // Prefer a tree the spread doesn't show; any eligible card otherwise.
+        let fresh = available.filter { !displayedTags.contains($0.tag) }
+        return (fresh.isEmpty ? available : fresh).randomElement(using: &rng)
     }
     
+    // MARK: - v2.1 A7a corrective (F1) — eligibility at ACQUISITION time
+
+    /// May the player TAKE this card right now, during the level-up at `level`?
+    /// A spread is drawn once, but a pick can change what is legal for the rest
+    /// of it — capabilities, tiers, blocks, the capstone state, the level's
+    /// taken set — so every remaining choice answers to the state NOW, never
+    /// to the state when it was drawn. The two scheduled seats keep their own
+    /// rules and never route through the ordinary offer rule: the panda by its
+    /// schedule, an active capstone by its guarantee.
+    func isSelectable(_ card: UpgradeCard, atLevel level: Int) -> Bool {
+        guard !takenAt(level).contains(card.id) else { return false }
+        if card.isSecret { return pandaOffer(atLevel: level)?.id == card.id }
+        if activeCapstones.contains(where: { $0.id == card.id }) { return true }
+        return isOfferable(card, capstoneInProgress: capstoneInProgress, level: level)
+    }
+
+    /// The part of a spread that is still selectable, in order. Newly invalid
+    /// cards drop out; nothing is drawn to replace them.
+    func stillSelectable(_ cards: [UpgradeCard], atLevel level: Int) -> [UpgradeCard] {
+        cards.filter { isSelectable($0, atLevel: level) }
+    }
+
+    /// Take a card only if it is selectable now (F1). The scene's picks and the
+    /// random opener's grants come through here; `pickCard` stays the raw apply.
+    @discardableResult
+    func acquire(_ card: UpgradeCard, stats: PlayerStats, level: Int) -> Bool {
+        guard isSelectable(card, atLevel: level) else { return false }
+        pickCard(card, stats: stats, level: level)
+        return true
+    }
+
+    /// v1.8 Codex: a card shown in a spread, or granted by the random opener,
+    /// is discovered — one production path the harness can execute.
+    func recordDiscovered(_ cards: [UpgradeCard]) {
+        for card in cards { CodexManager.shared.recordCardOffered(card.id) }
+    }
+
     /// Player picks a card — first pick applies tier 1; a re-pick runs the
     /// next ladder rung (v1.9).
     ///
@@ -648,6 +808,12 @@ final class UpgradeManager {
         // Capabilities are granted on the FIRST pick — re-picking to level a
         // card can't re-unlock what it already opened.
         if current == 0 { capabilities.formUnion(card.provides) }
+        // v2.1 A7a (CL-93): …and a specific tier can grant its own on purchase.
+        if let granted = card.tierProvides[current + 1] { capabilities.formUnion(granted) }
+
+        // v2.1 A7a (CL-89): remember what this level-up has already taken.
+        if level != cardsTakenLevel { cardsTakenLevel = level; cardsTakenThisLevel.removeAll() }
+        cardsTakenThisLevel.insert(card.id)
 
         // v2.0 (C2): the commitment point. Seeing the panda does nothing;
         // TAKING it is the first domino, and the schedule anchors here.
@@ -792,6 +958,8 @@ final class UpgradeManager {
         appliedSynergies.removeAll()
         shownBuildHints.removeAll()
         signatureIDsSeenThisLevel.removeAll()
+        cardsTakenLevel = -1
+        cardsTakenThisLevel.removeAll()
 
         rollRunMutations()
     }
@@ -806,7 +974,7 @@ final class UpgradeManager {
         rollActiveFamilies()
         pandaActive = false
         pandaActivationLevel = 0
-        pandaEligible = CGFloat.random(in: 0..<1) < GameConfig.Panda.eligibilityChance
+        pandaEligible = CGFloat.random(in: 0..<1, using: &rng) < GameConfig.Panda.eligibilityChance
         #if DEBUG
         if GameConfig.Panda.debugAlwaysEligible { pandaEligible = true }
         #endif
@@ -939,10 +1107,10 @@ final class UpgradeManager {
         switch tag {
         case .fire:
             return [SynergyTier(threshold: 3, title: "Spreading Flame", effect: "Burns leap to nearby enemies"),
-                    SynergyTier(threshold: 5, title: "Wildfire Heart", effect: "Burns spread farther and hit harder"),
-                    SynergyTier(threshold: 7, title: "Inferno Crown", effect: "Every enemy in the arena is burning")]
+                    SynergyTier(threshold: 5, title: "Wildfire Heart", effect: "Burns last 4s, spread farther and hit harder"),
+                    SynergyTier(threshold: 7, title: "Inferno Crown", effect: "Non-boss enemies take fire damage over time")]
         case .shock:
-            return [SynergyTier(threshold: 3, title: "Chain Current", effect: "Lightning chains to one more enemy"),
+            return [SynergyTier(threshold: 3, title: "Chain Current", effect: "Lightning chains to 1 additional enemy"),
                     SynergyTier(threshold: 5, title: "Tesla Field", effect: "A charged aura damages nearby enemies"),
                     SynergyTier(threshold: 7, title: "Storm Engine", effect: "Every 3rd shot fires a chaining spread")]
         case .bleed:
@@ -951,7 +1119,7 @@ final class UpgradeManager {
                     SynergyTier(threshold: 7, title: "Red Harvest", effect: "Killing a bleeding enemy restores 1 HP")]
         case .guardT:
             return [SynergyTier(threshold: 3, title: "Ironhide", effect: "Nearby enemies cut damage taken, up to 90%"),
-                    SynergyTier(threshold: 5, title: "Thornwall", effect: "Enemies that touch you take 150% of the hit back"),
+                    SynergyTier(threshold: 5, title: "Thornwall", effect: "Reflect 150% of contact damage; bosses take half"),
                     SynergyTier(threshold: 7, title: "Unbroken Core", effect: "Survive a lethal hit: 10s invulnerable, +ATK equal to DEF. A shield blocks projectiles.")]
         case .voidT:
             return [SynergyTier(threshold: 3, title: "Blackhole", effect: "Every 5th primary volley creates a black hole. Your black holes absorb hostile projectiles and impair enemy movement."),
@@ -963,11 +1131,51 @@ final class UpgradeManager {
                     SynergyTier(threshold: 7, title: "Absolute Zero", effect: "The arena slows; shatters come easy")]
         case .growth:
             return [SynergyTier(threshold: 3, title: "Rootbound", effect: "Cultivated ground grips harder — enemies on it are slower"),
-                    SynergyTier(threshold: 5, title: "Verdant Rise", effect: "Your ground mends you faster"),
+                    SynergyTier(threshold: 5, title: "Verdant Rise", effect: "Your ground heals 3 HP per tick"),
                     SynergyTier(threshold: 7, title: "Wildwood", effect: "The whole garden bites what stands on it")]
         case .neutral:
             return []
         }
+    }
+
+    // MARK: - v2.1 A7a (CL-102) — retired ids and the Codex tally
+
+    /// Card ids that shipped in a LIVE build and were later removed, with the
+    /// unit that retired each. The Codex's offered set (`sf_cards_offered`)
+    /// only grows and is never pruned, so a live save can still hold these:
+    /// they count as retired, never as discovered. An id listed here must
+    /// never be reused for a new card — its old discovery would carry over.
+    static let retiredCardIDs: [String: String] = [
+        "v13_static_field":   "A2 Chill (Static Field)",
+        "v16_arc_wake":       "A3 Shock (Arc Wake)",
+        "v16_live_wire":      "A3 Shock (Live Wire)",
+        "v17_induction_step": "A3 Shock (Induction Step)",
+        "v17_copper_vein":    "A3 Shock (Copper Vein)",
+        "v18_needlepoint":    "A4a Bleed (Needlepoint)",
+        "v16_blood_price":    "A4b Bleed (Blood Price)",
+        "v16_mass_tax":       "A6 Void (Mass Tax)",
+    ]
+
+    /// Every card id in the live pool, Panda included (the Codex renders it).
+    static var catalogIDs: [String] { buildCardPool().map { $0.id } }
+
+    /// What a save's offered set means against the live pool. Discovered only
+    /// ever counts live ids, so it can never exceed the total.
+    struct CodexTally: Equatable {
+        let discovered: Int
+        let total: Int
+        let retired: [String]
+        let unknown: [String]
+    }
+
+    static func codexTally(offered: [String], liveIDs: [String]) -> CodexTally {
+        let live = Set(liveIDs)
+        let stored = Set(offered)
+        return CodexTally(
+            discovered: stored.intersection(live).count,
+            total: live.count,
+            retired: stored.filter { retiredCardIDs[$0] != nil && !live.contains($0) }.sorted(),
+            unknown: stored.filter { retiredCardIDs[$0] == nil && !live.contains($0) }.sorted())
     }
 
     // MARK: - Card Pool Builder
@@ -986,8 +1194,8 @@ final class UpgradeManager {
         // made PERMANENT by the v2.1 A5 rework (CL-49: battlefield control —
         // keeping threats away from Spark). Void's is Phase, the rework's named
         // entry point.
-        // The rest of each tree stays UNGATED for now — the `requires`
-        // authoring rides the rework pass, one pass over the pool, not two.
+        // Every other card in a tree `requires` its signature's capability
+        // (authored tree by tree in A1–A6, audited in A7a).
 
         cards.append(UpgradeCard(
             id: "fire_1", name: "Kindle", tag: .fire,
@@ -1082,7 +1290,7 @@ final class UpgradeManager {
                 "Chains to 3; each jump keeps 85%",
                 "Chains to 4 with no damage falloff"
             ],
-            detail: "Each jump strikes a different enemy. T2 and T3 lose damage per jump, compounding (75% / 85% of the hit before). T4: hits chain to 4 additional enemies with no damage falloff. Chain Current adds one more jump.",
+            detail: "Each jump strikes a different enemy. T2 and T3 lose damage per jump, compounding (75% / 85% of the hit before). T4: hits chain to 4 additional enemies with no damage falloff. Chain Current adds one more jump. Hits on bosses never chain, and jumps never strike bosses.",
             isSignature: true,
             provides: [.shockUnlocked]
         ))
@@ -1104,7 +1312,7 @@ final class UpgradeManager {
             id: "shock_4", name: "Overload", tag: .shock,
             description: "Hits have a 20% chance to stun for 1s",
             apply: { stats in stats.overloadOwned = true },
-            detail: "Hits have a 20% chance to stun enemies for 1s. Chain Lightning hits can also trigger this effect. With maxed Chain Lightning: 35% stun chance and 2s stun duration. An enemy can't be stunned again for 3s after a stun ends. Elites and mini-bosses are stunned for 0.25s, or 0.5s with maxed Chain Lightning. Arena bosses are immune.",
+            detail: "Hits have a 20% chance to stun enemies for 1s. Chain Lightning hits can also trigger this effect. With maxed Chain Lightning: 35% stun chance and 2s stun duration. An enemy can't be stunned again for 3s after a stun ends. Mini-bosses are stunned for 0.25s, or 0.5s with maxed Chain Lightning. Arena bosses are immune.",
             requires: [.shockUnlocked]
         ))
 
@@ -1144,7 +1352,7 @@ final class UpgradeManager {
         // v2.1 A4a — the Bleed SIGNATURE (CL-1 Option B, approved copy verbatim
         // in `detail`). The ticking Bleed lives in BleedState; Needlepoint,
         // the interim crit-bleed signature, is retired. Boss-class takes half
-        // (CL-17). The rest of the tree gains its `requires` in A4b.
+        // (CL-17). The rest of the tree `requires` it (A4b).
         cards.append(UpgradeCard(
             id: "v21_bloodthirsty", name: "Bloodthirsty", tag: .bleed,
             description: "Primary hits: 50% chance to Bleed: 10% ATK/0.5s, 3s",
@@ -1172,6 +1380,7 @@ final class UpgradeManager {
                 "+10% critical hit chance",
                 "+20% critical hit chance"
             ],
+            provides: [.critSource],     // v2.1 A7a (CL-91): Hemorrhage's enabler
             requires: [.bleedUnlocked]
         ))
 
@@ -1181,7 +1390,8 @@ final class UpgradeManager {
             id: "bleed_2", name: "Hemorrhage", tag: .bleed,
             description: "Critical hits deal 3x damage instead of 2x",
             apply: { stats in stats.critMultiplier += GameConfig.Bleed.hemorrhageCritBonus },
-            requires: [.bleedUnlocked]
+            // v2.1 A7a (CL-91): base crit is 0%, so it waits for Gouge.
+            requires: [.bleedUnlocked, .critSource]
         ))
 
         // Q-B1: a kill of an enemy that was ALREADY bleeding → +15% for 4s;
@@ -1309,7 +1519,9 @@ final class UpgradeManager {
             description: "Slow shots that speed up. Slower = more damage.",
             apply: { stats in stats.warpShotActive = true },
             detail: "Your primary shots launch at 40% speed and reach full speed after 0.6s. They deal 150% damage at launch, falling to 100% at full speed. Damage between whole numbers rounds up by chance.",
-            requires: [.voidUnlocked]
+            provides: [.pelletEffect],          // v2.1 A7a (CL-93, symmetric)
+            requires: [.voidUnlocked],
+            blockedBy: [.glacialCondensation]   // v2.1 A7a (CL-93): pellets only
         ))
 
         // v2.1 A6: primary-shot scoped (CL-87); its pull zone is a black hole
@@ -1319,8 +1531,9 @@ final class UpgradeManager {
             description: "Spent shots leave a pull zone (1s)",
             apply: { stats in stats.gravityWellOnExpire = true },
             detail: "Primary shots that reach max range or hit a wall leave a pull zone for 1s. Pull zones count as black holes for your Void synergies.",
-            provides: [.voidWell],
-            requires: [.voidUnlocked]
+            provides: [.voidWell, .pelletEffect],   // pelletEffect: v2.1 A7a (CL-93, symmetric)
+            requires: [.voidUnlocked],
+            blockedBy: [.glacialCondensation]   // v2.1 A7a (CL-93): the icicle leaves no well (Q3)
         ))
 
         // v2.1 A6: the Void signature, reworked (Q-V2, CL-71…74). Its old
@@ -1390,11 +1603,14 @@ final class UpgradeManager {
             tierDescriptions: [
                 "Projectiles slow enemies 25%",
                 "Projectiles slow enemies 50%",
-                "Shards and icicle fragments apply it too"
+                "Shards apply it too (with Polar Vortex)"
             ],
-            detail: "T3: Iceburst shards and icicle fragments apply Frost Touch on hit.",
+            detail: "T3: Iceburst shards and icicle fragments apply Frost Touch on hit. T3 requires Polar Vortex.",
             isSignature: true,
-            provides: [.chillUnlocked]
+            provides: [.chillUnlocked],
+            // v2.1 A7a (CL-92): T3's shards only exist with Polar Vortex, so
+            // the card stops at T2 until the capstone is owned (the Ice Rink pattern).
+            tierRequires: [3: [.polarVortex]]
         ))
         
         cards.append(UpgradeCard(
@@ -1469,7 +1685,7 @@ final class UpgradeManager {
         
         cards.append(UpgradeCard(
             id: "neutral_3", name: "Rapid Fire", tag: .neutral,
-            description: "+10% attack speed"
+            description: "+11% attack speed"
         ) { stats in
             stats.fireRateMultiplier *= 0.90
         })
@@ -1493,7 +1709,7 @@ final class UpgradeManager {
         // fan (see GameConfig.Projectile.multishotFanWidthFactor).
         cards.append(UpgradeCard(
             id: "neutral_6", name: "Scatter", tag: .neutral,
-            description: "+1 projectile (wider spread)",
+            description: "+1 projectile (two parallel shots)",
             apply: { stats in
                 stats.extraProjectiles += 1
                 stats.spreadAngle += 0.15
@@ -1503,7 +1719,7 @@ final class UpgradeManager {
                 { stats in stats.extraProjectiles += 1 }
             ],
             tierDescriptions: [
-                "+1 projectile (wider spread)",
+                "+1 projectile (two parallel shots)",
                 "+1 more projectile (fans out)",
                 "+1 more projectile (denser fan)"
             ]
@@ -1561,7 +1777,7 @@ final class UpgradeManager {
         // 5. Phase Skin — brief invulnerability on hit (v2.1 A5, CL-66: 3.5s cd)
         cards.append(UpgradeCard(
             id: "v13_phase_skin", name: "Phase Skin", tag: .guardT,
-            description: "Taking damage grants 1s invulnerability (3.5s cd)",
+            description: "Ignore the next hit and gain 1s invulnerability (3.5s cd)",
             apply: { stats in
                 stats.phaseSkinCooldown = GameConfig.Guard.phaseSkinCooldown
                 stats.phaseSkinDuration = GameConfig.Guard.phaseSkinDuration
@@ -1585,8 +1801,9 @@ final class UpgradeManager {
         // v1.4: Self-damage is now 10 HP instead of losing a lethal save
         cards.append(UpgradeCard(
             id: "v13_unstable_core", name: "Unstable Core", tag: .voidT,
-            description: "Burst every 4s damages nearby enemies (costs 10 HP)",
+            description: "Every 4s, a burst hurts nearby enemies and you",
             apply: { stats in stats.unstableCoreActive = true },
+            detail: "Every 4s, deal 2 damage to enemies within 60pt. Each burst also costs you 10 HP minus your DEF (at least 1).",
             requires: [.voidUnlocked]   // v2.1 A6 (CL-82)
         ))
 
@@ -1675,9 +1892,6 @@ final class UpgradeManager {
             requires: [.growthUnlocked]
         ))
 
-        // Defensive Flowers — a 3-tier ladder that maps onto the 3-flower cap:
-        // each pick grows one more bloom on your ground. The stat closures are
-        // empty; the flower itself is a scene structure the scene grows on pick.
         // Rich Soil — the Terra+ modifier. Exercises the modify-all-zones path.
         cards.append(UpgradeCard(
             id: "v20_richsoil", name: "Rich Soil", tag: .growth,
@@ -1780,6 +1994,9 @@ final class UpgradeManager {
             requires: [.growthUnlocked]
         ))
 
+        // Defensive Flowers — a 3-tier ladder that maps onto the 3-flower cap:
+        // each pick grows one more bloom on your ground. The stat closures are
+        // empty; the flower itself is a scene structure the scene grows on pick.
         cards.append(UpgradeCard(
             id: "v20_wildbloom", name: "Wildbloom", tag: .growth,
             description: "Grow a defensive flower on your cultivated ground",
@@ -1826,7 +2043,7 @@ final class UpgradeManager {
             tierDescriptions: [
                 "Hits have a 12% chance to make a snowman (3s)",
                 "Snowmen last 6s",
-                "Damaging a snowman melts it: it dies"
+                "Damaging a snowman melts it: normals die"
             ],
             detail: "Hits have a 12% chance to turn an enemy into a snowman for 3s. Each enemy can transform once every 10s. T3: damaging a snowman melts it. Normal enemies die instantly; elites take an additional 20% of max HP as damage. Bosses cannot become snowmen.",
             provides: [.whiteout],
@@ -1854,6 +2071,7 @@ final class UpgradeManager {
             id: "v17_relay_burn", name: "Relay Burn", tag: .fire, secondaryTag: .shock,
             description: "Burning foes can arc Shock",
             apply: { stats in stats.relayBurnActive = true },
+            detail: "Each burning enemy arcs Shock roughly once a second to the nearest other enemy within 90pt, dealing 4 damage. Arcs don't chain.",
             requires: [.fireUnlocked]
         ))
 
@@ -1913,7 +2131,9 @@ final class UpgradeManager {
                 stats.projectileRangeMultiplier += GameConfig.VoidTree.riftlineRange
             },
             detail: "Shots pass through up to 2 enemies, so each shot can hit up to 3. Each enemy after the first takes 75% of the previous hit's damage (100% → 75% → 56%). +25% projectile range.",
-            requires: [.voidUnlocked]
+            provides: [.pelletEffect],          // v2.1 A7a (CL-93, symmetric)
+            requires: [.voidUnlocked],
+            blockedBy: [.glacialCondensation]   // v2.1 A7a (CL-93): the icicle doesn't pierce
         ))
 
         // ═══════════════════════════════════
@@ -1924,9 +2144,12 @@ final class UpgradeManager {
 
         cards.append(UpgradeCard(
             id: "v18_mirror_edge", name: "Mirror Edge", tag: .voidT,
-            description: "Attacks can echo once for less damage.",
+            description: "Shots have a 35% chance to echo for 50% damage.",
             apply: { stats in stats.echoChance = 0.35 },
-            requires: [.voidUnlocked]   // v2.1 A6 (CL-82)
+            detail: "Each primary shot has a 35% chance to fire again 0.15s later for 50% damage. Echoes don't echo, split or leave pull zones, and aren't primary hits.",
+            provides: [.pelletEffect],   // v2.1 A7a (CL-93, symmetric)
+            requires: [.voidUnlocked],   // v2.1 A6 (CL-82)
+            blockedBy: [.glacialCondensation]   // v2.1 A7a (CL-93): pellets only
         ))
 
         // v2.1 A4b rework (CL-27/28): enemies whose finishing blow is a Bleed
@@ -1949,10 +2172,11 @@ final class UpgradeManager {
 
         cards.append(UpgradeCard(
             id: "v18_fracture_shot", name: "Fracture Shot", tag: .neutral,
-            description: "Shots split into weaker fragments."
-        ) { stats in
-            stats.splitCount = 2
-        })
+            description: "Shots split into weaker fragments.",
+            apply: { stats in stats.splitCount = 2 },
+            provides: [.pelletEffect],          // v2.1 A7a (CL-93, symmetric)
+            blockedBy: [.glacialCondensation]   // v2.1 A7a (CL-93): pellets only
+        ))
 
         // v2.1 A4c: the Bleed/Void BRIDGE (Q-B4, closure table §B3). Every 10s
         // of active combat Spark becomes the Thing From Below for 3s: melee
@@ -1972,6 +2196,7 @@ final class UpgradeManager {
             id: "v18_false_opening", name: "False Opening", tag: .voidT,
             description: "A sharp turn leaves a delayed Void pulse.",
             apply: { stats in stats.falseOpeningActive = true },
+            detail: "A sharp turn while moving marks the spot. 0.3s later it pulses, dealing 12 damage to enemies within 72pt and slowing them 30% for 1.2s. 1.1s cooldown.",
             requires: [.voidUnlocked]   // v2.1 A6 (CL-82)
         ))
 
@@ -2011,10 +2236,11 @@ final class UpgradeManager {
             tierDescriptions: [
                 "Inner Heat: pulse every 2s for 50% ATK nearby",
                 "Burning Reach: pulse radius doubled",
-                "Ragekindled: damage taken grows the pulse (to +100%)",
-                "Living Furnace: pulse doubled; hits also grow ATK",
-                "Everglow: erupt for 500% ATK arena-wide every 15s"
+                "Ragekindled: getting hit grows the pulse",
+                "Living Furnace: pulse ×2; getting hit grows ATK",
+                "Everglow: erupt for 500% ATK every 20s"
             ],
+            detail: "Every 2s, a pulse deals 50% ATK to nearby enemies. T2 doubles its radius. T3: each hit you take adds +1% pulse damage, up to +100%. T4 doubles pulse damage, and each hit you take adds +0.5% ATK, up to +50%. T5: every 20s, after a short warning, erupt for 500% ATK across the whole arena. Mini-bosses take half pulse damage. Bosses and mini-bosses take half eruption damage.",
             isCapstone: true,
             requires: [.fireUnlocked]   // v2.1 A1: the capstone sits behind Kindle too
         ))
@@ -2051,14 +2277,14 @@ final class UpgradeManager {
             ],
             tierDescriptions: [
                 "Iron Skin: DEF fuels damage; +5% DEF; Thorns bite touchers",
-                "Barbed Armor: Thorns +250%; more DEF→damage",
-                "Retaliate: counter attackers for 150% of the hit",
-                "Kinetic Reserve: hits store energy; release a 200% DEF burst at 4",
-                "Iron Maiden: +15% DEF; every 20s fire stored energy at a priority foe"
+                "Barbed Armor: Thorns +240%; more DEF→damage",
+                "Retaliate: return 150% of the hit",
+                "Kinetic Reserve: 200% DEF burst at 4",
+                "Iron Maiden: +15% DEF; energy fires every 20s"
             ],
             // v2.1 A5: the T4/T5 faces overflow the card; the full ladder lives
             // here. T4's threshold corrected to the config's 4 (CL-67).
-            detail: "T1 Iron Skin: DEF fuels damage, +5% DEF, and thorns bite enemies that touch you. T2 Barbed Armor: thorns +250%, more DEF→damage. T3 Retaliate: counter attackers for 150% of the hit (1s cooldown). T4 Kinetic Reserve: damaging hits store energy; release a 200% DEF burst at 4. T5 Iron Maiden: +15% DEF; every 20s fire the stored energy at a priority foe. Bosses and mini-bosses take 50% less thorn and Retaliate damage.",
+            detail: "Thorns deal 5 damage to enemies that touch you (17 from T2). Damaging hits store energy: 4 release a 200% DEF burst, and T5 fires what's stored at a priority foe every 20s. The +5% and +15% DEF are one-time grants of at least +1. Retaliate has a 1s cooldown. Bosses and mini-bosses take 50% less thorn and Retaliate damage.",
             isCapstone: true,
             requires: [.guardUnlocked]   // v2.1 A5 (CL-50)
         ))
@@ -2093,11 +2319,12 @@ final class UpgradeManager {
             ],
             tierDescriptions: [
                 "Lightning Lasso: tether the nearest foe for 15% ATK Shock/s",
-                "Extended Circuit: lasso damage doubled; range doubled",
-                "Homing Beacon: your fire prioritizes the lassoed prey",
-                "Heaven's Call: 2s lassoed → prey takes +35% from all sources",
-                "Skybeam: every 5s a 300% ATK strike from above, with splash"
+                "Extended Circuit: lasso damage and range doubled",
+                "Homing Beacon: your shots favor the lassoed prey",
+                "Heaven's Call: prey lassoed 2s takes +35% damage",
+                "Skybeam: every 5s a 300% ATK strike with splash"
             ],
+            detail: "The lasso tethers the nearest foe in reach and deals 15% ATK Shock each second (T2: 30% ATK, double reach). T4: after 2s on the same prey, it takes +35% damage from all sources. T5: every 5s, a strike lands 1s after its warning: 300% ATK to the lassoed prey (or the nearest target), and 150% ATK to every other enemy within 80pt. Bosses and mini-bosses take half Skybeam damage and half the +35%.",
             isCapstone: true,
             requires: [.shockUnlocked]   // v2.1 A3
         ))
@@ -2130,11 +2357,12 @@ final class UpgradeManager {
             ],
             tierDescriptions: [
                 "Blood Familiar: an invulnerable bat hunts; kills grow its bite",
-                "Bloodfed: every 10 kills +5 max HP; 1% of max HP → ATK",
-                "Bloodhound: bat favors bleeders; executes weak normals",
-                "Marked: enemies alive 10s take +35% from all sources",
-                "The Hunter: hits on injured foes charge a gauge; full → the bat executes a weakened enemy"
+                "Bloodfed: +5 max HP per 10 kills; HP feeds ATK",
+                "Bloodhound: bat favors bleeders, executes the weak",
+                "Marked: foes alive 10s take +35% damage",
+                "The Hunter: hits charge an execute pounce"
             ],
+            detail: "The bat heals you for half its damage. T2: +5 max HP per 10 kills (up to +100); 1% of max HP adds to ATK. T3: bites execute normal enemies below 20% HP. T5: shots, bat bites and Red Smile sweeps charge a 4-step gauge; when full, the bat executes the nearest weakened enemy (2s cooldown): normal enemies below 50% HP, bosses and mini-bosses at 10% or less. Bosses and mini-bosses take half bat damage and half the Marked bonus.",
             isCapstone: true,
             requires: [.bleedUnlocked]   // v2.1 A4b: prerequisites ship with the tree
         ))
@@ -2169,11 +2397,12 @@ final class UpgradeManager {
             ],
             tierDescriptions: [
                 "Unstable: your hits charge the void; full meter → reality lurches",
-                "Void-Touched: shots pierce armor; the void charges faster",
-                "Rift Cannon: every 3rd lurch, an arena rift fires a 300% ATK beam",
-                "Echo: your shots echo 1.5s later from elsewhere (50% damage)",
-                "Event Horizon: at 75s the arena is erased; at 105s, so are you"
+                "Void-Touched: ignore shields; lurch more often",
+                "Rift Cannon: every 3rd lurch, a 300% ATK beam",
+                "Echo: shots echo 1.5s later from afar (50% damage)",
+                "Event Horizon: a timer erases the arena, then you"
             ],
+            detail: "Lurch cooldown: 2s, or 1.2s from T2. T5 in Arenas 1-10: 37.5s, then 52.5s.",
             isCapstone: true,
             requires: [.voidUnlocked]   // v2.1 A6 (CL-82): gated like every capstone
         ))
@@ -2212,13 +2441,20 @@ final class UpgradeManager {
             ],
             tierDescriptions: [
                 "Iceburst: chilled foes that die burst into 3 ice shards",
-                "Brittle Cold: 5 shards; +40% damage to chilled/frozen foes",
-                "Windchill: a cold storm follows you, stacking Chill",
-                "Glacial Condensation: every 3 shots fire one shattering icicle",
-                "Polar Vortex: storm ×3; 5 Chill → freeze → Frostbite (+100% dmg)"
+                "Brittle Cold: 5 shards; +40% vs impaired foes",
+                "Windchill: storm slows 30%, adds Chill",
+                "Glacial Condensation: 3 shots → 1 icicle",
+                "Polar Vortex: storm ×2.1; 5 Chill freezes"
             ],
+            detail: "Impaired: slowed, frozen or stunned. T3: the storm follows you and adds 1 Chill a second. T4: the icicle (200% damage) replaces your shot; Erasure's Echo stops. T4 is mutually exclusive with Warp Shot, Gravity Well, Mirror Edge, Fracture Shot and Riftline: whichever side you own first blocks the other. T5: 5 Chill freezes an enemy for 3s; then it takes +100% damage for 4s. Mini-bosses are slowed 85% instead of frozen, then take +50%. The storm ignores bosses.",
             isCapstone: true,
-            requires: [.chillUnlocked]   // v2.1 A2
+            provides: [.polarVortex],    // v2.1 A7a (CL-92): opens Frost Touch T3
+            requires: [.chillUnlocked],  // v2.1 A2
+            // v2.1 A7a (CL-93, SYMMETRIC): the icicle replaces the pellet, so
+            // the pellet-only cards stop being offered once T4 is owned — and
+            // T4 itself closes once one of them is owned (T1–T3 unaffected).
+            tierProvides: [4: [.glacialCondensation]],
+            tierBlockedBy: [4: [.pelletEffect]]
         ))
 
         return cards

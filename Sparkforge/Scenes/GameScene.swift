@@ -2432,10 +2432,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func commitCard(_ selectedNode: UpgradeCardNode) {
-        AudioManager.shared.play(.cardSelect)
         let card = selectedNode.card
         let tierBefore = upgradeManager.tier(of: card.id)
-        upgradeManager.pickCard(card, stats: playerStats, level: player.currentLevel)
+        // v2.1 A7a corrective (F1): eligibility is enforced at ACQUISITION, not
+        // only when the spread was drawn — a stale choice is refused, never taken.
+        guard upgradeManager.acquire(card, stats: playerStats, level: player.currentLevel) else { return }
+        AudioManager.shared.play(.cardSelect)
 
         // v2.0 Phase C: Growth's territory logic on a chosen pick.
         //   • Terra (the first Growth card, zones still empty) — DEFER to the
@@ -2507,6 +2509,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             extraPicksRemaining -= 1
             if let index = displayedCards.firstIndex(where: { $0 === selectedNode }) {
                 displayedCards.remove(at: index)
+            }
+            // v2.1 A7a corrective (F1): that pick may have made some of the rest
+            // illegal (CL-93, the capstone lockout, the level's taken set).
+            // Revalidate what's left; drop the stale cards, never replace them.
+            let legal = Set(upgradeManager.stillSelectable(displayedCards.map { $0.card },
+                                                           atLevel: player.currentLevel).map { $0.id })
+            for node in displayedCards where !legal.contains(node.card.id) { node.animateDismiss() }
+            displayedCards.removeAll { !legal.contains($0.card.id) }
+            // Nothing legal left: the Extra Pick resolves here, like a normal pick.
+            if displayedCards.isEmpty {
+                extraPicksRemaining = 0
+                let synergies = pendingSynergies
+                pendingSynergies = []
+                selectedNode.animateSelection { [weak self] in
+                    self?.finishLevelUp(synergies: synergies)
+                }
+                return
             }
             selectedNode.animateSelection { }
             if let pickBtn = levelUpOverlay.childNode(withName: "extraPickButton"),
@@ -7646,7 +7665,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - Polar Vortex (Chill capstone)
 
-    /// T4: fire one condensed icicle (200% ATK) that shatters into shards on impact.
+    /// T4: fire one condensed icicle (200% shot damage) that shatters into shards on impact.
     @discardableResult
     private func fireIcicle(direction: CGPoint, originOffset: CGPoint) -> ProjectileNode {
         let icicle = ProjectileNode(
@@ -9396,7 +9415,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                                       allowSecret: false).first
             else { break }
             let tierBefore = upgradeManager.tier(of: card.id)
-            upgradeManager.pickCard(card, stats: playerStats, level: player.currentLevel)
+            guard upgradeManager.acquire(card, stats: playerStats, level: player.currentLevel) else { break }
+            // v2.1 A7a (CL-102): a granted card is in your build, so the Codex
+            // counts it as discovered — it never passed through a spread.
+            upgradeManager.recordDiscovered([card])
             granted.append(card.name)
 
             // Granted Growth cards can't take a placement beat (nobody chose
@@ -12788,10 +12810,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Drop the ad buttons down when cards take two rows.
         repositionLevelUpButtons(twoRow: twoRow)
 
+        // v1.8 Unit 5: a card shown in a spread IS discovered (offered,
+        // whether or not it's picked).
+        upgradeManager.recordDiscovered(cards)
+
         for (i, card) in cards.enumerated() {
-            // v1.8 Unit 5: a card shown in a spread IS discovered (offered,
-            // whether or not it's picked).
-            CodexManager.shared.recordCardOffered(card.id)
 
             let row = (twoRow && i >= perRow) ? 1 : 0
             let idxInRow = row == 0 ? i : i - perRow

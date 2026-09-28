@@ -821,11 +821,11 @@ enum GameConfig {
     /// escalates through damage taken, culminating in periodic eruptions.
     /// v1.9 Polar Vortex (Chill capstone) — carry the storm, freeze to the soul.
     enum PolarVortex {
-        // T1 Iceburst — frozen enemies that die burst into ice shards.
+        // T1 Iceburst — slowed or frozen enemies that die burst into ice shards.
         static let iceburstShardsT1: Int = 3
         static let iceburstShardsT2: Int = 5
         static let iceburstShardsT5: Int = 7   // shots slow at T4, so the spread widens
-        static let shardMult: CGFloat = 0.15       // 15% ATK per shard
+        static let shardMult: CGFloat = 0.15       // 15% of shot damage per shard
         // T2 Brittle Cold
         static let brittleColdVuln: CGFloat = 1.4  // +40% damage vs slowed/frozen/stunned
         // T3 Windchill — a cold storm follows the player, stacking Chill.
@@ -842,7 +842,7 @@ enum GameConfig {
         static let galeSpeedMax: CGFloat = 100            // was 52
         // T4 Glacial Condensation — every 3 shots condense into one icicle.
         static let glacialEveryN: Int = 3
-        static let icicleMult: CGFloat = 2.0       // 200% ATK
+        static let icicleMult: CGFloat = 2.0       // 200% of shot damage
         static let icicleShards: Int = 3
         static let icicleShardMult: CGFloat = 0.30 // double a normal Iceburst shard
         // T5 Polar Vortex — Chill → freeze → frostbite.
@@ -888,7 +888,8 @@ enum GameConfig {
         static let eventHorizonPeaceDuration: TimeInterval = 3.5  // breather after the wipe, then spawns resume
 
         /// Arena-scaled Event Horizon timer factor (Brandon, Jul 20). Preplanning
-        /// for future arenas — currently only ~1-4 exist, so runs use 0.5×.
+        /// for future arenas — every shipped arena runs at 0.5×. Keyed by the
+        /// 0-based arena id, so `...10` covers Arenas 1–11 (fix ruled → A7b).
         static func eventHorizonScale(arena: Int) -> CGFloat {
             switch arena {
             case ...10:   return 0.5    // halved
@@ -998,7 +999,7 @@ enum GameConfig {
         static let thornsT1: Int = 5               // flat damage to touchers
         // T2 Barbed Armor
         static let defToDmgT2: CGFloat = 0.025     // +2.5% damage per DEF (~+50% at 20 DEF)
-        static let thornsT2: Int = 17              // Thorns +250% → 5 × 3.5 ≈ 17
+        static let thornsT2: Int = 17              // Thorns +240% (5 → 17)
         // T3 Retaliate
         static let retaliateMult: CGFloat = 1.5    // 150% of pre-mitigation incoming
         static let retaliateCooldown: TimeInterval = 1.0  // global, not per-enemy
@@ -1103,8 +1104,8 @@ enum GameConfig {
         // T4 Marked
         static let markLifetime: TimeInterval = 10.0    // alive 10s → Marked
         static let markVulnerability: CGFloat = 1.35    // +35% from all sources
-        // T5 The Hunter — the pounce gauge (reuses StackGaugeNode). Attacking
-        // INJURED foes charges it; when full the bat leaps to a weakened enemy
+        // T5 The Hunter — the pounce gauge (reuses StackGaugeNode). EVERY attack
+        // charges it (rate-limited); when full the bat leaps to a weakened enemy
         // and executes it. The bat keeps its normal bites at EVERY tier.
         static let pounceExecuteThreshold: CGFloat = 0.50  // normals executable below this
         static let pounceGaugeCapacity: Int = 4            // attacks to charge the gauge

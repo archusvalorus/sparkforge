@@ -459,10 +459,10 @@ do {
             && (brace.detail ?? "").contains("Brace saves you first, Unbroken Core second"))
 
     let ladder = UpgradeManager.synergyTiers(for: .guardT)
-    check("CA15 ladder copy is the ruled copy (CL-69)",
+    check("CA15 ladder copy is the ruled copy (CL-69; Thornwall re-worded in A7a, D4)",
           ladder.map(\.title) == ["Ironhide", "Thornwall", "Unbroken Core"]
             && ladder[0].effect == "Nearby enemies cut damage taken, up to 90%"
-            && ladder[1].effect == "Enemies that touch you take 150% of the hit back"
+            && ladder[1].effect == "Reflect 150% of contact damage; bosses take half"
             && ladder[2].effect == "Survive a lethal hit: 10s invulnerable, +ATK equal to DEF. A shield blocks projectiles.")
 
     let syn = UpgradeManager(), st = PlayerStats()

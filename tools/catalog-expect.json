@@ -1,0 +1,18 @@
+{
+ "_about": "Expected catalog counts (closure table CL-106). Read by tools/generate-card-atlas.py and tools/generate-ability-canon.py; the catalog harness asserts the same numbers (CA1-CA3).",
+ "total": 80,
+ "draftable": 79,
+ "secret": 1,
+ "signatures": 7,
+ "capstones": 7,
+ "byTree": {
+  "fire": 9,
+  "chill": 8,
+  "shock": 8,
+  "bleed": 13,
+  "guardT": 10,
+  "voidT": 13,
+  "growth": 8,
+  "neutral": 10
+ }
+}

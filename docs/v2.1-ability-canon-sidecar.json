@@ -1,0 +1,1889 @@
+{
+ "_about": "Hand-kept sidecar for docs/v2.1-ability-canon.md (closure table CL-104). The generator (tools/generate-ability-canon.py) joins it to the compiled catalog and FAILS on a missing or unknown key, so every new, renamed or retired card forces an entry here. Keys: card id, or 'syn:<Tree>_<3|5|7>'. Describe CURRENT behaviour; rulings not yet built go in 'sensitivities' as 'A7b: …'.",
+ "trees": {
+  "Fire": {
+   "thesis": "Burning and big booms, with a real risk/reward dial.",
+   "source": "Brandon (spec, Sep 15)"
+  },
+  "Chill": {
+   "thesis": "Control that escalates into transformation.",
+   "source": "Brandon (spec, Sep 15)"
+  },
+  "Shock": {
+   "thesis": "LOUD, bombastic, chaining wackiness — 'wackiness is how we'll be remembered.'",
+   "source": "Brandon (spec, Sep 15)"
+  },
+  "Bleed": {
+   "thesis": "Wounds that keep taking: Bleed ticks, executes and blood sustain, rewarding kills on already-bleeding foes.",
+   "source": "working summary (Claude) — for Lyra to confirm"
+  },
+  "Guard": {
+   "thesis": "Hold your ground and the ground hits back: two survival layers, mitigation, and retaliation.",
+   "source": "working summary (Claude, from Q-G1 and the A5 commit) — for Lyra to confirm"
+  },
+  "Void": {
+   "thesis": "Everything falls in, and some of it comes back: wells, erasure and fear that ignore the usual rules.",
+   "source": "working summary (Claude, from the A6 commit) — for Lyra to confirm"
+  },
+  "Growth": {
+   "thesis": "Growth modifies the ARENA rather than Spark: cultivated ground, living structures, territory. Verb: Cultivate.",
+   "source": "Brandon + Lyra (v2.0 Phase C); untouched in v2.1"
+  },
+  "Neutral": {
+   "thesis": "Not a tree: the palette's constant. Stat, XP and utility picks, never gated. Redesign deferred to v2.2+.",
+   "source": "Brandon (Sep 15)"
+  }
+ },
+ "entries": {
+  "bleed_1": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +10%/+20% crit chance (totals); crit is rolled at fire for every fireProjectile shot (fragments, shards and echoes too) and per target on sweeps.",
+   "bossClass": "Crits land on gun and sweep boss hits too.",
+   "killSource": "n/a",
+   "tell": "Crit shots render 1.5× larger.",
+   "rulings": [
+    "CL-91",
+    "CL-110"
+   ],
+   "sensitivities": "The only in-pool crit source (base crit 0%), so it provides `.critSource` for Hemorrhage (CL-91, A7a); the icicle, Glass Blood fragments, returned shots and Shadow Edge never crit. A7b: CL-110 ruled — the Polar Vortex replacement icicle will roll crit like the primary shot it replaces (its shards won't); today it never crits, so Gouge/Hemorrhage go quiet after T4 without Red Smile."
+  },
+  "bleed_2": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +1.0 crit-damage multiplier (2× → 3×, keeping Forge Path Deadeye); a crit deals max(2, Int(damage × multiplier)).",
+   "bossClass": "Applies to boss crits too.",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [
+    "CL-31",
+    "CL-91",
+    "CL-110"
+   ],
+   "sensitivities": "A dead pick without a crit source — CL-91 makes it require `.critSource` (A7a). A7b: CL-110 ruled — the Polar Vortex replacement icicle will roll crit like the primary shot it replaces (its shards won't); today it never crits, so Gouge/Hemorrhage go quiet after T4 without Red Smile."
+  },
+  "bleed_3": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: a full-credit kill of an already-bleeding enemy grants +15% real fire rate for 4s; further qualifying kills reset it, never stack or extend.",
+   "bossClass": "A boss kill qualifies if the boss was bleeding before the killing damage (CL-29).",
+   "killSource": "n/a",
+   "tell": "HUD ATK SPD row shows the live rate (CL-24).",
+   "rulings": [
+    "Q-B1",
+    "CL-22",
+    "CL-23",
+    "CL-24",
+    "CL-29"
+   ],
+   "sensitivities": "Reward-only kills (bursts, Everglow, Static Crown, Inferno Crown) never qualify; it also speeds Red Smile swings."
+  },
+  "bleed_4": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: heal 1/2/4/5 HP (totals) on each full-credit kill; with Sanguinarian only Siphon's overheal becomes Blood Barrier, 1:1.",
+   "bossClass": "A boss kill heals once through the chokepoint (CL-29).",
+   "killSource": "n/a",
+   "tell": "None dedicated (HP just rises; no heal flash on this path).",
+   "rulings": [
+    "Q-B5",
+    "CL-20",
+    "CL-29"
+   ],
+   "sensitivities": "At full HP, Siphon T4 + Sanguinarian fill a 50-point barrier in nine kills (A4b gate note); reward-only kills never heal."
+  },
+  "cap_bleed_apex": {
+   "family": [
+    "orbital / familiar",
+    "summon",
+    "global / positionless"
+   ],
+   "geometry": "The bat orbits Spark and bites without any occlusion test (Ruling 1 'Apex-style' pass), and the pounce likewise.",
+   "targeting": "Bites every 1.5s at the nearest enemy (then the boss) within 0.6×arena radius; T3 prefers the nearest bleeding target incl. a bleeding boss by surface; the T5 pounce takes the nearest executable target.",
+   "hitClass": "Summon %ATK bite (10% ATK, +1% per 5 bat kills to 50%) with 50% lifesteal; T2 +5 max HP per 10 kills and 1% max HP → ATK, T3 executes normals <20%, T4 Marked +35% taken after 10s alive, T5 a 4-hit gauge → execute.",
+   "bossClass": "Bites at damageScale 50% on boss-class; Marked is +17.5% on boss-class and lands on the arena boss immediately; the pounce executes mini-bosses and bosses only at ≤10% HP.",
+   "killSource": "summon (boss via onLethalHit)",
+   "tell": "Crimson 0xC02040 bat with yellow eyes, a pulsing 0xE0304D target ring, 0x99304D Marked pulses, blood-mist executes, a 4-pip gauge, and horns/fangs/wings on Spark at T5 (v1.9 procedural FX).",
+   "rulings": [
+    "CL-29",
+    "CL-32",
+    "CL-94",
+    "CL-101",
+    "CL-107"
+   ],
+   "sensitivities": "Gun boss hits don't charge The Hunter (missing apexRegisterAttack, A7b) and T5 copy's 'injured foes' is wrong (CL-101); Marked shares one vulnerability slot with Called/Frostbite and rounds away on 1-damage hits (CL-94). A7b: CL-107 ruled — independent vulnerability channels (Frostbite, Marked, Called); the strongest active multiplier wins, no stacking, each source clears only itself (today they share one slot and Called ending resets it). A7b reconcile (Brandon, Sep 25): T4 marks the arena boss immediately (no 10s wait)."
+  },
+  "cap_chill_polarvortex": {
+   "family": [
+    "direct projectile",
+    "aura (player-centred)",
+    "on-hit rider"
+   ],
+   "geometry": "Iceburst shards, the icicle and its shards are projectiles blocked by the Carrier; the Windchill storm is a player-centred aura that passes (Ruling 1 names Windchill).",
+   "targeting": "T1 shards burst radially from a slowed/frozen enemy's full-credit death; T3/T5 storm hits enemies within 130pt×DeviceScale of Spark (×2.1 at T5); the T4 icicle flies along the gun's aim.",
+   "hitClass": "T1 3/5/7 shards at 15% (fragment, generation-capped), T2 Brittle Cold +40% direct-hit amplifier, T3 30% storm slow + 1 Chill/s, T4 every 3rd primary pellet → a 200% primary-eligible icicle shattering into 3×30% shards, T5 5 Chill → 3s freeze → Frostbite +100% taken.",
+   "bossClass": "Mini-bosses get an 85% slow for 1.5s instead of a freeze and +50% Frostbite (debuffScale); arena bosses are never slowed, frozen or Brittle-Cold-amplified, and the icicle only shatters on enemies.",
+   "killSource": "fragment (shards), capstone (icicle).",
+   "tell": "Frost bursts 0x99E6FF/0xCCF2FF, a swirling storm circle with gale wisps, frost-styled shots, and a santa hat + beard on Spark at T5 (v1.9 procedural FX).",
+   "rulings": [
+    "CL-3",
+    "Q-C4",
+    "CL-72",
+    "CL-76",
+    "CL-92",
+    "CL-93",
+    "CL-101",
+    "CL-107",
+    "CL-110"
+   ],
+   "sensitivities": "T4 silences the pellet cards (CL-93 blockedBy, A7a) and Brittle Cold rounds away at ≤2 damage (A7b CL-94); Frostbite, Marked and Called overwrite one shared vulnerability slot rather than stack. A7b: CL-107 ruled — independent vulnerability channels (Frostbite, Marked, Called); the strongest active multiplier wins, no stacking, each source clears only itself (today they share one slot and Called ending resets it). A7b: CL-110 ruled — the Polar Vortex replacement icicle will roll crit like the primary shot it replaces (its shards won't); today it never crits, so Gouge/Hemorrhage go quiet after T4 without Red Smile. CL-93 is SYMMETRIC (Command Center correction, Sep 25): owning any pellet card (Warp Shot, Gravity Well, Mirror Edge, Fracture Shot, Riftline) closes T4 — T1–T3 stay open — and a Polar Vortex stalled at T3 neither gets its guarantee nor locks other capstones out (Brandon, Sep 25)."
+  },
+  "cap_fire_everglow": {
+   "family": [
+    "aura (player-centred)",
+    "global / positionless"
+   ],
+   "geometry": "The pulse is a player-centred radius and the eruption is arena-wide; neither is occlusion-tested, so both pass the Carrier (Ruling 1 names Everglow).",
+   "targeting": "Pulse every 2s hits every enemy within 70pt×DeviceScale of Spark (×2 at T2); the T5 eruption every 20s hits every enemy plus the arena boss after a 0.8s telegraph.",
+   "hitClass": "Capstone AoE on the %ATK scale × Fire bucket: pulse 50% ATK (×2 at T4, +up to 100% from hits taken at T3), eruption 500% ATK; T4 hits taken also add up to +50% to the damage multiplier.",
+   "bossClass": "BossClass.damageScale 50% (rounded) on mini-bosses and on the eruption's boss hit; the pulse never reaches the arena boss (A7b item).",
+   "killSource": "burst (reward-only) for both pulse and eruption kills; boss via onLethalHit.",
+   "tell": "Orange 0xFF6633 ring per pulse; eruption = swelling orange core telegraph, arena blast, shake and a 🔥 ERUPTION HUD countdown (v1.9 procedural FX).",
+   "rulings": [
+    "Q-F1",
+    "CL-95",
+    "CL-101"
+   ],
+   "sensitivities": "Pulse/eruption kills are reward-only (no Siphon, Frenzy, Ember Burst, Iceburst, kill count or arena gates); T5 copy says 15s but runtime is 20s (CL-101); pulse-vs-boss is a CL-95 A7b decision row."
+  },
+  "cap_guard_ironmaiden": {
+   "family": [
+    "passive stat",
+    "on-hit rider",
+    "aura (player-centred)",
+    "global / positionless"
+   ],
+   "geometry": "Thorns and Retaliate are contact effects; the T4 burst is a player-centred aura (passes); the T5 target needs line of sight from Spark, then the strike cannot miss and its tracer may cross the Carrier (Geo Ruling 5).",
+   "targeting": "T1-T3 the toucher of a damaging contact; T4 every EnemyNode within 130pt x DeviceScale; T5 every 20s the shared priority target (arena boss, then nearest mini-boss, then nearest normal, visible from Spark).",
+   "hitClass": "Retaliation on damaging contacts (thorns flat 5 / 17, Retaliate 150% of the raw contact on a 1s global cooldown), T4 a 200% DEF radius burst at 4 kinetic stacks (built by contact and enemy-projectile hits), T5 a direct strike of stored kinetic + thorns; T1/T2 also convert base DEF into the damage multiplier.",
+   "bossClass": "Capstone lever applied once: thorns, Retaliate, T4 and T5 take BossClass.damageScale (50%) against mini-bosses and arena bosses; the T4 burst never reaches the arena boss.",
+   "killSource": "retaliation (thorns, Retaliate), burst (T4, reward-only), capstone (T5).",
+   "tell": "Kinetic stack gauge; cyan-blue (0x1FB6FF) T4 ring and a T5 orb tracer with a white rim; no bespoke A5 art.",
+   "rulings": [
+    "CL-67",
+    "CL-50",
+    "CL-69",
+    "CL-101",
+    "Geo-R5"
+   ],
+   "sensitivities": "Iron Skin's DEF->damage reads base DEF only (not Fortify or Deeproot) and is flagged for balance; CL-101 copy: the +5% / +15% DEF are one-time grants (min +1) and '+250%' thorns is really +240%."
+  },
+  "cap_shock_skybeam": {
+   "family": [
+    "falling / sky-strike"
+   ],
+   "geometry": "The T1–T4 lasso is a supernatural tether that crosses the Carrier (Ruling 5) and the T5 strike descends from above (Ruling 6); neither is occlusion-tested.",
+   "targeting": "The lasso holds the nearest enemy or boss within 0.35×arena radius (0.70 at T2, retention ×1.4); the T5 strike every 5s hits the lassoed prey, else the nearest enemy or boss by distance with no range limit.",
+   "hitClass": "Capstone %ATK damage: lasso tick 15%/30% ATK per second, T3 steers auto-aim to the prey, T4 Called +35% taken after 2s attached, T5 300% ATK bolt after a 1s windup plus 150% ATK to every other enemy within 80pt×DeviceScale.",
+   "bossClass": "All Skybeam damage is at BossClass.damageScale 50% (rounded) on mini-bosses and bosses; Called is +17.5% on boss-class (debuffScale).",
+   "killSource": "capstone (boss via onLethalHit)",
+   "tell": "Cyan 0x66DDFF tether; the strike is a contracting 0x88EEFF warning ring, descending charge, white multi-bolt, double shockwave, screen flash and thunderclap (v1.9 procedural FX).",
+   "rulings": [
+    "Q-S4",
+    "CL-8",
+    "CL-94",
+    "CL-101",
+    "CL-107",
+    "CL-109"
+   ],
+   "sensitivities": "T3 Homing returns the lassoed prey to auto-aim WITHOUT the LOS check (contradicts the geometry 1A return's 'occluded prey falls through'); Called rounds away on 1-damage hits (A7b CL-94); lasso and strike ignore hittability. A7b: CL-107 ruled — independent vulnerability channels (Frostbite, Marked, Called); the strongest active multiplier wins, no stacking, each source clears only itself (today they share one slot and Called ending resets it). A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "cap_void_erasure": {
+   "family": [
+    "global / positionless",
+    "void beam",
+    "teleport / pin",
+    "knockback / pull",
+    "direct projectile"
+   ],
+   "geometry": "T3 rift and T4 echo ORIGINS are sampled valid (PlacementSampler); the T3 beam crosses the Carrier as reality-piercing Void (Geo Ruling 3); Displacement resolves out of solids; T4 echo shots are ordinary projectiles; T5 is positionless.",
+   "targeting": "T1 meter fills on every main-chain projectile hit (enemy or boss) and every Red Smile contact (4 hits, 0.15s rate limit); when full and off cooldown one random table effect fires at the nearest non-dying normal enemy (no line-of-sight or hittability filter).",
+   "hitClass": "T1 table (Implosion 55pt pull, Rift Burst 100% ATK r110, Phase Lock 1s stun, Damage Echo 60% ATK after 0.35s, Displacement 85pt, Fracture +40% taken 3s, Backwash 6 shards at 30%); T2 every shot ignores Braceguard and the trigger cooldown drops 2.0 -> 1.2s; T3 every 3rd trigger a 300% ATK beam 46pt wide; T4 each pellet re-fires 1.5s later at 50%; T5 erases the arena at 75s and the player at 105s (x arena scale).",
+   "bossClass": "Capstone lever on Rift Burst, Damage Echo, Rift Cannon and the mini-boss Phase Lock slow and Fracture; the T1 trigger never targets the arena boss, the T3 beam hits it at 50%, and T5 kills it outright (Boss Mode too).",
+   "killSource": "burst (Rift Burst), capstone (Damage Echo, Rift Cannon), fragment (Backwash, T4 echoes); T5's erase removes enemies uncredited.",
+   "tell": "Unstable HUD gauge in purple 0x9B59B6 (UI exception) with indigo in-world rings, pops, beam and T2 bolts; T5 purple 'VOID COLLAPSE' countdown and screen tints (UI exception).",
+   "rulings": [
+    "CL-82",
+    "CL-86",
+    "A6-Q4",
+    "Geo-R3",
+    "Geo-R6",
+    "CL-95",
+    "CL-101"
+   ],
+   "sensitivities": "A7b: CL-95 rows on letting T1/T3 target the arena boss (the gauge sits full in boss-only fights) and CL-101's 0-based arena band fix (the '1-10' band covers 1-11); T2 copy overclaims and T5 copy says 75s/105s while arenas 1-10 run 37.5s/52.5s (CL-101); the Boss Mode 'catastrophic damage' T5 branch was never built (closeout)."
+  },
+  "chill_1": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "Rides projectile hits, so delivery is blocked by the Carrier's swept segment test; the status itself has no geometry.",
+   "targeting": "Any landed player projectile with appliesFrostTouch (default true; Iceburst shards and icicle fragments only from T3); never Glass Blood fragments, Void secondaries or Red Smile sweeps.",
+   "hitClass": "On-hit slow 25%/50% for 2s (× Chill ×3 potency, cap 80%); T3 turns the shard flag on.",
+   "bossClass": "Mini-bosses take the full slow (no debuffScale); arena bosses are never slowed (the boss hit path has no slow).",
+   "killSource": "n/a",
+   "tell": "Slowed enemy body turns navy 0x112233 with blue 0x4488FF eyes (legacy tint).",
+   "rulings": [
+    "CL-3",
+    "Q-C4",
+    "CL-39",
+    "CL-92"
+   ],
+   "sensitivities": "T3 is a dead rung without Polar Vortex — CL-92 gates it on `.polarVortex` (A7a eligibility); the same hit's slow already counts toward Shatter and Iceburst."
+  },
+  "chill_2": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +30% projectile speed, read by every projectile built from effectiveProjectileSpeed (shards and Glass Blood fragments included).",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [],
+   "sensitivities": "Value from the Sep 15 spec table (range bonus dropped in A2); no numbered ruling."
+  },
+  "chill_3": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Direct-hit amplifier: +25% (Int-truncated) on gun and Red Smile hits against an enemy that is slowed, or any enemy while a global slow is active.",
+   "bossClass": "Enemy paths only — the gun and sweep boss paths skip it, so arena bosses never take it.",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [
+    "Q-C5",
+    "CL-94",
+    "CL-101"
+   ],
+   "sensitivities": "Adds nothing below 4 damage per hit; A7b: CL-94 ruled unbiased rounding, and Permafrost's copy waits for it."
+  },
+  "chill_4": {
+   "family": [
+    "ground zone",
+    "global / positionless"
+   ],
+   "geometry": "Patches drop at Spark's own (always valid) position, so none originate inside the Carrier; visuals may overlap it but no enemy can stand there; the T5 rink is arena-wide.",
+   "targeting": "Every enemy standing on a live patch (22pt×DeviceScale, +30% at T3), refreshed 0.5s; T5 slows every enemy through the global slow.",
+   "hitClass": "Zone slow 8% (× Chill ×3 potency) from patches dropped every 0.15s while the stick moves; patch life 2/3.5/5s, T4 permanent for the arena, T5 Ice Rink −50% enemies / +25% Spark move.",
+   "bossClass": "Mini-bosses slowed in full; arena bosses never (the trail loops enemies and bosses don't read globalEnemySlow).",
+   "killSource": "n/a",
+   "tell": "Pale frost patches 0x88CCFF/0xAADDFF off one shared texture; T5 glazes the whole floor 0xCCF2FF — placeholder, A9 replaces.",
+   "rulings": [
+    "CL-11",
+    "Q-C1",
+    "Q-C5",
+    "CL-89",
+    "CL-108"
+   ],
+   "sensitivities": "T4 painting is a device perf watch (merge-bounded); Ice Rink lights Permafrost arena-wide (Q-C5); the +1 Card bonus could re-offer T5 without Whiteout until CL-89's shared predicate (A7a). A7b: CL-108 ruled — arena bosses stay immune to the Ice Rink / Absolute Zero slow; runtime and copy to be reconciled."
+  },
+  "fire_1": {
+   "family": [
+    "on-hit rider",
+    "DoT status"
+   ],
+   "geometry": "Rides projectile hits, so delivery is blocked by the Carrier's swept segment test; the status itself has no geometry.",
+   "targeting": "Any player projectile that lands (primary pellets, PV icicle, and also echoes, splits and shards — no allowModifiers gate); never Glass Blood fragments, returned shots, Shadow Edge or Red Smile sweeps.",
+   "hitClass": "On-hit Burn rider (+0.5 DPS per stack, 2s, × Fire bucket at ignition) applied as a `.kindleHit`, so it can add a Crucible stack; ticks pay out as Burn-channel DoT hits.",
+   "bossClass": "Arena bosses and mini-bosses ignite and take Burn at BossClass.dotScale 50%, fraction-first before rounding; ticks ignore the Boss Mode DEF dial (CL-18).",
+   "killSource": "statusTick (a boss kill credits via the onLethalHit chokepoint with a burn-channel context).",
+   "tell": "Enemy rim glows orange 0xFF6633 while burning; bosses show ember pips in the status row beside the HP bar — A1/A4a placeholders, A9 replaces.",
+   "rulings": [
+    "Q-F1",
+    "Q-F2",
+    "CL-16",
+    "CL-17",
+    "CL-18",
+    "CL-39"
+   ],
+   "sensitivities": "Shards/echoes/splits also count as Kindle hits (unlike Frost Touch's T3 shard gate); sweeps never ignite (CL-39 'Projectiles…'); the post-Burn rim reset hard-codes red on themed enemies (A4a log)."
+  },
+  "fire_2": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: fireDamageBonus (+25/50/100% totals) multiplies Fire-owned damage — Kindle Burn and its spread, Ember Burst, Everglow pulse and eruption, Inferno Crown.",
+   "bossClass": "Inherits each Fire effect's own boss treatment; no boss-specific term.",
+   "killSource": "n/a",
+   "tell": "None beyond the amplified effects.",
+   "rulings": [
+    "Q-F1"
+   ],
+   "sensitivities": "Never touches shot damage, Relay Burn arcs or the Shock ×5 tesla field; Ember Burst stays 1 at base even at +100% (Int(0.5) floors to the minimum 1)."
+  },
+  "fire_3": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "Non-travel radius burst at the death point with no occlusion test, so it passes the Carrier (Ruling 1 radius class).",
+   "targeting": "Every enemy (mini-bosses included) within a fixed 60pt of a full-credit kill (not DeviceScale-scaled); never the arena boss.",
+   "hitClass": "On-kill secondary burst for max(1, Int(damageMultiplier × 25% × Fire bucket)) — base multiplier only, so Overcharge doesn't count; no crit or riders.",
+   "bossClass": "Mini-bosses take it unscaled; the arena boss is never hit, but a boss death fires one burst at the death position (CL-29).",
+   "killSource": "burst (reward-only: XP orb, no on-kill cascade).",
+   "tell": "Orange 0xFF6633 expanding blast disc (legacy procedural FX).",
+   "rulings": [
+    "Q-F1",
+    "CL-29",
+    "CL-95"
+   ],
+   "sensitivities": "1 damage at base on the integer scale (A1 open item 3, accepted); inert in add-less boss fights (CL-95)."
+  },
+  "fire_4": {
+   "family": [
+    "DoT status"
+   ],
+   "geometry": "n/a — a stacking rule on the Burn status.",
+   "targeting": "Per enemy and per arena boss; only Kindle-hit applications add stacks — Spreading Flame and the tesla field reignite but never add.",
+   "hitClass": "Burn stacks to 5, at most +1 per 3s per target, each stack at full Burn DPS; when Burn ends damage stops and stacks fade 1 per 2s, and a reignite preserves the survivors (CL-16).",
+   "bossClass": "Stacks build on bosses and mini-bosses with count and durations unscaled; damage at dotScale 50%.",
+   "killSource": "statusTick (boss via onLethalHit).",
+   "tell": "Rim glow thickens per live stack and ember pips appear from 2 stacks (gold 0xFFB84D live, dim 0x8A4A2A dormant); boss status row mirrors it — placeholder, A9 replaces.",
+   "rulings": [
+    "Q-F2",
+    "CL-16",
+    "CL-17"
+   ],
+   "sensitivities": "Stacked Burn on mini-bosses is the biggest Fire DPS lever (A1 open item 6, revisit at Arena 11+); tesla-held stacks stay dim and never extend Kindle's Burn (A4a fix)."
+  },
+  "guard_1": {
+   "family": [
+    "damage layer / shield"
+   ],
+   "geometry": "n/a; the rescue aftermath's 40pt shove of enemies within 50pt is a legacy instant shove with no path test (the next frame's enemy geometry resolve un-embeds).",
+   "targeting": "None: fires on the first lethal hit (HP reaches 0) through the shared damage pipeline or Unstable Core self-damage.",
+   "hitClass": "Lethal rescue #1: HP set to 1 plus a 1s damage-cooldown grace; a barrier-only hit can never reach it.",
+   "bossClass": "Source-agnostic (boss, mini-boss, hazard or self-damage); Erasure T5's forced erase bypasses it.",
+   "killSource": "n/a",
+   "tell": "Spark alpha-blink flash plus screen shake; placeholder until A9.",
+   "rulings": [
+    "Q-G1",
+    "CL-5",
+    "CL-50",
+    "CL-54",
+    "CL-69",
+    "A5-Q5"
+   ],
+   "sensitivities": "Two cheat-deaths with Unbroken Core are intended (Q-G1); Brace always spends first, never both on one lethal event."
+  },
+  "guard_2": {
+   "family": [
+    "on-hit rider",
+    "knockback / pull"
+   ],
+   "geometry": "Knockback row: T1/T2 shoves are path-tested and stop at the last free point; T3 launches stop at the arena wall and at the Carrier (exact segment test every step, landing step included).",
+   "targeting": "Every projectile hit on an EnemyNode through the main hit chain (pellets, icicle, echoes, fragments, seeds, flower/turret shots), directed away from Spark; never Glass Blood fragments, returned shots, Shadow Edge or Red Smile sweeps.",
+   "hitClass": "Projectile on-hit rider (not primary-only): T1 20pt / T2 60pt shove, T3 400pt launch over 0.35s whose collisions are their own direct hit of max(1, 25% effective ATK), each pin once per launch, 3 pins max.",
+   "bossClass": "Arena bosses and snowmen are immune; mini-bosses take a fixed 20pt at every tier and are never launched or used as pins; Void-trapped bodies are not displaced.",
+   "killSource": "impact (T3 collisions); the carrying projectile keeps its own source.",
+   "tell": "T3 only: steel (0xB8B2A6) trail motes and a steel impact ring per pin; T1/T2 shoves have no dedicated tell; placeholder until A9.",
+   "rulings": [
+    "CL-49",
+    "CL-62",
+    "CL-63",
+    "CL-15",
+    "CL-39",
+    "A5-Q3",
+    "A5-Q4",
+    "A6-Q1"
+   ],
+   "sensitivities": "Launches mostly reach the arena wall (400pt is about the arena radius); against 1-HP early mobs the shot usually kills before launching, so bowling matters from tougher waves on."
+  },
+  "guard_3": {
+   "family": [
+    "passive stat",
+    "knockback / pull"
+   ],
+   "geometry": "The bounce shove is path-tested and stops at the last free point before the Carrier.",
+   "targeting": "Every real touch-begin by a hittable, non-snowman EnemyNode, before the i-frame and damage-cooldown guards.",
+   "hitClass": "Stat (collision radius x0.70) plus a 40pt contact bounce that never creates damage; Harden and Aegis share one bounce and the largest owned distance wins.",
+   "bossClass": "Arena bosses are never moved; mini-bosses bounce like normals; snowmen are harmless to touch and never reach the bounce.",
+   "killSource": "n/a",
+   "tell": "The shrink has no visual; each bounce draws a small steel contact ring (astral blue once Aegis is T2+); placeholder until A9.",
+   "rulings": [
+    "CL-59",
+    "CL-50"
+   ],
+   "sensitivities": "The shrunk body is the one body for contact, enemy shots, geometry and every pickup (health orbs too); bounced enemies return for fresh contacts (A5 watch 4); some boss-hazard reach checks still use the unshrunk radius (A7b)."
+  },
+  "guard_4": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self: stillness is stick input only, so forced moves don't reset it and pushing into a wall does.",
+   "hitClass": "Stat only: +1 temporary DEF per 0.5s without stick input, cap +30, any input resets it, no combat needed, clock starts at ownership.",
+   "bossClass": "n/a (flat DEF against every source, floor 1 per hit).",
+   "killSource": "n/a",
+   "tell": "A steel blip per point plus the HUD DEF row's '+N'; placeholder until A9.",
+   "rulings": [
+    "Q-G2",
+    "Q-G3",
+    "CL-51",
+    "CL-64"
+   ],
+   "sensitivities": "Feeds current DEF, so it pumps Aegis spikes, Iron Bloom and the Unbroken snapshot (A5 watch 7); Fortify 30 + Grounded 30 floors ordinary melee to 1 until about 3:30 (A5 watch 3); stat-pick rebalance deferred to closeout."
+  },
+  "neutral_1": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self.",
+   "hitClass": "Stat only: +12% movement speed (additive to the move-speed multiplier).",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None beyond the HUD move-speed row.",
+   "rulings": [],
+   "sensitivities": "Neutral ships unchanged in v2.1; its redesign is deferred to v2.2+."
+  },
+  "neutral_2": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "XP orbs only; health orbs stay non-magnetized.",
+   "hitClass": "Stat only: +20% XP-orb magnet radius.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [],
+   "sensitivities": "Stacks with Magnetic Core and Devour's 2x."
+  },
+  "neutral_3": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self (the gun).",
+   "hitClass": "Stat only: firing interval x0.90, a real +11.1% firing rate.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None beyond the HUD ATK SPD row.",
+   "rulings": [
+    "CL-101"
+   ],
+   "sensitivities": "CL-101 compatibility copy: '+10% attack speed' -> '+11%' (the firing-rate convention)."
+  },
+  "neutral_4": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "Every projectile built from effective range, including the auto-aim acquisition range, Shadow Edge and returned shots.",
+   "hitClass": "Stat only: +20% projectile range.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [],
+   "sensitivities": "The only range source besides Riftline's +25% since Phase lost its range in A6."
+  },
+  "neutral_5": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self.",
+   "hitClass": "Stat only: +25% XP gained.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [],
+   "sensitivities": ""
+  },
+  "neutral_6": {
+   "family": [
+    "direct projectile"
+   ],
+   "geometry": "Ordinary direct projectiles.",
+   "targeting": "Adds pellets to each auto-aim volley: 2 pellets fire as parallel columns, 3+ fan into a static cone.",
+   "hitClass": "Each extra pellet is a full primary shot (every modifier, echo, Fracture, Warp and Gravity Well roll), while the volley still counts once for the Void volley counter.",
+   "bossClass": "No special treatment.",
+   "killSource": "primary",
+   "tell": "None beyond the extra pellets.",
+   "rulings": [
+    "CL-98",
+    "CL-101",
+    "CL-76"
+   ],
+   "sensitivities": "A7b: CL-98 ruled Storm Engine's spread volley = normal count + 2 (today a fixed 3, so Scatter T3 fires fewer on it); CL-101 copy: T1 '(wider spread)' -> two parallel shots; Polar Vortex T4 absorbs the pellets."
+  },
+  "shock_1": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +15/30/50% real fire rate (totals) inside the shared effectiveFireInterval.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "HUD ATK SPD row.",
+   "rulings": [
+    "CL-22",
+    "CL-23",
+    "CL-24"
+   ],
+   "sensitivities": "Also speeds Red Smile swings, which have no interval floor (CL-42)."
+  },
+  "shock_2": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "Enemy-to-enemy hops are not occlusion-tested, so chains cross the Carrier; no geometry ruling names chain hops.",
+   "targeting": "From the struck enemy, repeatedly the nearest unvisited enemy within 80pt×DeviceScale of the last victim — distinct targets, filtered only by isDying (no hittability check).",
+   "hitClass": "Chain hop: flat compounded damage off the triggering hit (T1 50%, T2 75%, T3 85% per jump, T4 100%, floor 1) with only an Overload roll; fires from any projectile hit on an enemy (not Glass Blood fragments or Void secondaries), Electro Pulse, and once per Red Smile swing.",
+   "bossClass": "Boss hits never start a chain and chains never jump to the arena boss; mini-bosses take hops unscaled.",
+   "killSource": "chain",
+   "tell": "Jagged blue 0x44BBFF bolt that thickens and glows harder per tier, plus a ring pulse on each victim.",
+   "rulings": [
+    "Q-S1",
+    "CL-12",
+    "CL-39",
+    "CL-101",
+    "CL-109"
+   ],
+   "sensitivities": "Can hop onto a phased PaneStalker (A4c Q6 → A7b hittability item); lethal hits still chain from the victim's position (A3 ruling 0); copy should say boss hits never chain (CL-101). A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "shock_3": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +10% move speed, +20% projectile speed, +10% real fire rate.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "HUD MV SPD / ATK SPD rows.",
+   "rulings": [
+    "CL-22"
+   ],
+   "sensitivities": "Value from the Sep 15 spec table; the fire-rate part also speeds Red Smile swings."
+  },
+  "shock_4": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "n/a — a status on the struck enemy, delivered by its carriers.",
+   "targeting": "Each struck enemy on any landed projectile, Red Smile sweep hit, Chain Lightning hop or Electro Pulse survivor; never coils, Relay arcs or DoTs.",
+   "hitClass": "20% stun for 1s, or 35%/2s while Chain Lightning is T4 (linked, no extra pick), with 3s Overload-only immunity after a stun ends.",
+   "bossClass": "Mini-bosses get fixed 0.25s / 0.5s linked stuns applied once; arena bosses are immune (the boss hit path never rolls).",
+   "killSource": "n/a",
+   "tell": "Three yellow ✦ 0xFFE066 dazed stars orbiting the head — placeholder, A9 replaces.",
+   "rulings": [
+    "Q-S2",
+    "CL-2",
+    "CL-73",
+    "CL-80",
+    "CL-101"
+   ],
+   "sensitivities": "A snowman ending cuts an overlapping Overload stun (A7b); copy 'Elites and mini-bosses' should read 'Mini-bosses' (CL-101)."
+  },
+  "v13_chain_reaction": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "Point burst at the corpse with no occlusion test (not reviewed under the section 3 matrix).",
+   "targeting": "On every full-credit kill (and an arena boss's death, once), every EnemyNode within 35pt of the death point.",
+   "hitClass": "On-kill radius burst of a bare 1 flat damage (no riders, not ATK-scaled).",
+   "bossClass": "Never damages the arena boss; mini-bosses take the flat 1.",
+   "killSource": "None at the hit: its kills fall to the frame-top prune (sweep, reward-only), so it can't chain.",
+   "tell": "An orange-yellow (0xFFCC44 / 0xFF8800) ring at the death point.",
+   "rulings": [
+    "CL-29",
+    "CL-95",
+    "CL-109"
+   ],
+   "sensitivities": "Inert in boss-only fights (CL-95 list); reward-only kills are a closeout audit item. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v13_execution": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Direct-hit amplifier: ×2 below 30% HP on gun and Red Smile hits; where Exsanguinate overlaps it is one ×2, never ×4.",
+   "bossClass": "Applies to arena bosses and mini-bosses too.",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [
+    "CL-26"
+   ],
+   "sensitivities": "Never applies to DoTs, chains, coils or capstone damage; partly redundant with Exsanguinate (its own value is the 25–30% band)."
+  },
+  "v13_glass_engine": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +100% real fire rate (interval ÷2 inside the shared effectiveFireInterval) and a one-time −50% max HP at pick (Int-truncated).",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "HUD ATK SPD and HP bar change; no other tell.",
+   "rulings": [
+    "CL-22",
+    "CL-23"
+   ],
+   "sensitivities": "Also speeds Red Smile swings; max-HP gains taken later are not halved (order-dependent); Blood Barrier clamps to the lowered cap; the `glassEngineActive` flag is written but never read."
+  },
+  "v13_magnetic_core": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "XP orbs; the speed burst on each XP orb collected.",
+   "hitClass": "Stat only: +50% XP-orb magnet radius and +30% move speed for 1.5s on each XP orb collected.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [],
+   "sensitivities": "With Chain Reaction it fires the 'Clear Engine' build hint."
+  },
+  "v13_overcharge": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +5% damage multiplier per second unhit, cap +50%, reset by any resolved hit including barrier-only ones (CL-5).",
+   "bossClass": "Uniform — no boss term.",
+   "killSource": "n/a",
+   "tell": "None; the HUD ATK row deliberately excludes it (displayDamageMultiplier).",
+   "rulings": [
+    "Q-F4",
+    "CL-6",
+    "CL-5",
+    "CL-94"
+   ],
+   "sensitivities": "Snapshotted into shots at fire time and truncated (1.0–1.5 → 1), so it never moves base gun damage, but it does raise %ATK effects (Bleed ticks, Skybeam, bat, Everglow); A7b: CL-94 ruled unbiased rounding for Overcharge on the gun."
+  },
+  "v13_phase_skin": {
+   "family": [
+    "damage layer / shield"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self: the first hit past the i-frame and cooldown guards (and past the Unbroken shield and Silver Skin) from a contact, an enemy projectile or a boss hazard.",
+   "hitClass": "The triggering hit is ignored and grants 1s invulnerability, 3.5s cooldown measured from the trigger; Unstable Core self-damage never triggers it.",
+   "bossClass": "Source-agnostic (boss contact and boss hazards included).",
+   "killSource": "n/a",
+   "tell": "Spark blinks five times with a light shake; placeholder until A9.",
+   "rulings": [
+    "CL-66",
+    "CL-50",
+    "CL-101"
+   ],
+   "sensitivities": "CL-101 copy pass: the face should say the triggering hit is ignored too; Phase Skin + Hoarfrost fires the 'Survivor Loop' build hint."
+  },
+  "v13_unstable_core": {
+   "family": [
+    "aura (player-centred)"
+   ],
+   "geometry": "Aura pass: no occlusion test.",
+   "targeting": "Every 4s, every EnemyNode within 60pt of Spark (no hittability filter).",
+   "hitClass": "A bare 2-damage burst (no riders, not ATK-scaled) plus self-damage of max(1, 10 - current flat DEF) outside the pipeline (no barrier, no percentage DR, lands through i-frames), rescued Brace then Unbroken; only Unbroken's window blocks it.",
+   "bossClass": "Never hits the arena boss; mini-bosses take the flat 2; the self-hit lands even with nothing in range.",
+   "killSource": "None at the hit: its kills fall to the frame-top prune (sweep, reward-only).",
+   "tell": "Expanding indigo (0x6688FF / 0x4466DD) ring from Spark plus a small shake (recoloured from purple in A6).",
+   "rulings": [
+    "CL-82",
+    "CL-86",
+    "A6-QA",
+    "CL-54",
+    "CL-55",
+    "CL-95",
+    "CL-101"
+   ],
+   "sensitivities": "A7b: CL-95 decision row on skipping self-damage with nothing in range (pure self-damage in boss-only fights); uncredited kills are a closeout item; Guard DEF shrinks the self-cost (CL-101 copy); with 2+ Void cards it fires the 'Chaos Build' hint."
+  },
+  "v16_aegis_pulse": {
+   "family": [
+    "damage layer / shield",
+    "knockback / pull"
+   ],
+   "geometry": "The bounce shove is path-tested at the Carrier; the spike needs no test because the toucher is adjacent.",
+   "targeting": "DR applies to every pipeline hit; from T2 the bounce and spike fire on every touch-begin by a hittable enemy or boss, even during Unbroken invulnerability.",
+   "hitClass": "Percentage DR in the pipeline's aegis slot (25 / 25 / 35%) inside the shared 90% ceiling; the T2/T3 spike is ordinary direct damage of max(1, 50% / 75% current DEF) with no bypass.",
+   "bossClass": "The arena boss takes the spike through plain takeDamage (DEF dial applies) but is never moved; mini-bosses are bounced and spiked at full.",
+   "killSource": "retaliation (spike)",
+   "tell": "Astral-blue (0xA8C8FF) heater shield with a white rim on Spark's LEFT, x1.3 at T3, hidden under the kaiju, blue contact ring on bounce, never purple; placeholder until A9.",
+   "rulings": [
+    "Q-G4",
+    "CL-58",
+    "CL-15",
+    "CL-5",
+    "CL-68",
+    "CL-69",
+    "A5-Q1",
+    "A5-Q2"
+   ],
+   "sensitivities": "Ironhide + Aegis reach the 90% ceiling in a crowd (A5 watch 2); a spike-killed toucher still lands its hit (A5-Q2); Unstable Core self-damage skips the DR."
+  },
+  "v16_cauterize": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +5 HP after each continuous 3s below 25% max HP; leaving the threshold resets the timer.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "HP bar heal flash.",
+   "rulings": [
+    "Q-F3"
+   ],
+   "sensitivities": "Not combat-gated; a tick may carry HP above 25%."
+  },
+  "v16_hoarfrost": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +5 HP every 7s, always on.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "HP bar heal flash.",
+   "rulings": [],
+   "sensitivities": "Not combat-gated; value from the Sep 15 spec table (no numbered ruling); pairs with Phase Skin as the Survivor Loop (A2 item 4)."
+  },
+  "v16_iron_bloom": {
+   "family": [
+    "aura (player-centred)"
+   ],
+   "geometry": "Ruled exception to the aura pass: each target needs a clear exact segment from Spark, so the Carrier blocks the spikes (CL-60).",
+   "targeting": "Every 4s on game time (remainder carried): every hittable enemy whose surface is within 70pt x DeviceScale of Spark, plus the arena boss.",
+   "hitClass": "Direct pulse damage of max(1, 50% current DEF) with no crit or on-hit riders; 'piercing' means it skips the Boss Mode flat DEF dial only.",
+   "bossClass": "Mini-bosses and the arena boss take it at full (not a capstone, no BossClass scaling); the boss hit uses ignoresChallengeDEF.",
+   "killSource": "retaliation",
+   "tell": "Steel ring plus eight steel spikes thrown out from Spark; placeholder until A9.",
+   "rulings": [
+    "CL-60",
+    "CL-61",
+    "CL-51",
+    "CL-40",
+    "CL-50"
+   ],
+   "sensitivities": "DEF-fed offense: Fortify, Deeproot and Grounded Core raise it (A5 watch 7)."
+  },
+  "v16_null_bloom": {
+   "family": [
+    "well / rooted object",
+    "knockback / pull"
+   ],
+   "geometry": "Opens at the death position; the centre is resolved out of solids and clamped inside the wall.",
+   "targeting": "30% of full-credit kills (and an arena boss's death, once, at its position).",
+   "hitClass": "No damage on its own: a 36pt x DeviceScale (0.6 x Blackhole), 0.8s pull hole that counts as a black hole for the synergies (provides .voidWell).",
+   "bossClass": "Mini-bosses are pulled at 50%; arena bosses are never pulled.",
+   "killSource": "n/a (ground via Dead Circuit or Singularity)",
+   "tell": "Indigo ring with a lighter fill than the other holes and no dark core; placeholder until A9.",
+   "rulings": [
+    "CL-10",
+    "CL-77",
+    "CL-82",
+    "CL-29"
+   ],
+   "sensitivities": "Counts toward the 4-live-hole cap and can evict an older hole mid-pass (review F2 re-checks liveness)."
+  },
+  "v16_open_vein": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "Non-travel radius burst at the death point, so it passes the Carrier (Ruling 1 radius class).",
+   "targeting": "Every enemy within a fixed 40pt (not DeviceScale) of a full-credit kill whose victim was bleeding before the killing damage.",
+   "hitClass": "On-kill secondary burst for a flat 2 damage, no riders.",
+   "bossClass": "Never damages the arena boss; a bleeding boss's death fires one burst at its position (CL-29); mini-bosses unscaled.",
+   "killSource": "burst (reward-only)",
+   "tell": "Red 0xCC2233 ring pulse at the death point.",
+   "rulings": [
+    "CL-29"
+   ],
+   "sensitivities": "Flat 2 is twice base shot damage; its kills can't cascade into further bursts."
+  },
+  "v16_static_crown": {
+   "family": [
+    "aura (player-centred)"
+   ],
+   "geometry": "An expanding ring evaluated by distance only, so it passes the Carrier (Ruling 1 radius class).",
+   "targeting": "On each level-up, a ring centred where Spark levelled grows to 260pt×DeviceScale over 4s, striking each enemy it reaches once.",
+   "hitClass": "Secondary burst for 150% shot damage (min 1), no crit or riders.",
+   "bossClass": "Enemies only — never the arena boss; mini-bosses unscaled.",
+   "killSource": "burst (reward-only)",
+   "tell": "Bright yellow 0xFFE066 glowing ring expanding and fading.",
+   "rulings": [
+    "CL-95"
+   ],
+   "sensitivities": "Kills are reward-only (no Siphon, Frenzy or kill count); dormant staticCrownDamage/staticCrownRadius stats are queued for A7b deletion."
+  },
+  "v16_whiteout": {
+   "family": [
+    "on-hit rider",
+    "transformation"
+   ],
+   "geometry": "n/a — a state on the struck enemy, delivered by projectile/sweep carriers the Carrier blocks.",
+   "targeting": "Survivors of any landed player projectile (primary, shards, echoes, icicle) or Red Smile sweep, each enemy at most once per 10s; never chains, coils, DoTs or Glass Blood fragments.",
+   "hitClass": "12% on-hit transform into a harmless snowman (a stun in costume) for 3s/6s; at T3 any damage melts it — normals die, mini-bosses take the hit plus 20% max HP.",
+   "bossClass": "Mini-bosses transform for half as long (debuffScale); arena bosses are structurally immune (not EnemyNodes).",
+   "killSource": "Whatever damage melted it (e.g. primary, statusTick, melee).",
+   "tell": "Two snowballs, coal eyes and a carrot; the melt is a blue smiling puddle — placeholder, A9 replaces.",
+   "rulings": [
+    "Q-C3",
+    "CL-7",
+    "Q-C1",
+    "CL-39",
+    "CL-79",
+    "CL-80",
+    "CL-101"
+   ],
+   "sensitivities": "endSnowman zeroes stunTimer and cuts an overlapping Overload stun (A7b); T3 face 'it dies' overstates elites (CL-101); snowmen can't be trapped or feared and don't count for Ironhide. A7b reconcile (Brandon, Sep 25): mini-boss snowmen last half as long; runtime and copy to be reconciled."
+  },
+  "v17_dead_circuit": {
+   "family": [
+    "well / rooted object",
+    "ground zone"
+   ],
+   "geometry": "In-hole damage has no occlusion test; the collapse burst is Carrier-blocked per target (exact segment from the hole centre).",
+   "targeting": "Modifies every player black hole: damages hittable enemies inside; matter = a full-credit, non-collapse kill inside (fed once to every containing hole) or an absorbed hostile shot.",
+   "hitClass": "Holes last x1.5, deal 1x current shot damage per second (fraction-first), grow +25% radius per matter, and at 3 matter collapse for max(1, 150% effective ATK) through ordinary defenses.",
+   "bossClass": "In-hole damage never reaches the arena boss; the collapse hits the boss (DEF dial applies) and mini-bosses at full, no BossClass scaling.",
+   "killSource": "ground (tick and collapse, full credit); collapse kills feed no hole.",
+   "tell": "Holes visibly grow; the collapse is a white-and-indigo flash burst; placeholder until A9.",
+   "rulings": [
+    "CL-78",
+    "CL-82",
+    "CL-10",
+    "A6-QC",
+    "A6-Q6",
+    "A6-R4"
+   ],
+   "sensitivities": "Rarely reaches a natural collapse in Gravity-Well-heavy builds as the cap churns (A6 watch 5; don't tune without Brandon); its tick also damages snowmen."
+  },
+  "v17_grounded_core": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self: still (no stick input) AND in active combat (the shared CombatPresence flag, read this frame).",
+   "hitClass": "Stat only: +1 permanent base DEF per uninterrupted 7.5s, cap +30 per run; moving or leaving combat resets unfinished progress.",
+   "bossClass": "n/a (active combat counts any hittable enemy or boss).",
+   "killSource": "n/a",
+   "tell": "Guard-green (0x88AA44) progress arc at Spark's feet, a '+1 DEF' pop, a faint full ring once capped, hidden under the kaiju; placeholder until A9.",
+   "rulings": [
+    "Q-G3",
+    "CL-65",
+    "CL-51",
+    "CL-33",
+    "CL-50"
+   ],
+   "sensitivities": "Turtling vs active play with Fortify (A5 watch 3); earned DEF survives death and revive, unfinished progress does not."
+  },
+  "v17_overclock": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self, on each level-up.",
+   "hitClass": "Stat only: +35% move speed for 3s after each level-up.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [],
+   "sensitivities": ""
+  },
+  "v17_relay_burn": {
+   "family": [
+    "DoT status"
+   ],
+   "geometry": "Instant enemy-to-enemy arc with no occlusion test, so it crosses the Carrier; no geometry ruling names enemy-to-enemy arcs.",
+   "targeting": "Each burning enemy (Kindle or tesla-field Burn) rolls 0.9/s; target = nearest other enemy within a fixed 90pt (not DeviceScale), with no hittability or isDying filter.",
+   "hitClass": "Secondary flat 4-damage Shock arc: no crit, amplifiers, Overload roll or Chain Lightning.",
+   "bossClass": "Enemies only — a burning boss never arcs and the boss is never a target; mini-bosses take the flat 4.",
+   "killSource": "chain",
+   "tell": "Thin blue 0x44BBFF arc line with a 0.15s fade (legacy FX).",
+   "rulings": [
+    "CL-89",
+    "CL-95",
+    "CL-101",
+    "CL-109"
+   ],
+   "sensitivities": "Flat 4 is ~4× base shot damage and never scales; copy lacks its numbers (CL-101 adds 4 dmg / 90pt); inert in add-less boss fights (CL-95); CL-89 stops the +1 Card bonus offering it with Shock dormant. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v18_bloodlust": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +0.1% real fire rate per full-credit kill of an already-bleeding enemy, permanent for the run, capped at +30%.",
+   "bossClass": "A bleeding boss kill counts once (CL-29).",
+   "killSource": "n/a",
+   "tell": "HUD ATK SPD row shows the live rate.",
+   "rulings": [
+    "Q-B6",
+    "CL-22",
+    "CL-23",
+    "CL-24",
+    "CL-29"
+   ],
+   "sensitivities": "Only visible because the FireClock carry keeps sub-frame time (CL-23); ~300 bleeding kills to cap."
+  },
+  "v18_false_opening": {
+   "family": [
+    "ground zone"
+   ],
+   "geometry": "Radius pulse with no occlusion test (aura pass); the mark drops at Spark's own, always-valid position.",
+   "targeting": "A sharp stick turn (over 90 degrees vs a lagging heading, stick above 0.3) marks the pivot; 0.3s later it pulses every enemy within 72pt, 1.1s cooldown.",
+   "hitClass": "One-shot area burst, not a lingering field: flat 12 damage plus a 30% slow for 1.2s, no riders, not ATK-scaled.",
+   "bossClass": "Never hits the arena boss; mini-bosses take the full damage and slow.",
+   "killSource": "burst (reward-only)",
+   "tell": "A faint indigo mark fading into a light-indigo (0x6688FF) ring pulse (recoloured from the Faceted Lie's danger purple in A6).",
+   "rulings": [
+    "CL-82",
+    "CL-86",
+    "CL-101",
+    "CL-109"
+   ],
+   "sensitivities": "Inert in boss-only fights (CL-95 list); reward-only kills are a closeout audit item; CL-101 copy: add a detail with the 30% / 1.2s slow and the flat 12. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v18_fracture_shot": {
+   "family": [
+    "direct projectile"
+   ],
+   "geometry": "Ordinary direct projectiles, blocked by the Carrier.",
+   "targeting": "Each primary pellet also fires 2 fragments angled 0.22 rad either side of its line.",
+   "hitClass": "Secondary projectile (no modifiers): 50% of the pellet's damage with standard projectile riders, no primary-only riders, never re-splits.",
+   "bossClass": "No special treatment.",
+   "killSource": "fragment",
+   "tell": "None beyond the extra shots.",
+   "rulings": [
+    "CL-93"
+   ],
+   "sensitivities": "Silenced by Polar Vortex T4, and CL-93 (A7a) stops offering it once T4 is owned; fragments pick up Riftline pierce and falloff and Repulse. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+  },
+  "v18_glass_blood": {
+   "family": [
+    "direct projectile",
+    "DoT status"
+   ],
+   "geometry": "Fragments are projectiles, so the Carrier blocks them.",
+   "targeting": "3 fragments fan radially from an enemy (or boss) killed by a Bleed tick at generation 0 or 1, with 150pt×DeviceScale range at 0.9× projectile speed.",
+   "hitClass": "Fragment hit: 30% shot damage (min 1) with no crit, pierce or riders, guaranteed Bleed on a survivor at parent generation + 1, and Braceguard shields still halve it.",
+   "bossClass": "Fragments hit and bleed the arena boss (Boss Mode DEF dial applies); a boss killed by a Bleed tick bursts once at its death position (CL-29).",
+   "killSource": "fragment",
+   "tell": "Red 0xE0203A blood-glass shard projectiles with a 0xFF8A99 edge and a red burst ring.",
+   "rulings": [
+    "CL-27",
+    "CL-28",
+    "CL-29"
+   ],
+   "sensitivities": "Each lineage stops after two hops but fresh primary wounds re-root outbreaks; dense-swarm frame-rate watch (A4b gate 6)."
+  },
+  "v18_mirror_edge": {
+   "family": [
+    "direct projectile"
+   ],
+   "geometry": "The echo is an ordinary direct projectile, blocked by the Carrier.",
+   "targeting": "Each primary pellet has a 35% chance to re-fire once, 0.15s later, on the same heading from Spark's then-current position.",
+   "hitClass": "Secondary projectile (no modifiers): 50% of the pellet's damage with the standard projectile riders but no primary-only ones (no Anomaly, fear, Warp, Gravity Well or counter), and it never echoes again.",
+   "bossClass": "No special treatment.",
+   "killSource": "fragment",
+   "tell": "Looks like a normal shot; no dedicated tell.",
+   "rulings": [
+    "CL-82",
+    "CL-93",
+    "CL-101"
+   ],
+   "sensitivities": "Silenced by Polar Vortex T4, and CL-93 (A7a) stops offering it once T4 is owned; CL-101 copy: state the 35% chance and 50% damage. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+  },
+  "v18_red_smile": {
+   "family": [
+    "melee sweep",
+    "transformation"
+   ],
+   "geometry": "Each target needs a clear exact segment from Spark (segmentBlockedExact), so the Carrier blocks the sweep regardless of Void affinity (CL-38).",
+   "targeting": "Every hittable enemy and the arena boss whose body overlaps a 110° × 80pt×DeviceScale sector facing Spark's last move direction, nearest first; intangible targets are skipped.",
+   "hitClass": "Primary hit per target (not a shot or projectile) at 2× current shot damage with crit rolled per target, carrying 'Hits…' riders and a guaranteed Bleed, one Chain Lightning per swing, and no Kindle, Frost Touch, Repulse or shot counters.",
+   "bossClass": "Same damage basis on bosses and mini-bosses with no BossClass scaling; the Boss Mode DEF dial applies and Void bypasses only Braceguard shields.",
+   "killSource": "melee (boss via onLethalHit)",
+   "tell": "Spark turns near-black 0x120A0D with a crimson 0xD01C34 grin, a faint crimson facing wedge, a crimson crescent per swing, an arrival ring + bossExecute sound and a RED SMILE HUD countdown, never violet — placeholder, A9 replaces.",
+   "rulings": [
+    "Q-B4",
+    "CL-15",
+    "CL-33",
+    "CL-34",
+    "CL-35",
+    "CL-36",
+    "CL-37",
+    "CL-38",
+    "CL-39",
+    "CL-40",
+    "CL-41",
+    "CL-42",
+    "CL-43",
+    "CL-44",
+    "CL-45",
+    "CL-46",
+    "CL-47",
+    "CL-48",
+    "CL-72",
+    "CL-73",
+    "CL-85"
+   ],
+   "sensitivities": "No swing-rate floor (CL-42), so stacked attack speed is a readability/perf watch; the kaiju ends and pauses it (CL-44); a swing's chain can still hop onto phased targets (A7b)."
+  },
+  "v18_riftline": {
+   "family": [
+    "direct projectile"
+   ],
+   "geometry": "Ordinary direct projectiles; pierce never carries a shot through the Carrier.",
+   "targeting": "Global pierce on every projectile built from the player's pierce count (pellets, echoes, fragments, shards, flower and turret shots, Backwash); not seeds, the icicle, returned shots or Shadow Edge.",
+   "hitClass": "+2 pierce (up to 3 bodies), each later body taking x0.75 of the previous (100 / 75 / 56%) via A6 rounding on one per-projectile threshold, plus +25% projectile range.",
+   "bossClass": "The falloff applies to boss hits too; no special treatment.",
+   "killSource": "The carrying projectile's own source.",
+   "tell": "No dedicated tell.",
+   "rulings": [
+    "CL-81",
+    "A6-R8",
+    "CL-70",
+    "A6-Q2",
+    "CL-93"
+   ],
+   "sensitivities": "Pierce carries the seeded lead shot past a boss, so Blackholes rarely overlap bosses (A6 watch 3, 7); under Polar Vortex T4 only the range survives, and CL-93 (A7a) stops offering it. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+  },
+  "v18_silver_skin": {
+   "family": [
+    "damage layer / shield"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self: every level-up arms one block (it doesn't stack), spent on the next hit past the i-frame and cooldown guards from a contact, enemy projectile or boss hazard.",
+   "hitClass": "Fully negates that one hit and grants 0.3s i-frames; the Unbroken projectile shield is checked first and spares it.",
+   "bossClass": "Source-agnostic.",
+   "killSource": "n/a",
+   "tell": "Silver (0xD6CCC2) ring, a blink and a small shake when spent; there is no armed-state indicator.",
+   "rulings": [
+    "CL-50",
+    "CL-57",
+    "CL-89"
+   ],
+   "sensitivities": "Guard -> Void bridge: counts toward both ladders but requires Guard only (not a dual payoff like Red Smile); the bonus draw's dormant-bridge gap is fixed by CL-89 (A7a)."
+  },
+  "v20_deeproot": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "Zone membership as Terra.",
+   "targeting": "Self, while standing on cultivated ground.",
+   "hitClass": "Stat only: +6 flat DEF while on the ground, counted as temporary DEF inside current DEF.",
+   "bossClass": "n/a (flat DEF against every source, floor 1).",
+   "killSource": "n/a",
+   "tell": "HUD DEF row '+N' only.",
+   "rulings": [
+    "CL-50",
+    "CL-51",
+    "CL-89",
+    "PhaseC-C1.7"
+   ],
+   "sensitivities": "Growth -> Guard bridge: counts toward both ladders, requires Growth only; its DEF feeds Aegis spikes, Iron Bloom and the Unbroken snapshot; the bonus draw's dormant-bridge gap is fixed by CL-89 (A7a)."
+  },
+  "v20_panda": {
+   "family": [
+    "summon",
+    "knockback / pull",
+    "teleport / pin",
+    "falling / sky-strike",
+    "transformation",
+    "draft rule"
+   ],
+   "geometry": "Panda systems = spectacle pass (Geo Ruling 6): arrival destinations resolve out of solids, a pinned victim is resolved outside the footprint every frame, rolls and bamboo rain ignore travel occlusion, and the kaiju strike target is line-of-sight checked from Spark.",
+   "targeting": "Mostly indifferent by design (random or nearest enemy); the samurai picks the healthiest mini-boss, then the boss, then the healthiest normal; the kaiju strike uses the shared priority target.",
+   "hitClass": "Tiered panda acts (rolls, body checks, pins, aggro pulls, projectile-eating sits, healing naps, bamboo drops, a 5% samurai strike from T4) and at T5 a 10s kaiju every 45s (gun off, aura plus arc strikes, 85% DR inside the 90% ceiling, 0.7x move).",
+   "bossClass": "Damage is BossClass-scaled on boss-class; the samurai deletes only below the execute threshold (else 14x ATK at 50%); the kaiju staggers bosses (2.6x ATK at 50%) and never deletes them.",
+   "killSource": "summon (panda acts, samurai), capstone (kaiju strike), burst (kaiju aura, reward-only).",
+   "tell": "Deliberately masked: '???' copy at every tier, punctuation-only tier names and a '???' HUD timer; 76pt pandas, a 3x kaiju with an orange ember aura, and a white samurai cut that belongs to no tree.",
+   "rulings": [
+    "Geo-R6",
+    "CL-5",
+    "CL-44",
+    "CL-90",
+    "CL-106"
+   ],
+   "sensitivities": "Secret card: never in the random pool or the bonus draw, 9.27% run eligibility (Review Mode forces it), first offer at levels 2-5 then every other level from the pick; neutral tag so it never feeds a synergy; T5 unlocks the earned panda skin at pick; kaiju tuning waits for the art pass."
+  },
+  "v20_richsoil": {
+   "family": [
+    "ground zone",
+    "passive stat"
+   ],
+   "geometry": "Scales every zone's radius; membership as Terra.",
+   "targeting": "Every cultivated zone, and Spark's ground regen.",
+   "hitClass": "+2 HP on each 10s ground-regen tick, and every zone x1.22 radius on pick (on top of the usual +16% Growth expansion).",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "The zone's swell animation on growth.",
+   "rulings": [
+    "PhaseC-C1.7",
+    "CL-109"
+   ],
+   "sensitivities": "Its x1.22 goes through modifyAllCultivatedZones, which skips the 0.55 x arena-radius cap every other expansion applies (noticed, unruled). A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v20_seed_spore": {
+   "family": [
+    "on-hit rider",
+    "direct projectile"
+   ],
+   "geometry": "Burst fragments are ordinary direct projectiles, blocked by the Carrier.",
+   "targeting": "Any main-chain projectile hit on an EnemyNode (pellets, echoes, fragments, flower and turret shots) seeds it; a seeded enemy's full-credit death bursts fragments radially.",
+   "hitClass": "The burst is 3 / 5 / 6 fragments at 30% shot damage, range 150pt x DeviceScale (x1.6 from T2), carrying standard projectile riders; T3 fragments re-seed once (generation 2), never deeper.",
+   "bossClass": "Bosses are never seeded (the boss hit path plants no seed); fragments hit bosses normally.",
+   "killSource": "fragment",
+   "tell": "A spore puff (0xC9D96F / 0x5FCF62) at the death and pale-green seed fragments.",
+   "rulings": [
+    "PhaseC-C1.4"
+   ],
+   "sensitivities": "Stacks with other on-death bursts (Chain Reaction, Null Bloom, Iceburst) in dense swarms."
+  },
+  "v20_terra": {
+   "family": [
+    "ground zone",
+    "draft rule"
+   ],
+   "geometry": "Growth row: the root is placed through a ghost resolved out of solids and clamped inside the wall; the painted zone may overlap the Carrier, and membership is a plain circle test (actors stay out of the Carrier through the solid resolve, not the zone).",
+   "targeting": "The player drags and releases to plant (a granted Terra auto-plants at Spark); every EnemyNode inside is slowed and Spark inside is nourished.",
+   "hitClass": "Zone of 110pt x DeviceScale: enemies inside slowed 30% (x Chill slow potency), Spark regains 1 HP per 10s on the ground, every later Growth pick (tier-ups included) grows it 16% up to 0.55 x arena radius, 4 zones max.",
+   "bossClass": "Mini-bosses are slowed at full; arena bosses are unaffected (not in the enemy list).",
+   "killSource": "n/a (ground via Thornsoil or Wildwood)",
+   "tell": "Deep-green (0x174A2A) fill with a leaf-green (0x5FCF62) rim, Spark's nourished glow and a 'PLANT YOUR GROUND' placement beat, kept distinct from health-green.",
+   "rulings": [
+    "PhaseC-D2",
+    "PhaseC-D2b",
+    "Geo-R2"
+   ],
+   "sensitivities": "The ground slow counts as 'slowed' for Chill's slow-conditioned amplifiers (Permafrost, Brittle Cold, Shatter) and Chill x3 doubles it to 60%; Terra + Guard is a positive emergent build (A5 watch 1, don't pre-nerf)."
+  },
+  "v20_thornsoil": {
+   "family": [
+    "ground zone"
+   ],
+   "geometry": "Same zone membership as Terra (circle test; visual overlap allowed).",
+   "targeting": "Every EnemyNode standing on cultivated ground, once per 1s ground tick.",
+   "hitClass": "Sets ground damage to 6 per tick (bare takeDamage, no riders).",
+   "bossClass": "Mini-bosses take BossClass.scaledDamage (half); arena bosses never.",
+   "killSource": "ground",
+   "tell": "No dedicated tell; the zone is the tell.",
+   "rulings": [
+    "CL-97"
+   ],
+   "sensitivities": "A7b: CL-97 ruled Thornsoil -> max(thornsoilDPS, 6); today taking it after Wildwood drops ground damage from 8 to 6."
+  },
+  "v20_tree": {
+   "family": [
+    "well / rooted object",
+    "summon",
+    "falling / sky-strike",
+    "passive stat"
+   ],
+   "geometry": "The Tree stands at the largest zone's (valid) centre; T5 animals arc from the crown over geometry onto the mark; the lion pet walks straight at its prey with no geometry resolve (unruled).",
+   "targeting": "T5 every 4.5s the shared priority target measured from Spark (arena boss, then nearest mini-boss, then nearest normal, line-of-sight occluded); the lion hunts its own priority target.",
+   "hitClass": "T1 garden +10%, T2 +15% move speed on the ground (garden +15%), T3 +3 HP per 4s on the ground, T4 garden +35%, T5 Nature Canon launches of about 150% ATK x per-animal effects (single strikes, AoE landings, knockback, a timed turret, poison clouds, a rare 10s lion pet).",
+   "bossClass": "Animal damage is BossClass-scaled (50%) on mini-bosses and bosses; AoE landings include the boss.",
+   "killSource": "summon (strikes, lion, turret needles), burst (AoE landings, reward-only), ground (skunk clouds).",
+   "tell": "The Tree grows per tier; a green 'NATURE CANON' HUD countdown; per-animal art with emoji fallback.",
+   "rulings": [
+    "PhaseC-C1.6",
+    "Geo-R2",
+    "CL-109"
+   ],
+   "sensitivities": "Deer and boar knockback uses the legacy applyKnockback with no path test (A7b); garden growth is capped at 0.55 x arena radius; Growth is untouched in v2.1. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v20_vinewall": {
+   "family": [
+    "ground zone",
+    "knockback / pull"
+   ],
+   "geometry": "The edge-band shove runs after the frame's enemy geometry resolve, so a push into the Carrier is corrected by the next frame's resolve.",
+   "targeting": "Non-mini-boss EnemyNodes in each zone's edge band (plus or minus 16% of radius), no hittability filter; T3 also hostile projectiles inside the zone.",
+   "hitClass": "Control, no damage: a 65% slow and a 90pt/s outward shove (T2 x1.5); T3 deletes hostile projectiles inside the zone radius.",
+   "bossClass": "Mini-bosses and arena bosses pass through (the zone-based fallback ruling).",
+   "killSource": "n/a",
+   "tell": "Deep bramble-green (0x2E6B3A) hedge ring on each zone.",
+   "rulings": [
+    "PhaseC-D1",
+    "CL-109"
+   ],
+   "sensitivities": "Its 65% band slow feeds Chill's slow-conditioned amplifiers; T3 is a third hostile-projectile eraser alongside Void holes and the sitting panda. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v20_wildbloom": {
+   "family": [
+    "summon",
+    "well / rooted object"
+   ],
+   "geometry": "Flowers root at a random point within 85% of a random zone's radius with NO geometry validity check (a gap vs the section 3 rooted-object row); their shots are ordinary projectiles blocked by the Carrier.",
+   "targeting": "Each flower every 1.4s fires at the shared priority target from its own position within 240pt x DeviceScale, line-of-sight occluded (arena boss, then nearest mini-boss, then nearest normal).",
+   "hitClass": "Secondary projectile (no modifiers) at 25% of a normal shot through the standard hit chain (crit can roll), never a primary hit; one flower per tier, 3 max, permanent.",
+   "bossClass": "No BossClass scaling on flower shots; the boss is the preferred target.",
+   "killSource": "summon",
+   "tell": "A procedural flower (stem 0x2E6B3A, petals 0xC9D96F) that turns to aim and flashes on fire.",
+   "rulings": [
+    "PhaseC-C1.3",
+    "CL-109"
+   ],
+   "sensitivities": "A flower can root inside the Carrier footprint when the garden overlaps it (noticed, unruled); flower shots pick up Riftline pierce and Erasure T2 styling. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v21_berserk": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: real fire rate +50% × missing-HP fraction, read live (barrier excluded).",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "HUD ATK SPD row shows the live rate.",
+   "rulings": [
+    "Q-B2",
+    "CL-22",
+    "CL-24"
+   ],
+   "sensitivities": "Pairs with Glass Engine's halved HP; no interval floor (CL-22 stress gate)."
+  },
+  "v21_bloodthirsty": {
+   "family": [
+    "on-hit rider",
+    "DoT status"
+   ],
+   "geometry": "Rides primary projectile and sweep hits (blocked by the Carrier); the Bleed status has no geometry.",
+   "targeting": "Survivors of primary hits only — primary pellets and the PV icicle roll 50%, and Red Smile sweep survivors bleed guaranteed; never shards, echoes, fragments, chains or summons.",
+   "hitClass": "Bleed: 10% effective ATK every 0.5s for 3s (6 ticks); a refresh restarts the duration without stacking or delaying the next tick, as a generation-0 lineage root.",
+   "bossClass": "Bosses and mini-bosses bleed at dotScale 50%, fraction-first; ticks ignore the Boss Mode DEF dial.",
+   "killSource": "statusTick (boss via onLethalHit with a bleed-channel context).",
+   "tell": "Three red 0xE0203A claw marks flaring each tick; bosses show a blood drop in the status row — placeholder, A9 replaces.",
+   "rulings": [
+    "CL-1",
+    "CL-17",
+    "CL-18",
+    "CL-28",
+    "CL-36"
+   ],
+   "sensitivities": "Ticks sit on the ATK scale (1 at base) so they grow with ATK picks while shots don't; reward conditions mean bleeding BEFORE the killing damage (A4a gate ruling 2)."
+  },
+  "v21_electro_pulse": {
+   "family": [
+    "aura (player-centred)"
+   ],
+   "geometry": "Instant player-to-target arc with no occlusion test, so it crosses the Carrier.",
+   "targeting": "Charges only while the stick is deflected; every 3s strikes the nearest enemy within 220pt×DeviceScale, holding its charge until one is in range; enemies only.",
+   "hitClass": "Secondary strike for 40% shot damage (min 1) that rolls Overload on a survivor and can start one Chain Lightning.",
+   "bossClass": "Never targets the arena boss; mini-bosses unscaled.",
+   "killSource": "chain",
+   "tell": "Yellow 0xFFE066 ring at Spark plus a jagged yellow arc to the target.",
+   "rulings": [
+    "CL-95",
+    "CL-109"
+   ],
+   "sensitivities": "Inert in add-less boss fights (CL-95); 40% floors to 1 at base. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v21_glacial_spikes": {
+   "family": [
+    "ground zone"
+   ],
+   "geometry": "Strikes at the victim's own position on chilled ground, so no Carrier interaction beyond chilled-ground membership.",
+   "targeting": "Each enemy on chilled ground rolls 4%/s, and so does the arena boss when it stands on chilled ground (e.g. Ice Rink); one spike per 0.75s arena-wide, landing on the target after a 0.35s tell.",
+   "hitClass": "Secondary ground strike: executes normals, 20% max HP to mini-bosses, 3% max HP to the arena boss.",
+   "bossClass": "The 20%/3% values are final boss-class numbers with no further BossClass scaling; the boss hit takes the Boss Mode DEF dial and vulnerability.",
+   "killSource": "ground (boss via onLethalHit)",
+   "tell": "A white/ice 0xCCF2FF ring closing over 0.35s, then an ice spike punching up — placeholder, A9 replaces.",
+   "rulings": [
+    "Q-C2",
+    "CL-73",
+    "CL-74"
+   ],
+   "sensitivities": "'Elite' means mini-boss (CL-73); median first offer ~L24 in the A7a reachability walk."
+  },
+  "v21_lightning_sentry": {
+   "family": [
+    "well / rooted object",
+    "summon"
+   ],
+   "geometry": "Coils are placed on valid ground (isBlocked check with a resolve fallback; T4 resolves a central anchor), but their shock arcs aren't occlusion-tested and cross the Carrier.",
+   "targeting": "Each coil shocks the nearest enemy within 140pt×DeviceScale (T4 unlimited) every 0.8s (T4 0.4s), falling back to the arena boss only when no enemy is in range; no hittability filter.",
+   "hitClass": "Summon strike on the hit scale: 50% shot damage (T4 75%), min 1, with no crit, riders, Overload or chains.",
+   "bossClass": "The boss takes full damage (no BossClass scaling) with the Boss Mode DEF dial; mini-bosses unscaled.",
+   "killSource": "summon (boss via onLethalHit)",
+   "tell": "Stubby dark mast with gold 0xF6D36B trim, pulsing yellow 0xFFE066 top and a faint range ring, plus a yellow jagged arc per shock — placeholder, A9 replaces.",
+   "rulings": [
+    "Q-S3",
+    "CL-13",
+    "CL-109"
+   ],
+   "sensitivities": "Both 50% and 75% floor to 1 at base; coil targeting skips the LOS rule that the shared findPriorityTarget summon brain applies. A7b: CL-109 ruled — Carrier geometry is respected unless the mechanic has an explicit terrain exemption; invalid persistent placements and pathing get fixed."
+  },
+  "v21_sanguinarian": {
+   "family": [
+    "damage layer / shield"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Blood Barrier on each full-credit kill of max(1, floor(20% × finishing damage, overkill excluded)); the pool caps at 50% max HP, expires 4s after the last positive gain and absorbs before health (CL-5 order).",
+   "bossClass": "A boss kill grants 20% of the HP its killing blow actually removed.",
+   "killSource": "n/a",
+   "tell": "Bone-white 0xEDE4D3 strip with a dark-red 0x8A1426 edge under the HP bar plus '+N'; a fully absorbed hit flashes only the strip (CL-21).",
+   "rulings": [
+    "Q-B3",
+    "CL-19",
+    "CL-20",
+    "CL-21",
+    "CL-5"
+   ],
+   "sensitivities": "Barrier-only hits still reset Overcharge and fire reactive effects but can't consume a lethal rescue (CL-5); swarm near-immortality watch with Siphon."
+  },
+  "v21_shadow_edge": {
+   "family": [
+    "direct projectile"
+   ],
+   "geometry": "A travel projectile: the swept segment test stops it at the Carrier (its 28pt body can sink about 10pt before stopping, cosmetic).",
+   "targeting": "Every 7th qualifying primary volley (one that emitted a primary projectile) also fires one blade along that volley's aim.",
+   "hitClass": "Secondary Void attack, named effects only: 125% of legacy shot damage (one rounding threshold, identical on every body), up to 3 bodies, Void affinity; no crit, riders, Anomaly, fear, meters, counters or spawns.",
+   "bossClass": "Hits the arena boss with no Phase T2 DEF-dial penetration and no BossClass scaling.",
+   "killSource": "shadowEdge",
+   "tell": "A long near-black (0x0E0B1C) crescent with a light-indigo rim; placeholder until A9.",
+   "rulings": [
+    "Q-V3",
+    "CL-75",
+    "CL-76",
+    "A6-QB",
+    "CL-70",
+    "CL-88"
+   ],
+   "sensitivities": "Readability at volley 35 alongside a Blackhole (A6 watch 6); its range and speed ride Riftline and Long Shot; the counter runs from run start, so the first blade can arrive fewer than 7 volleys after the pick."
+  },
+  "v21_void_horror": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "Flight is route-aware, clamped inside the wall, never steps toward Spark or into solid geometry, and slides along the Carrier face.",
+   "targeting": "8% roll on each primary hit the target survives (pellets, icicle, Red Smile sweeps); never returned shots, Shadow Edge, echoes, fragments, chains or DoTs.",
+   "hitClass": "No damage: a fear state (own behaviour paused like a stun, runs away from Spark), then 2s of fear immunity from when it ends.",
+   "bossClass": "Normals 0.5s, mini-bosses 0.25s, arena bosses immune; no roll on snowmen, airborne, trapped, stunned or frozen bodies, and a stronger control cancels fear.",
+   "killSource": "n/a",
+   "tell": "A white '!' and a quiver on the enemy; placeholder until A9.",
+   "rulings": [
+    "Q-V5",
+    "CL-80",
+    "CL-85",
+    "A6-R1"
+   ],
+   "sensitivities": "Fear routing in constrained geometry (A6 watch 4); fears are rare with Phase T3 because few hits leave survivors."
+  },
+  "void_1": {
+   "family": [
+    "direct projectile"
+   ],
+   "geometry": "Ordinary direct projectile: swept segment test, stops at the Carrier.",
+   "targeting": "The gun's own primary pellets only (auto-aim, line-of-sight gated); never the Polar Vortex icicle, echoes, fragments, Shadow Edge or returned shots.",
+   "hitClass": "Primary shot: launches at 40% speed, full speed after 0.6s; damage 150% -> 100% of the legacy (truncated) shot damage read at the hit, the A6 fraction rounded by chance on one threshold per projectile.",
+   "bossClass": "No special treatment; the curve applies to boss hits too.",
+   "killSource": "primary",
+   "tell": "Light-indigo (0x6688FF) stretched trail that shortens as the shot accelerates; placeholder until A9.",
+   "rulings": [
+    "Q-V1",
+    "CL-14",
+    "CL-70",
+    "A6-Q2",
+    "A6-Q3",
+    "CL-93"
+   ],
+   "sensitivities": "Warp feel vs payoff and probabilistic rounding (A6 watch 1-2); silenced by Polar Vortex T4's icicle, and CL-93 (A7a) stops offering it once T4 is owned; A7b: CL-94 ruled extending the rounding to the older amplifier chain. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+  },
+  "void_2": {
+   "family": [
+    "well / rooted object",
+    "knockback / pull"
+   ],
+   "geometry": "Opens where the pellet died (max range or the Carrier); the hole centre is resolved out of solids and clamped inside the wall; its pull runs before the frame's geometry resolve.",
+   "targeting": "Spawned only by spent primary pellets (never on an enemy hit, never the icicle or secondaries); pulls live, hittable, non-snowman, non-airborne enemies inside it.",
+   "hitClass": "No damage on its own: a 30pt (flat), 1s hole pulling 70pt/s that counts as a black hole for the Void synergies and Dead Circuit (provides .voidWell).",
+   "bossClass": "Mini-bosses are pulled at BossClass.debuffScale (50%); arena bosses are never pulled.",
+   "killSource": "n/a (ground via Dead Circuit or Singularity)",
+   "tell": "Indigo (0x4466DD) ring over a deep-indigo (0x223366) fill with a light-indigo swirl, no dark core; placeholder until A9.",
+   "rulings": [
+    "CL-10",
+    "CL-77",
+    "CL-87",
+    "CL-82",
+    "A6-Q3",
+    "CL-93"
+   ],
+   "sensitivities": "Opens a hole on every spent pellet, so the 4-live cap churns (Gravity Wells evicted first) and Dead Circuit rarely reaches 3 matter (A6 watch 5); silenced by Polar Vortex T4 (CL-93). CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+  },
+  "void_3": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "n/a (rides hits that already landed).",
+   "targeting": "Primary hits on survivors (gun pellets, the Polar Vortex icicle, each Red Smile sweep target) plus returned shots; never echoes, fragments, chains, Shadow Edge, wells or DoTs.",
+   "hitClass": "Anomaly stacks (T3: 2 per hit) trigger at 4 and clear; T2 gives shot-class primary hits Void affinity (Braceguard bypass) plus the Boss Mode flat DEF-dial bypass, never Red Smile.",
+   "bossClass": "Final values applied once (CL-74): normals erased, mini-bosses 20% max HP, arena bosses 3% max HP (post HP dial) through plain takeDamage (DEF dial applies), then a 2s no-stack cooldown for mini-bosses and bosses.",
+   "killSource": "The triggering hit's own source (primary, capstone for the icicle, melee, returned).",
+   "tell": "Up to 4 indigo pips under the enemy (dimmed while cooling) and a second pip row on the boss status tell; placeholder until A9.",
+   "rulings": [
+    "Q-V2",
+    "CL-71",
+    "CL-72",
+    "CL-73",
+    "CL-74",
+    "CL-81",
+    "CL-85",
+    "CL-37",
+    "CL-88"
+   ],
+   "sensitivities": "At T1 a 1-4 HP normal usually dies before 4 stacks; T2 bites only on Braceguards and the DEF dial above 1.0; Anomaly + Singularity boss pressure is about 2%/s (A6 watch 3)."
+  },
+  "void_4": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "XP orbs only; health orbs stay non-magnetized.",
+   "hitClass": "Stat only: XP orbs start their pull from 2x the current effective pickup radius (stacks with Keen Eye and Magnetic Core); collection is unchanged.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "No dedicated tell; orbs simply start drifting sooner.",
+   "rulings": [
+    "CL-84",
+    "A6-R7"
+   ],
+   "sensitivities": ""
+  },
+  "syn:Bleed_3": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Amplifier: +25% vs bleeding targets — Int-truncated on gun and sweep direct hits, fraction-first on Burn and Bleed ticks of a bleeding target.",
+   "bossClass": "Applies to a bleeding arena boss too (CL-32), unscaled.",
+   "killSource": "n/a",
+   "tell": "None beyond the Bleed tell.",
+   "rulings": [
+    "CL-25",
+    "CL-32",
+    "CL-94"
+   ],
+   "sensitivities": "The direct arm adds nothing on 1-damage hits; A7b: CL-94 ruled unbiased rounding for it."
+  },
+  "syn:Bleed_5": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Direct-hit amplifier: ×2 below 25% HP on gun and sweep hits; one ×2 where Execution Protocol overlaps.",
+   "bossClass": "Applies to arena bosses and mini-bosses (the boss last quarter).",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [
+    "CL-26"
+   ],
+   "sensitivities": "Boss last-quarter melt watch; never applies to DoTs, chains or capstone damage."
+  },
+  "syn:Bleed_7": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: heal 1 HP on each full-credit kill of an already-bleeding enemy.",
+   "bossClass": "A bleeding boss kill heals once (CL-29).",
+   "killSource": "n/a",
+   "tell": "None dedicated.",
+   "rulings": [
+    "CL-29"
+   ],
+   "sensitivities": "Stacks with Siphon; the starting value is 1 (source comment says 'test 2')."
+  },
+  "syn:Chill_3": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: slowPotencyMultiplier ×2 (effectiveSlow capped at 80%) for Frost Touch, the Glacial Drift trail and Windchill slows; global slows are unaffected.",
+   "bossClass": "Applies to mini-bosses in full; arena bosses take none of these slows.",
+   "killSource": "n/a",
+   "tell": "None beyond the usual slow tint.",
+   "rulings": [],
+   "sensitivities": "Shares the name 'Frostbite' with Polar Vortex T5's vulnerability — a Lyra naming call (§B6 noticed list)."
+  },
+  "syn:Chill_5": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "Rides projectile and sweep hits, so the carrier is blocked by the Carrier.",
+   "targeting": "Any enemy struck by a player projectile or Red Smile sweep while isSlowed with personal + global slow ≥ 40% (30% with Chill ×7), counting the same hit's Frost Touch.",
+   "hitClass": "20% chance to execute outright (no fragments), ending the hit before its damage, Bleed, Whiteout and Chain Lightning.",
+   "bossClass": "Mini-bosses are executed outright; arena bosses are immune (the boss hit paths lack it).",
+   "killSource": "The striking hit's own source: primary, fragment, capstone (icicle) or melee.",
+   "tell": "None dedicated — the enemy simply dies.",
+   "rulings": [
+    "CL-3",
+    "CL-39",
+    "CL-99"
+   ],
+   "sensitivities": "A7b: CL-99 ruled mini-bosses take the 20% max-HP elite chunk instead of dying, and its copy waits for that; a pure global slow never qualifies (needs isSlowed)."
+  },
+  "syn:Chill_7": {
+   "family": [
+    "global / positionless"
+   ],
+   "geometry": "Positionless; no geometry interaction.",
+   "targeting": "Every enemy's movement, mini-bosses included; arena bosses don't read the global slow.",
+   "hitClass": "+25% global enemy slow (combined slow capped at 80%) and the Shatter threshold drops 40% → 30%.",
+   "bossClass": "Arena bosses are unaffected.",
+   "killSource": "n/a",
+   "tell": "None.",
+   "rulings": [
+    "Q-C5",
+    "CL-108"
+   ],
+   "sensitivities": "Lights Permafrost for every enemy (Q-C5); the global slow alone never marks an enemy isSlowed for Shatter or Iceburst. A7b: CL-108 ruled — arena bosses stay immune to the Ice Rink / Absolute Zero slow; runtime and copy to be reconciled."
+  },
+  "syn:Fire_3": {
+   "family": [
+    "DoT status"
+   ],
+   "geometry": "Enemy-to-enemy spread by distance only, so it passes the Carrier.",
+   "targeting": "Every non-burning enemy within a fixed 30pt (37.5pt with Fire ×5) of any burning enemy, checked each frame.",
+   "hitClass": "Applies Burn at 50% of Kindle's DPS as `.kindleSpread`: ignites or reactivates dormant stacks, never adds one.",
+   "bossClass": "Enemies only — bosses never catch or emit it; mini-bosses burn at dotScale 50%.",
+   "killSource": "statusTick",
+   "tell": "Orange Burn rim on the newly ignited enemy.",
+   "rulings": [
+    "Q-F2",
+    "CL-16",
+    "CL-17",
+    "CL-95"
+   ],
+   "sensitivities": "Tesla-only burning enemies also spread Kindle-strength Burn; spread to/from bosses sits on the A7 list; inert in add-less boss fights (CL-95)."
+  },
+  "syn:Fire_5": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: burnDPS ×2 (Kindle 0.5 → 1.0 per stack), Burn duration 2s → 4s, spread radius ×1.25.",
+   "bossClass": "Flows through Burn's dotScale 50% on boss-class.",
+   "killSource": "n/a",
+   "tell": "None beyond hotter Burn.",
+   "rulings": [
+    "CL-101"
+   ],
+   "sensitivities": "Copy omits the 2s → 4s duration (CL-101); multiplies whatever burnDPS exists at that moment (Kindle is always owned first)."
+  },
+  "syn:Fire_7": {
+   "family": [
+    "global / positionless"
+   ],
+   "geometry": "Positionless arena-wide tick; no geometry interaction.",
+   "targeting": "Every normal enemy in the arena, mini-bosses included; never the arena boss.",
+   "hitClass": "Direct damage tick of 0.5 DPS × Fire bucket paid in whole points — not a Burn status, so no Relay Burn, spread, pips, Crucible or Open Wounds.",
+   "bossClass": "Arena bosses excluded; mini-bosses take it unscaled.",
+   "killSource": "sweep (reward-only: the frame-top prune credits the deaths).",
+   "tell": "None (no status tell).",
+   "rulings": [
+    "Q-F1",
+    "CL-100"
+   ],
+   "sensitivities": "Copy 'Every enemy in the arena is burning' overpromises — CL-100 copy-only fix via the CL-101 wording table (A7a)."
+  },
+  "syn:Growth_3": {
+   "family": [
+    "ground zone"
+   ],
+   "geometry": "Zone membership as Terra.",
+   "targeting": "Intended: enemies on cultivated ground.",
+   "hitClass": "Writes terraSlow +0.15, which nothing reads: the ground slow stays at the constant 30% (dead since v2.0).",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "The synergy reveal modal only.",
+   "rulings": [
+    "CL-96"
+   ],
+   "sensitivities": "A7b: CL-96 ruled wiring the ground slow to playerStats.terraSlow (30% -> 45%); the copy already describes the ruled behaviour."
+  },
+  "syn:Growth_5": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "Zone membership as Terra.",
+   "targeting": "Self, on each ground-regen tick.",
+   "hitClass": "+2 HP on each 10s ground-regen tick (1 -> 3, or 5 with Rich Soil); the tick rate is unchanged.",
+   "bossClass": "n/a",
+   "killSource": "n/a",
+   "tell": "The HP bar's heal flash on each tick.",
+   "rulings": [
+    "CL-101"
+   ],
+   "sensitivities": "CL-101 copy: 'mends you faster' -> it heals more per tick."
+  },
+  "syn:Growth_7": {
+   "family": [
+    "ground zone"
+   ],
+   "geometry": "Zone membership as Terra.",
+   "targeting": "Every EnemyNode on cultivated ground, once per 1s ground tick.",
+   "hitClass": "Sets ground damage to max(current, 8) per tick, even without Thornsoil.",
+   "bossClass": "Mini-bosses take half (BossClass.scaledDamage); arena bosses never.",
+   "killSource": "ground",
+   "tell": "The synergy reveal modal; the zone is the in-world tell.",
+   "rulings": [
+    "CL-97"
+   ],
+   "sensitivities": "Taking Thornsoil afterwards lowers it to 6 until A7b's CL-97 lands."
+  },
+  "syn:Guard_3": {
+   "family": [
+    "aura (player-centred)",
+    "damage layer / shield"
+   ],
+   "geometry": "Aura: no occlusion test, so a hostile behind the Carrier still counts.",
+   "targeting": "Counts hittable, non-snowman enemies whose surface is within 150pt x DeviceScale, plus the arena boss as one, once per frame after DoTs.",
+   "hitClass": "Percentage DR of 9% per contributor, 10 max (90%), in the pipeline's ironhide slot inside the shared 90% ceiling.",
+   "bossClass": "An arena boss or a mini-boss counts as one contributor.",
+   "killSource": "n/a",
+   "tell": "A faint steel ring around Spark whose opacity tracks the current %, hidden under the kaiju; placeholder until A9.",
+   "rulings": [
+    "CL-52",
+    "CL-5"
+   ],
+   "sensitivities": "Ironhide + Aegis at the 90% ceiling (A5 watch 2); Unstable Core self-damage bypasses it."
+  },
+  "syn:Guard_5": {
+   "family": [
+    "on-hit rider"
+   ],
+   "geometry": "n/a (contact).",
+   "targeting": "Whatever just landed a valid damaging contact on Spark.",
+   "hitClass": "Retaliation of 1.50x the contact's raw pre-mitigation damage (before the Boss Mode ATK dial); never from invulnerable-ignored, Silver-Skin- or Phase-Skin-absorbed contacts.",
+   "bossClass": "Arena bosses take it once through BossClass.damageScale (50%) before truncation, with the DEF dial; mini-bosses and normals take the full 1.50x.",
+   "killSource": "retaliation",
+   "tell": "No dedicated visual; damage only.",
+   "rulings": [
+    "CL-53",
+    "CL-101"
+   ],
+   "sensitivities": "The Slag Titan reflects about 30 per touch at 5:00 (A5 watch 5); Harden/Aegis bounces create fresh contacts that re-trigger it; CL-101 copy: add that bosses take half."
+  },
+  "syn:Guard_7": {
+   "family": [
+    "damage layer / shield"
+   ],
+   "geometry": "n/a",
+   "targeting": "Self: the next lethal hit once Brace is spent; the shield blocks any EnemyProjectileNode (never area strikes).",
+   "hitClass": "Lethal rescue #2 opening 10s of full invulnerability on its own timer (self-damage included) plus a bonus multiplier of DEF / ATK snapped at the rescue; a persistent shield blocks one hostile projectile and rearms in 6s; collision radius x0.85.",
+   "bossClass": "Source-agnostic; boss projectile volleys are blockable, boss area strikes are not.",
+   "killSource": "n/a",
+   "tell": "Steel (0xB8B2A6) shield on Spark's RIGHT with a gold (0xFFD98A) rim when ready and dim while rearming; the window adds a gold rim, an 'UNBROKEN' HUD countdown and a '+N ATK' pop; placeholder until A9.",
+   "rulings": [
+    "Q-G1",
+    "CL-54",
+    "CL-55",
+    "CL-56",
+    "CL-57",
+    "CL-68",
+    "A5-Q1"
+   ],
+   "sensitivities": "Capstone-level power that must stay readable (A5 watch 6); Fortify at rescue time feeds the snapshot; the unbrokenCoreOwned field is dormant (A7b deletion list)."
+  },
+  "syn:Shock_3": {
+   "family": [
+    "passive stat"
+   ],
+   "geometry": "n/a",
+   "targeting": "n/a",
+   "hitClass": "Stat only: +1 Chain Lightning jump (T4 + Chain Current = 5 jumps, 6 enemies).",
+   "bossClass": "Chains never reach the arena boss, so no boss effect.",
+   "killSource": "n/a",
+   "tell": "One more bolt in the chain.",
+   "rulings": [
+    "Q-S1",
+    "CL-101"
+   ],
+   "sensitivities": "Copy drifted from the approved '1 additional enemy' wording (CL-101)."
+  },
+  "syn:Shock_5": {
+   "family": [
+    "aura (player-centred)"
+   ],
+   "geometry": "Player-centred radius, so it passes the Carrier (Ruling 1 names Tesla).",
+   "targeting": "Every enemy within a fixed 50pt of Spark (not DeviceScale-scaled), each frame.",
+   "hitClass": "Flat 0.3 DPS on the Burn channel (source `.other`): no Fire bonus, never multiplied by stacks, and the stronger of it and Kindle's Burn applies, not the sum.",
+   "bossClass": "Enemies only — never the arena boss; unscaled on mini-bosses (CL-17 halves only Kindle's share).",
+   "killSource": "statusTick",
+   "tell": "No field visual; affected enemies show the orange Burn rim.",
+   "rulings": [
+    "CL-17"
+   ],
+   "sensitivities": "Tesla-burned enemies count as burning, feeding Relay Burn and Spreading Flame and holding dormant Crucible stacks, but never extend Kindle's Burn (A4a timer fix)."
+  },
+  "syn:Shock_7": {
+   "family": [
+    "direct projectile"
+   ],
+   "geometry": "Its pellets are ordinary projectiles blocked by the Carrier, aimed by the LOS-checked auto-aim.",
+   "targeting": "Every 3rd gun volley (Red Smile swings never count) fires 3 pellets in the standard V fan along the auto-aim direction.",
+   "hitClass": "Primary pellets: every shot modifier and hit rider applies, and each hit can start a chain.",
+   "bossClass": "As any primary shot.",
+   "killSource": "primary",
+   "tell": "The spread volley's V fan only; no dedicated FX.",
+   "rulings": [
+    "CL-98"
+   ],
+   "sensitivities": "The fixed count of 3 replaces the normal count, so Scatter T3 fires fewer pellets on spread volleys; A7b: CL-98 ruled normal count + 2."
+  },
+  "syn:Void_3": {
+   "family": [
+    "well / rooted object",
+    "knockback / pull"
+   ],
+   "geometry": "Opens where the seeded lead shot stopped (enemy, boss, Carrier or max range), resolved out of solids and clamped inside the wall; absorption and impair are area tests with no line of sight.",
+   "targeting": "Every 5th qualifying primary volley seeds its lead projectile; every live player hole then absorbs hostile EnemyProjectileNodes inside it (8 each) and slows enemies inside by 40%.",
+   "hitClass": "Blackhole preset of 60pt x DeviceScale for 2.5s; absorbed shots are deleted (or held with x5) and count as Dead Circuit matter; 4 live holes max, oldest Gravity Well evicted first.",
+   "bossClass": "Arena bosses are never pulled or slowed and their projectile volleys are absorbable (area strikes are not); mini-bosses are pulled at 50% and slowed at full.",
+   "killSource": "n/a",
+   "tell": "Indigo ring with a near-black (0x05060F) core and a light-indigo swirl, with an absorb spark; placeholder until A9.",
+   "rulings": [
+    "CL-10",
+    "CL-76",
+    "CL-77",
+    "CL-87",
+    "Q-V3",
+    "Q-V4",
+    "A6-R6"
+   ],
+   "sensitivities": "Shot 35 = Blackhole + blade (A6 watch 6); four holes plus absorbed and returned shots is the perf watch (A6 watch 5); an empty Glacial volley doesn't count."
+  },
+  "syn:Void_5": {
+   "family": [
+    "well / rooted object",
+    "direct projectile"
+   ],
+   "geometry": "The trap is an area test; returned shots need an exact line of sight from the hole to their target and then travel as ordinary projectiles (Carrier-blocked).",
+   "targeting": "Traps live, hittable, non-snowman, non-airborne enemies entering any live hole; each absorbed shot returns 0.15s later at the nearest hittable enemy or boss the hole can see, or is discarded.",
+   "hitClass": "The trap is a hold (no chase, attack or fire) that never writes stun or freeze; a returned shot is a secondary with named effects only: 1x legacy shot damage, Void affinity, Phase T2 DEF-dial penetration and Anomaly, with no crit, riders, counters or re-absorption.",
+   "bossClass": "Normals are held until the hole ends, mini-bosses for half its remaining life (then that hole can't retake them), arena bosses never; returned shots can hit the boss.",
+   "killSource": "returned (returned shots)",
+   "tell": "An indigo tether ring on trapped enemies; returned shots are white with an indigo rim; placeholder until A9.",
+   "rulings": [
+    "CL-4",
+    "CL-79",
+    "CL-77",
+    "A6-Q5",
+    "A6-Q1",
+    "A6-R2",
+    "A6-R5"
+   ],
+   "sensitivities": "Repulse can't displace trapped bodies (A6-Q1), but other shoves can detach and release them; an ending or evicted hole returns its held shots at once or discards them."
+  },
+  "syn:Void_7": {
+   "family": [
+    "DoT status",
+    "well / rooted object"
+   ],
+   "geometry": "Area test with no line of sight; a normal's terminal hold may outlive its hole by up to 2s.",
+   "targeting": "Trapped enemies, and the arena boss while its body overlaps any live hole.",
+   "hitClass": "Decomposition (fraction-first, skips the flat DEF dial): normals 50% max HP/s in a terminal hold of up to 2s, mini-bosses 8%/s capped at 20% per trap, the arena boss 1% max HP/s that never stacks across holes.",
+   "bossClass": "Final target-class values with no further BossClass scaling (CL-74); boss decomposition pauses while the boss is intangible.",
+   "killSource": "ground",
+   "tell": "No separate decompose visual; the trap tether is the tell.",
+   "rulings": [
+    "CL-9",
+    "CL-74",
+    "A6-R2",
+    "A6-R4"
+   ],
+   "sensitivities": "Anomaly + Singularity boss pressure (A6 watch 3); Riftline pierce rarely lets a Blackhole overlap the boss (0 overlaps in the A6 proofs)."
+  }
+ },
+ "crosscutting": [
+  {
+   "title": "Taxonomy",
+   "body": [
+    "Seven affinity trees (Fire, Chill, Shock, Bleed, Guard, Void, Growth) plus **Neutral**, the palette's constant (not a tree), plus one **secret** card outside the taxonomy (Panda).",
+    "Each tree has exactly one **signature** (its thesis card: the mandatory first pick, which grants the tree's `…Unlocked` capability) and exactly one designated **capstone** (a 5-tier ladder). Ordinary cards may have up to 4 tiers (canon amended Sep 15: T4 allowed, one capstone per tree).",
+    "Tier percentages are totals; an attack-speed % is a firing-rate increase. Synergies (×3/×5/×7) count DISTINCT cards per tree on first pick only; levelling a card never feeds a synergy. A bridge (dual-tag) card counts toward both trees."
+   ]
+  },
+  {
+   "title": "Drafting and eligibility",
+   "body": [
+    "**One offer rule for every draw** (CL-89): the level-up spread, reroll, the Boss Mode random opener and the +1 Card bonus all use `UpgradeManager.isOfferable`. A card is offered only if it isn't maxed; its `requires` are held; its next tier's `tierRequires` are held; nothing the run holds is in its `blockedBy`; it isn't secret; its colour (and a bridge's second colour) is in the run's palette; and it isn't a capstone while another capstone is in progress.",
+    "**Signature opening:** while the run holds no signature, spreads offer only signatures (one per active tree); a reroll prefers unseen signatures. **Gateway pity:** an unowned active signature unseen for 3 level-ups takes the front slot (one claimant per draw, longest-waited).",
+    "**Capstone focus and finish:** an in-progress capstone locks every other capstone out and is guaranteed a slot every other level; the +1 Card never offers it.",
+    "**Palette:** 5 colours + Neutral per run, one banned colour honoured, at least one colour always left out; Growth unlocks at Arena 5.",
+    "**Enabler edges (A7a):** Gouge → `critSource` → Hemorrhage (CL-91); Polar Vortex → `polarVortex` → Frost Touch T3 (CL-92); Polar Vortex T4 and the five pellet cards (Warp Shot, Gravity Well, Mirror Edge, Fracture Shot, Riftline) are mutually exclusive, both ways (CL-93, symmetric): T4 grants `glacialCondensation`, which blocks the pellet cards, and each pellet card grants `pelletEffect`, which closes T4; Glacial Drift → Glacial Spikes; Whiteout → Ice Rink (Glacial Drift T5); Gravity Well / Null Bloom → `voidWell` → Dead Circuit; Red Smile needs both the Bleed and Void signatures.",
+    "**Proof:** `tools/catalog-harness` walks the real draw — every draftable card offered and maxed from a fresh run on a full save and a new save — and checks the offer rule across both draws with an independent oracle.",
+    "**Acquisition-time eligibility (A7a corrective F1/F2):** a pick is re-checked when it is TAKEN (`UpgradeManager.acquire` / `isSelectable`), and after the Extra Pick's first card the rest of the table is revalidated — stale cards drop out, nothing replaces them. A card taken during a level-up is never offered again at another tier in that level-up (spread, reroll, +1 Card or a scheduled seat). A capstone whose next tier is closed is stalled: no guarantee, no lockout."
+   ]
+  },
+  {
+   "title": "Damage, hits and kills",
+   "body": [
+    "**Player damage pipeline** (CL-5, closure table §D): percentage reductions multiply under a 90% combined ceiling (the kaiju included); flat DEF applies after; lethal rescues go Brace first, then Unbroken Core, never both on one event.",
+    "**Gun damage is a whole number**, usually 1: a shot deals `max(1, Int(damageMultiplier))`. A6's new fractions use unbiased probabilistic rounding (CL-70). CL-94 (ruled, **A7b**) extends that rounding to the direct-hit amplifier chain.",
+    "**Hit classes:** a *primary shot* (the gun's pellet, or the Polar Vortex icicle that replaces it) triggers on-hit riders and advances volley counters; a *primary hit* (anything that 'hits' as a primary, including Red Smile's sweeps) stacks Anomaly, rolls Void Horror and rolls Bloodthirsty but never advances shot counters (CL-39/72/85); a *secondary* (echoes, fragments, shards, returned shots, Shadow Edge) carries named effects only (CL-4/75); a *DoT tick* (Burn, Bleed) takes the 50% boss-class scale and ignores the Boss Mode DEF dial (CL-17/18).",
+    "**Kill credit** goes through one chokepoint (`KillSource`); boss kills go through `onLethalHit`. Some sources (`.burst`, `.sweep`) are reward-only and feed no on-kill effects (Unstable Core, Everglow, Static Crown, Chain Reaction, False Opening) — a closeout-audit item."
+   ]
+  },
+  {
+   "title": "Boss-class treatment",
+   "body": [
+    "'Elite' means **mini-boss** in code. `GameConfig.BossClass` carries 50% levers for capstone damage (`damageScale`), capstone debuffs (`debuffScale`) and DoTs (`dotScale`) on mini-bosses and arena bosses.",
+    "Target-class values that are already boss-specific apply **once**, never through a second lever: Anomaly (mini-boss 20% max HP, boss 3%), Overload stuns (0.25s / 0.5s), Glacial Spikes, Singularity (1%/s).",
+    "Arena bosses are stun-immune in v2.1 and are never trapped, feared or turned into snowmen. Wave spawns pause while a boss lives, and the Boss Mode gauntlet has no adds, so enemy-only effects go quiet there (CL-95 → A7b)."
+   ]
+  },
+  {
+   "title": "Geometry (Arena 6 reconciliation, §3 and Rulings 5–6)",
+   "body": [
+    "Ordinary direct projectiles (player and enemy) are **blocked** by the Carrier; auto-aim excludes targets without line of sight. Red Smile's sweep needs an exact clear segment per target.",
+    "**Pass:** player-centred auras, global/positionless effects, falling and sky-strike effects, Void beams, and supernatural tethers (the Skybeam lasso, Iron Maiden T5).",
+    "**Never inside solids:** wells, flowers, rooted objects and ground zones can't originate inside; knockback, pulls and teleports resolve out of the footprint; Panda may cross geometry as spectacle but never leaves persistent state inside it.",
+    "Gaps found while writing this packet are ruled for A7b (CL-109): Carrier geometry is respected unless a mechanic has an explicit terrain exemption. Known cases: chain and arc hops, coil shocks and point bursts with no Carrier test; Skybeam T3 homing without the LOS check; Wildbloom flowers and the Tree lion ending inside the Carrier; Vine Wall's one-frame intrusion; Rich Soil skipping the garden radius cap."
+   ]
+  },
+  {
+   "title": "Colour and feel language",
+   "body": [
+    "**Purple = danger** (ranged enemies, enemy projectiles). Player-owned Void effects in the world are **indigo** (CL-86). Magnet orbs are blue; health orbs are never magnetized.",
+    "Every new mechanic ships with a readable procedural tell; art polish follows in A9 (with Lyra)."
+   ]
+  }
+ ]
+}

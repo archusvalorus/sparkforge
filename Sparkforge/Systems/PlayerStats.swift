@@ -106,7 +106,7 @@ final class PlayerStats {
     // MARK: - Erasure (Void capstone, v1.9). Per-run; reset each run.
     var erasureTier: Int = 0                  // 0 = inactive; 1..5
     var erasureActive = false                 // T1: hits stack Unstable
-    var erasureVoidTouched = false            // T2: armor bypass + 2-stack trigger
+    var erasureVoidTouched = false            // T2: Braceguard-shield bypass (the shorter trigger cooldown is erasureTriggerCD)
     var erasureRiftCannon = false             // T3: rift cannon every Nth activation
     var erasureEcho = false                   // T4: projectiles echo from elsewhere
     var erasureEventHorizon = false           // T5: the run-ending void
@@ -413,7 +413,7 @@ final class PlayerStats {
     // tunes them. All default to inert (0 / false).
 
     // Bleed
-    /// Open Wounds: bleeding enemies take this much MORE damage (0.15 = +15%)
+    /// Open Wounds: bleeding enemies take this much MORE damage (GameConfig.Bleed.openWoundsBonus, 0.25 = +25%)
     var bleedingEnemyDamageTaken: CGFloat = 0.0
     /// Red Harvest: HP restored when a BLEEDING enemy dies
     var bleedKillHeal: Int = 0
@@ -744,7 +744,6 @@ final class PlayerStats {
         return true
     }
 
-    /// Null Bloom: chance on kill to leave a slowing zone
     // MARK: - v2.0 Phase C: Growth
     /// > 0 ⇒ Terra is owned and cultivated ground exists.
     var terraZoneRadius: CGFloat = 0.0
@@ -769,7 +768,7 @@ final class PlayerStats {
     /// on cultivated ground, 0 otherwise. Folded into effectiveMoveSpeed.
     var treeGroundMoveBonus: CGFloat = 0
     /// Rich Soil (Terra+, C1.7): extra HP added to each cultivated-ground regen
-    /// tick. Also boosts the Growth-5 synergy.
+    /// tick. The Growth ×5 synergy (Verdant Rise) adds to the same field.
     var growthRegenBonusHP: Int = 0
 
     /// v2.0 (C2) — Panda. 0..5.
@@ -787,7 +786,7 @@ final class PlayerStats {
     /// Null Bloom (v2.1 A6): the chance a full-credit kill leaves a small black hole.
     var nullBloomChance: CGFloat = 0.0
 
-    /// Hoarfrost: flat regen — 1 HP per interval (0 = off)
+    /// Hoarfrost: flat regen — GameConfig.Chill.hoarfrostHeal HP per interval (0 = off)
     var hoarfrostInterval: TimeInterval = 0.0
     private var hoarfrostTimer: TimeInterval = 0.0
 
@@ -800,7 +799,6 @@ final class PlayerStats {
     var cauterizeHeal: Int = GameConfig.Fire.cauterizeHeal
     private var cauterizeTimer: TimeInterval = 0.0
 
-    /// Whiteout: slowed enemies release a slow burst on death
 
     // MARK: - v1.8 Mirrorwound Cards (Unit 14)
 

@@ -123,11 +123,15 @@ final class CodexManager {
     /// be validated across app restarts before any Codex page exists (Units 6–9).
     func debugSummary() -> String {
         let syn = (defaults.stringArray(forKey: Keys.synergiesSeen) ?? []).sorted()
-        let cards = (defaults.stringArray(forKey: Keys.cardsOffered) ?? []).count
+        // v2.1 A7a (CL-102): count against the LIVE pool. The stored set keeps
+        // retired ids forever (never pruned), so its raw size overstated this.
+        let tally = UpgradeManager.codexTally(
+            offered: defaults.stringArray(forKey: Keys.cardsOffered) ?? [],
+            liveIDs: UpgradeManager.catalogIDs)
         let enc = encounteredCache.sorted()
         return """
         [Codex] synergies seen (\(syn.count)): \(syn)
-        [Codex] cards offered: \(cards)
+        [Codex] cards discovered \(tally.discovered) / \(tally.total) live · retired \(tally.retired.count) \(tally.retired) · unknown \(tally.unknown.count) \(tally.unknown)
         [Codex] bestiary encountered (\(enc.count)): \(enc)
         [Codex] bestiary kills: \(killsCache)
         """

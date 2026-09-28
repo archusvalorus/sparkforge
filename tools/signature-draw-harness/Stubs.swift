@@ -6,30 +6,15 @@
 import CoreGraphics
 import Foundation
 
-// v2.1 A5: the REAL `GameConfig.Guard` block is extracted from the app source
-// by extract-guard-config.sh (every run.sh), so Guard numbers are never mirrored
-// here. It reads DeviceScale for two radii — the phone value is 1.
+// The REAL `GameConfig.Guard`, `.VoidTree`, `.Drafting` and `.Panda` blocks are
+// extracted from the app source by extract-config.sh (every run.sh), so those
+// numbers are never mirrored here (v2.1 A5; A6; A7a CL-90). They read
+// DeviceScale for a few radii — the phone value is 1.
 enum DeviceScale {
     static var gameplay: CGFloat { 1 }
 }
 
 enum GameConfig {
-    enum Drafting {
-        static let gatewayPityLevels: Int = 3
-        static let activeColorFamilies: Int = 5
-        static func unlockArena(for tag: UpgradeManager.Tag) -> Int {
-            switch tag {
-            case .growth: return 5
-            case .fire, .shock, .bleed, .guardT, .voidT, .chill, .neutral: return 1
-            }
-        }
-    }
-    enum Panda {
-        static let cardID = "v20_panda"
-        static let eligibilityChance: CGFloat = 0.0927
-        static let firstOfferWindow: ClosedRange<Int> = 2...5
-        static let debugAlwaysEligible: Bool = false
-    }
     enum Player {
         static let baseMaxHP: Int = 100
         static let baseAttack: Int = 10
@@ -200,10 +185,14 @@ final class SkinManager {
     func unlockEarned(_ id: String) {}
 }
 
+// CODEX-STUB-BEGIN — tools/catalog-harness/run.sh strips this block and
+// compiles the REAL CodexManager instead (A7a corrective F3.D).
 final class CodexManager {
     static let shared = CodexManager()
     func recordSynergySeen(tag: UpgradeManager.Tag, tier: Int) {}
+    func recordCardOffered(_ id: String) {}
 }
+// CODEX-STUB-END
 
 enum ReviewMode {
     static var isActive = false

@@ -49,6 +49,7 @@ section h2 { color:var(--fc); letter-spacing:.1em; font-size:17px;
 .gate { font-size:11px; color:#6FBF73; }
 .gate.req { color:#C9A15C; }
 .gate.link { color:#F6D36B; }
+.gate.block { color:#E07A7A; }
 .card.secret { border-style:dashed; }
 .card.prop { background:var(--panel2); border-style:dashed; }
 footer.page { color:var(--mut); font-size:11px; margin-top:44px; border-top:1px solid var(--line); padding-top:14px; }

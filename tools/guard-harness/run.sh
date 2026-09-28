@@ -29,7 +29,7 @@ cp "$ROOT/Sparkforge/Systems/GuardState.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
    "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
        "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/CombatPresence.swift" "$BUILD/KillSource.swift" \
        "$BUILD/GameTimer.swift" "$BUILD/PlayerDamagePipeline.swift" \

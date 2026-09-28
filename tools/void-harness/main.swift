@@ -403,7 +403,7 @@ do {
 do {
     let um = UpgradeManager()
     let voidCards = um.allCards.filter { $0.tag == .voidT }
-    check("CA1 pool 80 (79 − Mass Tax + Void Horror + Shadow Edge); Void 13 by primary tag (CL-83)",
+    check("CA1 pool 80 (A5's pool of 79 incl. Panda − Mass Tax + Void Horror + Shadow Edge; 79 draftable + Panda); Void 13 by primary tag (CL-83)",
           um.allCards.count == 80 && voidCards.count == 13, "pool=\(um.allCards.count) void=\(voidCards.count)")
     check("CA2 Mass Tax is retired — its id is gone",
           !um.allCards.contains { $0.id == "v16_mass_tax" || $0.name == "Mass Tax" })
@@ -420,7 +420,7 @@ do {
           nonSig.filter { !$0.requires.contains(.voidUnlocked) }.map(\.id).joined(separator: ","))
     check("CA6 Dead Circuit also needs a black-hole card; Gravity Well and Null Bloom provide it",
           card("v17_dead_circuit", um).requires == [.voidUnlocked, .voidWell]
-            && card("void_2", um).provides == [.voidWell] && card("v16_null_bloom", um).provides == [.voidWell]
+            && card("void_2", um).provides == [.voidWell, .pelletEffect] && card("v16_null_bloom", um).provides == [.voidWell]   // + pelletEffect: A7a CL-93 symmetric
             && um.allCards.filter { $0.provides.contains(.voidWell) }.count == 2)
     check("CA7 Silver Skin stays Guard-only (CL-50); Red Smile keeps its dual gate",
           card("v18_silver_skin", um).requires == [.guardUnlocked]
