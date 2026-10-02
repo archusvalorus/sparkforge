@@ -16,6 +16,8 @@
 //   BP   MusicManager's transport table (BGMPolicy): continuous across contexts,
 //        resume after the toggle / an interruption / the foreground, a new draw
 //        only when a track ends, the retry after a refused start (review m3);
+//        BP7 a hold (background, pause menu) pauses in place and keeps the
+//        song silent until it lifts (Brandon's release playtest, Oct 1);
 //   BA1  the bundle holds exactly the 20 mapped generic bgm_*.mp3 files, byte
 //        for byte.
 // Each validator prints PASS/FAIL; exit 1 on any FAIL.
@@ -164,16 +166,16 @@ do {
 // BP — MusicManager's transport table (BGMPolicy), every event × state.
 do {
     typealias E = BGMPolicy.Event
-    let all: [E] = [.contextChanged, .toggledOn, .toggledOff, .interruptionEnded, .becameActive, .trackFinished, .trackBroken]
-    func a(_ e: E, enabled: Bool = true, deferring: Bool = false, playing: Bool) -> BGMPolicy.Action {
-        BGMPolicy.action(for: e, enabled: enabled, deferring: deferring, hasPlayer: playing)
+    let all: [E] = [.contextChanged, .toggledOn, .toggledOff, .held, .released, .interruptionEnded, .becameActive, .trackFinished, .trackBroken]
+    func a(_ e: E, enabled: Bool = true, deferring: Bool = false, held: Bool = false, playing: Bool) -> BGMPolicy.Action {
+        BGMPolicy.action(for: e, enabled: enabled, deferring: deferring, held: held, hasPlayer: playing)
     }
     check("BP1 continuous: a context change never touches a song in progress, and only starts the deck when nothing has started",
           a(.contextChanged, playing: true) == .none && a(.contextChanged, playing: false) == .startDeck)
-    check("BP2 resume, never a new draw: BGM ON, an ended interruption and returning to the foreground all resume the current song",
-          [E.toggledOn, .interruptionEnded, .becameActive].allSatisfy { a($0, playing: true) == .resume })
+    check("BP2 resume, never a new draw: BGM ON, an ended interruption, returning to the foreground and the last hold lifting all resume the current song",
+          [E.toggledOn, .interruptionEnded, .becameActive, .released].allSatisfy { a($0, playing: true) == .resume })
     check("BP3 with nothing started (e.g. a refused start), those same events start the deck — the retry",
-          [E.toggledOn, .interruptionEnded, .becameActive].allSatisfy { a($0, playing: false) == .startDeck })
+          [E.toggledOn, .interruptionEnded, .becameActive, .released].allSatisfy { a($0, playing: false) == .startDeck })
     check("BP4 a new track is drawn only when one ends (or breaks)",
           a(.trackFinished, playing: false) == .playNext && a(.trackBroken, playing: false) == .playNext
             && all.filter { a($0, playing: true) == .playNext } == [.trackFinished, .trackBroken])
@@ -181,8 +183,18 @@ do {
           a(.toggledOff, playing: true) == .pause && a(.toggledOff, enabled: false, playing: true) == .pause
             && a(.toggledOff, deferring: true, playing: true) == .pause && a(.toggledOff, playing: false) == .none)
     check("BP6 disabled or deferring to the player's own audio: nothing else ever plays",
-          all.filter { $0 != .toggledOff }.allSatisfy { e in
+          all.filter { $0 != .toggledOff && $0 != .held }.allSatisfy { e in
               [true, false].allSatisfy { p in a(e, enabled: false, playing: p) == .none && a(e, deferring: true, playing: p) == .none } })
+    // BP7 — the playtest fix: the song played on in the background and under
+    // the pause menu. A hold pauses in place (like BGM OFF, whatever else
+    // holds); while held, no event resumes, starts or draws — not an ended
+    // interruption, not the foreground, not a finished track.
+    check("BP7 a hold pauses the song in place, and while held nothing resumes, starts or draws",
+          a(.held, playing: true) == .pause && a(.held, playing: false) == .none
+            && a(.held, enabled: false, playing: true) == .pause && a(.held, deferring: true, playing: true) == .pause
+            && all.filter { $0 != .toggledOff && $0 != .held }.allSatisfy { e in
+                [true, false].allSatisfy { p in a(e, held: true, playing: p) == .none } }
+            && a(.toggledOff, held: true, playing: true) == .pause && a(.held, held: true, playing: true) == .pause)
 }
 
 // BA1 — the bundle.

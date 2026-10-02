@@ -12,6 +12,9 @@ Every bgm_*.mp3 / .m4a / .wav in this folder joins ONE shuffled deck
     drawn only when one finishes.
   * Resume: an OS interruption, backgrounding and BGM OFF -> ON all resume
     the same song where it was.
+  * Holds: the song pauses in place while the app is in the background and
+    while the run's pause menu is up, and comes back when the hold lifts.
+    Nothing plays, resumes or draws under a hold.
   * A track that can't be opened is dropped for that session and logged
     (DEBUG); the next track is drawn. A start the system refuses keeps the
     track for the next try, unless the same track is refused twice in a row

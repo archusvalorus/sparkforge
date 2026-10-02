@@ -2152,10 +2152,10 @@ do {
     let u4Music = music.contains("private var deck = BGMDeck<URL>([])") && !music.contains("pools") && !music.contains("lastTrack")
         && flatBody(musicRaw, "func setContext(_ new: Context)") == "{ context = new perform(.contextChanged, fadeIn: true) }"
         && flatBody(musicRaw, "func refresh()") == "{ guard hasTracks else { return } perform(SettingsManager.shared.bgmEnabled ? .toggledOn : .toggledOff, fadeIn: true) }"
-        && flatBody(musicRaw, "@objc private func handleDidBecomeActive(") == "{ perform(.becameActive, fadeIn: false) }"
+        && flatBody(musicRaw, "@objc private func handleDidBecomeActive(") == "{ holds.remove(.background) perform(.becameActive, fadeIn: true) }"
         && flatBody(musicRaw, "@objc private func handleInterruption(").hasSuffix("perform(.interruptionEnded, fadeIn: false) }")
         && flatBody(musicRaw, "func audioPlayerDidFinishPlaying(").hasSuffix("player = nil perform(.trackFinished, fadeIn: false) }")
-        && music.contains("switch BGMPolicy.action(for: event, enabled: SettingsManager.shared.bgmEnabled, deferring: deferringToUserAudio, hasPlayer: player != nil) {")
+        && music.contains("switch BGMPolicy.action(for: event, enabled: SettingsManager.shared.bgmEnabled, deferring: deferringToUserAudio, held: !holds.isEmpty, hasPlayer: player != nil) {")
         && music.contains("case .startDeck: playNext(fadeIn: true) case .resume: if let current = player { resume(current, fadeIn: fadeIn) }")
         && music.contains("case .playNext: playNext(fadeIn: false)")
         && music.components(separatedBy: "playNext(fadeIn: true)").count == 2 && music.components(separatedBy: "playNext(fadeIn: false)").count == 2
@@ -2165,7 +2165,9 @@ do {
         && music.contains("deck.started(url) everStarted = true")
         // (re-review pins) BGM OFF fades then pauses; only an ENDED interruption
         // resumes; a decode error drops the track and routes as `.trackBroken`.
-        && music.contains("case .pause: player?.setVolume(0, fadeDuration: TimeInterval(GameConfig.BGM.crossfade)) DispatchQueue.main.asyncAfter(deadline: .now() + Double(GameConfig.BGM.crossfade)) { [weak self] in if !SettingsManager.shared.bgmEnabled { self?.player?.pause() } }")
+        // (Oct 1 playtest fix, WR24) the delayed pause asks shouldBeSilent (OFF or
+        // held), and a background hold stops the song at once.
+        && music.contains("case .pause: player?.setVolume(0, fadeDuration: TimeInterval(GameConfig.BGM.crossfade)) if holds.contains(.background) { player?.pause() } else { DispatchQueue.main.asyncAfter(deadline: .now() + Double(GameConfig.BGM.crossfade)) { [weak self] in if self?.shouldBeSilent == true { self?.player?.pause() } } }")
         && music.contains("AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return } perform(.interruptionEnded, fadeIn: false) }")
         && flatBody(musicRaw, "func audioPlayerDecodeErrorDidOccur(").hasPrefix("{ guard p === player, let url = p.url else { return } deck.failed(url) player = nil")
         && flatBody(musicRaw, "func audioPlayerDecodeErrorDidOccur(").hasSuffix("perform(.trackBroken, fadeIn: false) }")
@@ -2184,6 +2186,26 @@ do {
     check("WR23 v2.1 geometry Unit 4: the Splitworks is arena 6 (shell seam gone); the Marchwarden is in Boss Mode, the bestiary and Marchworn's unlock; Arena 6's cues fire on their tells; MusicManager plays ONE continuous deck that resumes and drops a failed track",
           u4Arena && u4Boss && u4Portraits && u4Skin && u4Cues && u4Music && u4Review,
           "arena \(u4Arena) boss \(u4Boss) portraits \(u4Portraits) skin \(u4Skin) cues \(u4Cues) music \(u4Music) review \(u4Review)")
+
+    // WR24 — Brandon's release playtest (Oct 1): the song played on under the
+    // pause menu and with the app minimized. MusicManager now keeps HOLDS
+    // (background, pause menu); a hold pauses the song in place and BGMPolicy
+    // (bgm BP7) refuses every resume, start and draw while one stands. The
+    // background hold comes from the app's own notification; the pause-menu
+    // hold is set by pauseGame and lifted by resumeGame and by quitting to the
+    // title (the scene's only exit, so a hold can't outlive its run).
+    let holdMusic = music.contains("private enum Hold { case background, pauseMenu } private var holds = Set<Hold>()")
+        && music.contains("private var shouldBeSilent: Bool { !SettingsManager.shared.bgmEnabled || !holds.isEmpty }")
+        && musicRaw.contains("name: UIApplication.didEnterBackgroundNotification, object: nil)")
+        && flatBody(musicRaw, "@objc private func handleDidEnterBackground(") == "{ holds.insert(.background) perform(.held, fadeIn: false) }"
+        && flatBody(musicRaw, "func setGamePaused(_ paused: Bool)") == "{ if paused { guard holds.insert(.pauseMenu).inserted else { return } perform(.held, fadeIn: false) } else { guard holds.remove(.pauseMenu) != nil else { return } perform(.released, fadeIn: true) } }"
+        && n(music, "holds.insert(") == 2 && n(music, "holds.remove(") == 2
+    let holdScene = flatBody(sceneS8, "private func pauseGame()").hasSuffix("pauseMenu.show(upgradeManager: upgradeManager) MusicManager.shared.setGamePaused(true) }")
+        && flatBody(sceneS8, "private func resumeGame()").hasSuffix("pauseMenu.hide() MusicManager.shared.setGamePaused(false) }")
+        && flatBody(sceneS8, "private func returnToTitle()").contains("BossModeDials.shared.reset() MusicManager.shared.setGamePaused(false) let titleScene")
+        && n(sceneFlat, "MusicManager.shared.setGamePaused(") == 3 && n(sceneFlat, "view.presentScene(") == 1
+    check("WR24 v2.1 BGM holds (release playtest): the song pauses in place in the background and under the pause menu, and resumes when the hold lifts (Resume, quit to title, back to the foreground)",
+          holdMusic && holdScene, "music \(holdMusic) scene \(holdScene)")
 }
 
 // MARK: - MD · the card-detail modal fits the smallest iPhone (v2.1 A7b, S0b)

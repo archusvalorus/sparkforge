@@ -11,6 +11,9 @@
 //     drawn only when one finishes;
 //   • RESUME: an OS interruption, backgrounding, and BGM OFF → ON all resume
 //     the current track where it was (no new draw);
+//   • HOLDS: the song pauses in place while the app is in the background and
+//     while the run's pause menu is up, and resumes when the last hold lifts
+//     (Brandon's release playtest, Oct 1: it had played on through both);
 //   • a track that can't be opened is dropped for the session and logged — no
 //     spin, no double advance; a start the session refuses is retried on the
 //     next transport event. The rules are one table, BGMPolicy.
@@ -46,7 +49,15 @@ final class MusicManager: NSObject, AVAudioPlayerDelegate {
     /// a first-start rule).
     private var everStarted = false
 
+    /// What's holding the song paused right now; the song plays only when
+    /// this is empty.
+    private enum Hold { case background, pauseMenu }
+    private var holds = Set<Hold>()
+
     var hasTracks: Bool { !deck.isEmpty }
+
+    /// BGM is off, or something holds the song paused.
+    private var shouldBeSilent: Bool { !SettingsManager.shared.bgmEnabled || !holds.isEmpty }
 
     private override init() {
         super.init()
@@ -57,6 +68,9 @@ final class MusicManager: NSObject, AVAudioPlayerDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleDidBecomeActive(_:)),
             name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleDidEnterBackground(_:)),
+            name: UIApplication.didEnterBackgroundNotification, object: nil)
     }
 
     /// Every bundled bgm_* audio file, wherever Xcode flattened it — one deck.
@@ -91,11 +105,24 @@ final class MusicManager: NSObject, AVAudioPlayerDelegate {
         perform(SettingsManager.shared.bgmEnabled ? .toggledOn : .toggledOff, fadeIn: true)
     }
 
+    /// The run's pause menu opened or closed. Open fades the song out and
+    /// keeps its place; closed (Resume, or quitting to the title) fades the
+    /// same song back in, unless something else still holds it.
+    func setGamePaused(_ paused: Bool) {
+        if paused {
+            guard holds.insert(.pauseMenu).inserted else { return }
+            perform(.held, fadeIn: false)
+        } else {
+            guard holds.remove(.pauseMenu) != nil else { return }
+            perform(.released, fadeIn: true)
+        }
+    }
+
     // MARK: - Transport (the rules live in BGMPolicy, executed in tools/bgm-harness)
 
     private func perform(_ event: BGMPolicy.Event, fadeIn: Bool) {
         switch BGMPolicy.action(for: event, enabled: SettingsManager.shared.bgmEnabled,
-                                deferring: deferringToUserAudio, hasPlayer: player != nil) {
+                                deferring: deferringToUserAudio, held: !holds.isEmpty, hasPlayer: player != nil) {
         case .none:
             break
         case .startDeck:
@@ -104,9 +131,13 @@ final class MusicManager: NSObject, AVAudioPlayerDelegate {
             if let current = player { resume(current, fadeIn: fadeIn) }
         case .pause:
             player?.setVolume(0, fadeDuration: TimeInterval(GameConfig.BGM.crossfade))
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(GameConfig.BGM.crossfade)) {
-                [weak self] in
-                if !SettingsManager.shared.bgmEnabled { self?.player?.pause() }
+            if holds.contains(.background) {
+                player?.pause()   // the app is leaving: stop now (a fade would never finish)
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(GameConfig.BGM.crossfade)) {
+                    [weak self] in
+                    if self?.shouldBeSilent == true { self?.player?.pause() }
+                }
             }
         case .playNext:
             playNext(fadeIn: false)   // a straight segue to the deck's next track
@@ -197,9 +228,18 @@ final class MusicManager: NSObject, AVAudioPlayerDelegate {
         perform(.interruptionEnded, fadeIn: false)
     }
 
-    /// Back from the background (or any deactivation): the same song resumes —
-    /// or, if a start was refused earlier, the deck starts now.
+    /// Back from the background (or any deactivation): the same song fades
+    /// back in (unless the pause menu still holds it) — or, if a start was
+    /// refused earlier, the deck starts now.
     @objc private func handleDidBecomeActive(_ note: Notification) {
-        perform(.becameActive, fadeIn: false)
+        holds.remove(.background)
+        perform(.becameActive, fadeIn: true)
+    }
+
+    /// Minimized or locked: the song pauses in place, and nothing (not even an
+    /// ended interruption) restarts it until the app is active again.
+    @objc private func handleDidEnterBackground(_ note: Notification) {
+        holds.insert(.background)
+        perform(.held, fadeIn: false)
     }
 }

@@ -91,9 +91,11 @@ struct BGMDeck<Track: Hashable> {
 /// v2.1 geometry Unit 4 — MusicManager's transport rules as one table
 /// (Brandon's settled plan: continuous across contexts, resume after
 /// interruptions, the toggle and the foreground; a new draw only when a track
-/// ends — or when nothing has started yet).
+/// ends — or when nothing has started yet). A HOLD (the app in the
+/// background, the run's pause menu up) pauses the song in place; while any
+/// hold stands nothing resumes, starts or draws (Brandon's playtest, Oct 1).
 enum BGMPolicy {
-    enum Event { case contextChanged, toggledOn, toggledOff, interruptionEnded, becameActive, trackFinished, trackBroken }
+    enum Event { case contextChanged, toggledOn, toggledOff, held, released, interruptionEnded, becameActive, trackFinished, trackBroken }
     enum Action: Equatable {
         case none
         case startDeck   // nothing is playing yet: draw and fade in
@@ -102,17 +104,17 @@ enum BGMPolicy {
         case playNext    // the song ended (or broke): straight segue to the next draw
     }
 
-    static func action(for event: Event, enabled: Bool, deferring: Bool, hasPlayer: Bool) -> Action {
-        if event == .toggledOff { return hasPlayer ? .pause : .none }
-        guard enabled, !deferring else { return .none }
+    static func action(for event: Event, enabled: Bool, deferring: Bool, held: Bool, hasPlayer: Bool) -> Action {
+        if event == .toggledOff || event == .held { return hasPlayer ? .pause : .none }
+        guard enabled, !deferring, !held else { return .none }
         switch event {
         case .contextChanged:
             return hasPlayer ? .none : .startDeck
-        case .toggledOn, .interruptionEnded, .becameActive:
+        case .toggledOn, .interruptionEnded, .becameActive, .released:
             return hasPlayer ? .resume : .startDeck
         case .trackFinished, .trackBroken:
             return .playNext
-        case .toggledOff:
+        case .toggledOff, .held:
             return .none
         }
     }

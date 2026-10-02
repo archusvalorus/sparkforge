@@ -1051,9 +1051,10 @@ M = [
   '                let dropped = deck.refused(url)', '                deck.failed(url); let dropped = true', [CAT]),
  ('U4-14 the user-audio check runs at every song change (review N1)', 'Sparkforge/Systems/MusicManager.swift',
   '        if !everStarted, AVAudioSession.sharedInstance().isOtherAudioPlaying {', '        if AVAudioSession.sharedInstance().isOtherAudioPlaying {', [CAT]),
+ # U4-15 re-pointed for the Oct 1 hold fix (`.released` joined the resume row); same contract
  ('U4-15 an ended interruption draws a new song (the reviewer\'s surviving mutant)', 'Sparkforge/Systems/BGMDeck.swift',
-  '        case .toggledOn, .interruptionEnded, .becameActive:\n            return hasPlayer ? .resume : .startDeck',
-  '        case .toggledOn, .becameActive:\n            return hasPlayer ? .resume : .startDeck\n        case .interruptionEnded:\n            return .playNext', ['bgm']),
+  '        case .toggledOn, .interruptionEnded, .becameActive, .released:\n            return hasPlayer ? .resume : .startDeck',
+  '        case .toggledOn, .becameActive, .released:\n            return hasPlayer ? .resume : .startDeck\n        case .interruptionEnded:\n            return .playNext', ['bgm']),
  ('U4-16 the Column Advances searches the wrong layer again (review N4)', GS,
   'let solids = self.arenaLayer.children.filter', 'let solids = self.worldNode.children.filter', [CAT]),
  # --- the re-review's follow-ups ---
@@ -1067,6 +1068,28 @@ M = [
   '        perform(.trackBroken, fadeIn: false)', '', [CAT]),
  ('U4-21 the Boss Mode fit ignores the safe area (under the notch)', 'Sparkforge/Scenes/TitleScene.swift',
   'let fit = min(1, (size.height - insets.top - insets.bottom - 16) / panelH)', 'let fit = min(1, (size.height - 16) / panelH)', [CAT]),
+ # --- Brandon's release playtest (Oct 1): the song played on in the background and under the pause menu ---
+ ('U4-22 minimizing the app leaves the song playing (the playtest bug)', 'Sparkforge/Systems/MusicManager.swift',
+  '        holds.insert(.background)\n        perform(.held, fadeIn: false)', '        holds.insert(.background)', [CAT]),
+ ('U4-23 the pause menu leaves the song playing (the playtest bug)', GS,
+  '        MusicManager.shared.setGamePaused(true)   // v2.1: the song waits with the run\n', '', [CAT]),
+ ('U4-24 Resume leaves the song held (silent for the rest of the run)', GS,
+  '        pauseMenu.hide()\n        MusicManager.shared.setGamePaused(false)\n', '        pauseMenu.hide()\n', [CAT]),
+ ('U4-25 quitting to the title leaves the song held (silent until relaunch)', GS,
+  '        MusicManager.shared.setGamePaused(false)\n\n        let titleScene', '\n        let titleScene', [CAT]),
+ ('U4-26 a hold lets an ended interruption, the foreground or a finished track play again', 'Sparkforge/Systems/BGMDeck.swift',
+  '        guard enabled, !deferring, !held else { return .none }', '        guard enabled, !deferring else { return .none }', ['bgm']),
+ ('U4-27 a hold never pauses the song', 'Sparkforge/Systems/BGMDeck.swift',
+  'if event == .toggledOff || event == .held {', 'if event == .toggledOff {', ['bgm']),
+ ('U4-28 lifting the last hold leaves the song silent', 'Sparkforge/Systems/BGMDeck.swift',
+  '        case .toggledOn, .interruptionEnded, .becameActive, .released:\n',
+  '        case .released:\n            return .none\n        case .toggledOn, .interruptionEnded, .becameActive:\n', ['bgm']),
+ ('U4-29 the delayed pause ignores a hold (the pause-menu fade ends in a playing song)', 'Sparkforge/Systems/MusicManager.swift',
+  'if self?.shouldBeSilent == true { self?.player?.pause() }', 'if !SettingsManager.shared.bgmEnabled { self?.player?.pause() }', [CAT]),
+ ('U4-30 coming back to the foreground lifts the pause-menu hold too (the song plays under the menu)', 'Sparkforge/Systems/MusicManager.swift',
+  '        holds.remove(.background)\n', '        holds.removeAll()\n', [CAT]),
+ ('U4-31 a background hold fades instead of stopping (the app suspends mid-fade)', 'Sparkforge/Systems/MusicManager.swift',
+  '            if holds.contains(.background) {', '            if false, holds.contains(.background) {', [CAT]),
 ]
 
 COPY_DIRS = ['Sparkforge/Systems', 'Sparkforge/Config', 'Sparkforge/Scenes', 'Sparkforge/Nodes', 'Sparkforge/Utils', 'tools', 'docs']

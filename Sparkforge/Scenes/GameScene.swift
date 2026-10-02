@@ -2230,6 +2230,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // right after a dialled gauntlet must be authored-difficulty, not
         // whatever the player last set here.
         BossModeDials.shared.reset()
+        // Quitting from the pause menu: the held song carries on into the title.
+        MusicManager.shared.setGamePaused(false)
 
         let titleScene = TitleScene(size: view.bounds.size)
         titleScene.scaleMode = .resizeFill
@@ -2251,6 +2253,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         orbIndicators.isHidden = true
         falseEndingCard?.isHidden = true
         pauseMenu.show(upgradeManager: upgradeManager)
+        MusicManager.shared.setGamePaused(true)   // v2.1: the song waits with the run
     }
 
     private func resumeGame() {
@@ -2262,6 +2265,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         orbIndicators.isHidden = false
         falseEndingCard?.isHidden = false
         pauseMenu.hide()
+        MusicManager.shared.setGamePaused(false)
     }
 
     private func handlePauseScreenTap(_ touch: UITouch) {
