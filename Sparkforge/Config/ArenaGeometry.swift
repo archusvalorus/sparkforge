@@ -215,6 +215,45 @@ struct ArenaGeometry {
         }
     }
 
+    /// v2.1 A7b S13 (CL-109 / CL-123a): the nearest candidate strictly within
+    /// `range` whose EXACT segment from `origin` is clear, else nil — "the nearest
+    /// visible wins; with none, no arc" (the A6 Q5 precedent). An open arena
+    /// reduces to plain nearest-within-range, ties to the first found.
+    func nearestVisible<S: Sequence>(from origin: CGPoint, among candidates: S,
+                                     position: (S.Element) -> CGPoint, within range: CGFloat,
+                                     travelRadius: CGFloat) -> S.Element? {
+        var best: S.Element?
+        var bestDistance = range
+        for candidate in candidates {
+            let p = position(candidate)
+            let d = origin.distance(to: p)
+            guard d < bestDistance else { continue }
+            if segmentBlockedExact(origin, p, travelRadius: travelRadius) { continue }
+            best = candidate
+            bestDistance = d
+        }
+        return best
+    }
+
+    /// v2.1 A7b S14 (CL-109 / CL-124a): THE path-tested shove — Guard's exact
+    /// test plus a short bisection, shared by every instant knock. A body of
+    /// `radius` moved from `from` (assumed free) toward `to` stops at the
+    /// farthest point it reaches before solid geometry; a clear path (and every
+    /// open arena) lands exactly on `to`.
+    func pathShove(from: CGPoint, to: CGPoint, radius: CGFloat) -> CGPoint {
+        guard segmentBlockedExact(from, to, travelRadius: radius) else { return to }
+        var lo: CGFloat = 0, hi: CGFloat = 1
+        for _ in 0..<6 {
+            let mid = (lo + hi) / 2
+            if segmentBlockedExact(from, from + (to - from) * mid, travelRadius: radius) {
+                hi = mid
+            } else {
+                lo = mid
+            }
+        }
+        return from + (to - from) * lo
+    }
+
     /// The safe anchor with this label, if authored.
     func anchor(_ label: String) -> CGPoint? {
         safeAnchors.first { $0.label == label }?.position
@@ -253,6 +292,24 @@ enum PlacementSampler {
         }
         // Give up gracefully: resolve the last candidate out of the geometry.
         return geometry.resolve(last, actorRadius: margin)
+    }
+
+    /// v2.1 A7b S14 (CL-124c): a uniform-by-area point in the disc around
+    /// `center` that sits off solid geometry AND inside the arena wall, both by
+    /// `margin` — a persistent placement (a Wildbloom flower) may be neither.
+    /// After `attempts` rejections it returns `fallback`, which the caller
+    /// guarantees valid (a garden's own centre).
+    static func randomPoint(inDiscAt center: CGPoint, radius: CGFloat, in geometry: ArenaGeometry,
+                            arenaRadius: CGFloat, margin: CGFloat, fallback: CGPoint,
+                            attempts: Int = 12) -> CGPoint {
+        for _ in 0..<attempts {
+            let r = radius * sqrt(CGFloat.random(in: 0...1))
+            let a = CGFloat.random(in: 0..<(2 * .pi))
+            let p = center + CGPoint(x: cos(a) * r, y: sin(a) * r)
+            if p.length + margin <= arenaRadius, !geometry.isBlocked(p, margin: margin) { return p }
+            rejectionCount += 1
+        }
+        return fallback
     }
 }
 

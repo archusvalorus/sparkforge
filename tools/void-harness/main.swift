@@ -11,6 +11,7 @@
 //   EL  eligibility through the real draw   KS  kill credit
 //   CF  the REAL GameConfig.VoidTree (extracted from source) = the rulings
 //   WR  the scene WIRING (GameScene isn't compiled — its source is read)
+//   EH  Erasure T5's arena band: 1-based arena numbers (CL-101; A7b S3, G1.4)
 // Each validator prints PASS/FAIL; exit 1 on any FAIL. Everything is seeded
 // except EL1–EL3, which sample the REAL card draw (its palette roll is random).
 
@@ -865,22 +866,23 @@ do {
 // compiled: every pure rule above is only worth anything if the scene calls it.
 do {
     let env = ProcessInfo.processInfo.environment
-    guard let src = try? String(contentsOfFile: env["VOID_SCENE"] ?? "", encoding: .utf8),
-          let enemySrc = try? String(contentsOfFile: env["VOID_ENEMY"] ?? "", encoding: .utf8),
-          let projSrc = try? String(contentsOfFile: env["VOID_PROJECTILE"] ?? "", encoding: .utf8) else {
+    guard let rawScene = try? String(contentsOfFile: env["VOID_SCENE"] ?? "", encoding: .utf8),
+          let rawEnemy = try? String(contentsOfFile: env["VOID_ENEMY"] ?? "", encoding: .utf8),
+          let rawProjectile = try? String(contentsOfFile: env["VOID_PROJECTILE"] ?? "", encoding: .utf8) else {
         check("WR0 GameScene / EnemyNode / ProjectileNode are readable", false)
         exit(1)
     }
+    // v2.1 A7b corrective 2: every source is read as CODE through the shared
+    // lexical sanitizer (line, block and nested block comments removed; string
+    // literals intact), so no comment of any kind can satisfy a check.
+    let src = SwiftSource.code(rawScene), enemySrc = SwiftSource.code(rawEnemy), projSrc = SwiftSource.code(rawProjectile)
     func body(_ name: String, in text: String = src, prefix: String = "private func ") -> String {
         guard let r = text.range(of: "\(prefix)\(name)(") else { return "" }
         let rest = text[r.upperBound...]
         let ends = ["\n    private func ", "\n    func ", "\n    @discardableResult", "\n    override func "]
             .compactMap { rest.range(of: $0)?.lowerBound }
         let end = ends.min() ?? rest.endIndex
-        // Match CODE only: a token surviving in a comment must not satisfy a check.
-        return rest[..<end].split(separator: "\n", omittingEmptySubsequences: false)
-            .map { line -> Substring in line.range(of: "//").map { line[..<$0.lowerBound] } ?? line }
-            .joined(separator: "\n")
+        return String(rest[..<end])   // the text is already CODE (SwiftSource)
     }
     func order(_ text: String, _ marks: [String]) -> Bool {
         var from = text.startIndex
@@ -919,7 +921,7 @@ do {
     let bossHit = body("handleProjectileHitBoss")
     check("WR6 the gun on the boss: secondaries leave first; Phase T2 skips ONLY the flat dial; primary hits stack its Anomaly",
           order(bossHit, ["resolveVoidSecondaryHitBoss(projectileNode, on: bossNode)", "var damage = shotBaseDamage(projectileNode)",
-                          "bossNode.takeDamage(damage, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)",
+                          "bossNode.takeDirectHit(hit, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)",   // A7b S8: the direct entry
                           "if projectileNode.isPrimaryHit, !bossNode.isDead { applyBossAnomaly(bossNode) }"]))
     let sweep = body("redSmileHit")
     check("WR7 a sweep target: Anomaly on a survivor (an erase ends it), then the survivor riders and Void Horror (CL-85)",
@@ -992,10 +994,11 @@ do {
           enemyFunc("applyStun").contains("cancelFear()") && enemyFunc("applyOverloadStun").contains("cancelFear()")
             && enemyFunc("applyFreeze").contains("cancelFear()")
             && order(enemyFunc("becomeSnowman"), ["cancelFear()", "releaseVoidTrap()"]))
-    check("WR23 capture cancels fear, and the trap never touches stunTimer or freezeTimer (R2)",
+    // A7b S5: the timed stun is `stunHold` now (StunHold); `stunTimer` is gone (catalog WR11).
+    check("WR23 capture cancels fear, and the trap never touches the timed stun (stunHold) or freezeTimer (R2)",
           enemyFunc("captureInVoid").contains("cancelFear()")
-            && !enemyFunc("captureInVoid").contains("stunTimer") && !enemyFunc("captureInVoid").contains("freezeTimer")
-            && !enemyFunc("releaseVoidTrap").contains("stunTimer") && !enemyFunc("tickVoidTrap").contains("stunTimer")
+            && !enemyFunc("captureInVoid").contains("stunHold") && !enemyFunc("captureInVoid").contains("freezeTimer")
+            && !enemyFunc("releaseVoidTrap").contains("stunHold") && !enemyFunc("tickVoidTrap").contains("stunHold")
             && enemyFunc("releaseVoidTrap").contains("voidTrap.release()"))
     check("WR24 the trap's hold ticks from the scene, NOT the status tick (decompose-first order, TR7/TR8)",
           !enemyFunc("updateStatusEffects").contains("voidTrap.tick(") && enemyFunc("tickVoidTrap").contains("voidTrap.tick(dt)")
@@ -1014,6 +1017,10 @@ do {
             && body("shotBaseDamage").contains("RiftlineFalloff.fraction(priorHits: projectile.bodiesStruck"))
     check("WR28 a returned shot aimed at a body on the hole's centre never gets a zero heading (it would never expire)",
           body("fireReturnedShot").contains("aim.length > 1 ? aim : CGPoint(x: 0, y: 1)"))
+    check("WR29 the DEBUG ledger's liveMax counts LIVE holes only; an ended or collapse-pending hole never inflates it (A6 note, A7b S2)",
+          body("spawnVoidWell").contains("combatLedger.recordVoidWell(preset, live: voidWells.filter { $0.state.isLive }.count)")
+            && !body("spawnVoidWell").contains("live: voidWells.count")
+            && order(body("spawnVoidWell"), ["voidWells.append(well)", "combatLedger.recordVoidWell("]))
     // ---- internal review (Sep 24): construction, gates and the corrective fixes ----
     func count(_ text: String, _ s: String) -> Int { text.components(separatedBy: s).count - 1 }
     let edgeFire = body("fireShadowEdge")
@@ -1029,8 +1036,7 @@ do {
           ret.contains("damageMultiplier: playerStats.effectiveDamageMultiplier,")
             && ret.contains("shot.voidKind = .returned") && ret.contains("shot.killSource = .returned")
             && ret.contains("shot.voidHit = .returned(phaseT2: playerStats.phasePenetrates)"))
-    let codeOnly = src.split(separator: "\n", omittingEmptySubsequences: false)
-        .map { l -> Substring in l.range(of: "//").map { l[..<$0.lowerBound] } ?? l }.joined(separator: "\n")
+    let codeOnly = src
     check("PX4 only a real primary shot marks the volley emitted (an absorbed Glacial pellet is no volley)",
           count(codeOnly, "volley.note(") == 1 && primary.contains("volley.note(projectile)"))
     check("PX5 both Anomaly cooldowns tick on game time",
@@ -1061,8 +1067,10 @@ do {
     let unflagged = calls.filter { !$0.contains("allowModifiers: false") }.count
     check("PX9 only the volley's 3 call sites (+ the declaration) fire primary shots",
           count(spread, "fireProjectile(direction:") == 3 && unflagged == 4, "unflagged=\(unflagged)")
+    // A7b S8 (CL-114c): the sweep now lands through the boss's DIRECT entry with
+    // the dial's default (no Phase T2 penetration) — the same ruled path.
     check("PX10 a sweep on the boss hits through the dial exactly as ruled (positive form)",
-          sweepBoss.contains("        bossNode.takeDamage(damage)\n"))
+          sweepBoss.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.contains("bossNode.takeDirectHit(hit)"))
     check("PXC ruled CL-77/78 numbers: pull 70pt/s, 40% impair slow, Dead Circuit 1 shot-damage/s; Gravity Well a flat 30pt",
           V.pullSpeed == 70 && V.impairSlow == 0.40 && V.deadCircuitDamage == 1.0 && V.gravityWellRadius == 30)
     check("FX1 fear routes to a TRUNCATED escape point — never pushed to the Carrier's far face (H1)",
@@ -1131,8 +1139,7 @@ do {
             && order(wells, ["VoidWellPass.forEachWhileLive(enemies",
                              "guard isHittable(enemy), well.state.contains(enemy.position, center: well.position) else { return }",
                              "dealDirectDamage(damage, toEnemy: enemy, source: .ground)"]))
-    let projectileCode = projSrc.split(separator: "\n", omittingEmptySubsequences: false)
-        .map { l -> Substring in l.range(of: "//").map { l[..<$0.lowerBound] } ?? l }.joined(separator: "\n")
+    let projectileCode = projSrc
     check("RV3 (F3) one threshold per projectile, drawn at launch; every A6 rounding reads it — no per-hit draw",
           projectileCode.contains("let a6Rounding = A6Rounding()")
             && body("shotBaseDamage").contains("projectile.a6Rounding.damage(multiplier: projectile.damageMultiplier, fraction: fraction)")
@@ -1200,6 +1207,38 @@ do {
     let config = (try? String(contentsOfFile: env["VOID_CONFIG"] ?? "", encoding: .utf8)) ?? ""
     check("WR27 VC4's Glacial cadence is the app's (glacialEveryN = 3)",
           config.contains("static let glacialEveryN: Int = 3") || config.contains("static let glacialEveryN = 3"))
+}
+
+// EH — Erasure T5 Event Horizon's arena band (CL-101's runtime constant; A7b
+// S3, G1.4). The bands are 1-based arena NUMBERS: Arenas 1–10 at 0.5×, 11–20
+// at 0.65×, 21–30 at 0.8×, 31+ full. The scene passes the 0-based arena id, so
+// the REAL extracted GameConfig.Erasure.eventHorizonScale adds 1. Every shipped
+// arena (ids 0–5) stays at 0.5×, so nothing changes today.
+do {
+    let E = GameConfig.Erasure.self
+    func band(number n: Int) -> CGFloat { n <= 10 ? 0.5 : n <= 20 ? 0.65 : n <= 30 ? 0.8 : 1.0 }
+    let wrong = (0...45).filter { E.eventHorizonScale(arena: $0) != band(number: $0 + 1) }
+    check("EH1 the real band on the 0-based id: ids 0–9 (Arenas 1–10) 0.5×, 10–19 0.65×, 20–29 0.8×, 30+ full (edges: id 9 → 0.5, id 10 → 0.65; every shipped id 0–5 → 0.5)",
+          wrong.isEmpty && E.eventHorizonScale(arena: 9) == 0.5 && E.eventHorizonScale(arena: 10) == 0.65
+            && (0...5).allSatisfy { E.eventHorizonScale(arena: $0) == 0.5 },
+          "wrong ids \(wrong)")
+    // The scene side, on the EXECUTABLE view: the one caller hands the scale the
+    // 0-based id, directly in updateEventHorizon's body; and ArenaConfig's ids
+    // really are 0-based (Arena 1 = the Crucible, id 0), so the +1 is right.
+    let env = ProcessInfo.processInfo.environment
+    let scene = (try? String(contentsOfFile: env["VOID_SCENE"] ?? "", encoding: .utf8)) ?? ""
+    let arenas = (try? String(contentsOfFile: env["VOID_ARENACONFIG"] ?? "", encoding: .utf8)) ?? ""
+    let call = "let scale = TimeInterval(GameConfig.Erasure.eventHorizonScale(arena: arenaConfig.id))"
+    let at = SwiftSource.block(in: scene, after: "private func updateEventHorizon(").map { b in
+        b.executableOffsets(of: call).filter { b.depth(at: $0) == 1 }
+    } ?? []
+    let flatArenas = SwiftSource.executable(arenas).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    // v2.1 geometry Unit 4: the Splitworks shell became the registered `splitworks`.
+    let zeroBased = ["crucible", "quench", "coilworks", "mirrorwound", "starAnvil", "splitworks"].enumerated()
+        .allSatisfy { flatArenas.contains("static let \($0.element) = ArenaConfig( id: \($0.offset),") }
+    check("EH2 the scene passes the 0-based arena id to the band exactly once (updateEventHorizon's body), and ArenaConfig's ids are 0-based (Crucible 0 … Splitworks 5)",
+          at.count == 1 && SwiftSource.executable(scene).components(separatedBy: "eventHorizonScale(").count == 2 && zeroBased,
+          "calls=\(at.count) zeroBased=\(zeroBased)")
 }
 
 print("\n\(passed) passed, \(failed) failed")

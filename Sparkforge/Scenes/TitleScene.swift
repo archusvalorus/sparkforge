@@ -653,11 +653,13 @@ final class TitleScene: SKScene {
             killProgressLabel.isHidden = false
 
             if g.nextArena.isEmpty {
-                // Last live arena — no next to open; just honor the kill.
-                // (v2.0.1: that's the Unmade Star now, not the Lie.)
+                // Last live arena — no next to open; just honor the kill with
+                // that arena's own line (v2.1 Unit 4: it was hard-coded to the
+                // Star's, so Arena 6 showed Arena 5's victory).
                 arenaReadyLabel.isHidden = !felled
                 if felled {
-                    arenaReadyLabel.text = "★ THE STAR IS UNMADE ★"
+                    arenaReadyLabel.text = arena.finalFelledLine.isEmpty
+                        ? "★ \(g.boss.uppercased()) HAS FALLEN ★" : arena.finalFelledLine
                     arenaReadyLabel.fontSize = 15
                     arenaReadyLabel.fontColor = SKColor(hex: g.accent)
                 }
@@ -673,7 +675,8 @@ final class TitleScene: SKScene {
                 arenaReadyLabel.isHidden = false
             }
         } else {
-            // Arena 5+ (Star Anvil, DEBUG-only for now): no gate copy yet.
+            // Unreachable since v2.1 Unit 0 (every arena carries its boss in the
+            // registry); kept as a quiet fallback.
             killProgressLabel.isHidden = true
             arenaFlavorLabel.text = arena.flavorLine
             arenaFlavorLabel.isHidden = false
@@ -1749,6 +1752,13 @@ final class TitleScene: SKScene {
 
         addChild(modal)
         bossModeModal = modal
+        // v2.1 geometry Unit 4 (independent review m1): six felled bosses make
+        // the panel taller than an iPhone SE's 667pt scene — fit it inside the
+        // safe area (clear of the notch), never clip it. Hit-testing
+        // (`nodes(at:)`) follows the scale.
+        let insets = view?.safeAreaInsets ?? .zero
+        let fit = min(1, (size.height - insets.top - insets.bottom - 16) / panelH)
+        if fit < 1 { modal.setScale(fit) }
         modal.alpha = 0
         panel.setScale(0.9)
         modal.run(SKAction.fadeIn(withDuration: 0.18))

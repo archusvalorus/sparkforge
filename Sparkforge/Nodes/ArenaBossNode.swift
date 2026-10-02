@@ -9,7 +9,15 @@
 
 import SpriteKit
 
-protocol ArenaBossNode: SKNode {
+/// v2.1 A7b S15 (CL-59, CL-127d — "the shrunk body is the one body"): a boss
+/// whose hazards reach Spark's body. The scene writes Spark's LIVE collision
+/// radius (Harden shrinks it) here before each `update`, and every hazard test
+/// reaches that body, not the constant.
+protocol PlayerReachHazards: AnyObject {
+    var playerHitRadius: CGFloat { get set }
+}
+
+protocol ArenaBossNode: SKNode, VulnerabilityCarrier {
     var health: Int { get }
     /// v2.1 A6 (CL-74): authoritative max HP — after any Boss Mode HP dial —
     /// for the FINAL percentage effects (Anomaly's 3%, Singularity's 1%/s).
@@ -20,9 +28,11 @@ protocol ArenaBossNode: SKNode {
     /// Damage dealt to the player on body contact
     var contactDamage: Int { get }
     /// v1.9: general vulnerability — scales incoming damage (1.0 = none). The
-    /// boss-side twin of EnemyNode.vulnerabilityMultiplier, so capstone debuffs
-    /// (Skybeam Called, later Apex/Polar Vortex) can mark boss-class targets.
-    var vulnerabilityMultiplier: CGFloat { get set }
+    /// boss-side twin of EnemyNode's, so capstone debuffs (Skybeam Called, Apex
+    /// Marked) can mark boss-class targets. A7b S6 (CL-107/116): the channel
+    /// store (`vulnerability`) comes from VulnerabilityCarrier, and every boss's
+    /// takeDamage reads the ONE shared `vulnerabilityMultiplier` (the strongest
+    /// active channel); no boss declares its own.
 
     /// v2.0 (B3): Boss Mode DEF dial — a flat reduction subtracted from each
     /// incoming hit (the boss-side mirror of the player's DEF). 0 outside Boss
@@ -48,8 +58,12 @@ protocol ArenaBossNode: SKNode {
     /// forwards here with `false`. Burn and Bleed ticks pass `true` — CL-18
     /// (Brandon, Sep 21): DoTs ignore the Boss Mode DEF dial's flat per-hit
     /// reduction (vulnerability and the HP dial still apply).
+    /// A7b S8 (CL-114c): `resolved` is a DIRECT hit's post-vulnerability amount —
+    /// it lands as is (the hit chain folded the vulnerability into its one
+    /// rounding); nil applies the in-node vulnerability. `amount` stays the
+    /// pre-vulnerability request the DEF dial's execute check reads.
     @discardableResult
-    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool, resolved: Int?) -> Bool
 
     /// v2.1 A4b: the boss-kill chokepoint. Every boss calls this exactly once,
     /// synchronously, on its killing blow — after `isDead` is set, before any
@@ -101,6 +115,21 @@ extension ArenaBossNode {
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
         takeDamage(amount, ignoresChallengeDEF: false)
+    }
+
+    /// Every non-direct source: the in-node vulnerability applies.
+    @discardableResult
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
+        takeDamage(amount, ignoresChallengeDEF: ignoresChallengeDEF, resolved: nil)
+    }
+
+    /// v2.1 A7b S8 (CL-114c): a DIRECT hit (the gun, a Red Smile sweep). Its
+    /// vulnerability is already folded in (`hit.dealt`); the DEF dial still
+    /// applies after it and reads the pre-vulnerability request (`hit.basis`).
+    /// Only a Phase T2 shot passes `true` (CL-71/72); a sweep never does.
+    @discardableResult
+    func takeDirectHit(_ hit: DirectHit, ignoresChallengeDEF: Bool = false) -> Bool {
+        takeDamage(hit.basis, ignoresChallengeDEF: ignoresChallengeDEF, resolved: hit.dealt)
     }
 
     /// Default: just above the body; each boss overrides to sit beside its bar.

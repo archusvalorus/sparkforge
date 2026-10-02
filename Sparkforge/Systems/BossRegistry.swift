@@ -68,6 +68,13 @@ final class BossRegistry {
         BossEntry(id: "unmade_star", name: "The Unmade Star", arenaID: 4,
                   grammar: .monument, accentHex: 0xFFD98A,
                   make: { radius, hp in UnmadeStarNode(arenaRadius: radius, hpScaling: hp) }),
+
+        // v2.1 geometry Unit 4: Arena 6. A mobile arena boss that reads the
+        // Splitworks' Carrier, gates and routes — Boss Mode loads its home arena
+        // (geometry included) like every boss, so the fight is the authored one.
+        BossEntry(id: "marchwarden", name: "The Marchwarden", arenaID: 5,
+                  grammar: .arena, accentHex: 0x3F8F8A,
+                  make: { _, hp in MarchwardenNode(hpScaling: hp) }),
     ]
 
     // MARK: - Queries

@@ -739,6 +739,37 @@ do {
         if t.discovered > t.total || t.discovered + t.retired.count + t.unknown.count != Set(sample).count { bounded = false }
     }
     check("CT8 discovered never exceeds the total; every stored id is exactly one of discovered/retired/unknown", bounded)
+    // v2.1 geometry Unit 4 (design lock §8): the Splitworks bestiary set — four
+    // entries with stable persistence ids, the Marchwarden a boss, Lyra's
+    // provisional lines verbatim — and EVERY bestiary line fits the live row
+    // wrapper (≤ 3 lines; BestiaryCodexNode wraps at Int((width − 32 − 82) / 6.6),
+    // 39 characters on the narrowest 375pt phone).
+    func bestiaryLines(_ text: String, _ cap: Int) -> Int {
+        var n = 0, cur = 0
+        for w in text.split(separator: " ") {
+            if cur == 0 { cur = w.count; n += 1 } else if cur + 1 + w.count <= cap { cur += 1 + w.count } else { cur = w.count; n += 1 }
+        }
+        return n
+    }
+    let splitworksSet: [(BestiaryFamily, String, Bool, String)] = [
+        (.spurhound, "spurhound", false, "It learned the shortest distance between two points. Then it learned to hunt around corners."),
+        (.linekeeper, "linekeeper", false, "A firing line given legs. It mistakes patience for permission."),
+        (.ramplate, "ramplate", false, "A barricade with forward momentum. The forge forgot that walls should stay put."),
+        (.marchwarden, "marchwarden", true, "The march ended long ago. Its warden still clears the road for an army that will never come."),
+    ]
+    let narrowCap = Int((375.0 - 32 - 82) / 6.6)
+    // (Read directly: this group runs before the WR section declares `root`, and
+    // top-level globals initialize in source order — the SX15 precedent.)
+    let bestiaryNode = SwiftSource.code((try? String(contentsOf: URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ".")
+        .appendingPathComponent("Sparkforge/Nodes/BestiaryCodexNode.swift"), encoding: .utf8)) ?? "")
+    let wrapperPinned = bestiaryNode.contains("private static let sideMargin: CGFloat = 16")
+        && bestiaryNode.contains("let textW = width - 66 - 16")
+        && bestiaryNode.contains("for (li, line) in Self.wrap(family.flavor, maxChars: Int(textW / 6.6)).prefix(3).enumerated() {")
+    check("CT9 v2.1 geometry Unit 4: the Splitworks bestiary set (Spurhound, Linekeeper, Ramplate, the Marchwarden) with stable ids and the design lock's lines, and every bestiary line fits the live wrapper on the narrowest phone",
+          splitworksSet.allSatisfy { $0.0.rawValue == $0.1 && $0.0.isBoss == $0.2 && $0.0.flavor == $0.3 && !$0.0.hiddenUntilFutureVersion }
+            && BestiaryFamily.allCases.filter { !$0.hiddenUntilFutureVersion }.allSatisfy { bestiaryLines($0.flavor, narrowCap) <= 3 }
+            && narrowCap == 39 && wrapperPinned,
+          "cap=\(narrowCap) wrapper=\(wrapperPinned)")
 }
 
 // MARK: - AQ · eligibility at ACQUISITION time (Reviewer F1) + CL-93 symmetric (CC-1)
@@ -1055,7 +1086,7 @@ do {
         ("cap_fire_everglow T5", tierLine("cap_fire_everglow", 5), "Everglow: erupt for 500% ATK every 20s"),
         ("cap_bleed_apex T2", tierLine("cap_bleed_apex", 2), "Bloodfed: +5 max HP per 10 kills; HP feeds ATK"),
         ("cap_bleed_apex T3", tierLine("cap_bleed_apex", 3), "Bloodhound: bat favors bleeders, executes the weak"),
-        ("cap_bleed_apex T4", tierLine("cap_bleed_apex", 4), "Marked: foes alive 10s take +35% damage"),
+        ("cap_bleed_apex T4", tierLine("cap_bleed_apex", 4), "Marked: bosses at once, foes after 10s: +35%"),   // A7b S6 G2-5
         ("cap_bleed_apex T5", tierLine("cap_bleed_apex", 5), "The Hunter: hits charge an execute pounce"),
         ("cap_void_erasure T2", tierLine("cap_void_erasure", 2), "Void-Touched: ignore shields; lurch more often"),
         ("cap_void_erasure T3", tierLine("cap_void_erasure", 3), "Rift Cannon: every 3rd lurch, a 300% ATK beam"),
@@ -1082,7 +1113,8 @@ do {
         ("v13_phase_skin face", card("v13_phase_skin").description, "Ignore the next hit and gain 1s invulnerability (3.5s cd)"),
         ("v18_mirror_edge face", card("v18_mirror_edge").description, "Shots have a 35% chance to echo for 50% damage."),
         ("v13_unstable_core face", card("v13_unstable_core").description, "Every 4s, a burst hurts nearby enemies and you"),
-        ("v13_unstable_core detail", card("v13_unstable_core").detail, "Every 4s, deal 2 damage to enemies within 60pt. Each burst also costs you 10 HP minus your DEF (at least 1)."),
+        // A7b S11 (CL-120 B1′, its copy approved Sep 28): the burst can't hurt you when it struck nothing.
+        ("v13_unstable_core detail", card("v13_unstable_core").detail, "Every 4s, deal 2 damage to enemies within 60pt. Each burst also costs you 10 HP minus your DEF (at least 1). With nothing in range, it can't hurt you."),
         ("neutral_3 face", card("neutral_3").description, "+11% attack speed"),
         ("neutral_6 face", card("neutral_6").description, "+1 projectile (two parallel shots)"),
         ("neutral_6 T1 rung", tierLine("neutral_6", 1), "+1 projectile (two parallel shots)"),
@@ -1090,7 +1122,8 @@ do {
     let wrong = approved.filter { $0.1 != $0.2 }.map { $0.0 }
     check("CP1 the approved faces and short details are in place, exactly (\(approved.count) strings)", wrong.isEmpty, "\(wrong)")
     let longDetails: [(String, String)] = [
-        ("cap_fire_everglow", "Mini-bosses take half pulse damage. Bosses and mini-bosses take half eruption damage."),
+        // A7b S11 (CL-121 C2 copy gate; Brandon's pick E1, Oct 1): the pulse's boss exclusion, said outright.
+        ("cap_fire_everglow", "The pulse skips bosses; mini-bosses take half. Bosses and mini-bosses take half eruption damage."),
         ("cap_bleed_apex", "Bosses and mini-bosses take half bat damage and half the Marked bonus."),
         ("cap_chill_polarvortex", "Mini-bosses are slowed 85% instead of frozen, then take +50%. The storm ignores bosses."),
         ("cap_shock_skybeam", "Bosses and mini-bosses take half Skybeam damage and half the +35%."),
@@ -1117,11 +1150,40 @@ do {
     check("CP3 the approved synergy lines are in place and fit the Codex chip (3 × 17)", synWrong.isEmpty, "\(synWrong)")
 
     // Deferred copy must NOT have moved (it waits for its A7b behaviour).
-    check("CP4 deferred copy untouched: Permafrost (CL-94), Shatter (CL-99), Rootbound (CL-96)",
-          card("chill_3").description == "Slowed enemies take +25% damage"
-              && card("chill_3").detail == "Slowed enemies take 25% more damage, regardless of the slow's source."
-              && UpgradeManager.synergyTiers(for: .chill).first { $0.threshold == 5 }?.effect == "Frozen enemies burst when struck"
+    // A7b S7 (authorized re-pin, Sep 30): Permafrost's behaviour has landed
+    // (CL-94 94a), so it now carries its approved G2-1 copy; the Shatter (CL-99)
+    // and Rootbound (CL-96) assertions below are unchanged.
+    // A7b S10 (re-pin with Brandon's S9+S10 go, Oct 1): Shatter's behaviour has
+    // landed (CL-99/CL-118), so it now carries its approved G2-2 copy (CP7 holds
+    // the whole Chill batch); Rootbound's assertion is unchanged.
+    check("CP4 Permafrost carries its approved G2-1 copy (A7b S7, CL-94) and Shatter its G2-2 copy (A7b S10, CL-99); Rootbound's (CL-96) is untouched",
+          card("chill_3").description == "Hits deal +25% to slowed enemies"
+              && card("chill_3").detail == "Your projectiles and Red Smile sweeps deal 25% more damage to slowed enemies, whatever slowed them. Damage between whole numbers rounds up by chance."
+              && UpgradeManager.synergyTiers(for: .chill).first { $0.threshold == 5 }?.effect == "Slowed foes may shatter (elites: 20% HP)"
               && UpgradeManager.synergyTiers(for: .growth).first { $0.threshold == 3 }?.effect == "Cultivated ground grips harder — enemies on it are slower")
+    // A7b S10 (Group 2, approved Sep 28; each string lands with its behaviour):
+    // the Chill copy batch — G2-2 Shatter and G2-3 Absolute Zero (each one Codex
+    // chip of 3 × 17 AND one modal line of 40, so Polar Vortex stays at 665pt,
+    // MD2), G2-4 Glacial Drift's detail, G2-6 Whiteout's detail — exactly as
+    // approved. The faces don't change (boss rules live in details).
+    // A7b S11 (the ruled copy gates; Brandon's picks, Oct 1): Erasure's T1 rung
+    // states the lone-boss fallback and its reduction (CL-119 A1, never "bosses
+    // too"), and Unstable Core's approved CL-120 sentence closes its detail (CP1);
+    // Everglow's C2 wording is CP2's. Both capstone modals keep their heights
+    // (MD1: Erasure 665pt, Everglow 652pt).
+    check("CP8 A7b S11 Erasure's T1 rung says the boss lurch is a lone-boss fallback at 50% (CL-119 A1), as approved",
+          card("cap_void_erasure").tierDescriptions?.first == "Unstable: hits charge the void; full meter → a lurch (a lone boss: 50%)"
+              && !(card("cap_void_erasure").tierDescriptions ?? []).joined().contains("bosses too"))
+    let chillLines = UpgradeManager.synergyTiers(for: .chill)
+    let chillBatch = [chillLines.first { $0.threshold == 5 }?.effect, chillLines.first { $0.threshold == 7 }?.effect]
+    check("CP7 A7b S10 the Chill copy batch G2-2/3/4/6 is exactly the approved text, each synergy line one chip (3 × 17) and one modal line (≤ 40); the faces are untouched",
+          chillBatch == ["Slowed foes may shatter (elites: 20% HP)", "Non-boss foes slow; shatters come easy"]
+              && chillBatch.allSatisfy { ($0 ?? "").count <= 40 && faceLines($0 ?? "") <= 3 }
+              && card("chill_4").detail == "Trail time is per patch of ground. T4's frozen ground lasts for the arena. T5 Ice Rink: freeze the arena, slowing non-boss enemies by 50% and increasing your movement speed by 25%. Replaces your chill trail. Requires Whiteout."
+              && card("v16_whiteout").detail == "Hits have a 12% chance to turn an enemy into a snowman for 3s (elites for half as long). Each enemy can transform once every 10s. T3: damaging a snowman melts it. Normal enemies die instantly; elites take an additional 20% of max HP as damage. Bosses cannot become snowmen."
+              && card("chill_4").tierDescriptions?.last == "Ice Rink: enemies -50% speed, you +25%"
+              && card("v16_whiteout").tierDescriptions?.first == "Hits have a 12% chance to make a snowman (3s)",
+          "\(chillBatch)")
 
     // Fit, catalog-wide: every face fits its budget (3 beside a MORE detail, 4
     // without), except the known pre-existing Growth overflows (untouched by
@@ -1141,16 +1203,188 @@ do {
           synOver == ["Growth_3", "Guard_7", "Void_3", "Void_5", "Void_7"], "\(synOver.sorted())")
 }
 
+// MARK: - SX · the shared source sanitizer, executed (v2.1 A7b corrective 2)
+//
+// tools/signature-draw-harness/SwiftSource.swift is what every source-reading
+// harness (catalog, guard, redsmile, void) matches against, so it is proven
+// here on fixtures: comments of every kind go, string literals of every kind
+// stay, the shape view is aligned, and Block measures structure.
+do {
+    // Comments are BLANKED, one space per character, newlines kept (corrective 4).
+    func blanks(_ n: Int) -> String { String(repeating: " ", count: n) }
+    let comments: [(String, String)] = [
+        ("a() // line", "a() " + blanks(7)),
+        ("b() /* block */ c()", "b() " + blanks(11) + " c()"),
+        ("/* outer /* nested */ still comment */ d()", blanks(38) + " d()"),
+        ("/* a\n   multi-line\n   block */ e()", blanks(4) + "\n" + blanks(13) + "\n" + blanks(11) + " e()"),
+    ]
+    let badComments = comments.filter { SwiftSource.code($0.0) != $0.1 }.map { $0.0 }
+    check("SX1 line, block, NESTED block and multi-line block comments are blanked character for character (newlines kept)", badComments.isEmpty, "\(badComments)")
+    let strings = [
+        "let s = \"keep // this /* and this */\"",
+        "let t = \"esc \\\" // still string\"",
+        "let u = \"interp \\(f(\"x // y\")) done\"",
+        "let m = \"\"\"\n    multi // kept\n    /* kept */\n    \"\"\"",
+        "let r = #\"raw \"// kept\" \"#",
+    ]
+    let badStrings = strings.filter { SwiftSource.code($0) != $0 }
+    let trailing = SwiftSource.code("let u = \"interp \\(f(\"x // y\")) done\" // gone")
+    check("SX2 comment markers inside string literals are NOT comments: plain, escaped, interpolated, multi-line and raw strings survive intact",
+          badStrings.isEmpty && trailing == "let u = \"interp \\(f(\"x // y\")) done\" " + blanks(7), "\(badStrings) \(trailing)")
+    let text = "x = \"{ } }\" { y } // z {"
+    check("SX3 the shape view is the code view with string contents blanked, character for character",
+          SwiftSource.shape(text) == "x = \"     \" { y } " + blanks(6) && SwiftSource.code(text).count == SwiftSource.shape(text).count
+            && SwiftSource.code(text).count == text.count)
+    let fn = "func f() {\n  guard ok else { return }\n  if c {\n    g()\n  }\n  h() /* { */\n  _ = \"}\"\n}\nfunc k() {}"
+    let b = SwiftSource.block(in: fn, after: "func f(")
+    let g = b?.offsets(of: "g()").first, h = b?.offsets(of: "h()").first
+    check("SX4 Block: body bounds, brace depth, the enclosing block and the returns before a point (braces in comments and strings ignored)",
+          b != nil && g != nil && h != nil
+            && b.map { $0.depth(at: g ?? 0) == 2 && $0.depth(at: h ?? 0) == 1 && $0.returns(before: h ?? 0) == 1 } == true
+            && b.map { String($0.code[($0.enclosingOpen(of: g ?? 0) ?? 0)...]).hasPrefix("{\n    g()") } == true
+            && b.map { $0.text.hasSuffix("_ = \"}\"\n}") } == true)
+
+    // Corrective 3: the EXECUTABLE view — what the structural checks search.
+    func calls(_ source: String, _ needle: String = "apexRegisterAttack()") -> Int {
+        SwiftSource.block(in: "func f() {\n" + source + "\n}", after: "func f(")?.executableOffsets(of: needle).count ?? -1
+    }
+    check("SX5 call-looking text in strings is not executable (plain, escaped, interpolated, multi-line, raw); a live call is",
+          calls("let s = \"apexRegisterAttack()\"") == 0 && calls("let s = \"x \\\" apexRegisterAttack()\"") == 0
+            && calls("let s = \"\\(x) apexRegisterAttack()\"") == 0
+            && calls("_ = \"\"\"\n    apexRegisterAttack()\n    \"\"\"") == 0 && calls("let r = #\"apexRegisterAttack()\"#") == 0
+            && calls("    apexRegisterAttack()") == 1 && calls("    let s = \"x\"; apexRegisterAttack()") == 1)
+    let pp = "#if false\n a()\n#endif\n#if DEBUG\n b()\n#else\n c()\n#endif\n#if !DEBUG\n d()\n#elseif true\n e()\n#endif\n"
+        + "#if DEBUG\n#if false\n g()\n#endif\n h()\n#endif\n#if !false\n i()\n#elseif DEBUG\n j()\n#endif"
+    let visible = ["a()", "b()", "c()", "d()", "e()", "g()", "h()", "i()", "j()"].filter { calls(pp, $0) == 1 }
+    check("SX6 inactive conditional-compilation content is not executable; active DEBUG content is (nesting, #else, #elseif, negation)",
+          visible == ["b()", "e()", "h()", "i()"], "\(visible)")
+    let braces = SwiftSource.block(in: "func f() {\n  let s = \"{ /* } // {\"\n  let m = \"\"\"\n}\n{\n\"\"\"\n  x()\n}", after: "func f(")
+    check("SX7 braces and comment markers inside strings never corrupt depth (plain and multi-line)",
+          braces.map { b in b.executableOffsets(of: "x()").first.map { b.depth(at: $0) == 1 } == true } == true)
+    let path = SwiftSource.block(in: "func f() {\n  if flag {\n    guard false else { return }\n    banner()\n  }\n  if other {\n    let a = 1\n    banner2()\n  }\n  if third {\n    guard ok else { crash() }\n    banner3()\n  }\n}", after: "func f(")
+    let clear = path.map { b -> [Bool] in
+        [("if flag {", "banner()"), ("if other {", "banner2()"), ("if third {", "banner3()")].map { branch, target in
+            let o = b.executableOffsets(of: branch).first ?? 0, t = b.executableOffsets(of: target).first ?? 0
+            return b.exitFree(from: o + branch.count, to: t)
+        }
+    }
+    check("SX8 the in-branch path check: an exit or a guard (even one whose else ends in an unlisted Never call) before the target breaks the path; a straight path holds",
+          clear == [false, true, false], "\(String(describing: clear))")
+
+    // Corrective 4: token boundaries survive comment removal, and directives are
+    // parsed as TOKENS (any spaces/tabs, comments between them), never as text.
+    let separated = SwiftSource.code("a/**/b") == "a" + blanks(4) + "b"
+        && SwiftSource.code("a/* x /* y */ z */b") == "a" + blanks(17) + "b"
+        && SwiftSource.code("a// c\nb") == "a" + blanks(4) + "\nb"
+        && SwiftSource.code("x = 1 /* one */ + /* two */ 2").split(separator: " ") == ["x", "=", "1", "+", "2"]
+    let guardTok = SwiftSource.block(in: "func f() {\n  guard/**/ok else { return }\n  g()\n}", after: "func f(")
+    check("SX9 comments never fuse tokens: blanks across block, nested block and line comments (newline kept); executable tokens stay separate",
+          separated && guardTok.map { b in b.executableOffsets(of: "g()").first.map { b.skeleton(before: $0) == ["guard", "else", "{"] } == true } == true)
+    let forms: [(String, Int)] = [("#if/**/false", 0), ("#if\tfalse", 0), ("#if  false", 0), ("\t#if false", 0), ("#if /* a */ false", 0),
+                                  ("#if !/**/DEBUG", 0), ("#if\ttrue", 1), ("#if/*x*/DEBUG", 1), ("#if !false", 1), ("#if !!DEBUG", 1)]
+    let wrong = forms.filter { calls("\($0.0)\n    apexRegisterAttack()\n#endif") != $0.1 }.map { $0.0 }
+    let nested = calls("#if DEBUG\n#if/**/false\n    apexRegisterAttack()\n#endif\n#endif") == 0
+        && calls("#if\tDEBUG\n#if true\n    apexRegisterAttack()\n#endif\n#endif") == 1
+    check("SX10 directives are parsed as tokens: comments, spaces and tabs between them change nothing; false/true/DEBUG, negation and nesting evaluate as the build does",
+          wrong.isEmpty && nested, "\(wrong) nested=\(nested)")
+    let unsupported = SwiftSource.unsupportedDirectives("#if os(iOS)\nx()\n#endif\n#if DEBUG && false\ny()\n#endif")
+    check("SX11 a condition form outside the supported set is flagged, and a block containing one is refused (it fails loudly, never guessed)",
+          unsupported.count == 2 && SwiftSource.block(in: "func f() {\n#if os(iOS)\n x()\n#endif\n}", after: "func f(") == nil
+            && SwiftSource.unsupportedDirectives("#if DEBUG\nx()\n#endif").isEmpty, "\(unsupported)")
+    let sk = { (body: String) in SwiftSource.block(in: "func f() {\n" + body + "\n  call()\n}", after: "func f(").map { b in b.skeleton(before: b.executableOffsets(of: "call()").first ?? 0) } }
+    let base = sk("  if a { }\n  guard b else { return }\n  let c = { 1 }()")
+    let extras = ["  guard x else { fatalError(\"no\") }", "  guard x else { preconditionFailure() }", "  guard x else { throw E.x }",
+                  "  if x { }", "  for i in s { }", "  while w { }", "  switch v { default: break }", "  run { }"]
+        .map { sk("  if a { }\n  guard b else { return }\n  let c = { 1 }()\n" + $0) }
+    check("SX12 the direct control-flow skeleton: keywords and blocks written directly in the body, in order; any added guard (whatever its terminator), if, loop, switch or closure changes it",
+          base == ["if", "{", "guard", "else", "{", "{"] && extras.allSatisfy { $0 != base && $0 != nil }, "\(String(describing: base))")
+
+    // Corrective 5: a required call must be a STANDALONE statement — alone on its
+    // line, not joined to a neighbour by an operator or opener (ternaries,
+    // assignments, chaining, trailing closures), whatever comments or tabs sit between.
+    let standalone = { (body: String) -> Bool? in
+        SwiftSource.block(in: "func f() {\n  z()\n" + body + "\n  y()\n}", after: "func f(").flatMap { b in
+            b.executableOffsets(of: "call()").first.map { b.isStandaloneStatement(at: $0, length: "call()".count) }
+        }
+    }
+    let accepted = ["  call()", "  call()   // a trailing comment", "  x = 1\n  call()", "  if a { }\n  call()"].map { standalone($0) }
+    let rejected: [(String, String)] = [
+        ("same-line ternary", "  false ? call() : ()"),
+        ("multi-line ternary (the Reviewer's form)", "  false ?\n  call()\n  : ()"),
+        ("previous line ends in ?", "  false ?\n  call()"),
+        ("previous line ends in ? after a comment", "  false /* c */ ?   // why\n  call()"),
+        ("next line begins with :", "  call()\n  : ()"),
+        ("next line begins with : after a tab", "  call()\n\t:\t()"),
+        ("next line chains with .", "  call()\n  .foo()"),
+        ("next line opens a trailing closure", "  call()\n  { }"),
+        ("assignment on the line", "  let v = call()"),
+        ("assignment across lines", "  let v =\n  call()"),
+        ("argument of another call", "  f(a,\n  call())"),
+        ("operand of an operator", "  a +\n  call()"),
+    ]
+    let wrongly = rejected.filter { standalone($0.1) != false }.map { $0.0 }
+    check("SX13 a required call must be a standalone statement: alone on its line, never joined into a ternary, assignment, argument, operator, chain or trailing closure (comments/tabs between change nothing)",
+          accepted.allSatisfy { $0 == true } && wrongly.isEmpty, "accepted=\(accepted) wronglyAccepted=\(wrongly)")
+
+    // Corrective 6: the exact active token sequence (the tripwire's input).
+    let toks = { (body: String) -> [String] in
+        SwiftSource.block(in: "func f() {\n" + body + "\n}", after: "func f(").map { $0.tokens(from: $0.open + 1, to: $0.close) } ?? ["<no block>"]
+    }
+    let lexemes = toks("  let a = \"x // y /* z */\" /* c */ + b.c(1_000, 0x1F, 2.5) ?? #\"r \"q\"\"# // t")
+    let tokenOK = lexemes == ["let", "a", "=", "\"x // y /* z */\"", "+", "b", ".", "c", "(", "1_000", ",", "0x1F", ",", "2.5", ")", "??", "#\"r \"q\"\"#"]
+        && toks("  a  +\n\t\tb") == toks("  a + b")
+        && toks("  s = \"a b\"") != toks("  s = \"a  b\"")
+        && toks("  s = \"n: \\(x + 1)\"") == ["s", "=", "\"n: \\(x + 1)\""]
+        && toks("  s = \"\"\"\n  one\n  \"\"\"") == ["s", "=", "\"\"\"\n  one\n  \"\"\""]
+        && toks("#if false\n  x()\n#endif\n  y()") == ["y", "(", ")"]
+        && toks("  a == b") != toks("  a = b") && toks("  try f() as Void") == ["try", "f", "(", ")", "as", "Void"]
+        && SwiftSource.digest(["ab", "c"]) != SwiftSource.digest(["a", "bc"]) && SwiftSource.digest(["x"]).count == 64
+    check("SX14 the exact token sequence: whitespace and comments ignored, inactive regions excluded, every lexeme verbatim (string literals whole, internal whitespace kept; numbers, operators, punctuation, keywords)",
+          tokenOK, "\(lexemes)")
+    // SX15, on the REAL scene: harmless whitespace/comment edits leave both
+    // tripwires unchanged; the Reviewer's `assert(… try … as Void)` wrapper changes them.
+    // (Read directly: this group runs before the WR section declares `root`, and
+    // top-level globals initialize in source order.)
+    let sceneRaw = (try? String(contentsOf: URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ".")
+        .appendingPathComponent("Sparkforge/Scenes/GameScene.swift"), encoding: .utf8)) ?? ""
+    let apexLine = "        apexRegisterAttack()   // T5 Apex: every player hit charges the pounce gauge\n"
+    let moteAdd = "+ 78)\n            seam.zPosition = 300\n            camera.addChild(seam)\n"
+    func apexPrefix(_ src: String) -> String? {
+        // A7b S10: the DIRECT-BODY registration MW7/MW8 protect (the Shatter
+        // exit's nested one precedes it).
+        guard let b = SwiftSource.block(in: src, after: "private func handleProjectileHit("),
+              let at = b.executableOffsets(of: "apexRegisterAttack()").first(where: { b.depth(at: $0) == 1 }) else { return nil }
+        return SwiftSource.digest(b.tokens(from: b.open, to: at + "apexRegisterAttack()".count))
+    }
+    func moteBranch(_ src: String) -> [String]? {
+        guard let b = SwiftSource.block(in: src, after: "private func setupHUD("),
+              let at = b.executableOffsets(of: "if GameConfig.Mote.debugForceEntrance {").first,
+              let add = b.executableOffsets(of: "camera.addChild(seam)").first(where: { $0 > at }) else { return nil }
+        return b.tokens(from: at, to: add + "camera.addChild(seam)".count)
+    }
+    let harmlessApex = sceneRaw.replacingOccurrences(of: apexLine,
+        with: "\n        // a harmless comment\n        /* and a block one */\n\n\tapexRegisterAttack()      /* trailing */\n")
+    let wrappedApex = sceneRaw.replacingOccurrences(of: apexLine,
+        with: "        assert(true, String(describing:\n            try\n            apexRegisterAttack()\n            as Void\n        ))\n")
+    let harmlessMote = sceneRaw.replacingOccurrences(of: moteAdd,
+        with: "+ 78)\n            seam.zPosition   =   300   // spaced out\n\n            /* a note */ camera.addChild(seam)\n")
+    let wrappedMote = sceneRaw.replacingOccurrences(of: moteAdd,
+        with: "+ 78)\n            seam.zPosition = 300\n            assert(true, String(describing:\n                try\n                camera.addChild(seam)\n                as Void\n            ))\n")
+    let edited = sceneRaw.components(separatedBy: apexLine).count == 2 && sceneRaw.components(separatedBy: moteAdd).count == 2
+    check("SX15 on the real scene: harmless whitespace/comment edits leave the MW7 and WR8 tripwires unchanged; the lazy assert(… try … as Void) wrapper changes both",
+          edited && apexPrefix(sceneRaw) != nil && apexPrefix(harmlessApex) == apexPrefix(sceneRaw) && apexPrefix(wrappedApex) != apexPrefix(sceneRaw)
+            && moteBranch(sceneRaw) != nil && moteBranch(harmlessMote) == moteBranch(sceneRaw) && moteBranch(wrappedMote) != moteBranch(sceneRaw))
+}
+
 // MARK: - WR · scene wiring the harness can't execute (exact lines, comments stripped)
 
 let root = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ".")
-func code(_ rel: String) -> String {
-    let text = (try? String(contentsOf: root.appendingPathComponent(rel), encoding: .utf8)) ?? ""
-    return text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
-        if let r = line.range(of: "//") { return String(line[..<r.lowerBound]) }
-        return String(line)
-    }.joined(separator: "\n")
+func raw(_ rel: String) -> String {
+    (try? String(contentsOf: root.appendingPathComponent(rel), encoding: .utf8)) ?? ""
 }
+/// The file as CODE: the shared lexical sanitizer removes line, block and
+/// nested block comments and keeps string literals intact (A7b corrective 2).
+func code(_ rel: String) -> String { SwiftSource.code(raw(rel)) }
 /// The body of `func name(` up to the next `func ` at the same indent.
 func body(_ src: String, _ signature: String) -> String {
     guard let start = src.range(of: signature) else { return "" }
@@ -1215,6 +1449,833 @@ do {
     check("WR3 the +1 Card still draws through drawBonusCard (the one caller)",
           extra.contains("upgradeManager.drawBonusCard(excluding: displayedCards.map { $0.card })")
               && scene.components(separatedBy: "drawBonusCard(").count == 2)
+    // v2.1 A7b S1: the dormant runtime is deleted (A4c/A7a lists; CL-127b). None
+    // of it may come back in CODE (comments stripped); the retired ids stay in
+    // `retiredCardIDs` for the Codex, which this doesn't read.
+    let stats = code("Sparkforge/Systems/PlayerStats.swift")
+    let dormant = ["arcWake", "ArcWake", "inductionStep", "InductionStep", "InductionCharge", "inductionCharge", "shockChainRadiusBonus",
+                   "stunChance", "stunDuration", "bloodPriceBonus", "staticCrownDamage", "staticCrownRadius",
+                   "glassEngineActive", "unbrokenCoreOwned"]
+    let survivors = dormant.filter { scene.contains($0) || stats.contains($0) || code("Sparkforge/Systems/UpgradeManager.swift").contains($0) }
+    check("WR7 A7b S1 the dormant runtime stays deleted (Arc Wake, Induction Step, Copper Vein radius, the legacy stun, Blood Price, Static Crown stats, the Glass Engine and Unbroken flags)",
+          survivors.isEmpty && scene.contains("private func chainLightning(") && scene.contains("private func rollOverload(on enemy: EnemyNode) {")
+            && stats.contains("guard overloadOwned else { return 0 }") && stats.contains("var effectiveDamageMultiplier: CGFloat {")
+            && !body(scene, "private func rollOverload(").contains("applyStun(") && body(scene, "private func rollOverload(").contains("applyOverloadStun("),
+          "\(survivors)")
+    // v2.1 A7b S2 (debug-seams rule; CL-127c): a hot dev flag announces itself.
+    let hud = body(scene, "private func setupHUD(")
+    let mote = body(scene, "private func tryMoteEntrance(")
+    let config = code("Sparkforge/Config/GameConfig.swift")
+    var moteFlag = ""
+    if let a = config.range(of: "    enum Mote {"),
+       let b = config.range(of: "static let debugForceEntrance: Bool = false\n        #endif", range: a.upperBound..<config.endIndex) {
+        moteFlag = String(config[a.lowerBound..<b.upperBound])
+    }
+    // Corrective 6: the EXACT accepted active token sequence of each banner branch,
+    // from the hot-flag `if` through and including `camera.addChild(seam)`
+    // (SwiftSource.tokens; the freeze-5 production shape). An intentional change
+    // to either branch must update these arrays, as a reviewed contract change.
+    func bannerTokens(forced: Bool) -> [String] {
+        let head = forced
+            ? ["if", "let", "forced", "=", "UpgradeManager", ".", "debugForcedCardID", "{"]
+            : ["if", "GameConfig", ".", "Mote", ".", "debugForceEntrance", "{"]
+        let text = forced ? "\"⚠︎ DEBUG — forced card: \\(forced)\"" : "\"⚠︎ DEBUG — Mote entrance forced\""
+        return head + ["let", "seam", "=", "SKLabelNode", "(", "fontNamed", ":", "\"Menlo-Bold\"", ")",
+                       "seam", ".", "text", "=", text,
+                       "seam", ".", "fontSize", "=", "9",
+                       "seam", ".", "fontColor", "=", "SKColor", "(", "hex", ":", "0xFFCC44", ")",
+                       "seam", ".", "horizontalAlignmentMode", "=", ".", "left",
+                       "seam", ".", "verticalAlignmentMode", "=", ".", "center",
+                       "seam", ".", "position", "=", "CGPoint", "(", "x", ":", "safeLeft", ",", "y", ":", "-", "view", ".", "bounds", ".", "height", "/", "2", "+", forced ? "66" : "78", ")",
+                       "seam", ".", "zPosition", "=", "300",
+                       "camera", ".", "addChild", "(", "seam", ")"]
+    }
+    /// `needle` sits inside an open `#if DEBUG` block of `text` (internal review LOW-5).
+    func insideDebug(_ text: String, _ needle: String) -> Bool {
+        guard let at = text.range(of: needle) else { return false }
+        let before = text[..<at.lowerBound]
+        guard let open = before.range(of: "#if DEBUG", options: .backwards) else { return false }
+        let close = before.range(of: "#endif", options: .backwards)
+        return close.map { $0.lowerBound < open.lowerBound } ?? true
+    }
+    // Corrective 2/3: each banner is REACHABLE from its hot flag, on the
+    // EXECUTABLE view (no comments, string contents or inactive `#if`
+    // regions). The flag's `if` is itself executable and sits directly in
+    // setupHUD's body after only the opening guard; the banner's text and its
+    // addChild are executable and sit directly inside THAT branch (its own
+    // block, depth 2); and the path inside the branch, from its `{` to the
+    // addChild, holds no exit and no guard at all.
+    func reachable(_ condition: String, _ text: String, accepted: [String]) -> Bool {
+        guard let b = SwiftSource.block(in: raw("Sparkforge/Scenes/GameScene.swift"), after: "private func setupHUD("),
+              b.executableOffsets(of: condition).count == 1, let at = b.executableOffsets(of: condition).first else { return false }
+        let brace = at + condition.count - 1
+        guard b.exec[brace] == "{", let end = b.matchingClose(of: brace),
+              b.depth(at: at) == 1, b.returns(before: at) == 1 else { return false }
+        let label = b.executableOffsets(of: text), adds = b.executableOffsets(of: "camera.addChild(seam)").filter { $0 > at && $0 < end }
+        return label.count == 1 && label[0] > at && label[0] < end && b.enclosingOpen(of: label[0]) == brace
+            && adds.count == 1 && adds[0] > label[0] && b.enclosingOpen(of: adds[0]) == brace
+            && b.exitFree(from: brace + 1, to: adds[0])
+            && b.isStandaloneStatement(at: adds[0], length: "camera.addChild(seam)".count)   // corrective 5: not inside an expression
+            && b.tokens(from: at, to: adds[0] + "camera.addChild(seam)".count) == accepted       // corrective 6: the exact accepted tokens
+    }
+    check("WR8 A7b S2 the draft force-slot and the Mote entrance override are badged on the HUD (DEBUG only; each banner reachable straight from its hot flag), and the Mote flag no longer compiles into release",
+          reachable("if let forced = UpgradeManager.debugForcedCardID {", "seam.text = \"⚠︎ DEBUG — forced card: \\(forced)\"", accepted: bannerTokens(forced: true))
+            && reachable("if GameConfig.Mote.debugForceEntrance {", "seam.text = \"⚠︎ DEBUG — Mote entrance forced\"", accepted: bannerTokens(forced: false))
+            && insideDebug(hud, "if let forced = UpgradeManager.debugForcedCardID {") && insideDebug(hud, "if GameConfig.Mote.debugForceEntrance {")
+            && insideDebug(mote, "let eligible = earned || GameConfig.Mote.debugForceEntrance")
+            && hud.contains("if let forced = UpgradeManager.debugForcedCardID {") && hud.contains("seam.text = \"⚠︎ DEBUG — forced card: \\(forced)\"")
+            && hud.contains("if GameConfig.Mote.debugForceEntrance {") && hud.contains("seam.text = \"⚠︎ DEBUG — Mote entrance forced\"")
+            && moteFlag.contains("#if DEBUG") && mote.contains("#if DEBUG\n        let eligible = earned || GameConfig.Mote.debugForceEntrance")
+            && mote.contains("#else\n        let eligible = earned\n        #endif"))
+    // v2.1 A7b S3 (G1.3, CL-98): the gun takes its volley's pellet count from
+    // PlayerStats.volleyPelletCount, the one source the shock harness executes
+    // (SE). On the EXECUTABLE view: the spread verdict and the fire call sit
+    // directly in updateAutoAttack's body, the EXACT accepted active tokens from
+    // the verdict through the fire call leave no room for another count, the
+    // scene never reads Scatter's `extraProjectiles` itself, and the retired
+    // fixed `spreadShotCount` is gone from code everywhere.
+    let fireCall = "fireShotSpread(count: shotCount, baseDirection: baseDirection)"
+    let volleyTokens = ["let", "isSpreadShot", "=", "playerStats", ".", "recordShot", "(", ")",
+                        "let", "shotCount", "=", "playerStats", ".", "volleyPelletCount", "(", "isSpreadVolley", ":", "isSpreadShot", ")",
+                        "volley", ".", "begin", "(", ")",
+                        "fireShotSpread", "(", "count", ":", "shotCount", ",", "baseDirection", ":", "baseDirection", ")"]
+    func volleyWired() -> Bool {
+        guard let b = SwiftSource.block(in: raw("Sparkforge/Scenes/GameScene.swift"), after: "private func updateAutoAttack(") else { return false }
+        let verdict = b.executableOffsets(of: "let isSpreadShot = playerStats.recordShot()"), fire = b.executableOffsets(of: fireCall)
+        guard verdict.count == 1, fire.count == 1 else { return false }
+        return b.depth(at: verdict[0]) == 1 && b.depth(at: fire[0]) == 1
+            && b.tokens(from: verdict[0], to: fire[0] + fireCall.count) == volleyTokens
+    }
+    let retired = ["spreadShotCount"].filter { scene.contains($0) || stats.contains($0) || code("Sparkforge/Systems/UpgradeManager.swift").contains($0) }
+    check("WR9 A7b S3 Storm Engine: the gun fires PlayerStats.volleyPelletCount's count (normal + 2 on a spread volley, CL-98), and nothing else sets it",
+          volleyWired() && !scene.contains("extraProjectiles") && retired.isEmpty
+            && stats.contains("func volleyPelletCount(isSpreadVolley: Bool) -> Int {"),
+          "wired=\(volleyWired()) sceneReadsExtra=\(scene.contains("extraProjectiles")) retired=\(retired)")
+    // v2.1 A7b S4 (G1.5, CL-96 Rootbound): the cultivated ground slows by the
+    // run's `playerStats.terraSlow`, the value Growth ×3 raises (executed in the
+    // chill harness, GW). On the EXECUTABLE view: the enemies loop sits directly
+    // in updateCultivatedGround's body, and the EXACT accepted active tokens from
+    // it through the slow leave no room for another value or a condition. The
+    // scene never reads the Growth constant itself, and PlayerStats seeds and
+    // resets terraSlow from it (the config stays the one source).
+    let slowCall = "enemy.applySlow(playerStats.effectiveSlow(playerStats.terraSlow), duration: 0.3)"
+    let groundTokens = ["for", "enemy", "in", "enemies", "where", "!", "enemy", ".", "isDying", "{",
+                        "guard", "cultivatedZones", ".", "contains", "(", "where", ":", "{", "$0", ".", "covers", "(", "enemy", ".", "position", ")", "}", ")",
+                        "else", "{", "continue", "}",
+                        "enemy", ".", "applySlow", "(", "playerStats", ".", "effectiveSlow", "(", "playerStats", ".", "terraSlow", ")", ",", "duration", ":", "0.3", ")"]
+    func groundWired() -> Bool {
+        guard let b = SwiftSource.block(in: raw("Sparkforge/Scenes/GameScene.swift"), after: "private func updateCultivatedGround(") else { return false }
+        let loop = b.executableOffsets(of: "for enemy in enemies where !enemy.isDying {"), slow = b.executableOffsets(of: slowCall)
+        guard loop.count == 1, slow.count == 1 else { return false }
+        return b.depth(at: loop[0]) == 1 && b.tokens(from: loop[0], to: slow[0] + slowCall.count) == groundTokens
+    }
+    check("WR10 A7b S4 Rootbound: the cultivated ground slows by playerStats.terraSlow (CL-96), seeded and reset from GameConfig.Growth.enemySlow",
+          groundWired() && !scene.contains("GameConfig.Growth.enemySlow")
+            && stats.contains("var terraSlow: CGFloat = GameConfig.Growth.enemySlow\n")
+            && stats.components(separatedBy: "        terraSlow = GameConfig.Growth.enemySlow\n").count == 2,
+          "wired=\(groundWired()) sceneReadsConstant=\(scene.contains("GameConfig.Growth.enemySlow"))")
+    // v2.1 A7b S5 (G1.7, closure table R2): EnemyNode wires the executed
+    // StunHold (shock SH) so the snowman and the timed stun are INDEPENDENT
+    // holds. On the EXECUTABLE view (no comments, string contents or inactive
+    // `#if` regions): no `stunTimer` is left; `isStunned` is either hold;
+    // `stunHold` appears at exactly five sites (its declaration, `isStunned`, the
+    // two stun calls and the status tick), each stun call and the tick a
+    // standalone direct-body statement, Overload's hold written right after its
+    // immunity guard; and becoming or ending a snowman never touches the hold.
+    let enemyRaw = raw("Sparkforge/Nodes/EnemyNode.swift")
+    let enemyExec = SwiftSource.executable(enemyRaw)
+    let flatEnemy = enemyExec.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    func holdSite(_ fn: String, _ statement: String) -> Bool {
+        guard let b = SwiftSource.block(in: enemyRaw, after: fn) else { return false }
+        let at = b.executableOffsets(of: statement)
+        return at.count == 1 && b.executableOffsets(of: "stunHold").count == 1
+            && b.depth(at: at[0]) == 1 && b.isStandaloneStatement(at: at[0], length: statement.count)
+    }
+    func holdFree(_ fn: String) -> Bool {
+        guard let b = SwiftSource.block(in: enemyRaw, after: fn) else { return false }
+        return b.executableOffsets(of: "stunHold").isEmpty && b.executableOffsets(of: "stunTimer").isEmpty
+    }
+    let overloadGuard = "guard !isDying, overloadStun.tryStun(duration: duration) else { return false }"
+    let overloadHold = SwiftSource.block(in: enemyRaw, after: "func applyOverloadStun(").map { b -> Bool in
+        let g = b.executableOffsets(of: overloadGuard), w = b.executableOffsets(of: "stunHold.stun(duration)")
+        guard g.count == 1, w.count == 1 else { return false }
+        return b.tokens(from: g[0], to: w[0] + "stunHold.stun(duration)".count)
+            == ["guard", "!", "isDying", ",", "overloadStun", ".", "tryStun", "(", "duration", ":", "duration", ")",
+                "else", "{", "return", "false", "}", "stunHold", ".", "stun", "(", "duration", ")"]
+    } ?? false
+    let holdCount = enemyExec.components(separatedBy: "stunHold").count - 1
+    check("WR11 A7b S5 the snowman and the timed (Overload) stun are independent holds in EnemyNode: either stuns, becoming or ending a snowman never writes or clears the timed stun (R2)",
+          !enemyExec.contains("stunTimer") && holdCount == 5
+            && flatEnemy.contains("private var stunHold = StunHold()")
+            && flatEnemy.contains("var isStunned: Bool { stunHold.isStunned(snowman: snowman.isSnowman) }")
+            && holdSite("func applyStun(", "stunHold.stun(duration)")
+            && holdSite("func applyOverloadStun(", "stunHold.stun(duration)") && overloadHold
+            && holdSite("func updateStatusEffects(", "stunHold.tick(deltaTime)")
+            && holdFree("func becomeSnowman(") && holdFree("private func endSnowman("),
+          "stunHold sites=\(holdCount) overloadHold=\(overloadHold) become=\(holdFree("func becomeSnowman(")) end=\(holdFree("private func endSnowman("))")
+    // v2.1 A7b S6 (G1.8, CL-107/116): four independent vulnerability channels
+    // (damage-pipeline VC executes the rule). On the EXECUTABLE view of EVERY
+    // app source file (whitespace-flattened), with nothing left to chance:
+    //  • ONE resolution — `vulnerability.multiplier` is read only by the shared
+    //    VulnerabilityCarrier accessor, no raw channel is read anywhere else, and
+    //    only that accessor declares `vulnerabilityMultiplier`;
+    //  • the SAME model everywhere — EnemyNode and ArenaBossNode adopt
+    //    VulnerabilityCarrier, and exactly the seven bodies (EnemyNode + the six
+    //    boss conformers) declare a fresh `var vulnerability = VulnerabilityChannels()`;
+    //  • each body's takeDamage applies the resolved value EXACTLY ONCE, in its
+    //    accepted statement (EnemyNode's third read is `isVulnerable`);
+    //  • every channel write is one of ten exact statements: EnemyNode's Fracture
+    //    set/clear and Frostbite set/clear; the scene's Called set and clear and
+    //    Marked set, enemy and boss, Marked behind its own not-yet-Marked gate.
+    //    CONTRACT CHANGE, A7b S11 (CL-119 A1, a CL-116 channel; Oct 1): plus the
+    //    scene's Erasure Fracture on a lone arena boss — its set, at the boss-class
+    //    scale, and the clear when its game-time window ends: twelve writes.
+    let appRoot = root.appendingPathComponent("Sparkforge")
+    let appFiles = (FileManager.default.enumerator(atPath: appRoot.path)?.allObjects as? [String] ?? [])
+        .filter { $0.hasSuffix(".swift") }.sorted()
+    let flatApp: [String: String] = Dictionary(uniqueKeysWithValues: appFiles.map { rel in
+        (rel, SwiftSource.executable(raw("Sparkforge/" + rel)).split(whereSeparator: { $0.isWhitespace }).joined(separator: " "))
+    })
+    func hits(_ needle: String) -> [String: Int] {
+        flatApp.compactMapValues { text in let n = text.components(separatedBy: needle).count - 1; return n > 0 ? n : nil }
+    }
+    let channelsFile = "Systems/VulnerabilityChannels.swift"
+    let bodies = ["Nodes/EnemyNode.swift", "Nodes/BossNode.swift", "Nodes/QuenchWardenNode.swift", "Nodes/DynamoChoirNode.swift",
+                  "Nodes/FacetedLieNode.swift", "Nodes/MonumentBossNode.swift", "Nodes/MarchwardenNode.swift"]
+    // CONTRACT CHANGE, A7b S8 (CL-114c; authorized): each body takes a DIRECT hit's
+    // post-vulnerability amount as is (`resolved`), else applies the in-node rounding.
+    let consume = "let scaled = resolved ?? (vulnerabilityMultiplier == 1.0 ? amount : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))"
+    let rawReads = [".frostbite", ".marked", ".called", ".fracture", "["].flatMap { ch in
+        hits("vulnerability" + ch).keys.filter { $0 != channelsFile }.map { "\($0): vulnerability\(ch)" } }
+    let oneModel = hits("vulnerability.multiplier") == [channelsFile: 1]
+        && hits("var vulnerabilityMultiplier") == [channelsFile: 1] && rawReads.isEmpty
+        && (flatApp[channelsFile] ?? "").contains("var vulnerabilityMultiplier: CGFloat { vulnerability.multiplier }")
+        && (flatApp["Nodes/EnemyNode.swift"] ?? "").contains("class EnemyNode: SKNode, VulnerabilityCarrier {")
+        && (flatApp["Nodes/ArenaBossNode.swift"] ?? "").contains("protocol ArenaBossNode: SKNode, VulnerabilityCarrier {")
+        && hits("var vulnerability = VulnerabilityChannels()") == Dictionary(uniqueKeysWithValues: bodies.map { ($0, 1) })
+        && hits("vulnerability = ") == Dictionary(uniqueKeysWithValues: bodies.map { ($0, 1) })
+    let consumers = hits("vulnerabilityMultiplier").filter { $0.key != channelsFile && $0.key != "Nodes/ArenaBossNode.swift" }
+    // CONTRACT CHANGE, A7b S8 (CL-114b; authorized): the scene's four direct-hit
+    // chains read their target's resolved value into the block — exactly these four
+    // arguments, and no other scene read.
+    let chainReads = ["vulnerability: enemyNode.vulnerabilityMultiplier": 1, "vulnerability: enemy.vulnerabilityMultiplier": 1,
+                      "vulnerability: bossNode.vulnerabilityMultiplier": 2]
+    let sceneReadsOK = consumers["Scenes/GameScene.swift"] == 4
+        && chainReads.allSatisfy { (flatApp["Scenes/GameScene.swift"] ?? "").components(separatedBy: $0.key).count - 1 == $0.value }
+    let consumedOnce = bodies.allSatisfy { b in
+        (flatApp[b] ?? "").components(separatedBy: consume).count == 2 && consumers[b] == (b == "Nodes/EnemyNode.swift" ? 3 : 2)
+    } && Set(consumers.keys) == Set(bodies + ["Scenes/GameScene.swift"]) && sceneReadsOK
+        && (flatApp["Nodes/EnemyNode.swift"] ?? "").contains("var isVulnerable: Bool { vulnerabilityMultiplier > 1.0 }")
+    let writes: [String: [String]] = [
+        "Nodes/EnemyNode.swift": ["vulnerability.set(.fracture, multiplier)", "vulnerability.clear(.fracture)",
+                                  "vulnerability.set(.frostbite, frostbiteMultiplier)", "vulnerability.clear(.frostbite)"],
+        "Scenes/GameScene.swift": [
+            "e.vulnerability.set(.called, GameConfig.BossClass.scaledDebuff( GameConfig.Skybeam.calledVulnerability, isBossClass: e.isMiniBoss))",
+            "b.vulnerability.set(.called, GameConfig.BossClass.scaledDebuff( GameConfig.Skybeam.calledVulnerability, isBossClass: true))",
+            "calledEnemy?.vulnerability.clear(.called)", "calledBoss?.vulnerability.clear(.called)",
+            "if e.timeAlive >= GameConfig.Apex.markLifetime && !e.vulnerability.isActive(.marked) { e.vulnerability.set(.marked, GameConfig.BossClass.scaledDebuff( GameConfig.Apex.markVulnerability, isBossClass: e.isMiniBoss))",
+            "if let b = boss, !b.isDead, !b.vulnerability.isActive(.marked) { b.vulnerability.set(.marked, GameConfig.BossClass.scaledDebuff( GameConfig.Apex.markVulnerability, isBossClass: true))",
+            "bossNode.vulnerability.set(.fracture, GameConfig.BossClass.scaledDebuff( GameConfig.Erasure.fractureVulnerability, isBossClass: true)) bossFractureWindow.start(GameConfig.Erasure.fractureDuration)",
+            "if bossFractureWindow.tick(dt) { b.vulnerability.clear(.fracture) }"],
+    ]
+    let writeCensus = hits("vulnerability.set(").merging(hits("vulnerability.clear(")) { $0 + $1 }.filter { $0.key != channelsFile }
+    let missing = writes.flatMap { file, statements in
+        statements.filter { (flatApp[file] ?? "").components(separatedBy: $0).count != 2 }.map { "\(file): \($0)" } }
+    let censusOK = writeCensus == writes.mapValues { $0.count } && missing.isEmpty
+    check("WR12 A7b S6 four independent vulnerability channels (CL-107/116): one shared resolution, the same model on EnemyNode and all six bosses, each takeDamage applies it once, and exactly the twelve accepted channel writes (ten, plus Erasure's boss Fracture since A7b S11)",
+          oneModel && consumedOnce && censusOK,
+          "oneModel=\(oneModel) rawReads=\(rawReads) consumers=\(consumers) census=\(writeCensus) missing=\(missing)")
+    // v2.1 A7b S7 (G1.9 94a; CL-94 / CL-114 / CL-115): all four direct-hit chains
+    // call the ONE DirectHitDamage routine (executed in damage-pipeline DH) and
+    // hand its result to the target. On the EXECUTABLE view, per chain: the Forge
+    // offense call and the routine call each appear exactly once, directly in the
+    // body, and their tokens run back to back EXACTLY as accepted (Forge ends the
+    // integer prefix; the routine takes the ruled amplifiers and its threshold —
+    // the shot's own `hitRounding`, or a fresh per-target draw on a sweep); no
+    // truncating amplifier step remains outside that call; the consumption is
+    // once, directly in the body; and the exact active token prefix from the
+    // body's `{` through the consumption is pinned (SHA-256 + count, as MW8) — so
+    // the integer prefix, the block, the suffix and every exit on the way are the
+    // accepted shape. The projectile carries its OWN block threshold beside the A6
+    // one (both drawn at launch).
+    // CONTRACT CHANGE, A7b S8 (G1.9 94b/94c; authorized, Oct 1): the block now also
+    // takes Overcharge's factor and the target's resolved vulnerability and yields
+    // a DirectHit (`hit`); the enemy chains' Braceguard halving is `hit.shield(by:
+    // BraceguardNode.shieldDamageMultiplier)` on both values, then the ONLY write to
+    // `damage` is `damage = hit.basis` (the pre-vulnerability basis, CL-114d); the
+    // boss chains write neither; and the consumption is the target's DIRECT entry,
+    // `takeDirectHit(hit…)` (CL-114c). Token deltas: a7b/s8/mw8-token-diff.txt.
+    // CONTRACT CHANGE, A7b S10 (G1.11 CL-99/CL-118; Brandon's go, Oct 1): the two
+    // ENEMY prefixes run through the reworked Shatter (WR16), which sits between
+    // the block and the consumption; every other token is identical and both boss
+    // prefixes are unchanged (a7b/s9/prefix-token-diff.txt).
+    //   gun → enemy    661 `052750f1…` → 706 `e409a68a…`
+    //   sweep → enemy  426 `25af33fc…` → 463 `d33cbd51…`
+    struct S7Chain {
+        let name: String, signature: String, routineEnd: String, consumption: String, shielded: Bool
+        let forgeThenBlock: [String]
+        let prefixCount: Int, prefixDigest: String
+    }
+    // The accepted suffix: Braceguard's halving on the DirectHit, then the basis.
+    let shieldTokens = ["hit", ".", "shield", "(", "by", ":", "BraceguardNode", ".", "shieldDamageMultiplier", ")"]
+    let basisWrite = ["damage", "=", "hit", ".", "basis"]
+    let s7Chains: [S7Chain] = [
+        S7Chain(name: "gun → enemy", signature: "private func handleProjectileHit(",
+                routineEnd: "rounding: projectileNode.hitRounding)",
+                consumption: "let killed = enemyNode.takeDirectHit(hit)",
+                shielded: true,
+                forgeThenBlock: ["damage", "=", "applyForgeOffense", "(", "damage", ",", "healthPercent", ":", "enemyNode", ".",
+                                "healthPercent", ",", "bossClass", ":", "enemyNode", ".", "isMiniBoss", ",", "impaired", ":",
+                                "enemyNode", ".", "isSlowed", "||", "enemyNode", ".", "isFrozen", "||", "enemyNode", ".",
+                                "isStunned", ",", "relentlessTarget", ":", "enemyNode", ")", "var", "hit", "=", "DirectHitDamage",
+                                ".", "resolve", "(", "damage", ",", ".", "onEnemy", "(", "permafrostBonus", ":",
+                                "playerStats", ".", "slowedDamageBonus", ",", "slowed", ":", "enemyNode", ".", "isSlowed", ",",
+                                "arenaSlowed", ":", "playerStats", ".", "globalEnemySlow", ">", "0", ",", "brittleCold", ":",
+                                "playerStats", ".", "brittleCold", ",", "brittleColdFactor", ":", "GameConfig", ".", "PolarVortex", ".",
+                                "brittleColdVuln", ",", "frozen", ":", "enemyNode", ".", "isFrozen", ",", "stunned", ":",
+                                "enemyNode", ".", "isStunned", ",", "openWoundsBonus", ":", "playerStats", ".", "bleedingEnemyDamageTaken", ",",
+                                "bleeding", ":", "enemyNode", ".", "isBleeding", ")", ",", "overcharge", ":", "projectileNode",
+                                ".", "overchargeFactor", ",", "vulnerability", ":", "enemyNode", ".", "vulnerabilityMultiplier", ",", "rounding",
+                                ":", "projectileNode", ".", "hitRounding", ")"],
+                prefixCount: 706, prefixDigest: "e409a68a8d0f9b548a855e2f854aedaec81e5ec9e7e163cc9dd58a68b4c68ba4"),
+        S7Chain(name: "gun → boss", signature: "private func handleProjectileHitBoss(",
+                routineEnd: "rounding: projectileNode.hitRounding)",
+                consumption: "bossNode.takeDirectHit(hit, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)",
+                shielded: false,
+                forgeThenBlock: ["damage", "=", "applyForgeOffense", "(", "damage", ",", "healthPercent", ":", "bossNode", ".",
+                                "healthPercent", ",", "bossClass", ":", "true", ",", "impaired", ":", "false", ",",
+                                "relentlessTarget", ":", "nil", ")", "let", "hit", "=", "DirectHitDamage", ".", "resolve",
+                                "(", "damage", ",", ".", "onBoss", "(", "openWoundsBonus", ":", "playerStats", ".",
+                                "bleedingEnemyDamageTaken", ",", "bleeding", ":", "bossStatus", ".", "bleed", ".", "isBleeding", ")",
+                                ",", "overcharge", ":", "projectileNode", ".", "overchargeFactor", ",", "vulnerability", ":", "bossNode",
+                                ".", "vulnerabilityMultiplier", ",", "rounding", ":", "projectileNode", ".", "hitRounding", ")"],
+                prefixCount: 342, prefixDigest: "cc3d754994b1e797d319a1a0967cd83a8f58e03dcca62fab1f0d3cd32d3951e2"),
+        S7Chain(name: "sweep → enemy", signature: "private func redSmileHit(",
+                routineEnd: "rounding: DirectHitRounding())",
+                consumption: "let killed = enemy.takeDirectHit(hit)",
+                shielded: true,
+                forgeThenBlock: ["damage", "=", "applyForgeOffense", "(", "damage", ",", "healthPercent", ":", "enemy", ".",
+                                "healthPercent", ",", "bossClass", ":", "enemy", ".", "isMiniBoss", ",", "impaired", ":",
+                                "enemy", ".", "isSlowed", "||", "enemy", ".", "isFrozen", "||", "enemy", ".",
+                                "isStunned", ",", "relentlessTarget", ":", "enemy", ")", "var", "hit", "=", "DirectHitDamage",
+                                ".", "resolve", "(", "damage", ",", ".", "onEnemy", "(", "permafrostBonus", ":",
+                                "playerStats", ".", "slowedDamageBonus", ",", "slowed", ":", "enemy", ".", "isSlowed", ",",
+                                "arenaSlowed", ":", "playerStats", ".", "globalEnemySlow", ">", "0", ",", "brittleCold", ":",
+                                "playerStats", ".", "brittleCold", ",", "brittleColdFactor", ":", "GameConfig", ".", "PolarVortex", ".",
+                                "brittleColdVuln", ",", "frozen", ":", "enemy", ".", "isFrozen", ",", "stunned", ":",
+                                "enemy", ".", "isStunned", ",", "openWoundsBonus", ":", "playerStats", ".", "bleedingEnemyDamageTaken", ",",
+                                "bleeding", ":", "enemy", ".", "isBleeding", ")", ",", "overcharge", ":", "overcharge",
+                                ".", "factor", ",", "vulnerability", ":", "enemy", ".", "vulnerabilityMultiplier", ",", "rounding",
+                                ":", "DirectHitRounding", "(", ")", ")"],
+                prefixCount: 463, prefixDigest: "d33cbd51284aa48dba57f9e5d12fa475acf5d6dd96d0263d2a7e50811c8d49e1"),
+        S7Chain(name: "sweep → boss", signature: "private func redSmileHitBoss(",
+                routineEnd: "rounding: DirectHitRounding())",
+                consumption: "bossNode.takeDirectHit(hit)",
+                shielded: false,
+                forgeThenBlock: ["damage", "=", "applyForgeOffense", "(", "damage", ",", "healthPercent", ":", "bossNode", ".",
+                                "healthPercent", ",", "bossClass", ":", "true", ",", "impaired", ":", "false", ",",
+                                "relentlessTarget", ":", "nil", ")", "let", "hit", "=", "DirectHitDamage", ".", "resolve",
+                                "(", "damage", ",", ".", "onBoss", "(", "openWoundsBonus", ":", "playerStats", ".",
+                                "bleedingEnemyDamageTaken", ",", "bleeding", ":", "bossStatus", ".", "bleed", ".", "isBleeding", ")",
+                                ",", "overcharge", ":", "overcharge", ".", "factor", ",", "vulnerability", ":", "bossNode",
+                                ".", "vulnerabilityMultiplier", ",", "rounding", ":", "DirectHitRounding", "(", ")", ")"],
+                prefixCount: 197, prefixDigest: "35816a8b98f99fc963bc2d13321b5a9fe4adefaba90a2ddb1e9244ac695e100e")
+    ]
+    let sceneRawS7 = raw("Sparkforge/Scenes/GameScene.swift")
+    let s7Drift = s7Chains.compactMap { c -> String? in
+        guard let b = SwiftSource.block(in: sceneRawS7, after: c.signature) else { return "\(c.name): no body" }
+        let forge = b.executableOffsets(of: "damage = applyForgeOffense("), start = b.executableOffsets(of: "hit = DirectHitDamage.resolve(")
+        let end = b.executableOffsets(of: c.routineEnd), take = b.executableOffsets(of: c.consumption)
+        guard forge.count == 1, start.count == 1, end.count == 1, take.count == 1 else {
+            return "\(c.name): forge \(forge.count) routine \(start.count) end \(end.count) consumption \(take.count)"
+        }
+        guard [forge[0], start[0], take[0]].allSatisfy({ b.depth(at: $0) == 1 }), forge[0] < start[0], end[0] < take[0] else {
+            return "\(c.name): not direct-body statements in order"
+        }
+        let routineStop = end[0] + c.routineEnd.count
+        if b.tokens(from: forge[0], to: routineStop) != c.forgeThenBlock { return "\(c.name): Forge + block tokens differ" }
+        let amplifierTokens = ["slowedDamageBonus", "brittleColdVuln", "bleedingEnemyDamageTaken"]
+        let body = b.tokens(from: b.open, to: b.close + 1), block = b.tokens(from: start[0], to: routineStop)
+        for a in amplifierTokens where body.filter({ $0 == a }).count != block.filter({ $0 == a }).count {
+            return "\(c.name): \(a) outside the routine call"
+        }
+        // The hit's own value never reaches the in-node entry (other sources in the
+        // chain — Shatter's execute, the Glass Blood exit, Overkill — keep it).
+        if body.indices.contains(where: { $0 + 2 < body.count && body[$0] == "takeDamage" && body[$0 + 1] == "(" && body[$0 + 2] == "damage" }) {
+            return "\(c.name): the hit's damage reaches takeDamage (the direct entry only)"
+        }
+        let flow = b.tokens(from: routineStop, to: take[0] + c.consumption.count)
+        let writes = flow.indices.filter { $0 + 1 < flow.count && flow[$0] == "damage" && flow[$0 + 1] == "=" }
+        let shields = flow.indices.filter { $0 + shieldTokens.count <= flow.count && Array(flow[$0..<($0 + shieldTokens.count)]) == shieldTokens }
+        let hitMutations = flow.indices.filter { $0 + 2 < flow.count && flow[$0] == "hit" && flow[$0 + 1] == "." && flow[$0 + 2] != "basis" }
+        if c.shielded {
+            guard writes.count == 1, writes[0] + basisWrite.count <= flow.count, Array(flow[writes[0]..<(writes[0] + basisWrite.count)]) == basisWrite,
+                  shields.count == 1, hitMutations == shields, shields[0] < writes[0] else {
+                return "\(c.name): after the block, exactly Braceguard's hit.shield(by:) then damage = hit.basis (\(writes.count) writes, \(shields.count) shields)"
+            }
+        } else if !writes.isEmpty || !hitMutations.isEmpty { return "\(c.name): \(writes.count) writes / \(hitMutations.count) hit mutations after the block" }
+        let prefix = b.tokens(from: b.open, to: take[0] + c.consumption.count)
+        let digest = SwiftSource.digest(prefix)
+        return prefix.count == c.prefixCount && digest == c.prefixDigest ? nil : "\(c.name): prefix \(prefix.count) tokens \(digest.prefix(16))"
+    }
+    // Corrective 8: each declaration must be the WHOLE executable line (a substring
+    // match let `let hitRounding = DirectHitRounding().unit >= 0 ? … : …` through).
+    // The draw itself is executed on real projectiles (vulnerability RP1–RP4).
+    let projectileLines = SwiftSource.executable(raw("Sparkforge/Nodes/ProjectileNode.swift"))
+        .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+    let ownThreshold = projectileLines.filter { $0 == "let hitRounding = DirectHitRounding()" }.count == 1
+        && projectileLines.filter { $0 == "let a6Rounding = A6Rounding()" }.count == 1
+        && projectileLines.filter { $0.contains("hitRounding") }.count == 1
+    check("WR13 A7b S7/S8 all four direct-hit chains (gun/sweep → enemy/boss): Forge then ONE DirectHitDamage block with the ruled amplifiers, Overcharge, the resolved vulnerability and its own threshold; Braceguard then the basis; the target's direct entry; the accepted token prefix through the consumption",
+          s7Drift.isEmpty && ownThreshold, "\(s7Drift) ownThreshold=\(ownThreshold)")
+    // v2.1 A7b S8 (G1.9 94b/94c; CL-114a/c): the static wiring the executed
+    // checks (damage-pipeline DH9–DH11, vulnerability RN4/RN5) can't reach, on the
+    // EXECUTABLE view, whitespace-flattened:
+    //  • the Overcharge split rides exactly the ruled shots — fireProjectile and
+    //    fireIcicle store the Overcharge-free multiplier and the split's factor —
+    //    and the two sweeps start from the split's base; the five excluded
+    //    constructions (acorn, seed fragment, Glass Blood, returned shot, Shadow
+    //    Edge) keep today's whole multiplier; shotFractionDamage's other users stay;
+    //  • the four chains are the only direct-entry callers; EnemyNode's and the
+    //    bosses' direct entries skip only the in-node vulnerability;
+    //  • the Spurhound / Ramplate punish window applies on both entries with
+    //    today's arithmetic, token for token;
+    //  • PlayerStats' Overcharge-free multiplier is today's sum without Overcharge.
+    let sceneS8 = raw("Sparkforge/Scenes/GameScene.swift")
+    func flatExec(_ text: String) -> String { SwiftSource.executable(text).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+    func flatBody(_ src: String, _ sig: String) -> String {
+        guard let b = SwiftSource.block(in: src, after: sig) else { return "" }
+        return String(b.exec[b.open...b.close]).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+    func n(_ text: String, _ needle: String) -> Int { text.components(separatedBy: needle).count - 1 }
+    let fp = flatBody(sceneS8, "private func fireProjectile("), fi = flatBody(sceneS8, "private func fireIcicle(")
+    let fireSplit = n(fp, "let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: damageScale))") == 1
+        && n(fp, "damageMultiplier: overcharge.overchargeFree,") == 1 && n(fp, "projectile.overchargeFactor = overcharge.factor") == 1
+        && n(fi, "let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: GameConfig.PolarVortex.icicleMult))") == 1
+        && n(fi, "damageMultiplier: overcharge.overchargeFree,") == 1 && n(fi, "icicle.overchargeFactor = overcharge.factor") == 1
+    let excluded = ["private func fireAcorn(", "private func fireSeedFragment(", "private func glassBloodBurst(",
+                    "private func fireReturnedShot(", "private func fireShadowEdge("]
+    let excludedKeep = excluded.allSatisfy { sig in
+        let body = flatBody(sceneS8, sig)
+        return n(body, "damageMultiplier: playerStats.effectiveDamageMultiplier") == 1 && !body.contains("overcharge")
+    }
+    let sceneFlat = flatExec(sceneS8)
+    let sweepSplit = ["private func redSmileHit(", "private func redSmileHitBoss("].allSatisfy { sig in
+        let body = flatBody(sceneS8, sig)
+        return n(body, "let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: GameConfig.RedSmile.damageFraction))") == 1
+            && n(body, "var damage = overcharge.base") == 1 && !body.contains("shotFractionDamage")
+    }
+    let census = n(sceneFlat, "overchargeFactor =") == 2 && n(sceneFlat, "overchargeParts(scale:") == 4
+        && n(sceneFlat, "damageMultiplier: playerStats.effectiveDamageMultiplier") == 5 && n(sceneFlat, "takeDirectHit(") == 4
+    let enemyFlat = flatExec(raw("Sparkforge/Nodes/EnemyNode.swift")), bossProto = flatExec(raw("Sparkforge/Nodes/ArenaBossNode.swift"))
+    let entries = enemyFlat.contains("func takeDamage(_ amount: Int) -> Bool { takeDamage(amount, resolved: nil) }")
+        && enemyFlat.contains("func takeDirectHit(_ hit: DirectHit) -> Bool { takeDamage(hit.basis, resolved: hit.dealt) }")
+        && bossProto.contains("func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool { takeDamage(amount, ignoresChallengeDEF: ignoresChallengeDEF, resolved: nil) }")
+        && bossProto.contains("func takeDirectHit(_ hit: DirectHit, ignoresChallengeDEF: Bool = false) -> Bool { takeDamage(hit.basis, ignoresChallengeDEF: ignoresChallengeDEF, resolved: hit.dealt) }")
+    let punish = [("SpurhoundNode", "Spurhound"), ("RamplateNode", "Ramplate")].allSatisfy { node, cfg in
+        let f = flatExec(raw("Sparkforge/Nodes/\(node).swift"))
+        return f.contains("override func takeDamage(_ amount: Int) -> Bool { super.takeDamage(punished(amount)) }")
+            && f.contains("override func takeDirectHit(_ hit: DirectHit) -> Bool { super.takeDirectHit(DirectHit(basis: hit.basis, dealt: punished(hit.dealt))) }")
+            && f.contains("private func punished(_ amount: Int) -> Int { punishActive ? Int((CGFloat(amount) * GameConfig.\(cfg).punishVulnerability).rounded()) : amount }")
+            && n(f, "punishVulnerability") == 1 && n(f, "punished(") == 3
+    }
+    let statsRaw = raw("Sparkforge/Systems/PlayerStats.swift")
+    let effectiveTokens = SwiftSource.block(in: statsRaw, after: "var effectiveDamageMultiplier: CGFloat")
+        .map { $0.tokens(from: $0.open, to: $0.close + 1) } ?? []
+    let freeTokens = SwiftSource.block(in: statsRaw, after: "var overchargeFreeDamageMultiplier: CGFloat")
+        .map { $0.tokens(from: $0.open, to: $0.close + 1) } ?? []
+    var withoutOvercharge = effectiveTokens
+    if let k = (0..<max(0, withoutOvercharge.count - 1)).first(where: { withoutOvercharge[$0] == "+" && withoutOvercharge[$0 + 1] == "overchargeCurrentBonus" }) {
+        withoutOvercharge.removeSubrange(k...(k + 1))
+    }
+    let freeSum = !freeTokens.isEmpty && freeTokens == withoutOvercharge && effectiveTokens.filter { $0 == "overchargeCurrentBonus" }.count == 1
+    check("WR14 A7b S8 the Overcharge split rides exactly the ruled hits (fireProjectile, fireIcicle, the two sweeps; never the five excluded shots), the four chains are the only direct-entry callers, the entries skip only the in-node vulnerability, the punish window applies on both entries unchanged, and the Overcharge-free multiplier is today's sum without Overcharge",
+          fireSplit && excludedKeep && sweepSplit && census && entries && punish && freeSum,
+          "fire \(fireSplit) excluded \(excludedKeep) sweep \(sweepSplit) census \(census) entries \(entries) punish \(punish) freeSum \(freeSum)")
+
+    // v2.1 A7b S9 (G1.10, CL-117; Brandon's go, Oct 1), on the EXECUTABLE view:
+    //  • ONE crit roll for a shot, `rollShotCrit(directAttack:)`; only a direct
+    //    attack advances Calculated Strike (every 5th crits);
+    //  • the replacement icicle rolls it as a direct attack — it crits and counts
+    //    once — while Glacial Condensation's absorbed pellets return before any roll;
+    //  • the icicle's own shatter shards never roll (`rollsCrit: false`); Iceburst's
+    //    shards and every other shot keep today's roll.
+    let glacialBranch = "if playerStats.glacialActive && allowModifiers { playerStats.glacialShotCounter += 1 if playerStats.glacialShotCounter % GameConfig.PolarVortex.glacialEveryN == 0 { configurePrimaryShot(fireIcicle(direction: direction, originOffset: originOffset), pellet: false) } return }"
+    let rollShot = "let isCrit = rollsCrit && rollShotCrit(directAttack: allowModifiers)"
+    let fpGlacial = fp.range(of: glacialBranch), fpRoll = fp.range(of: rollShot)
+    let s9Fire = n(fp, glacialBranch) == 1 && n(fp, rollShot) == 1 && n(fp, "rollShotCrit(") == 1 && n(fp, "isCrit: isCrit,") == 1
+        && fpGlacial != nil && fpRoll != nil && (fpGlacial?.upperBound ?? fp.endIndex) <= (fpRoll?.lowerBound ?? fp.startIndex)
+        && n(sceneFlat, "private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero, damageScale: CGFloat = 1.0, allowModifiers: Bool = true, rollsCrit: Bool = true,") == 1
+    let s9Icicle = n(fi, "let isCrit = rollShotCrit(directAttack: true)") == 1 && n(fi, "isCrit: isCrit,") == 1
+        && n(fi, "rollShotCrit(") == 1 && !fi.contains("isCrit: false") && n(fi, "isIcicle: true") == 1
+    let shatterShards = flatBody(sceneS8, "private func iceShatter("), iceburstShards = flatBody(sceneS8, "private func iceburst(")
+    let s9Shards = n(shatterShards, "allowModifiers: false, rollsCrit: false,") == 1
+        && !iceburstShards.isEmpty && !iceburstShards.contains("rollsCrit")
+        && n(sceneFlat, "rollsCrit: false") == 1 && n(sceneFlat, "rollShotCrit(") == 3
+    let s9Roll = flatBody(sceneS8, "private func rollShotCrit(directAttack: Bool) -> Bool")
+        == "{ var isCrit = CGFloat.random(in: 0...1) < playerStats.critChance if playerStats.forgeCalculatedStrike && directAttack { forgeCalcStrikeCount += 1 if forgeCalcStrikeCount % 5 == 0 { isCrit = true } } return isCrit }"
+        && n(sceneFlat, "forgeCalcStrikeCount += 1") == 2
+    check("WR15 A7b S9 the replacement icicle rolls the shot's crit and counts once toward Calculated Strike; the absorbed pellets never roll; the icicle's own shards never crit; Iceburst's shards and every other shot keep today's roll",
+          s9Fire && s9Icicle && s9Shards && s9Roll, "fire \(s9Fire) icicle \(s9Icicle) shards \(s9Shards) roll \(s9Roll)")
+
+    // v2.1 A7b S10 (G1.11, CL-99/CL-118): both Shatter sites ask the ONE rule
+    // (executed in chill SR1–SR6) with the live stats — the arena's slow counted —
+    // and land its damage through the PLAIN entry (the vulnerability scales the
+    // chunk); a kill, or an execute, ends the hit, and an elite that survives its
+    // chunk takes the rest of the hit; the gun's Shatter kill keeps the shot's
+    // Iceburst generation and its exit charges the meters (redsmile MW9); the
+    // tuning is GameConfig's (CL-118d). Nothing else reads Shatter's stats.
+    func shatterAsk(_ t: String) -> String {
+        "if let shatter = ShatterRule.outcome(chance: playerStats.shatterChance, threshold: playerStats.shatterSlowThreshold, slowed: \(t).isSlowed, totalSlow: \(t).currentSlow + playerStats.globalEnemySlow, elite: \(t).isMiniBoss, maxHealth: \(t).maxHealth, roll: CGFloat.random(in: 0...1)) { let killed = \(t).takeDamage(shatter.damage(health: \(t).health)) if killed {"
+    }
+    let gunHit = flatBody(sceneS8, "private func handleProjectileHit("), sweepHit = flatBody(sceneS8, "private func redSmileHit(")
+    let gunExit = "if killed || shatter.endsHit { apexRegisterAttack() erasureRegisterHit() if let index = projectiles.firstIndex(where: { $0 === projectileNode }) { projectiles.remove(at: index) } openBlackholeIfSeeded(projectileNode) projectileNode.removeFromParent() return } }"
+    let sweepExit = "if killed || shatter.endsHit { chargeRedSmileHitMeters(.shatter) return nil } }"
+    let s10Sites = n(gunHit, shatterAsk("enemyNode")) == 1 && n(sweepHit, shatterAsk("enemy")) == 1
+        && n(gunHit, gunExit) == 1 && n(sweepHit, sweepExit) == 1
+        && n(gunHit, "onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode, source: projectileNode.killSource, iceburstGeneration: projectileNode.iceburstGeneration) }") == 1
+        && n(sweepHit, "onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .melee) }") == 2
+    let s10Census = n(sceneFlat, "ShatterRule.") == 2 && n(sceneFlat, "playerStats.shatterChance") == 2
+        && n(sceneFlat, "playerStats.shatterSlowThreshold") == 2 && n(sceneFlat, "shatter.endsHit") == 2
+    let statsFlatS10 = flatExec(statsRaw), umFlatS10 = flatExec(raw("Sparkforge/Systems/UpgradeManager.swift"))
+    let s10Tuning = n(statsFlatS10, "var shatterSlowThreshold: CGFloat = GameConfig.Chill.shatterSlowThreshold") == 1
+        && n(statsFlatS10, "shatterSlowThreshold = GameConfig.Chill.shatterSlowThreshold") == 1
+        && n(statsFlatS10, "shatterSlowThreshold") == 4 && n(statsFlatS10, "shatterChance = 0.0") == 1   // 2 sites + their 2 config reads
+        && n(umFlatS10, "stats.shatterChance = GameConfig.Chill.shatterChance") == 1
+        && n(umFlatS10, "stats.shatterSlowThreshold = GameConfig.Chill.absoluteZeroShatterThreshold") == 1
+        && n(umFlatS10, "stats.shatterChance") == 1 && n(umFlatS10, "stats.shatterSlowThreshold") == 1
+    check("WR16 A7b S10 both Shatter sites ask the one rule with the live stats, land it through the plain entry, end the hit only on a kill or an execute (a surviving elite takes the rest), keep the gun kill's Iceburst generation and charge its meters on the exit; the tuning is GameConfig's",
+          s10Sites && s10Census && s10Tuning, "sites \(s10Sites) census \(s10Census) tuning \(s10Tuning)")
+
+    // v2.1 A7b S11 (CL-119 A1, CL-120 B1′), on the EXECUTABLE view:
+    //  • Erasure's full meter lurches at the nearest foe; with none alive, at the
+    //    arena boss only if it can be hit (else the charge holds), rolling only
+    //    the boss-reachable effects — Rift Burst (boss included), Damage Echo,
+    //    Fracture — each at the boss-class 50%; a boss lurch is an activation;
+    //  • the boss's Fracture runs on the scene's game-time window, cleared when
+    //    it ends and reset for every new boss (its writes: WR12);
+    //  • Unstable Core keeps its cadence and ring but costs you only when the
+    //    burst struck a live body (Unbroken still covers it).
+    let erasureFlat = flatBody(sceneS8, "private func updateErasure(")
+    let s11Fallback = n(erasureFlat, "if erasureStacks >= GameConfig.Erasure.unstableGaugeCapacity, erasureTriggerCooldown <= 0 { if let target = nearestEnemyToPlayer() { releaseUnstableCharge() triggerUnstable(on: target) } else if let b = boss, isHittable(b) { releaseUnstableCharge() triggerUnstable(onBoss: b) } }") == 1
+        && flatBody(sceneS8, "private func releaseUnstableCharge()") == "{ erasureStacks = 0 erasureGauge.flashRelease() erasureTriggerCooldown = playerStats.erasureTriggerCD }"
+    let s11BossLurch = flatBody(sceneS8, "private func triggerUnstable(onBoss bossNode: any ArenaBossNode)")
+        == "{ playerStats.erasureActivations += 1 let pos = bossNode.position showUnstablePop(at: pos) switch Int.random(in: 0..<3) { case 0: erasureRiftBurst(at: pos, includeBoss: true) case 1: erasureDamageEcho(onBoss: bossNode) default: erasureFracture(onBoss: bossNode) } fireRiftCannonIfDue() }"
+        && flatBody(sceneS8, "private func triggerUnstable(on enemy: EnemyNode)").hasSuffix("default: erasureBackwash(at: pos) } fireRiftCannonIfDue() }")
+        && n(sceneFlat, "fireRiftCannonIfDue()") == 3 && n(sceneFlat, "fireRiftCannon()") == 2
+        && n(sceneFlat, "private func erasureRiftBurst(at pos: CGPoint, includeBoss: Bool = false) {") == 1
+        && n(flatBody(sceneS8, "private func erasureRiftBurst("), "damage: dmg, bossClassScaled: true, includeBoss: includeBoss)") == 1
+    let echoBoss = flatBody(sceneS8, "private func erasureDamageEcho(onBoss bossNode: any ArenaBossNode)")
+    let s11Effects = n(echoBoss, "guard let self = self, let b = self.boss, ObjectIdentifier(b) == target, self.isHittable(b) else { return }") == 1
+        && n(echoBoss, "b.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: true))") == 1
+        && n(echoBoss, "GameConfig.Erasure.damageEchoFraction") == 1
+        && n(sceneFlat, "bossFractureWindow = GameTimer()") == 3 && n(sceneFlat, "bossFractureWindow.start(") == 1   // the declaration + 2 resets
+        && n(sceneFlat, "bossFractureWindow.tick(") == 1 && n(sceneFlat, "private var bossFractureWindow = GameTimer()") == 1
+        && n(flatBody(sceneS8, "private func resetBossStatus()"), "bossFractureWindow = GameTimer()") == 1
+    let coreFlat = flatBody(sceneS8, "private func performUnstableCoreBurst()")
+    let s11Core = n(coreFlat, "var struck = false for enemy in enemies { if player.position.distance(to: enemy.position) < radius { if !enemy.isDying { struck = true } enemy.takeDamage(damage) } }") == 1
+        && n(coreFlat, "if !playerStats.unbrokenWindow.isActive && struck {") == 1 && n(coreFlat, "struck") == 3
+        && n(coreFlat, "let ring = SKShapeNode(circleOfRadius: radius)") == 1
+    check("WR17 A7b S11 Erasure's lurch falls back to a lone, hittable arena boss with only the boss-reachable effects at 50% (an activation; the boss Fracture on its own reset window); Unstable Core costs you only when its burst struck something",
+          s11Fallback && s11BossLurch && s11Effects && s11Core,
+          "fallback \(s11Fallback) bossLurch \(s11BossLurch) effects \(s11Effects) core \(s11Core)")
+
+    // v2.1 A7b S12 (CL-127a, CL-126): every targeter picks only what can be hit —
+    // Chain Lightning's jumps, the Electro Pulse, Sentry coils and their boss
+    // fallback, Relay Burn arcs (which skipped nothing before), and the gun's
+    // auto-aim, the lassoed prey included: the next visible hittable target,
+    // else hold fire. None of them filters on `isDying` / `isDead` alone any more.
+    let chainFlat = flatBody(sceneS8, "private func chainLightning("), pulseFlat = flatBody(sceneS8, "private func updateElectroPulse(")
+    let coilFlat = flatBody(sceneS8, "private func updateSentryCoils("), relayFlat = flatBody(sceneS8, "private func fireRelayBurnArc(")
+    let aimFlat = flatBody(sceneS8, "private func findNearestTargetPosition()")
+    // CONTRACT CHANGE, A7b S13 (CL-123a; Oct 1): the four arc/hop candidate loops
+    // became `nearestVisible(…)` calls (WR19); their candidate filters keep the
+    // same hittability terms, pinned here in their new form.
+    let s12Sites = n(chainFlat, "among: enemies.filter { e in isHittable(e) && !visited.contains(where: { $0 === e }) },") == 1
+        && n(pulseFlat, "among: enemies.filter { isHittable($0) },") == 1
+        && n(coilFlat, "among: enemies.filter { isHittable($0) },") == 1
+        && n(coilFlat, "} else if let b = boss, isHittable(b), origin.distance(to: b.position) - b.targetingRadius < range,") == 1
+        && n(relayFlat, "among: enemies.filter { $0 !== source && isHittable($0) },") == 1
+        && n(aimFlat, "if playerStats.skybeamHoming, let node = lassoTargetNode, isHittableTarget(node), player.position.distance(to: node.position) <= range {") == 1
+        && n(aimFlat, "for enemy in enemies where isHittable(enemy) {") == 1 && n(aimFlat, "if let boss = boss, isHittable(boss) {") == 1
+    let s12Stale = [chainFlat, pulseFlat, coilFlat, relayFlat, aimFlat].allSatisfy {
+        !$0.isEmpty && !$0.contains("!enemy.isDying") && !$0.contains("!b.isDead") && !$0.contains("!boss.isDead")
+    }
+    let s12Helper = flatBody(sceneS8, "private func isHittableTarget(_ node: SKNode) -> Bool")
+        == "{ if let enemy = node as? EnemyNode { return isHittable(enemy) } if let boss = node as? (any ArenaBossNode) { return isHittable(boss) } return true }"
+    check("WR18 A7b S12 every targeter picks only hittable bodies — Chain Lightning, Electro Pulse, Sentry coils and their boss fallback, Relay Burn arcs, and the gun's auto-aim (lassoed prey included)",
+          s12Sites && s12Stale && s12Helper, "sites \(s12Sites) stale-free \(s12Stale) helper \(s12Helper)")
+
+    // v2.1 A7b S13 (CL-109; CL-123a/b): arcs and hops — Chain Lightning, Relay
+    // Burn, the Electro Pulse, Sentry T1–T3 and the coils' boss fallback — take
+    // the nearest candidate they can SEE (ArenaGeometry.nearestVisible, executed
+    // in geometry G6) on the exact segment at the arc travel radius, else none;
+    // the T4 Lightning Network is exempt (arena-wide by ruling and copy); and the
+    // gun's Skybeam homing takes the same line-of-sight predicate as every other
+    // auto-aim target, falling through when the prey is occluded.
+    let arcTail = "position: { $0.position }, within: "
+    let s13Arcs = n(chainFlat, "guard let target = arenaGeometry.nearestVisible( from: from, among:") == 1
+        && n(chainFlat, arcTail + "GameConfig.Shock.chainRange, travelRadius: GameConfig.Geometry.arcTravelRadius) else { break }") == 1
+        && n(relayFlat, "guard let target = arenaGeometry.nearestVisible( from: source.position, among:") == 1
+        && n(relayFlat, arcTail + "playerStats.relayBurnRadius, travelRadius: GameConfig.Geometry.arcTravelRadius) else { return }") == 1
+        && n(pulseFlat, "guard let target = arenaGeometry.nearestVisible( from: player.position, among:") == 1
+        && n(pulseFlat, arcTail + "GameConfig.Shock.pulseRange, travelRadius: GameConfig.Geometry.arcTravelRadius) else { return }") == 1
+        && n(coilFlat, "let sight = network ? ArenaGeometry.open : arenaGeometry if let target = sight.nearestVisible( from: origin, among:") == 1
+        && n(coilFlat, arcTail + "range, travelRadius: GameConfig.Geometry.arcTravelRadius) {") == 1
+        && n(coilFlat, "!sight.segmentBlockedExact(origin, b.position, travelRadius: GameConfig.Geometry.arcTravelRadius) {") == 1
+        && n(sceneFlat, "nearestVisible(") == 4 && n(sceneFlat, "GameConfig.Geometry.arcTravelRadius") == 5
+        && [chainFlat, relayFlat, pulseFlat, coilFlat].allSatisfy { !$0.contains(".distance(to: enemy.position)") }
+    let s13Homing = n(aimFlat, "if playerStats.skybeamHoming, let node = lassoTargetNode, isHittableTarget(node), player.position.distance(to: node.position) <= range { if !(solid && arenaGeometry.segmentBlocked( player.position, node.position, travelRadius: GameConfig.Geometry.projectileTravelRadius)) { return node.position } geometryDebug.losSuppressedTargets += 1 }") == 1
+        && (aimFlat.range(of: "let solid = arenaGeometry.hasBlockedGeometry")?.lowerBound ?? aimFlat.endIndex)
+            < (aimFlat.range(of: "if playerStats.skybeamHoming")?.lowerBound ?? aimFlat.startIndex)
+    let geoFlat = flatExec(raw("Sparkforge/Config/ArenaGeometry.swift"))
+    let s13Helper = n(geoFlat, "func nearestVisible<S: Sequence>(from origin: CGPoint, among candidates: S, position: (S.Element) -> CGPoint, within range: CGFloat, travelRadius: CGFloat) -> S.Element? {") == 1
+    check("WR19 A7b S13 arcs and hops take the nearest target they can see (else none), the T4 network is exempt, the coils' boss fallback needs sight, and Skybeam homing uses the gun's line-of-sight predicate",
+          s13Arcs && s13Homing && s13Helper, "arcs \(s13Arcs) homing \(s13Homing) helper \(s13Helper)")
+
+    // v2.1 A7b S14 (CL-109; CL-124a–d), on the EXECUTABLE view:
+    //  • ONE path-tested shove (ArenaGeometry.pathShove, executed in geometry G7)
+    //    for every instant knock — Guard's (still `guardShove`), the deer, the
+    //    Brace rescue (both sites), the boar's sideways shove, Implosion's pull,
+    //    the Panda body check and roll, the kaiju swipe — and the Repulse flight's
+    //    bisection; the legacy `applyKnockback` is gone from the app;
+    //  • the Vine Wall's edge push runs beside the void-well pull, BEFORE the
+    //    frame's geometry resolve (the CL-77 precedent);
+    //  • the Tree T5 lion resolves after each step; Wildbloom flowers root off
+    //    the Carrier and inside the wall (executed in G8; the zone centre is the
+    //    fallback); Rich Soil widens within the garden cap.
+    let appText = flatApp.values.joined(separator: "\n")
+    let shoveBody = flatBody(sceneS8, "private func shove(_ enemy: EnemyNode, along direction: CGPoint, by distance: CGFloat)")
+    let s14Shove = shoveBody == "{ guard distance > 0 else { return } let from = enemy.position enemy.position = arenaGeometry.pathShove(from: from, to: from + direction.normalized * distance, radius: enemy.hitBodyRadius) }"
+        && flatBody(sceneS8, "private func guardShove(") == "{ shove(enemy, along: enemy.position - player.position, by: distance) }"
+        && n(sceneFlat, "shove(target, along: target.position - panda.node.position, by: GameConfig.Panda.bodyCheckKnockback)") == 1
+        && n(sceneFlat, "shove(e, along: e.position - player.position, by: GameConfig.Panda.kaijuKnockback)") == 1
+        && n(sceneFlat, "shove(e, along: e.position - panda.node.position, by: 30 * DeviceScale.gameplay)") == 1
+        && n(sceneFlat, "self.shove(e, along: e.position - origin, by: GameConfig.NatureCanon.deerKnockback)") == 1
+        && n(sceneFlat, "shove(e, along: side * sign, by: missile.shoveForce)") == 1
+        && n(sceneFlat, "shove(enemy, along: enemy.position - player.position, by: 40)") == 2
+        && n(sceneFlat, "shove(e, along: pos - e.position, by: GameConfig.Erasure.implosionPull)") == 1
+        && n(sceneFlat, "to = arenaGeometry.pathShove(from: from, to: to, radius: r)") == 1
+        && !appText.contains("applyKnockback") && !appText.contains("lastFreePoint")
+        && !sceneFlat.contains("enemy.position += dir * 40") && !sceneFlat.contains("e.position += side * sign")
+        && !sceneFlat.contains("e.position += dir * GameConfig.Erasure.implosionPull")
+    let enemiesFlat = flatBody(sceneS8, "private func updateEnemies(")
+    let wellAt = enemiesFlat.range(of: "applyVoidWellPull(dt) applyVineWallEdge(dt) resolveEnemiesAgainstGeometry() }")
+    let s14Order = wellAt != nil && enemiesFlat.hasSuffix("applyVoidWellPull(dt) applyVineWallEdge(dt) resolveEnemiesAgainstGeometry() }")
+        && n(sceneFlat, "applyVineWallEdge(dt)") == 1
+        && n(flatBody(sceneS8, "private func applyVineWallEdge("), "e.position += out * repel * CGFloat(dt)") == 1
+        && !flatBody(sceneS8, "private func updateVineWall(").contains("repel")
+    let s14Places = n(sceneFlat, "lion.position += dir * GameConfig.Tree.lionSpeed * CGFloat(dt) lion.position = arenaGeometry.resolve(lion.position, actorRadius: GameConfig.Tree.lionFootprintRadius)") == 1
+        && flatBody(sceneS8, "private func randomPointOnCultivatedGround()") == "{ guard let zone = cultivatedZones.randomElement() else { return nil } return PlacementSampler.randomPoint(inDiscAt: zone.position, radius: zone.radius * 0.85, in: arenaGeometry, arenaRadius: GameConfig.Arena.radius, margin: GameConfig.Growth.flowerRootMargin, fallback: zone.position) }"
+        && flatBody(sceneS8, "private func modifyAllCultivatedZones(") == "{ let cap = GameConfig.Arena.radius * GameConfig.Growth.maxZoneRadiusFactor for zone in cultivatedZones { zone.setRadius(min(cap, zone.radius * radiusScale)) } }"
+        && n(sceneFlat, "modifyAllCultivatedZones(radiusScale: GameConfig.Growth.richSoilRadiusScale)") == 2 && !sceneFlat.contains("radiusScale: 1.22")
+    check("WR20 A7b S14 one path-tested shove for every instant knock (applyKnockback gone), the Vine Wall pushes before the frame's resolve, the lion resolves each step, flowers root on valid ground, and Rich Soil grows within the garden cap",
+          s14Shove && s14Order && s14Places, "shove \(s14Shove) order \(s14Order) places \(s14Places)")
+
+    // v2.1 A7b S15 (CL-59, CL-127d): boss hazards reach Spark's LIVE (Harden-
+    // shrunk) body — Quench Warden lanes, the Dynamo Choir litany, the Faceted
+    // Lie's plates and Pane burst read the scene-written `playerHitRadius`, and
+    // the Quench Field's wall clamp reads the live radius; centre-point hazards
+    // are untouched (the Titan/Anvilborn slams, the Star, Standardfall).
+    let hazardNodes = ["QuenchWardenNode", "DynamoChoirNode", "FacetedLieNode"].map { flatExec(raw("Sparkforge/Nodes/\($0).swift")) }
+    let s15Nodes = hazardNodes.allSatisfy { $0.contains(", ArenaBossNode, PlayerReachHazards {") && $0.contains("var playerHitRadius: CGFloat = GameConfig.Player.collisionRadius")
+            && $0.components(separatedBy: "GameConfig.Player.collisionRadius").count - 1 == 1 }
+        && hazardNodes[0].contains("QuenchWardenNode.laneHalfWidth + playerHitRadius")
+        && hazardNodes[1].contains("DynamoChoirNode.litanyHitDistance + playerHitRadius")
+        && hazardNodes[2].contains("FacetedLieNode.falseSafePlateReach + playerHitRadius") && hazardNodes[2].contains("FacetedLieNode.paneBurstRadius + playerHitRadius")
+        && flatExec(raw("Sparkforge/Nodes/ArenaBossNode.swift")).contains("protocol PlayerReachHazards: AnyObject { var playerHitRadius: CGFloat { get set } }")
+    let s15Scene = n(sceneFlat, "(boss as? PlayerReachHazards)?.playerHitRadius = playerStats.effectiveCollisionRadius boss?.update(deltaTime: dt, playerPosition: player.position)") == 1
+        && n(sceneFlat, "let maxDist = GameConfig.Arena.radius - playerStats.effectiveCollisionRadius") == 2
+        && !sceneFlat.contains("GameConfig.Arena.radius - GameConfig.Player.collisionRadius")
+    check("WR21 A7b S15 the three bosses' hazards and the Quench Field's wall clamp reach Spark's live (Harden-shrunk) body, written before every boss update",
+          s15Nodes && s15Scene, "nodes \(s15Nodes) scene \(s15Scene)")
+
+    // v2.1 A7b S16 (CL-125, accepted and deferred to the Arena 10 monument): the
+    // monument is not solid for enemies, which is safe only while no enemy and a
+    // live monument share the field. The INVARIANT, retained here: the Unmade
+    // Star's one spawn path (campaign and gauntlet alike) wipes the board before
+    // the monument arrives, and the wave spawn and the mini-boss bell both require
+    // that no boss is on the field. Deleting the wipe, or a gate, must fail.
+    let starFlat = flatBody(sceneS8, "private func spawnUnmadeStar()")
+    let wipeAt = starFlat.range(of: "for e in enemies { e.removeFromParent() } enemies.removeAll()")
+    let starAt = starFlat.range(of: "let star = UnmadeStarNode(")
+    let s16Invariant = wipeAt != nil && starAt != nil && (wipeAt?.upperBound ?? starFlat.endIndex) <= (starAt?.lowerBound ?? starFlat.startIndex)
+        && n(sceneFlat, "UnmadeStarNode(") == 1 && n(sceneFlat, "spawnUnmadeStar()") == 3
+        && n(sceneFlat, "if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }") == 1
+        && n(sceneFlat, "if spawnEvent.shouldSpawnMiniBoss, boss == nil, !arenaBossSpawnedThisRun { spawnMiniBoss()") == 1
+    check("WR22 A7b S16 (CL-125) the monument invariant: the Unmade Star's one spawn path wipes the board before it arrives, and wave spawns and the mini-boss bell require no boss on the field",
+          s16Invariant, "wipe \(wipeAt != nil) star \(starAt != nil)")
+
+    // v2.1 geometry Unit 4 — Arena 6 registered and presented (design lock §8–§9,
+    // reconciliation §5 Unit 4), on the EXECUTABLE view:
+    //  • the Splitworks is arena 6 of ArenaConfig.all (the unlock registry then
+    //    opens it on the Unmade Star's defeat) and the DEBUG shell seam is gone;
+    //  • Boss Mode: the Marchwarden is registered (home arena 5) and the gauntlet
+    //    has its spawner; its defeat records the bestiary, the registry and
+    //    Marchworn; the three Splitworks enemies map onto their bestiary families
+    //    and every family has a live portrait;
+    //  • Marchworn is an earned re-tint in The Broken March family;
+    //  • the Arena 6 cues fire on their tells; the horn opens an Arena 6 run;
+    //  • the BGM deck (BGMDeck, executed in tools/bgm-harness): MusicManager draws
+    //    from ONE deck, never changes the song on a context change, resumes on
+    //    toggle / interruption / foreground, and drops a track that won't start.
+    // String-bearing needles read the CODE view (comments out, literals intact);
+    // the executable view blanks string literals.
+    func flatCode(_ text: String) -> String { SwiftSource.code(text).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+    let sceneCode = flatCode(sceneS8)
+    let arenaFlat = flatCode(raw("Sparkforge/Config/ArenaConfig.swift"))
+    let u4Arena = arenaFlat.contains("static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks]")
+        && arenaFlat.contains("static let splitworks = ArenaConfig( id: 5,") && arenaFlat.contains("bossID: \"marchwarden\",")
+        && !appText.contains("splitworksShell") && !appText.contains("shellIndex") && !appText.contains("forceSplitworksShell")
+    let u4Boss = flatCode(raw("Sparkforge/Systems/BossRegistry.swift")).contains("BossEntry(id: \"marchwarden\", name: \"The Marchwarden\", arenaID: 5, grammar: .arena, accentHex: 0x3F8F8A, make: { _, hp in MarchwardenNode(hpScaling: hp) }),")
+        && n(sceneCode, "case \"marchwarden\": spawnMarchwarden()") == 1
+        && n(sceneCode, "CodexManager.shared.recordDefeat(.marchwarden) ProgressionManager.shared.registerArenaBossDefeat(\"marchwarden\") SkinManager.shared.unlockEarned(\"spark_marchworn\")") == 1
+        && n(sceneFlat, "case is SpurhoundNode: return .spurhound case is LinekeeperNode: return .linekeeper case is RamplateNode: return .ramplate") == 1
+    let portraitFlat = flatExec(raw("Sparkforge/Nodes/BestiaryCodexNode.swift"))
+    let u4Portraits = ["case .spurhound: node = SpurhoundNode(health: 1, xpValue: 0)", "case .linekeeper: node = LinekeeperNode(health: 1, xpValue: 0)",
+                       "case .ramplate: node = RamplateNode(health: 1, xpValue: 0)", "case .marchwarden: node = MarchwardenNode()"].allSatisfy { portraitFlat.contains($0) }
+    let skinFlat = flatCode(raw("Sparkforge/Systems/SkinManager.swift"))
+    let marchwornAt = skinFlat.range(of: "id: \"spark_marchworn\", familyID: \"broken_march\", name: \"Marchworn\",")
+    let u4Skin = skinFlat.contains("SkinFamily(id: \"broken_march\", name: \"The Broken March\", secret: false),")
+        && marchwornAt != nil && skinFlat.components(separatedBy: "id: \"spark_marchworn\"").count == 2
+        && (marchwornAt.map { r in skinFlat[r.upperBound...].prefix(700).contains("tier: .earned,") && skinFlat[r.upperBound...].prefix(900).contains("iapProductID: nil),") } ?? false)
+    let u4Cues = n(sceneFlat, "AudioManager.shared.play(.spurhoundWhine)") == 2 && n(sceneFlat, "keeper.onAimStart = { AudioManager.shared.play(.linekeeperAim) }") == 1
+        && n(sceneFlat, "AudioManager.shared.play(.ramplateBrace)") == 1 && n(sceneFlat, "warden.onMusterCalled = { AudioManager.shared.play(.wardenMuster) }") == 1
+        && n(sceneFlat, "if arenaConfig.id == ArenaConfig.splitworks.id { run(SKAction.sequence([SKAction.wait(forDuration: 1.0), SKAction.run { AudioManager.shared.play(.splitworksHorn) }])) }") == 1
+        && flatExec(raw("Sparkforge/Nodes/LinekeeperNode.swift")).contains("phase = .aim phaseTimer = C.aimDuration onAimStart?()")
+        && flatExec(raw("Sparkforge/Nodes/MarchwardenNode.swift")).contains("phase = .muster phaseTimer = C.musterSignalDuration onMusterCalled?()")
+    let musicRaw = raw("Sparkforge/Systems/MusicManager.swift"), music = flatExec(musicRaw)
+    // Re-pinned after the independent review (m2/m3/N1): every transport entry
+    // routes through `perform`, whose actions come from BGMPolicy (executed in
+    // bgm BP1–BP6); only `.startDeck` and `.playNext` draw; a refused start
+    // restores the track; the user-audio check is a first-start rule.
+    let u4Music = music.contains("private var deck = BGMDeck<URL>([])") && !music.contains("pools") && !music.contains("lastTrack")
+        && flatBody(musicRaw, "func setContext(_ new: Context)") == "{ context = new perform(.contextChanged, fadeIn: true) }"
+        && flatBody(musicRaw, "func refresh()") == "{ guard hasTracks else { return } perform(SettingsManager.shared.bgmEnabled ? .toggledOn : .toggledOff, fadeIn: true) }"
+        && flatBody(musicRaw, "@objc private func handleDidBecomeActive(") == "{ perform(.becameActive, fadeIn: false) }"
+        && flatBody(musicRaw, "@objc private func handleInterruption(").hasSuffix("perform(.interruptionEnded, fadeIn: false) }")
+        && flatBody(musicRaw, "func audioPlayerDidFinishPlaying(").hasSuffix("player = nil perform(.trackFinished, fadeIn: false) }")
+        && music.contains("switch BGMPolicy.action(for: event, enabled: SettingsManager.shared.bgmEnabled, deferring: deferringToUserAudio, hasPlayer: player != nil) {")
+        && music.contains("case .startDeck: playNext(fadeIn: true) case .resume: if let current = player { resume(current, fadeIn: fadeIn) }")
+        && music.contains("case .playNext: playNext(fadeIn: false)")
+        && music.components(separatedBy: "playNext(fadeIn: true)").count == 2 && music.components(separatedBy: "playNext(fadeIn: false)").count == 2
+        && music.contains("if !everStarted, AVAudioSession.sharedInstance().isOtherAudioPlaying {")
+        && music.contains("guard let url = deck.draw(using: &rng) else { return } guard let next = try? AVAudioPlayer(contentsOf: url) else { deck.failed(url)")
+        && music.contains("guard next.play() else { let dropped = deck.refused(url)") && music.contains("if dropped { continue } return }")
+        && music.contains("deck.started(url) everStarted = true")
+        // (re-review pins) BGM OFF fades then pauses; only an ENDED interruption
+        // resumes; a decode error drops the track and routes as `.trackBroken`.
+        && music.contains("case .pause: player?.setVolume(0, fadeDuration: TimeInterval(GameConfig.BGM.crossfade)) DispatchQueue.main.asyncAfter(deadline: .now() + Double(GameConfig.BGM.crossfade)) { [weak self] in if !SettingsManager.shared.bgmEnabled { self?.player?.pause() } }")
+        && music.contains("AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return } perform(.interruptionEnded, fadeIn: false) }")
+        && flatBody(musicRaw, "func audioPlayerDecodeErrorDidOccur(").hasPrefix("{ guard p === player, let url = p.url else { return } deck.failed(url) player = nil")
+        && flatBody(musicRaw, "func audioPlayerDecodeErrorDidOccur(").hasSuffix("perform(.trackBroken, fadeIn: false) }")
+        && music.contains("name: UIApplication.didBecomeActiveNotification")
+        && music.components(separatedBy: "deck.draw(").count == 2
+    // The independent review's fixes (Oct 1): the last arena's title card reads
+    // that arena's own line; a Boss Mode swap re-validates Growth's persistent
+    // placements; the Column Advances finds the Carrier's bodies (arenaLayer).
+    let titleCode = flatCode(raw("Sparkforge/Scenes/TitleScene.swift"))
+    let u4Review = titleCode.contains("arenaReadyLabel.text = arena.finalFelledLine.isEmpty ? \"★ \\(g.boss.uppercased()) HAS FALLEN ★\" : arena.finalFelledLine")
+        && !titleCode.contains("\"★ THE STAR IS UNMADE ★\"")
+        && arenaFlat.contains("finalFelledLine: \"★ THE STAR IS UNMADE ★\"") && arenaFlat.contains("finalFelledLine: \"★ THE MARCH IS BROKEN ★\",")
+        && flatBody(sceneS8, "private func clampLooseNodesToArena()").hasSuffix("xpOrbs.forEach(clamp) cultivatedZones.forEach(clamp) flowers.forEach(clamp) if let tree = treeNode { clamp(tree) } }")
+        && n(sceneFlat, "let solids = self.arenaLayer.children.filter") == 1 && !sceneFlat.contains("worldNode.children.filter { ($0.name")
+        && titleCode.contains("let insets = view?.safeAreaInsets ?? .zero let fit = min(1, (size.height - insets.top - insets.bottom - 16) / panelH) if fit < 1 { modal.setScale(fit) }")
+    check("WR23 v2.1 geometry Unit 4: the Splitworks is arena 6 (shell seam gone); the Marchwarden is in Boss Mode, the bestiary and Marchworn's unlock; Arena 6's cues fire on their tells; MusicManager plays ONE continuous deck that resumes and drops a failed track",
+          u4Arena && u4Boss && u4Portraits && u4Skin && u4Cues && u4Music && u4Review,
+          "arena \(u4Arena) boss \(u4Boss) portraits \(u4Portraits) skin \(u4Skin) cues \(u4Cues) music \(u4Music) review \(u4Review)")
+}
+
+// MARK: - MD · the card-detail modal fits the smallest iPhone (v2.1 A7b, S0b)
+//
+// CardDetailNode is SpriteKit and isn't compiled here, so its vertical layout is
+// MODELLED below, and MD0 pins every constant the model uses to the node's own
+// code lines: change the layout and MD0 fails until the model follows. The
+// ceiling is the iPhone SE 2/3 scene, 667pt tall (portrait). A7a's copy passes
+// held every card to 665pt; the one pre-existing card above that is Phase
+// (666pt, CL-88). Every tree's synergy lines are part of every card's modal, so
+// a synergy line that grows is caught here through its tree's tallest card.
+func wrappedLines(_ text: String, _ maxChars: Int) -> Int {
+    var n = 0, cur = 0
+    for w in text.split(separator: " ") {
+        if cur == 0 { cur = w.count; n += 1 } else if cur + 1 + w.count <= maxChars { cur += 1 + w.count } else { cur = w.count; n += 1 }
+    }
+    return n
+}
+/// The panel height CardDetailNode draws for `c`; `owned` adds the in-run
+/// "TIER n / m" line a multi-tier card shows once taken (the taller case).
+func modalHeight(_ c: Card, owned: Bool) -> Int {
+    var y = 30 + (20 + 14)                                         // name; tag chip + gap
+    if c.maxTier > 1 {
+        if owned { y += 18 }                                       // TIER n / m
+        for t in 1...c.maxTier { y += 14 + 13 * wrappedLines(c.description(forTier: t), 38) + 5 }
+        y += 3
+    } else {
+        y += 16 * wrappedLines(c.description, 34)
+    }
+    if let d = c.detail, !d.isEmpty, !c.isSecret { y += 4 + 13 * wrappedLines(d, 40) + 2 }
+    let tiers = UpgradeManager.synergyTiers(for: c.tag)
+    if !tiers.isEmpty {
+        y += 8 + 16 + 20                                           // divider, header
+        for s in tiers { y += 15 + 13 * wrappedLines(s.effect, 40) + 6 }
+    }
+    y += 8 + 12                                                    // "tap to close"
+    return y + 22 + 18                                             // padTop + padBottom
+}
+do {
+    let node = code("Sparkforge/Nodes/CardDetailNode.swift")
+    let layout: String = {
+        guard let a = node.range(of: "init(content: Content) {"),
+              let b = node.range(of: "@available(*, unavailable)", range: a.upperBound..<node.endIndex) else { return "" }
+        return String(node[a.upperBound..<b.lowerBound])
+    }()
+    let pattern = try! NSRegularExpression(pattern: #"y -= [^\n]+|maxChars: [0-9]+|chipH: CGFloat = [0-9]+"#)
+    let tokens = pattern.matches(in: layout, range: NSRange(layout.startIndex..., in: layout))
+        .compactMap { Range($0.range, in: layout).map { String(layout[$0]).trimmingCharacters(in: .whitespaces) } }
+    let expected = ["y -= 30", "chipH: CGFloat = 20", "y -= chipH + 14", "y -= 18",
+                    "y -= 14", "maxChars: 38", "y -= 13", "y -= 5", "y -= 3",
+                    "maxChars: 34", "y -= 16",
+                    "y -= 4", "maxChars: 40", "y -= 13", "y -= 2",
+                    "y -= 8", "y -= 16", "y -= 20", "y -= 15", "maxChars: 40", "y -= 13", "y -= 6",
+                    "y -= 8", "y -= 12"]
+    let builder = body(node, "static func content(for card: UpgradeManager.UpgradeCard, tagCount: Int, ownedTier: Int) -> Content {")
+    // The layout's STRUCTURE too (internal review MED-2): where each spacing sits
+    // (inside which loop or branch), the starting y, and the panel formula. A
+    // spacing moved into a loop keeps the token order but changes the height.
+    let skeleton = layout.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { $0.hasPrefix("for ") || $0.hasPrefix("if ") || $0.hasPrefix("} else") || $0 == "}" || $0.hasPrefix("y -= ")
+            || $0.hasPrefix("var y") || $0.hasPrefix("let contentHeight") || $0.hasPrefix("let panelH") }
+    let skeletonExpected = [
+        "var y: CGFloat = 0", "y -= 30", "if let second = content.secondaryTag { tags.append(second) }", "for tag in tags {",
+        "if content.masked {", "}", "}", "y -= chipH + 14", "if let tierLine = content.cardTierLine {", "y -= 18", "}",
+        "if let ladder = content.cardLadder, !ladder.isEmpty {", "for rung in ladder {", "y -= 14",
+        "for line in Self.wrap(rung.effect, maxChars: 38) {", "y -= 13", "}", "y -= 5", "}", "y -= 3", "} else {",
+        "for line in Self.wrap(content.effect, maxChars: 34) {", "y -= 16", "}", "}",
+        "if let detail = content.detail, !detail.isEmpty, !content.masked {", "y -= 4", "for line in Self.wrap(detail, maxChars: 40) {",
+        "y -= 13", "}", "y -= 2", "}", "if !content.tiers.isEmpty {", "y -= 8", "y -= 16", "y -= 20", "for tier in content.tiers {",
+        "y -= 15", "for line in Self.wrap(tier.effect, maxChars: 40) {", "y -= 13", "}", "y -= 6", "}", "}", "y -= 8", "y -= 12",
+        "let contentHeight = -y", "let panelH = contentHeight + Self.padTop + Self.padBottom", "}"]
+    check("MD0 the modelled layout is the node's own: every spacing and wrap width in order and in place (the layout's skeleton), the start, the panel formula, the pads, the wrap rule and the content builder",
+          tokens == expected
+            && node.contains("private static let padTop: CGFloat = 22") && node.contains("private static let padBottom: CGFloat = 18")
+            && node.contains("} else if current.count + 1 + word.count <= maxChars {")
+            && layout.contains("if let detail = content.detail, !detail.isEmpty, !content.masked {")
+            && builder.contains("UpgradeManager.synergyTiers(for: card.tag)")
+            && builder.contains("CardTierLine(tier: $0, effect: card.description(forTier: $0), reached: $0 <= ownedTier)")
+            && builder.contains("cardTierLine: card.maxTier > 1 && ownedTier > 0 ?")
+            && builder.contains("effect: card.description, tiers: tiers,")
+            && skeleton == skeletonExpected,
+          "tokens=\(tokens) skeleton=\(skeleton.count)")
+    let heights = pool.map { ($0.id, modalHeight($0, owned: true)) }
+    let over = heights.filter { $0.1 > 667 }
+    check("MD1 every card's detail modal fits the iPhone SE scene (≤ 667pt, in-run, the taller case)",
+          heights.count == pool.count && over.isEmpty, "\(over)")
+    let aboveTarget = Set(heights.filter { $0.1 > 665 }.map { "\($0.0) \($0.1)" })
+    check("MD2 the cards above A7a's 665pt copy target are exactly the known set: Phase at 666pt",
+          aboveTarget == ["void_3 666"] && heights.first { $0.0 == "cap_chill_polarvortex" }?.1 == 665
+            // A7b S11: the copy gates kept both capstone modals where they were.
+            && heights.first { $0.0 == "cap_void_erasure" }?.1 == 665 && heights.first { $0.0 == "cap_fire_everglow" }?.1 == 652,
+          "\(aboveTarget.sorted())")
 }
 
 print("\n\(passed) passed, \(failed) failed")

@@ -1,7 +1,10 @@
 // main.swift — deterministic validators for v2.1 abilities Unit A0: the
 // player damage order (closure table CL-5 §D), Blood Barrier, lethal rescue
-// ordering, kill-credit tiers and game-time timers. Each validator prints
-// PASS/FAIL; exit 1 on any FAIL.
+// ordering, kill-credit tiers and game-time timers. A7b S6 adds VC: the four
+// independent vulnerability channels a body takes damage through (CL-107/116).
+// A7b S7 adds DH: the direct-hit amplifier block, rounded once (CL-94/114/115).
+// A7b S8 adds DH9–DH12: the vulnerability fold, the Overcharge split (CL-114) and the shield.
+// Each validator prints PASS/FAIL; exit 1 on any FAIL.
 
 import CoreGraphics
 import Foundation
@@ -340,6 +343,343 @@ do {
           "barrier=\(stats.bloodBarrier.amount)")
     stats.maxHP = 200
     check("P10g …and leaves it alone when max HP rises", stats.bloodBarrier.amount == 25)
+}
+
+// VC — independent vulnerability channels (A7b S6, G1.8: CL-107 + CL-116).
+// Four sources (Frostbite, Marked, Called, Fracture) each own a channel; a body
+// takes the STRONGEST active one, never a stack; each source clears only
+// itself. Executed on the REAL VulnerabilityChannels (and the shared
+// VulnerabilityCarrier accessor every body reads), with the REAL per-source
+// values: Fracture and BossClass from the extracted config, the other three read
+// from the app's GameConfig.swift (their Stubs mirrors don't carry them). `Body`
+// below drives the channels with EnemyNode's own timers (GameTimer,
+// DelayedWindow) exactly as its applyFracture / scheduleFrostbite /
+// updateStatusEffects do — that wiring, the scene's Called / Marked writers and
+// every boss conformer are pinned on the executable view by catalog WR12.
+do {
+    typealias V = VulnerabilityChannels
+    let configText = (try? String(contentsOfFile: ProcessInfo.processInfo.environment["DP_CONFIG"] ?? "", encoding: .utf8)) ?? ""
+    func configValue(_ key: String) -> CGFloat {
+        guard let r = configText.range(of: "static let \(key): CGFloat = ") else { return .nan }
+        return CGFloat(Double(configText[r.upperBound...].prefix { "0123456789.".contains($0) }) ?? .nan)
+    }
+    let frost = configValue("frostbiteVuln"), called = configValue("calledVulnerability"), marked = configValue("markVulnerability")
+    let fracture = GameConfig.Erasure.fractureVulnerability
+    let value: [V.Source: CGFloat] = [.frostbite: frost, .marked: marked, .called: called, .fracture: fracture]
+    let boss = value.mapValues { GameConfig.BossClass.scaledDebuff($0, isBossClass: true) }
+    check("VC0 the per-source values are unchanged: Frostbite ×2.0, Marked ×1.35, Called ×1.35, Fracture ×1.4; boss-class halves each bonus (×1.5 / ×1.175 / ×1.175 / ×1.2)",
+          frost == 2.0 && marked == 1.35 && called == 1.35 && fracture == 1.4
+            && boss[.frostbite] == 1.5 && boss[.marked] == 1.175 && boss[.called] == 1.175 && boss[.fracture] == 1.2,
+          "\(value) boss \(boss)")
+
+    let fresh = V()
+    let solo = V.Source.allCases.filter { s in
+        var v = V(); v.set(s, value[s]!)
+        return !(v.multiplier == value[s]! && v.isActive(s) && V.Source.allCases.allSatisfy { $0 == s || (!v.isActive($0) && v[$0] == 1.0) })
+    }
+    check("VC1 a fresh store (every enemy and boss spawns with one) carries nothing; each of the four sources activates ITS OWN channel alone",
+          fresh.multiplier == 1.0 && V.Source.allCases.allSatisfy { !fresh.isActive($0) } && solo.isEmpty, "\(solo)")
+
+    var all = V()
+    for s in V.Source.allCases { all.set(s, value[s]!) }
+    let product = value.values.reduce(1, *), sum = 1 + value.values.reduce(0) { $0 + ($1 - 1) }
+    check("VC2 all four active: the strongest alone applies (×2.0), never a product (×\(product)) or a sum (×\(sum))",
+          all.multiplier == 2.0 && all.multiplier == value.values.max() && all.multiplier != product && all.multiplier != sum)
+    check("VC3 the weaker channels stay stored underneath the winner",
+          all.frostbite == frost && all.marked == marked && all.called == called && all.fracture == fracture
+            && V.Source.allCases.allSatisfy { all.isActive($0) })
+
+    var chain = all, revealed = [chain.multiplier]
+    for s in [V.Source.frostbite, .fracture, .called, .marked] { chain.clear(s); revealed.append(chain.multiplier) }
+    check("VC4 clearing the strongest reveals the next strongest, all the way down: ×2.0 → ×1.4 → ×1.35 → ×1.35 → none",
+          revealed == [2.0, 1.4, 1.35, 1.35, 1.0], "\(revealed)")
+
+    let crossClears = V.Source.allCases.flatMap { s -> [String] in
+        var v = all; v.clear(s)
+        return V.Source.allCases.compactMap { o in (o == s ? !v.isActive(o) : v[o] == value[o]!) ? nil : "\(s)→\(o)" }
+    }
+    check("VC5 clearing one source never clears another (Called ending leaves Marked, Frostbite and Fracture; Marked leaves the rest)",
+          crossClears.isEmpty, "\(crossClears)")
+
+    func permutations<T>(_ a: [T]) -> [[T]] {
+        guard a.count > 1 else { return [a] }
+        return a.indices.flatMap { i -> [[T]] in var r = a; let x = r.remove(at: i); return permutations(r).map { [x] + $0 } }
+    }
+    let orders = permutations(V.Source.allCases)
+    let stores = orders.map { order -> V in var v = V(); for s in order { v.set(s, value[s]!) }; return v }
+    var churn = V()
+    for _ in 0..<5 { for s in V.Source.allCases.reversed() { churn.set(s, value[s]!) } }   // Called re-written each frame
+    check("VC6 order-free: all \(orders.count) acquisition orders (and a Called re-write every frame) give the same store and ×2.0",
+          orders.count == 24 && stores.allSatisfy { $0 == all } && churn == all)
+
+    // EnemyNode's timers driving the channels (A0 game time), as updateStatusEffects does.
+    final class Body: VulnerabilityCarrier {
+        var vulnerability = VulnerabilityChannels()
+        var fractureWindow = GameTimer(), frostbiteWindow = DelayedWindow(), frostbiteMultiplier: CGFloat = 1.0
+        func applyFracture(_ m: CGFloat, duration: TimeInterval) { vulnerability.set(.fracture, m); fractureWindow.start(duration) }
+        func scheduleFrostbite(_ m: CGFloat, after delay: TimeInterval, lasting d: TimeInterval) {
+            frostbiteMultiplier = m; frostbiteWindow.schedule(after: delay, lasting: d)
+        }
+        func tick(_ dt: TimeInterval) {
+            if fractureWindow.tick(dt) { vulnerability.clear(.fracture) }
+            switch frostbiteWindow.tick(dt) {
+            case .opened: vulnerability.set(.frostbite, frostbiteMultiplier)
+            case .closed: vulnerability.clear(.frostbite)
+            case .none: break
+            }
+        }
+        func run(_ seconds: TimeInterval) { for _ in 0..<Int(seconds * 64) { tick(1.0 / 64) } }
+    }
+    // The recon's real losses (CL-116): Frostbite +100% for 4s after a 3s freeze;
+    // Skybeam's Called attaches at 3.5s and lets go at 4.5s; Fracture lands at 5s.
+    let b = Body()
+    b.scheduleFrostbite(frost, after: 3, lasting: 4)
+    b.run(3.5)
+    let opened = b.vulnerabilityMultiplier
+    for _ in 0..<64 { b.vulnerability.set(.called, called); b.tick(1.0 / 64) }   // attached: re-written every frame
+    let whileCalled = b.vulnerabilityMultiplier
+    b.vulnerability.clear(.called)                                              // the lasso lets go (clearCalled)
+    let afterCalled = b.vulnerabilityMultiplier
+    b.run(0.5)                                                                  // t = 5s
+    b.applyFracture(fracture, duration: 3)
+    b.run(2)                                                                    // t = 7s: Frostbite closes
+    let frostClosed = b.vulnerabilityMultiplier
+    b.run(1)                                                                    // t = 8s: Fracture expires
+    check("VC7 lifetimes stay each source's own: Called never downgrades a Frostbitten body (×2.0, was ×1.35), letting go keeps Frostbite (was wiped), Frostbite closing reveals Fracture (×1.4), Fracture's expiry ends at none",
+          opened == 2.0 && whileCalled == 2.0 && afterCalled == 2.0 && frostClosed == fracture && b.vulnerabilityMultiplier == 1.0,
+          "\(opened) \(whileCalled) \(afterCalled) \(frostClosed) \(b.vulnerabilityMultiplier)")
+
+    // Marked lands whatever else is on the body, and no other source's timer ends it.
+    let m = Body()
+    m.applyFracture(fracture, duration: 3)
+    m.vulnerability.set(.called, called)
+    let markable = !m.vulnerability.isActive(.marked)
+    m.vulnerability.set(.marked, marked)
+    m.vulnerability.clear(.called)
+    m.run(4)
+    check("VC8 Marked lands on a body already Called and Fractured (it used to wait for an empty slot) and outlives both",
+          markable && m.vulnerability.isActive(.marked) && m.vulnerabilityMultiplier == marked
+            && !m.vulnerability.isActive(.called) && !m.vulnerability.isActive(.fracture))
+
+    // Boss-class: the halved values keep their order, and a boss body resolves
+    // through the same shared accessor as an enemy body.
+    final class BossProbe: VulnerabilityCarrier { var vulnerability = VulnerabilityChannels() }
+    let bp = BossProbe(), ep = Body()
+    for s in V.Source.allCases { bp.vulnerability.set(s, boss[s]!); ep.vulnerability.set(s, boss[s]!) }
+    var bossChain: [CGFloat] = [bp.vulnerabilityMultiplier]
+    for s in [V.Source.frostbite, .fracture, .called] { bp.vulnerability.clear(s); bossChain.append(bp.vulnerabilityMultiplier) }
+    check("VC9 boss-class: ×1.5 > ×1.2 > ×1.175 keep CL-116's order, and a boss body resolves exactly as an enemy body (one shared accessor)",
+          ep.vulnerabilityMultiplier == 1.5 && bossChain == [1.5, 1.2, 1.175, 1.175], "\(bossChain)")
+}
+
+// DH — the direct-hit amplifier block (A7b S7, G1.9 94a: CL-94 / CL-114 / CL-115).
+// Executed on the REAL DirectHitDamage / DirectHitAmplifiers / DirectHitRounding
+// and the REAL CL-70 VoidRounding it rounds with. The per-source values are the
+// app's: Permafrost from the extracted GameConfig.Chill, Brittle Cold and Open
+// Wounds read from GameConfig.swift (their Stubs mirrors lack or mirror them).
+// Means are taken over an evenly spaced grid of rounding units (u = (k + ½)/N),
+// so every expectation is exact, not sampled. Each GameScene chain's call into
+// this routine — its arguments, Forge ahead of it, its result reaching the
+// target's takeDamage — is pinned on the executable view (catalog WR13; the gun
+// chains also by redsmile MW7/MW8).
+do {
+    let configText = (try? String(contentsOfFile: ProcessInfo.processInfo.environment["DP_CONFIG"] ?? "", encoding: .utf8)) ?? ""
+    func configValue(_ key: String) -> CGFloat {
+        guard let r = configText.range(of: "static let \(key): CGFloat = ") else { return .nan }
+        return CGFloat(Double(configText[r.upperBound...].prefix { "0123456789.".contains($0) }) ?? .nan)
+    }
+    let permafrost = GameConfig.Chill.permafrostBonus, brittle = configValue("brittleColdVuln"), wounds = configValue("openWoundsBonus")
+    func enemy(_ p: Bool = false, _ b: Bool = false, _ w: Bool = false) -> DirectHitAmplifiers {
+        .onEnemy(permafrostBonus: p ? permafrost : 0, slowed: p || b, arenaSlowed: false,
+                 brittleCold: b, brittleColdFactor: brittle, frozen: false, stunned: false,
+                 openWoundsBonus: w ? wounds : 0, bleeding: w)
+    }
+    let grid = 10_000
+    func outcomes(_ prefix: Int, _ a: DirectHitAmplifiers) -> [Int] {
+        (0..<grid).map { DirectHitDamage.resolve(prefix, a, rounding: DirectHitRounding(unit: (CGFloat($0) + 0.5) / CGFloat(grid))) }
+    }
+    func mean(_ xs: [Int]) -> CGFloat { CGFloat(xs.reduce(0, +)) / CGFloat(xs.count) }
+    check("DH0 the real values: Permafrost +25%, Brittle Cold ×1.4, Open Wounds +25%",
+          permafrost == 0.25 && brittle == 1.4 && wounds == 0.25, "\(permafrost) \(brittle) \(wounds)")
+
+    let singles: [(String, DirectHitAmplifiers, CGFloat)] = [("Permafrost", enemy(true), 1.25), ("Brittle Cold", enemy(false, true), 1.4), ("Open Wounds", enemy(false, false, true), 1.25)]
+    let unmoved = singles.filter { name, a, x in
+        let o = outcomes(1, a)
+        return !(Set(o) == [1, 2] && abs(mean(o) - x) < 1e-3 && abs(a.product - x) < 1e-12)
+    }.map { $0.0 }
+    check("DH1 each amplifier alone now moves a 1-damage hit: Permafrost / Open Wounds average 1.25, Brittle Cold 1.4 (it truncated to 1 before)",
+          unmoved.isEmpty, "\(unmoved)")
+
+    let all3 = enemy(true, true, true), x3 = 1.25 * 1.4 * 1.25
+    let o3 = outcomes(1, all3)
+    let scaled = (1...40).filter { p in abs(mean(outcomes(p, all3)) - CGFloat(p) * x3) > 2e-3 }
+    check("DH2 all three on a 1-damage hit multiply as fractions: 2 or 3, averaging exactly ×2.1875 (and ×2.1875 for every prefix 1…40)",
+          Set(o3) == [2, 3] && abs(mean(o3) - x3) < 1e-3 && scaled.isEmpty, "mean \(mean(o3)) off \(scaled)")
+
+    var combos: [DirectHitAmplifiers] = []
+    for p in [false, true] { for b in [false, true] { for w in [false, true] { combos.append(enemy(p, b, w)) } } }
+    combos += [.onBoss(openWoundsBonus: wounds, bleeding: true), .onBoss(openWoundsBonus: wounds, bleeding: false)]
+    var outside: [String] = []
+    for p in 1...60 { for a in combos { for k in 0..<64 {
+        let u = (CGFloat(k) + 0.5) / 64, x = CGFloat(p) * a.product
+        let r = DirectHitDamage.resolve(p, a, rounding: DirectHitRounding(unit: u))
+        if r != Int(floor(x + 1e-9)) && r != Int(ceil(x - 1e-9)) { outside.append("p\(p)×\(a.product) u\(u) → \(r)") }
+    } } }
+    // One rounding vs a rounding per step with the same unit: prefix 1, all three, u = 0.5.
+    let once = DirectHitDamage.resolve(1, all3, rounding: DirectHitRounding(unit: 0.5))
+    var stepped = 1
+    for f in [1.25, 1.4, 1.25] as [CGFloat] { stepped = VoidRounding.damage(CGFloat(stepped) * f, unit: 0.5) }
+    check("DH3 ONE rounding, not one per step: every result is ⌊x⌋ or ⌈x⌉ of the exact product (60 prefixes × 10 combos × 64 units); at u = 0.5 one rounding gives 2 where rounding each step gives 1",
+          outside.isEmpty && once == 2 && stepped == 1, "\(outside.prefix(3)) once \(once) stepped \(stepped)")
+
+    let floorOK = (1...200).allSatisfy { p in combos.allSatisfy { a in [0.0, 0.5, 0.999999].allSatisfy { u in
+        let r = DirectHitDamage.resolve(p, a, rounding: DirectHitRounding(unit: u)); return r >= 1 && r >= p } } }
+    check("DH4 minimum 1: a landed hit never deals less than 1, nor less than its integer prefix (every factor is ≥ 1); a 0 prefix stays 0",
+          floorOK && DirectHitDamage.resolve(0, all3, rounding: DirectHitRounding(unit: 0)) == 0)
+
+    let none = DirectHitAmplifiers()
+    let identity = (0...5000).allSatisfy { p in [0.0, 0.25, 0.5, 0.75, 0.999999].allSatisfy { u in
+        DirectHitDamage.resolve(p, none, rounding: DirectHitRounding(unit: u)) == p } }
+    check("DH5 identity: with no amplifier the block returns its integer prefix EXACTLY (0…5000, every unit) — the base, crit, Lucky Break, execute and Forge steps reach it untouched",
+          identity && none.product == 1 && enemy() == none && DirectHitAmplifiers.onBoss(openWoundsBonus: wounds, bleeding: false) == none)
+
+    // CL-114(3)'s own case: a Warp shot at ×1.5 (CL-70 rounding on the shot's
+    // A6 threshold), then Permafrost's ×1.25 in the block. Exact mean 1.875.
+    let n = 400
+    var independent = 0, reused = 0
+    for i in 0..<n { for j in 0..<n {
+        let u1 = (CGFloat(i) + 0.5) / CGFloat(n), u2 = (CGFloat(j) + 0.5) / CGFloat(n)
+        let base = VoidRounding.a6Damage(multiplier: 1, fraction: 1.5, unit: u1)
+        independent += DirectHitDamage.resolve(base, enemy(true), rounding: DirectHitRounding(unit: u2))
+        if j == 0 { reused += DirectHitDamage.resolve(base, enemy(true), rounding: DirectHitRounding(unit: u1)) }
+    } }
+    let meanIndependent = CGFloat(independent) / CGFloat(n * n), meanReused = CGFloat(reused) / CGFloat(n)
+    check("DH6 CL-114(e): an INDEPENDENT threshold is unbiased (Warp ×1.5 then Permafrost ×1.25 averages exactly 1.875); reusing the shot's spent A6 threshold is biased (2.0)",
+          abs(meanIndependent - 1.875) < 1e-3 && abs(meanReused - 2.0) < 1e-3, "independent \(meanIndependent) reused \(meanReused)")
+
+    // Corrective 8: the default draw's DISTRIBUTION, not just its mean and range —
+    // the review showed a two-point draw ({0, 0.999999}) passed the old check.
+    // Bounds sit ≥ 5σ out over 20,000 production draws (unseeded by design).
+    var units: [CGFloat] = [], pairs: [(CGFloat, CGFloat)] = []
+    for _ in 0..<20_000 { let a6 = A6Rounding(), hit = DirectHitRounding(); units.append(hit.unit); pairs.append((a6.unit, hit.unit)) }
+    let mu = units.reduce(0, +) / CGFloat(units.count)
+    let ma = pairs.map { $0.0 }.reduce(0, +) / CGFloat(pairs.count)
+    let cov = pairs.map { ($0.0 - ma) * ($0.1 - mu) }.reduce(0, +) / CGFloat(pairs.count)
+    let va = pairs.map { ($0.0 - ma) * ($0.0 - ma) }.reduce(0, +) / CGFloat(pairs.count)
+    let vh = units.map { ($0 - mu) * ($0 - mu) }.reduce(0, +) / CGFloat(units.count)
+    let r = cov / (va * vh).squareRoot()
+    let sortedUnits = units.sorted(), nu = CGFloat(units.count)
+    var ks: CGFloat = 0
+    for (i, x) in sortedUnits.enumerated() { ks = max(ks, abs(CGFloat(i) / nu - x), abs(CGFloat(i + 1) / nu - x)) }
+    let deciles = stride(from: 0.1, through: 0.9, by: 0.1).map { q in (CGFloat(q), CGFloat(units.filter { $0 < CGFloat(q) }.count) / nu) }
+    let viaDefault = (0..<20_000).map { _ in DirectHitDamage.resolve(1, enemy(true), rounding: DirectHitRounding()) }
+    let defaultMean = CGFloat(viaDefault.reduce(0, +)) / CGFloat(viaDefault.count)
+    check("DH7 a default DirectHitRounding is a fresh UNIFORM draw on [0, 1) (mean ≈ ½ and the full range, as before; now also Kolmogorov–Smirnov < 0.02 and every decile's CDF within 0.02), uncorrelated with the A6 threshold drawn beside it (|r| < 0.03, as before); rounding a 1-damage Permafrost hit through the block on default draws averages ×1.25",
+          units.allSatisfy { $0 >= 0 && $0 < 1 } && abs(mu - 0.5) < 0.01 && units.min()! < 0.01 && units.max()! > 0.99 && abs(r) < 0.03
+            && ks < 0.02 && deciles.allSatisfy { abs($0.0 - $0.1) < 0.02 }
+            && Set(viaDefault).isSubset(of: [1, 2]) && abs(defaultMean - 1.25) < 0.02,
+          "ks \(ks) deciles \(deciles.map { $0.1 }) r \(r) mean \(defaultMean)")
+
+    // The ruled applicability, as a truth table over every flag combination.
+    var wrong: [String] = []
+    for bits in 0..<(1 << 8) {
+        let f = (0..<8).map { bits & (1 << $0) != 0 }
+        let (pOwned, slowed, arena, bOwned, frozen, stunned, wOwned, bleeding) = (f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7])
+        let a = DirectHitAmplifiers.onEnemy(permafrostBonus: pOwned ? permafrost : 0, slowed: slowed, arenaSlowed: arena,
+                                            brittleCold: bOwned, brittleColdFactor: brittle, frozen: frozen, stunned: stunned,
+                                            openWoundsBonus: wOwned ? wounds : 0, bleeding: bleeding)
+        let wantP: CGFloat = pOwned && (slowed || arena) ? 1.25 : 1
+        let wantB: CGFloat = bOwned && (slowed || frozen || stunned) ? 1.4 : 1
+        let wantW: CGFloat = wOwned && bleeding ? 1.25 : 1
+        if a.permafrost != wantP || a.brittleCold != wantB || a.openWounds != wantW { wrong.append("enemy \(f)") }
+        let boss = DirectHitAmplifiers.onBoss(openWoundsBonus: wOwned ? wounds : 0, bleeding: bleeding)
+        if boss.permafrost != 1 || boss.brittleCold != 1 || boss.openWounds != wantW { wrong.append("boss \(f)") }
+    }
+    check("DH8 applicability, all 256 flag combinations: Permafrost on any slow (the arena's included), Brittle Cold on slowed / frozen / stunned, Open Wounds on bleeding; a boss only ever gets Open Wounds",
+          wrong.isEmpty, "\(wrong.prefix(4))")
+}
+
+// DH9–DH11 — A7b S8 (G1.9 94b/94c; CL-114a–d). Executed on the REAL block,
+// OverchargeSplit and PlayerStats. The scene wiring (which values each chain
+// passes, the fire-time split, the direct entries) is pinned by catalog WR13/WR14;
+// the target-side direct entries run on the real nodes (vulnerability RN4/RN5).
+do {
+    let grid = 4096
+    func units() -> [DirectHitRounding] { (0..<grid).map { DirectHitRounding(unit: (CGFloat($0) + 0.5) / CGFloat(grid)) } }
+    let none = DirectHitAmplifiers()
+    func meanDealt(_ p: Int, _ a: DirectHitAmplifiers, _ o: CGFloat, _ v: CGFloat) -> CGFloat {
+        CGFloat(units().map { DirectHitDamage.resolve(p, a, overcharge: o, vulnerability: v, rounding: $0).dealt }.reduce(0, +)) / CGFloat(grid)
+    }
+    // DH9 — the resolved vulnerability joins the ONE rounding (CL-114b).
+    let frostbittenMini = meanDealt(1, none, 1, 1.5), fractured = meanDealt(1, none, 1, 1.4)
+    var foldWrong: [String] = []
+    for p in 1...40 { for v: CGFloat in [1, 1.175, 1.2, 1.35, 1.4, 1.5, 2.0] { for o: CGFloat in [1, 1.05, 1.5] { for r in units().enumerated() where r.offset % 64 == 0 {
+        let h = DirectHitDamage.resolve(p, .onEnemy(permafrostBonus: 0.25, slowed: true, arenaSlowed: false, brittleCold: false, brittleColdFactor: 1.4,
+                                                    frozen: false, stunned: false, openWoundsBonus: 0, bleeding: false),
+                                        overcharge: o, vulnerability: v, rounding: r.element)
+        let x = CGFloat(p) * 1.25 * o * v, xb = CGFloat(p) * 1.25 * o
+        let oneRounding = (h.dealt == Int(floor(x + 1e-9)) || h.dealt == Int(ceil(x - 1e-9))) && (h.basis == Int(floor(xb + 1e-9)) || h.basis == Int(ceil(xb - 1e-9)))
+        if !oneRounding || h.basis > h.dealt || (v == 1 && h.basis != h.dealt) { foldWrong.append("p\(p) v\(v) o\(o) → \(h)") }
+    } } } }
+    check("DH9 the resolved vulnerability folds into the ONE rounding: dealt = ⌊x⌋ or ⌈x⌉ of prefix × amplifiers × Overcharge × vulnerability, basis the same without it (≤ dealt; equal at ×1); a 1-damage hit on a Frostbitten mini-boss now averages 1.5 (in-node it was 2) and a Fractured one 1.4 (it was 1)",
+          foldWrong.isEmpty && abs(frostbittenMini - 1.5) < 1e-3 && abs(fractured - 1.4) < 1e-3
+            && abs(meanDealt(1, .onEnemy(permafrostBonus: 0.25, slowed: true, arenaSlowed: false, brittleCold: false, brittleColdFactor: 1.4,
+                                         frozen: false, stunned: false, openWoundsBonus: 0, bleeding: false), 1.5, 2.0) - 1.25 * 1.5 * 2.0) < 2e-3,
+          "\(foldWrong.prefix(3)) mini \(frostbittenMini) fractured \(fractured)")
+
+    // DH10 — the Overcharge split over an integer-crossing grid (CL-114a).
+    let scales: [CGFloat] = [0.15, 0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1.0, 2.0]
+    var splitWrong: [String] = []
+    for bi in 30...600 { for oi in 0...10 { for s in scales {
+        let B = CGFloat(bi) / 100, O = CGFloat(oi) * 0.05
+        let split = OverchargeSplit(multiplier: (B + O) * s, overchargeFree: B * s, overcharge: O * s)
+        let today = max(1, Int((B + O) * s)), want = max(CGFloat(today), CGFloat(Int(B * s)) + O * s)
+        let lowest = DirectHitDamage.resolve(split.base, none, overcharge: split.factor, vulnerability: 1, rounding: DirectHitRounding(unit: CGFloat(1).nextDown)).dealt
+        if split.todayFloor != today || split.base != max(1, Int(B * s)) || split.factor < 1
+            || CGFloat(split.base) * split.factor < CGFloat(today) || abs(CGFloat(split.base) * split.factor - want) > 1e-9
+            || lowest < today || (O == 0 && (split.factor != 1 || split.base != today)) {
+            splitWrong.append("B\(B) O\(O) s\(s) base \(split.base) factor \(split.factor) today \(today) lowest \(lowest)")
+        }
+    } } }
+    let oneDamage = (0...10).map { oi -> CGFloat in
+        let O = CGFloat(oi) * 0.05, split = OverchargeSplit(multiplier: 1 + O, overchargeFree: 1, overcharge: O)
+        return meanDealt(split.base, none, split.factor, 1) - (1 + O) }
+    let crossing = OverchargeSplit(multiplier: 1.8 + 0.4, overchargeFree: 1.8, overcharge: 0.4)
+    check("DH10 the Overcharge split (56,529 cases over B, O and the real damage scales): base ⌊B·s⌋ (min 1), factor ≥ 1 bringing it to max(today's floor, ⌊B·s⌋ + O·s) EXACTLY, so no shot's BASE pays below today's floor even at the highest unit (the integer prefix after the base — a non-integer crit multiplier such as Deadeye's ×2.1 / ×3.1, Lucky Break, Forge offense, Killing Stroke — is not covered: A7b review M1); no Overcharge = no change; a 1-damage shot averages 1 + O; an Iron Skin crossing (1.8 + 0.4) stays at 2",
+          splitWrong.isEmpty && oneDamage.allSatisfy { abs($0) < 2e-3 } && crossing.base == 1 && CGFloat(crossing.base) * crossing.factor == 2,
+          "\(splitWrong.count) wrong: \(splitWrong.prefix(3)) oneDamage \(oneDamage)")
+
+    // DH11 — the REAL PlayerStats parts: today's multiplier bit-identical, the
+    // Overcharge-free part plus Overcharge's share = it; other users unchanged.
+    var partsWrong: [String] = []
+    var gen = SystemRandomNumberGenerator()
+    for k in 0..<400 {
+        let st = PlayerStats()
+        st.damageMultiplier = CGFloat(Int.random(in: 50...600, using: &gen)) / 100
+        st.overchargeDamagePerSecond = 0.1; st.overchargeMaxBonus = 0.5
+        st.updateOvercharge(TimeInterval(k % 6))
+        if k % 3 == 0 { st.ironSkinDefToDmg = 0.02; st.defense = Int.random(in: 0...40, using: &gen) }
+        if k % 4 == 0 { st.everglowAtkGrowth = CGFloat(Int.random(in: 0...30, using: &gen)) / 100 }
+        for s: CGFloat in [0.5, 1, 2] {
+            let parts = st.overchargeParts(scale: s)
+            if parts.multiplier != st.effectiveDamageMultiplier * s || abs(parts.overchargeFree + parts.overcharge - parts.multiplier) > 1e-9
+                || parts.overcharge != st.overchargeCurrentBonus * s || st.shotFractionDamage(s) != max(1, Int(st.effectiveDamageMultiplier * s)) {
+                partsWrong.append("k\(k) s\(s) \(parts)")
+            }
+        }
+    }
+    check("DH11 the real PlayerStats split: its whole multiplier is today's effectiveDamageMultiplier × scale bit for bit, the Overcharge-free part + Overcharge's share equals it (400 states incl. Iron Skin, Everglow), and shotFractionDamage's other users are unchanged",
+          partsWrong.isEmpty, "\(partsWrong.prefix(3))")
+    // DH12 — Braceguard's halving on the DirectHit: both the delivered value and
+    // the pre-vulnerability basis, exactly today's `max(1, Int(x × multiplier))`.
+    var shieldWrong: [String] = []
+    for b in 1...60 { for d in b...(b * 3) {
+        var h = DirectHit(basis: b, dealt: d)
+        h.shield(by: 0.5)
+        if h.basis != max(1, Int(CGFloat(b) * 0.5)) || h.dealt != max(1, Int(CGFloat(d) * 0.5)) { shieldWrong.append("\(b)/\(d) → \(h)") }
+    } }
+    check("DH12 Braceguard's halving applies to BOTH the delivered hit and its pre-vulnerability basis, exactly as before (max 1, truncated)",
+          shieldWrong.isEmpty, "\(shieldWrong.prefix(3))")
 }
 
 print("\n\(passed) passed, \(failed) failed")

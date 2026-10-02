@@ -21,7 +21,7 @@ cp "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$HERE/Stubs.swift" "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
        "$BUILD/UpgradeManager.swift" "$BUILD/PlayerStats.swift" \
        "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/GameTimer.swift"

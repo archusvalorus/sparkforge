@@ -125,6 +125,8 @@ final class SkinManager {
         SkinFamily(id: "core_spark", name: "Core Spark", secret: false),
         SkinFamily(id: "starforged", name: "Starforged", secret: false),
         SkinFamily(id: "panda",      name: "Panda",      secret: true),
+        // v2.1 geometry Unit 4: The Broken March (Arena 6's first-clear token).
+        SkinFamily(id: "broken_march", name: "The Broken March", secret: false),
         // Later: "verdant" (Verdant Treekeeper, 11–20) + raw-purchasable families.
     ]
 
@@ -192,6 +194,25 @@ final class SkinManager {
                 trailColorHex: 0xB088FF, flareRingColorHex: 0xE0C8FF, glowBoost: 1.3,
                 trailBoost: 2.2, overlay: .constellation),
             iapProductID: premiumStarCrossedProductID),
+
+        // ── The Broken March family (Arena 6 payoff) ───────────────────────
+        // Design lock §8: Marchworn, an EARNED re-tint (no mechanical effect) —
+        // charcoal iron, worn pale markings, oxidized teal accents and narrow
+        // ember-lit fractures. Iron body, teal halo (so it still reads on the
+        // Splitworks' charcoal floor), an ember heart, pale ceramic eyes.
+        SkinDefinition(
+            id: "spark_marchworn", familyID: "broken_march",
+            name: "Marchworn",
+            blurb: "Iron that kept marching after the road broke. Earned in Arena 6.",
+            tier: .earned,
+            appearance: SkinAppearance(
+                coreColorHex: 0x55514C,        // charcoal iron (lifted for readability)
+                glowColorHex: 0x3F8F8A,        // oxidized teal signal paint
+                innerCoreColorHex: 0xFFB070,   // the ember-lit fracture
+                eyeColorHex: 0xE8E0D0,         // worn pale ceramic markings
+                trailColorHex: 0xD9772E,       // kiln-orange embers
+                flareRingColorHex: 0x7FD1C8, glowBoost: 1.25),
+            iapProductID: nil),
 
         // ── Panda family (SECRET — masked ??? until revealed) ──────────────
         SkinDefinition(

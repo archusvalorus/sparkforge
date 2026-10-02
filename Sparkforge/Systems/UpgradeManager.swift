@@ -1022,7 +1022,6 @@ final class UpgradeManager {
             stats.teslaFieldDPS = 0.3
         case (.shock, 7):
             stats.spreadShotInterval = 3
-            stats.spreadShotCount = 3
 
         // BLEED — vulnerability → execution → sustain (v1.8 5b)
         case (.bleed, 3):
@@ -1042,7 +1041,6 @@ final class UpgradeManager {
             // Unbroken Core (CL-54/57): arm the second rescue + equip the
             // projectile shield. The old DEF→damage conversion is retired; the
             // collision shrink stays.
-            stats.unbrokenCoreOwned = true
             stats.unbrokenRescueAvailable = true
             stats.projectileShield.grant()
             stats.collisionShrink *= 0.85
@@ -1061,10 +1059,10 @@ final class UpgradeManager {
         case (.chill, 3):
             stats.slowPotencyMultiplier = 2.0
         case (.chill, 5):
-            stats.shatterChance = 0.2
+            stats.shatterChance = GameConfig.Chill.shatterChance
         case (.chill, 7):
             stats.globalEnemySlow += 0.25
-            stats.shatterSlowThreshold = 0.3
+            stats.shatterSlowThreshold = GameConfig.Chill.absoluteZeroShatterThreshold
 
         // GROWTH (C1.7) — the garden deepens: control → sustain → territory.
         // All three are universal to any Growth build (every Growth build has
@@ -1127,8 +1125,8 @@ final class UpgradeManager {
                     SynergyTier(threshold: 7, title: "Singularity", effect: "Trapped enemies decompose: normal enemies until they die, elites up to 20% max HP per trap. Bosses caught in a black hole take 1% max HP per second.")]
         case .chill:
             return [SynergyTier(threshold: 3, title: "Frostbite", effect: "Chilled enemies move even slower"),
-                    SynergyTier(threshold: 5, title: "Shatter", effect: "Frozen enemies burst when struck"),
-                    SynergyTier(threshold: 7, title: "Absolute Zero", effect: "The arena slows; shatters come easy")]
+                    SynergyTier(threshold: 5, title: "Shatter", effect: "Slowed foes may shatter (elites: 20% HP)"),
+                    SynergyTier(threshold: 7, title: "Absolute Zero", effect: "Non-boss foes slow; shatters come easy")]
         case .growth:
             return [SynergyTier(threshold: 3, title: "Rootbound", effect: "Cultivated ground grips harder — enemies on it are slower"),
                     SynergyTier(threshold: 5, title: "Verdant Rise", effect: "Your ground heals 3 HP per tick"),
@@ -1622,9 +1620,9 @@ final class UpgradeManager {
         
         cards.append(UpgradeCard(
             id: "chill_3", name: "Permafrost", tag: .chill,
-            description: "Slowed enemies take +25% damage",
+            description: "Hits deal +25% to slowed enemies",
             apply: { stats in stats.slowedDamageBonus += GameConfig.Chill.permafrostBonus },
-            detail: "Slowed enemies take 25% more damage, regardless of the slow's source.",
+            detail: "Your projectiles and Red Smile sweeps deal 25% more damage to slowed enemies, whatever slowed them. Damage between whole numbers rounds up by chance.",
             requires: [.chillUnlocked]
         ))
         
@@ -1650,7 +1648,7 @@ final class UpgradeManager {
                 "Trail is permanent",
                 "Ice Rink: enemies -50% speed, you +25%"
             ],
-            detail: "Trail time is per patch of ground. T4's frozen ground lasts for the arena. T5 Ice Rink: freeze the arena, slowing enemies by 50% and increasing your movement speed by 25%. Replaces your chill trail. Requires Whiteout.",
+            detail: "Trail time is per patch of ground. T4's frozen ground lasts for the arena. T5 Ice Rink: freeze the arena, slowing non-boss enemies by 50% and increasing your movement speed by 25%. Replaces your chill trail. Requires Whiteout.",
             provides: [.glacialDrift],
             requires: [.chillUnlocked],
             tierRequires: [5: [.whiteout]]
@@ -1766,7 +1764,6 @@ final class UpgradeManager {
                 // v2.1 A1: a REAL +100% firing rate (the interval halves). The
                 // old "+40%" line was ×0.60 on the interval — really +66.7%.
                 stats.fireRateMultiplier /= (1.0 + GameConfig.Fire.glassEngineFireRateBonus)
-                stats.glassEngineActive = true
                 let hpLoss = Int(CGFloat(stats.maxHP) * GameConfig.Fire.glassEngineMaxHPLoss)
                 stats.maxHP -= hpLoss
                 stats.currentHP = min(stats.currentHP, stats.maxHP)
@@ -1803,7 +1800,7 @@ final class UpgradeManager {
             id: "v13_unstable_core", name: "Unstable Core", tag: .voidT,
             description: "Every 4s, a burst hurts nearby enemies and you",
             apply: { stats in stats.unstableCoreActive = true },
-            detail: "Every 4s, deal 2 damage to enemies within 60pt. Each burst also costs you 10 HP minus your DEF (at least 1).",
+            detail: "Every 4s, deal 2 damage to enemies within 60pt. Each burst also costs you 10 HP minus your DEF (at least 1). With nothing in range, it can't hurt you.",
             requires: [.voidUnlocked]   // v2.1 A6 (CL-82)
         ))
 
@@ -1888,7 +1885,8 @@ final class UpgradeManager {
         cards.append(UpgradeCard(
             id: "v20_thornsoil", name: "Thornsoil", tag: .growth,
             description: "Cultivated ground wounds what walks on it",
-            apply: { stats in stats.thornsoilDPS = 6 },
+            // CL-97 (A7b G1.6): never LOWERS the ground's bite (Wildwood's 8 stands).
+            apply: { stats in stats.thornsoilDPS = max(stats.thornsoilDPS, 6) },
             requires: [.growthUnlocked]
         ))
 
@@ -2045,7 +2043,7 @@ final class UpgradeManager {
                 "Snowmen last 6s",
                 "Damaging a snowman melts it: normals die"
             ],
-            detail: "Hits have a 12% chance to turn an enemy into a snowman for 3s. Each enemy can transform once every 10s. T3: damaging a snowman melts it. Normal enemies die instantly; elites take an additional 20% of max HP as damage. Bosses cannot become snowmen.",
+            detail: "Hits have a 12% chance to turn an enemy into a snowman for 3s (elites for half as long). Each enemy can transform once every 10s. T3: damaging a snowman melts it. Normal enemies die instantly; elites take an additional 20% of max HP as damage. Bosses cannot become snowmen.",
             provides: [.whiteout],
             requires: [.chillUnlocked]
         ))
@@ -2240,7 +2238,7 @@ final class UpgradeManager {
                 "Living Furnace: pulse ×2; getting hit grows ATK",
                 "Everglow: erupt for 500% ATK every 20s"
             ],
-            detail: "Every 2s, a pulse deals 50% ATK to nearby enemies. T2 doubles its radius. T3: each hit you take adds +1% pulse damage, up to +100%. T4 doubles pulse damage, and each hit you take adds +0.5% ATK, up to +50%. T5: every 20s, after a short warning, erupt for 500% ATK across the whole arena. Mini-bosses take half pulse damage. Bosses and mini-bosses take half eruption damage.",
+            detail: "Every 2s, a pulse deals 50% ATK to nearby enemies. T2 doubles its radius. T3: each hit you take adds +1% pulse damage, up to +100%. T4 doubles pulse damage, and each hit you take adds +0.5% ATK, up to +50%. T5: every 20s, after a short warning, erupt for 500% ATK across the whole arena. The pulse skips bosses; mini-bosses take half. Bosses and mini-bosses take half eruption damage.",
             isCapstone: true,
             requires: [.fireUnlocked]   // v2.1 A1: the capstone sits behind Kindle too
         ))
@@ -2359,7 +2357,7 @@ final class UpgradeManager {
                 "Blood Familiar: an invulnerable bat hunts; kills grow its bite",
                 "Bloodfed: +5 max HP per 10 kills; HP feeds ATK",
                 "Bloodhound: bat favors bleeders, executes the weak",
-                "Marked: foes alive 10s take +35% damage",
+                "Marked: bosses at once, foes after 10s: +35%",
                 "The Hunter: hits charge an execute pounce"
             ],
             detail: "The bat heals you for half its damage. T2: +5 max HP per 10 kills (up to +100); 1% of max HP adds to ATK. T3: bites execute normal enemies below 20% HP. T5: shots, bat bites and Red Smile sweeps charge a 4-step gauge; when full, the bat executes the nearest weakened enemy (2s cooldown): normal enemies below 50% HP, bosses and mini-bosses at 10% or less. Bosses and mini-bosses take half bat damage and half the Marked bonus.",
@@ -2396,7 +2394,7 @@ final class UpgradeManager {
                 }
             ],
             tierDescriptions: [
-                "Unstable: your hits charge the void; full meter → reality lurches",
+                "Unstable: hits charge the void; full meter → a lurch (a lone boss: 50%)",   // A7b S11 (CL-119 A1; Brandon's pick, Oct 1)
                 "Void-Touched: ignore shields; lurch more often",
                 "Rift Cannon: every 3rd lurch, a 300% ATK beam",
                 "Echo: shots echo 1.5s later from afar (50% damage)",

@@ -7,7 +7,7 @@
 
 import SpriteKit
 
-class EnemyNode: SKNode {
+class EnemyNode: SKNode, VulnerabilityCarrier {
     
     // MARK: - State
     
@@ -30,9 +30,9 @@ class EnemyNode: SKNode {
 
     /// v2.1 (Geometry 1A): the radius this enemy occupies for ARENA GEOMETRY —
     /// resolution against blocked footprints and (1B) route clearance. It is
-    /// EXPLICIT and independent of both the contact physics body (which never
-    /// tracks setScale — a 2.2× mini-boss still has a 12pt body) and the
-    /// visual. Reconciliation §4/§7.2: geometry footprints must never silently
+    /// EXPLICIT and independent of both the contact physics body (which DOES
+    /// track setScale — a 2.2× mini-boss has a ~26pt body, `hitBodyRadius`;
+    /// settled in A7b S16 on a ticking SpriteKit scene) and the visual. Reconciliation §4/§7.2: geometry footprints must never silently
     /// replace combat hitboxes. Default = visual radius × current scale;
     /// subclasses that phase or fly set 0 to exempt themselves.
     var geometryFootprintRadius: CGFloat {
@@ -106,9 +106,11 @@ class EnemyNode: SKNode {
     /// Bleed ticks that landed during the last `updateStatusEffects` (DEBUG proof).
     var bleedTicksThisFrame: Int { dots.bleed.ticksThisFrame }
     /// v1.9: general vulnerability — scales ALL incoming damage (every source
-    /// routes through takeDamage). 1.0 = none. Reusable temporary-vulnerability
-    /// primitive: Skybeam "Called", later Apex "Marked", Polar Vortex "Frostbitten".
-    var vulnerabilityMultiplier: CGFloat = 1.0
+    /// routes through takeDamage). A7b S6 (CL-107/116): four independent
+    /// channels — Frostbite, Marked, Called, Fracture — and `takeDamage` reads
+    /// the strongest active one through `vulnerabilityMultiplier`
+    /// (VulnerabilityCarrier). 1.0 = none.
+    var vulnerability = VulnerabilityChannels()
     var isVulnerable: Bool { vulnerabilityMultiplier > 1.0 }
     /// v2.0 Phase C (C1.4) — Seed Spore Shot. 0 = unseeded; 1 = a primary seed;
     /// 2 = a re-embedded (secondary) seed. The generation caps the chain: a
@@ -120,13 +122,16 @@ class EnemyNode: SKNode {
     var chillStacks: Int = 0
     private var freezeTimer: TimeInterval = 0
     var isFrozen: Bool { freezeTimer > 0 }
-    private var stunTimer: TimeInterval = 0
+    /// The timed stun (Overload, a panda's prune, Phase Lock), independent of
+    /// the snowman form (A7b S5, R2): see StunHold.
+    private var stunHold = StunHold()
     /// v2.1 A0: timed vulnerability windows on GAME time. These were SKAction
     /// waits, which kept running under the pause menu and the level-up screen.
-    /// They still share `vulnerabilityMultiplier` (last writer wins) as before.
-    // v2.1 A2 Whiteout: the snowman. A transform is a stun with a costume —
+    /// A7b S6: each writes and clears only its own channel (CL-107/116).
+    // v2.1 A2 Whiteout: the snowman. A transform holds like a stun —
     // every subclass already respects `isStunned`, so none of them need to
-    // learn about snowmen. One transform per enemy per cooldown.
+    // learn about snowmen. One transform per enemy per cooldown. A7b S5: it is
+    // its own hold; it never writes or clears the timed stun (StunHold).
     // v2.1 A3 Overload (CL-2): its stun + the 3s per-target immunity after it.
     private var overloadStun = OverloadStunState()
     private var dazedStars: SKNode?
@@ -161,7 +166,7 @@ class EnemyNode: SKNode {
     var isSlowed: Bool { currentSlow > 0 && slowTimer > 0 }
     /// Live status (tells, Open Wounds, Bloodhound). Kill rewards read `diedBleeding`.
     var isBleeding: Bool { dots.bleed.isBleeding }
-    var isStunned: Bool { stunTimer > 0 }
+    var isStunned: Bool { stunHold.isStunned(snowman: snowman.isSnowman) }
     /// v2.1 A4a (CL-17): boss-class takes Burn and Bleed at `BossClass.dotScale`.
     private var dotScale: CGFloat { isMiniBoss ? GameConfig.BossClass.dotScale : 1.0 }
     
@@ -531,7 +536,7 @@ class EnemyNode: SKNode {
     }
     
     func applyStun(_ duration: TimeInterval) {
-        stunTimer = max(stunTimer, duration)
+        stunHold.stun(duration)
         cancelFear()   // v2.1 A6 (CL-80): a stronger control ends fear
     }
 
@@ -540,7 +545,7 @@ class EnemyNode: SKNode {
     @discardableResult
     func applyOverloadStun(_ duration: TimeInterval) -> Bool {
         guard !isDying, overloadStun.tryStun(duration: duration) else { return false }
-        stunTimer = max(stunTimer, duration)
+        stunHold.stun(duration)
         showDazedStars()
         cancelFear()   // v2.1 A6 (CL-80)
         return true
@@ -580,10 +585,9 @@ class EnemyNode: SKNode {
     @discardableResult
     func becomeSnowman(duration: TimeInterval, meltsOnDamage: Bool) -> Bool {
         guard !isDying,
-              let applied = snowman.begin(duration: duration, cooldown: GameConfig.Chill.snowmanCooldown,
-                                          meltsOnDamage: meltsOnDamage, isBossClass: isMiniBoss,
-                                          bossClassScale: GameConfig.BossClass.debuffScale) else { return false }
-        stunTimer = max(stunTimer, applied)
+              snowman.begin(duration: duration, cooldown: GameConfig.Chill.snowmanCooldown,
+                            meltsOnDamage: meltsOnDamage, isBossClass: isMiniBoss,
+                            bossClassScale: GameConfig.BossClass.debuffScale) != nil else { return false }
         showSnowman()
         // v2.1 A6: a transformation ends fear (CL-80) and exits a trap (CL-79).
         cancelFear()
@@ -620,7 +624,6 @@ class EnemyNode: SKNode {
 
     /// Drop the costume. `melted` = damage did it (T3): the blue smiling puddle.
     private func endSnowman(melted: Bool) {
-        stunTimer = 0
         snowmanNode?.removeFromParent()
         snowmanNode = nil
         guard melted, let field = parent else { return }
@@ -657,7 +660,7 @@ class EnemyNode: SKNode {
     /// v1.9 Erasure Fracture: take more damage for a while. Re-applying
     /// restarts the window.
     func applyFracture(_ multiplier: CGFloat, duration: TimeInterval) {
-        vulnerabilityMultiplier = multiplier
+        vulnerability.set(.fracture, multiplier)
         fractureWindow.start(duration)
     }
 
@@ -857,9 +860,7 @@ class EnemyNode: SKNode {
         timeAlive += deltaTime
 
         // v1.6: stun timer ticks here so ALL enemy types respect it
-        if stunTimer > 0 {
-            stunTimer -= deltaTime
-        }
+        stunHold.tick(deltaTime)
 
         // v1.9 Polar Vortex: freeze ticks here too; on thaw, clear Chill + tint.
         if freezeTimer > 0 {
@@ -879,10 +880,10 @@ class EnemyNode: SKNode {
         let wasDazed = overloadStun.isStunned
         overloadStun.tick(deltaTime, immunityDuration: GameConfig.Shock.overloadImmunity)
         if wasDazed, !overloadStun.isStunned { dazedStars?.removeFromParent(); dazedStars = nil }
-        if fractureWindow.tick(deltaTime) { vulnerabilityMultiplier = 1.0 }
+        if fractureWindow.tick(deltaTime) { vulnerability.clear(.fracture) }
         switch frostbiteWindow.tick(deltaTime) {
-        case .opened: vulnerabilityMultiplier = frostbiteMultiplier
-        case .closed: vulnerabilityMultiplier = 1.0
+        case .opened: vulnerability.set(.frostbite, frostbiteMultiplier)
+        case .closed: vulnerability.clear(.frostbite)
         case .none: break
         }
 
@@ -931,6 +932,21 @@ class EnemyNode: SKNode {
     
     @discardableResult
     func takeDamage(_ amount: Int) -> Bool {
+        takeDamage(amount, resolved: nil)
+    }
+
+    /// v2.1 A7b S8 (CL-114c): a DIRECT hit (the gun, a Red Smile sweep). The hit
+    /// chain already folded this body's resolved vulnerability into its one
+    /// rounding (`hit.dealt`), so it is NOT applied again here. Every other
+    /// source (DoTs, chains, bursts…) keeps `takeDamage(_:)` and its in-node rounding.
+    @discardableResult
+    func takeDirectHit(_ hit: DirectHit) -> Bool {
+        takeDamage(hit.basis, resolved: hit.dealt)
+    }
+
+    /// The one body both entries share. `resolved` is a direct hit's
+    /// post-vulnerability amount; nil applies the in-node vulnerability.
+    private func takeDamage(_ amount: Int, resolved: Int?) -> Bool {
         // v2.1 A0: a dying enemy can't die again. Re-hits used to return
         // "killed" a second time — the root of every duplicate kill credit.
         guard !isDying else { return false }
@@ -951,14 +967,17 @@ class EnemyNode: SKNode {
             return true
         case .elite(let extra):
             endSnowman(melted: true)
-            if takeDamage(amount) { return true }
+            if let dealt = resolved {
+                if takeDirectHit(DirectHit(basis: amount, dealt: dealt)) { return true }
+            } else if takeDamage(amount) { return true }
             return takeDamage(extra)
         }
 
         // v1.9: general vulnerability scales every incoming hit (1.0 = no change).
-        let scaled = vulnerabilityMultiplier == 1.0
+        // A7b S8 (CL-114c): a direct hit arrives with it already applied.
+        let scaled = resolved ?? (vulnerabilityMultiplier == 1.0
             ? amount
-            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))
         let healthBefore = health
         health -= scaled
 
@@ -988,13 +1007,9 @@ class EnemyNode: SKNode {
         return false
     }
     
-    // MARK: - Knockback
-    
-    func applyKnockback(from sourcePosition: CGPoint, force: CGFloat) {
-        let direction = (position - sourcePosition).normalized
-        position += direction * force
-    }
-    
+    // v2.1 A7b S14 (CL-124a): the legacy un-path-tested `applyKnockback` is
+    // gone — every knock goes through GameScene's path-tested shove.
+
     // MARK: - Death
     
     private func onDeath() {

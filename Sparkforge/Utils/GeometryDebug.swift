@@ -21,10 +21,6 @@ final class GeometryDebug {
     /// DEV SEAM — draw the geometry overlay in the run. Reinstall the sim
     /// after switching it back off. Announced by the HUD banner while on.
     static let showOverlay: Bool = false
-    /// DEV SEAM — run whatever arena is selected AS the Splitworks shell
-    /// (geometry + palette, existing enemies). Proof-of-foundation lens; the
-    /// shell is not in ArenaConfig.all so nothing unlocks or persists.
-    static let forceSplitworksShell: Bool = false
     #endif
 
     // MARK: Counters (always compiled — cheap, telemetry-readable)
@@ -175,27 +171,24 @@ final class GeometryDebug {
 /// for a device pass — WITHOUT the silent force-unlock that once masked a
 /// prod bug. Progression, persistence, and the title card never see these.
 enum DevSeams {
-    /// nil = off. 0..<ArenaConfig.all.count = that arena; `shellIndex` = the
-    /// Splitworks shell (geometry + palette, existing enemies).
+    /// nil = off. 0..<ArenaConfig.all.count = that arena (the Splitworks is
+    /// arena 6 since geometry Unit 4 registered it).
     static var arenaOverrideIndex: Int? = nil
-    static let shellIndex = ArenaConfig.all.count
     static var overlayEnabled = false
 
     static func cycleArena() {
         switch arenaOverrideIndex {
         case nil: arenaOverrideIndex = 0
-        case let i? where i < shellIndex: arenaOverrideIndex = i + 1
+        case let i? where i + 1 < ArenaConfig.all.count: arenaOverrideIndex = i + 1
         default: arenaOverrideIndex = nil
         }
     }
 
-    static var anyActive: Bool { arenaOverrideIndex != nil || overlayEnabled || GeometryDebug.showOverlay || GeometryDebug.forceSplitworksShell }
+    static var anyActive: Bool { arenaOverrideIndex != nil || overlayEnabled || GeometryDebug.showOverlay }
 
     static var bannerText: String {
         var parts: [String] = []
-        if let i = arenaOverrideIndex {
-            parts.append(i == shellIndex ? "splitworks shell" : "arena \(i + 1)")
-        } else if GeometryDebug.forceSplitworksShell { parts.append("splitworks shell (flag)") }
+        if let i = arenaOverrideIndex { parts.append("arena \(i + 1)") }
         if overlayEnabled || GeometryDebug.showOverlay { parts.append("geometry overlay") }
         return "⚠︎ DEV — " + parts.joined(separator: " · ")
     }

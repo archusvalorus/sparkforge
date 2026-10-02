@@ -16,6 +16,8 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 cp "$ROOT/Sparkforge/Systems/OverloadStunState.swift" \
+   "$ROOT/Sparkforge/Systems/SnowmanState.swift" \
+   "$ROOT/Sparkforge/Systems/StunHold.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$ROOT/Sparkforge/Systems/PlayerDamagePipeline.swift" \
    "$ROOT/Sparkforge/Systems/GuardState.swift" \
@@ -25,9 +27,9 @@ cp "$ROOT/Sparkforge/Systems/OverloadStunState.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
    "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
-       "$BUILD/OverloadStunState.swift" "$BUILD/GameTimer.swift" \
+       "$BUILD/OverloadStunState.swift" "$BUILD/SnowmanState.swift" "$BUILD/StunHold.swift" "$BUILD/GameTimer.swift" \
        "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/PlayerStats.swift" \
        "$BUILD/UpgradeManager.swift"
 "$BUILD/harness"

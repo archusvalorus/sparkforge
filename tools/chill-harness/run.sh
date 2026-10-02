@@ -5,8 +5,8 @@
 # UpgradeManager.swift (+ PlayerDamagePipeline.swift, which PlayerStats needs)
 # against the signature harness's host stubs, then runs the deterministic
 # validators in main.swift: Glacial Drift's frozen ground (CL-11), the
-# snowman melt rule (CL-7), and the reworked Chill cards applied through
-# the real card pool. Re-run after ANY change to chilled ground, snowmen or the Chill tree —
+# snowman melt rule (CL-7), the Shatter rule (A7b S10, CL-99/CL-118), and
+# the reworked Chill cards applied through the real card pool. Re-run after ANY change to chilled ground, snowmen or the Chill tree —
 # exits non-zero on any failure.
 #
 # Usage (from repo root):  sh tools/chill-harness/run.sh
@@ -17,6 +17,7 @@ BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 cp "$ROOT/Sparkforge/Systems/ChillGround.swift" \
    "$ROOT/Sparkforge/Systems/SnowmanState.swift" \
+   "$ROOT/Sparkforge/Systems/ShatterRule.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$ROOT/Sparkforge/Systems/PlayerDamagePipeline.swift" \
    "$ROOT/Sparkforge/Systems/GuardState.swift" \
@@ -26,9 +27,9 @@ cp "$ROOT/Sparkforge/Systems/ChillGround.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
    "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
-       "$BUILD/ChillGround.swift" "$BUILD/SnowmanState.swift" "$BUILD/GameTimer.swift" \
+       "$BUILD/ChillGround.swift" "$BUILD/SnowmanState.swift" "$BUILD/ShatterRule.swift" "$BUILD/GameTimer.swift" \
        "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/PlayerStats.swift" \
        "$BUILD/UpgradeManager.swift"
 "$BUILD/harness"

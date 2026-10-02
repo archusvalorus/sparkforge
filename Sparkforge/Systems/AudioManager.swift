@@ -21,6 +21,13 @@ final class AudioManager {
         case buildHint
         case skyStrike
         case bossExecute
+        // v2.1 geometry Unit 4 — Arena 6 cues (design lock §9), synthesized
+        // with the same helpers as every sound here (no assets).
+        case spurhoundWhine     // the Spurhound's acceleration whine
+        case linekeeperAim      // the Linekeeper's aim tone
+        case ramplateBrace      // the Ramplate's brace impact
+        case wardenMuster       // the Marchwarden's muster call
+        case splitworksHorn     // a signal horn that never receives an answer
     }
 
     private let engine = AVAudioEngine()
@@ -170,6 +177,9 @@ final class AudioManager {
                 return (crack + body) * 0.55
             }
 
+        case .spurhoundWhine, .linekeeperAim, .ramplateBrace, .wardenMuster, .splitworksHorn:
+            return renderSplitworks(sfx)
+
         case .bossExecute:
             // A deep, loud explosive boom + gore crunch — the boss-finish payoff.
             let d = 0.6
@@ -185,7 +195,62 @@ final class AudioManager {
         }
     }
 
-    // MARK: - Synth helpers
+    // MARK: - Synth helpers (Arena 6 cues render below, in renderSplitworks)
+
+    /// v2.1 geometry Unit 4: the Splitworks' voice — "a procession failing to
+    /// complete" (design lock §9). Restrained on purpose: short, quieter than
+    /// the combat payoffs, and only on the tells that teach a verb.
+    private static func renderSplitworks(_ sfx: SFX) -> AVAudioPCMBuffer? {
+        switch sfx {
+        case .spurhoundWhine:
+            // A thin turbine whine climbing as it commits — the flank is coming.
+            let d = 0.34
+            return synth(duration: d) { t in
+                let ph = sweepPhase(f0: 320, f1: 940, duration: d, t: t)
+                return (sin(ph) + 0.35 * sin(2 * ph)) * envelope(t, duration: d, attack: 0.05) * 0.10
+            }
+        case .linekeeperAim:
+            // A steady, faintly wavering sight tone — the line is being drawn.
+            let d = 0.26
+            return synth(duration: d) { t in
+                let vib = 1 + 0.004 * sin(2 * .pi * 11 * t)
+                return sin(2 * .pi * 1320 * vib * t) * envelope(t, duration: d, attack: 0.03) * 0.07
+            }
+        case .ramplateBrace:
+            // Iron planting into stone: a dropping thud, a grit burst, a dull clang.
+            let d = 0.26
+            return synthStateful(duration: d) { t, state in
+                state.seed = state.seed &* 1_664_525 &+ 1_013_904_223
+                let white = Double(state.seed >> 8) / Double(1 << 24) * 2 - 1
+                state.lowpass += 0.10 * (white - state.lowpass)
+                let thud = sin(sweepPhase(f0: 120, f1: 66, duration: d, t: t))
+                let clang = sin(2 * .pi * 420 * t) * 0.25
+                return (thud * 0.7 + state.lowpass * 0.6 + clang) * envelope(t, duration: d, attack: 0.002) * 0.38
+            }
+        case .wardenMuster:
+            // A brass-ish two-note call (D3 → G3) — the column is summoned.
+            let d = 0.8
+            return synth(duration: d) { t in
+                let f = t < 0.32 ? 146.8 : 196.0
+                let local = t < 0.32 ? t : t - 0.32
+                let dur = t < 0.32 ? 0.34 : 0.48
+                let s = sin(2 * .pi * f * local) + 0.5 * sin(2 * .pi * 2 * f * local) + 0.25 * sin(2 * .pi * 3 * f * local)
+                return s * envelope(local, duration: dur, attack: 0.06) * 0.22
+            }
+        case .splitworksHorn:
+            // One distant signal horn, low and long, with nothing answering it.
+            let d = 1.6
+            return synthStateful(duration: d) { t, state in
+                state.seed = state.seed &* 1_664_525 &+ 1_013_904_223
+                let breath = (Double(state.seed >> 8) / Double(1 << 24) * 2 - 1) * 0.03
+                let swell = min(t / 0.5, 1.0) * max(0, 1 - max(0, t - 1.0) / 0.6)
+                let s = sin(2 * .pi * 110 * t) + 0.4 * sin(2 * .pi * 220 * t) + 0.15 * sin(2 * .pi * 330 * t)
+                return (s + breath) * swell * 0.13
+            }
+        default:
+            return nil
+        }
+    }
 
     private struct NoiseState {
         var seed: UInt32 = 0x5EED

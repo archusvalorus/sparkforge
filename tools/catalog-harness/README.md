@@ -19,7 +19,9 @@ Test support only. Nothing under `tools/` is part of the app target.
 | SL | the same-level exclusion on every draw path (Reviewer F2) |
 | PB | production boundaries: capstone-guarantee cadence, Panda's schedule, `reset()`, the real Codex write, the scene's level plumbing (Reviewer F3) |
 | PA / CT / CP | Panda via its scheduler; the Codex tally and retired ids; the approved copy and its fit |
-| WR | scene wiring that can't be executed, matched on exact code lines (comments stripped) |
+| WR | scene wiring that can't be executed, matched on exact code lines; the source is read as CODE through the shared `tools/signature-draw-harness/SwiftSource.swift` (line, block and nested block comments removed, string literals intact), and WR8 proves structure (each DEBUG banner reachable straight from its hot flag); WR9 (A7b S3) pins the exact active tokens that hand the gun Storm Engine's volley count (CL-98), WR10 (A7b S4) the ones that slow enemies on cultivated ground by the run's `terraSlow` (CL-96), WR11 (A7b S5) EnemyNode's independent snowman / timed-stun holds (R2), WR12 (A7b S6) the four independent vulnerability channels across every app source (CL-107/116), WR13 (A7b S7/S8) the four direct-hit chains' one block and its path to the target's direct entry (CL-94/114/115), WR14 (A7b S8) the Overcharge split's reach, the direct entries and the punish routing (CL-114a/c), WR15 (A7b S9) the replacement icicle's crit roll and Calculated Strike count (CL-117), WR16 (A7b S10) both Shatter sites' one rule, exits and tuning (CL-118), WR17 (A7b S11) Erasure's lone-boss fallback and Unstable Core's struck-only cost (CL-119/120), WR18 (A7b S12) hittability for every targeter, the gun's auto-aim included (CL-126/127a), WR19 (A7b S13) arcs and hops see their target and Skybeam homing's line of sight (CL-123), WR20 (A7b S14) the one path-tested shove and valid placements (CL-124), WR21 (A7b S15) boss hazards reach the live body (CL-127d), and WR22 (A7b S16) CL-125's monument invariant |
+| SX | the shared source sanitizer itself, executed on fixtures: every comment form removed, every string form kept, the aligned shape view, `Block`'s depth / enclosing block / early-exit count (corrective 2); the EXECUTABLE view (string contents and inactive `#if` regions excluded, DEBUG active) and the in-branch exit-free path check (corrective 3); comments BLANKED so tokens never fuse, directives parsed as tokens (spaces, tabs, comments between them), unsupported condition forms refused, and the direct control-flow skeleton MW7 pins (corrective 4); a required call must be a STANDALONE statement, never embedded in a ternary, assignment, argument, operator, chain or trailing closure (corrective 5); the EXACT active token sequence (every lexeme verbatim, string literals whole) and its SHA-256, the input of the MW8 / WR8 tripwires; SX15 proves on the real scene that harmless whitespace/comment edits keep the tripwires while a wrapper breaks them (corrective 6) |
+| MD | the card-detail modal fits the smallest iPhone (≤ 667pt; above A7a's 665pt target only Phase). CardDetailNode's layout is modelled; its spacings, wrap widths, pads, structure (which loop or branch each spacing sits in), start and panel formula are pinned to its code (v2.1 A7b S0b) |
 
 ## Commands (from the repo root)
 
@@ -34,7 +36,9 @@ python3 tools/catalog-harness/mutations.py F3 S1       # …only mutants whose i
 The Atlas (`tools/generate-card-atlas.py`) and the canon
 (`tools/generate-ability-canon.py`) render from `--dump`, assert the counts in
 `tools/catalog-expect.json`, and then validate their OWN output before writing
-it. The Atlas checks that the rendered card ids are exactly the catalog's, and
+it. The Atlas's checks are best-effort tooling, not a rendering guarantee
+(CL-112, "Authority" below; known limits in the A7a return packet). It checks
+that the rendered card ids are exactly the catalog's, and
 validates its display-only provenance from a PARSED element tree (stdlib
 `html.parser`), never raw HTML or CSS classes. Visibility is inherited
 (`hidden`, `aria-hidden="true"`, inline `display:none` /
@@ -85,8 +89,8 @@ validates the committed packet without writing (the suite's `canon-file` check).
 `mutations.py` applies one mutant at a time — an exact-string edit, a short
 ordered list of them, or a regex (`RE(...)`) for "every entry"/"move" cases —
 to a throwaway copy
-of `Sparkforge/Systems`, `Sparkforge/Config`, `Sparkforge/Scenes`, `tools`
-and `docs`, and runs the checks listed for it there (Swift harnesses, or the
+of `Sparkforge/Systems`, `Sparkforge/Config`, `Sparkforge/Scenes`,
+`Sparkforge/Nodes`, `Sparkforge/Utils` (A7b S0a), `tools` and `docs`, and runs the checks listed for it there (Swift harnesses, or the
 Atlas / canon generators). The unmutated copy must pass first. A mutant counts
 as **KILLED** only when a check fails by assertion; a compile error or crash
 is **INVALID** and a hang is a **TIMEOUT**, and neither is coverage. It exits

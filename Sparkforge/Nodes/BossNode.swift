@@ -61,7 +61,7 @@ final class BossNode: SKNode {
     private(set) var health: Int
     private(set) var maxHealth: Int
     private(set) var isDead: Bool = false
-    var vulnerabilityMultiplier: CGFloat = 1.0   // v1.9: capstone-debuff vulnerability
+    var vulnerability = VulnerabilityChannels()   // v1.9 capstone-debuff vulnerability; A7b S6 channels
     var challengeFlatReduction: Int = 0          // v2.0 (B3): Boss Mode DEF dial
     
     var healthPercent: CGFloat {
@@ -475,12 +475,12 @@ final class BossNode: SKNode {
     var hitBodyRadius: CGFloat { config.bodyRadius }
 
     @discardableResult
-    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool, resolved: Int?) -> Bool {
         guard !isDead else { return false }
         // v1.9: vulnerability scales every incoming hit (1.0 = no change).
-        let scaled = vulnerabilityMultiplier == 1.0
+        let scaled = resolved ?? (vulnerabilityMultiplier == 1.0
             ? amount
-            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))
         let healthBefore = health
         let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
         health -= dealt

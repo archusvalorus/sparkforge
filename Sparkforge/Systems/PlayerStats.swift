@@ -393,7 +393,7 @@ final class PlayerStats {
     /// Shatter chance on heavily slowed enemies (base: 0)
     var shatterChance: CGFloat = 0.0
     /// Slow threshold for shatter eligibility
-    var shatterSlowThreshold: CGFloat = 0.4
+    var shatterSlowThreshold: CGFloat = GameConfig.Chill.shatterSlowThreshold
     
     /// v2.1 A4a: Bloodthirsty (the Bleed signature, CL-1 Option B) — chance
     /// per PRIMARY hit to inflict the ticking Bleed. 0 = no Bleed source.
@@ -425,9 +425,6 @@ final class PlayerStats {
     /// ×5 Thornwall: multiple of the valid contact's pre-mitigation hit
     /// reflected to the toucher (CL-53: 1.50; arena bosses take 50% of that).
     var thornsContactReflect: CGFloat = 0.0
-    /// ×7 Unbroken Core: the rescue is armed and the projectile shield equipped
-    /// (CL-54/57). Replaces the old always-on DEF→damage conversion.
-    var unbrokenCoreOwned = false
 
     // Void — v2.1 A6 (closure table §B5). The synergy ladder upgrades EVERY
     // player black hole (CL-77): ×3 Blackhole, ×5 Listlessness, ×7 Singularity.
@@ -512,7 +509,7 @@ final class PlayerStats {
     var overloadOwned = false
     var overloadLinked: Bool { overloadOwned && chainLightningTier >= GameConfig.Shock.chainRetention.count }
     var effectiveStunChance: CGFloat {
-        guard overloadOwned else { return stunChance }
+        guard overloadOwned else { return 0 }
         return overloadLinked ? GameConfig.Shock.overloadLinkedChance : GameConfig.Shock.overloadChance
     }
     /// Stun length for this target. Boss-class gets CL-2's fixed durations —
@@ -531,28 +528,8 @@ final class PlayerStats {
     func shotFractionDamage(_ fraction: CGFloat) -> Int { max(1, Int(effectiveDamageMultiplier * fraction)) }
     /// Chain damage multiplier relative to original hit
     var chainDamageMultiplier: CGFloat = 0.5
-    /// v1.7 Copper Vein: extra chain target search radius
-    var shockChainRadiusBonus: CGFloat = 0
 
     // MARK: - v1.7: Coilworks Cards
-
-    /// Induction Step — distance traveled charges the next attack
-    var inductionStepActive: Bool = false
-    /// Points of travel for a full charge
-    var inductionChargeDistance: CGFloat = 380
-    private(set) var inductionCharge: CGFloat = 0  // 0.0–1.0
-
-    func addInductionCharge(distance: CGFloat) {
-        guard inductionStepActive else { return }
-        inductionCharge = min(1.0, inductionCharge + distance / inductionChargeDistance)
-    }
-
-    /// Consume a full charge. Returns the bonus Shock damage (0 if not charged).
-    func consumeInductionCharge() -> Int {
-        guard inductionStepActive, inductionCharge >= 1.0 else { return 0 }
-        inductionCharge = 0
-        return max(3, Int(CGFloat(baseAttack) * 1.5))
-    }
 
     /// Relay Burn (Fire/Shock) — burning foes can arc Shock
     var relayBurnActive: Bool = false
@@ -700,26 +677,8 @@ final class PlayerStats {
     
     /// Every Nth shot fires spread (Lightning Storm)
     var spreadShotInterval: Int = 0
-    var spreadShotCount: Int = 3
-
-    /// v1.6: Stun chance on projectile hit (Overload — was a mislabeled slow)
-    var stunChance: CGFloat = 0.0
-    /// Stun duration in seconds
-    var stunDuration: TimeInterval = 0.5
 
     // MARK: - v1.6: Quench Cards (Lyra)
-
-    /// Arc Wake: damage per spark node dropped while moving (0 = off)
-    var arcWakeDamage: Int = 0
-    var arcWakeDropInterval: TimeInterval = 0.25
-    var arcWakeLifetime: TimeInterval = 1.0
-
-    /// Static Crown: shock burst on level-up (0 = off)
-    var staticCrownDamage: Int = 0
-    var staticCrownRadius: CGFloat = 90.0
-
-    /// Blood Price: bonus damage while HP ≤ 50%
-    var bloodPriceBonus: CGFloat = 0.0
 
     /// Open Vein: bleeding enemies burst on death (0 = off)
     var openVeinDamage: Int = 0
@@ -747,8 +706,9 @@ final class PlayerStats {
     // MARK: - v2.0 Phase C: Growth
     /// > 0 ⇒ Terra is owned and cultivated ground exists.
     var terraZoneRadius: CGFloat = 0.0
-    /// Enemy slow applied inside cultivated ground.
-    var terraSlow: CGFloat = 0.30
+    /// Enemy slow applied inside cultivated ground: the Growth constant, +0.15
+    /// from Rootbound (Growth ×3). The scene reads THIS (CL-96, A7b G1.5).
+    var terraSlow: CGFloat = GameConfig.Growth.enemySlow
     /// Thornsoil: damage per second to enemies standing in cultivated ground.
     var thornsoilDPS: Int = 0
     /// Seed Spore Shot (C1.4). >0 ⇒ shots embed a seed; the number is the burst
@@ -840,9 +800,6 @@ final class PlayerStats {
     var overchargeDamagePerSecond: CGFloat = 0.0
     var overchargeMaxBonus: CGFloat = 0.5
     private(set) var overchargeCurrentBonus: CGFloat = 0.0
-    
-    /// Glass Engine: attack speed boost with max HP penalty (v1.4: was lethal save penalty)
-    var glassEngineActive: Bool = false
     
     /// Phase Skin: brief invulnerability on taking damage
     var phaseSkinCooldown: TimeInterval = 0.0
@@ -1005,6 +962,14 @@ final class PlayerStats {
         shotsFired += 1
         return shotsFired % spreadShotInterval == 0
     }
+
+    /// Pellets in one gun volley: the normal count (1 + Scatter's extras), and
+    /// Storm Engine's spread volley adds its bonus on top (CL-98, A7b G1.3) —
+    /// so the ×7 tier never fires fewer than a normal volley.
+    func volleyPelletCount(isSpreadVolley: Bool) -> Int {
+        let normal = 1 + extraProjectiles
+        return isSpreadVolley ? normal + GameConfig.Shock.stormEngineBonusPellets : normal
+    }
     
     // MARK: - Overcharge
     
@@ -1022,11 +987,6 @@ final class PlayerStats {
     /// Total damage multiplier including overcharge
     var effectiveDamageMultiplier: CGFloat {
         var total = damageMultiplier + overchargeCurrentBonus
-        // v1.6: Blood Price — bonus while at or below half HP (card retired in
-        // v2.1 A4b; dormant at 0 until the A7 cleanup)
-        if bloodPriceBonus > 0 && currentHP * 2 <= maxHP {
-            total += bloodPriceBonus
-        }
         // v2.1 A5 (CL-56): Unbroken Core's window — DEF / ATK snapped at the
         // rescue, fixed for its 10s (0 outside the window).
         total += unbrokenWindow.bonusMultiplier
@@ -1039,10 +999,29 @@ final class PlayerStats {
         return total
     }
 
+    /// A7b S8 (CL-114a): the same multiplier WITHOUT Overcharge — the same
+    /// terms as `effectiveDamageMultiplier`, in the same order, Overcharge left out.
+    var overchargeFreeDamageMultiplier: CGFloat {
+        var total = damageMultiplier
+        total += unbrokenWindow.bonusMultiplier
+        if ironSkinDefToDmg > 0 {
+            total += CGFloat(defense) * ironSkinDefToDmg
+        }
+        total += everglowAtkGrowth
+        return total
+    }
+
+    /// A7b S8 (CL-114a): the Overcharge split of a hit worth `scale` of the shot
+    /// multiplier — a shot's damage scale, the icicle's ×2, the sweep's ×2:
+    /// today's whole multiplier, the Overcharge-free part, and Overcharge's share.
+    func overchargeParts(scale: CGFloat) -> (multiplier: CGFloat, overchargeFree: CGFloat, overcharge: CGFloat) {
+        (effectiveDamageMultiplier * scale, overchargeFreeDamageMultiplier * scale, overchargeCurrentBonus * scale)
+    }
+
     /// Multiplier for the HUD's "effective ATK" readout: the persistent build
     /// multiplier PLUS the permanent DEF-fueled conversion (Iron Skin) and
     /// per-run ATK growth. Excludes volatile combat buffs
-    /// (overcharge/blood price) so the number reflects build power and
+    /// (overcharge) so the number reflects build power and
     /// updates the moment DEF changes — without flickering frame to frame.
     /// v2.1 A5 (CL-56): Unbroken's window IS shown — a fixed 10s bonus, so the
     /// ATK row rises by exactly the snapped DEF for its duration.
@@ -1252,14 +1231,13 @@ final class PlayerStats {
         slowPotencyMultiplier = 1.0
         slowedDamageBonus = 0.0
         shatterChance = 0.0
-        shatterSlowThreshold = 0.4
+        shatterSlowThreshold = GameConfig.Chill.shatterSlowThreshold
         bleedApplyChance = 0.0
         // v1.8 Unit 5b reworked-tree fields
         bleedingEnemyDamageTaken = 0.0
         bleedKillHeal = 0
         ironhideActive = false
         thornsContactReflect = 0.0
-        unbrokenCoreOwned = false
         voidBlackhole = false
         voidListlessness = false
         voidSingularity = false
@@ -1288,9 +1266,6 @@ final class PlayerStats {
         electroPulseActive = false
         staticCrownActive = false
         chainDamageMultiplier = 0.5
-        shockChainRadiusBonus = 0
-        inductionStepActive = false
-        inductionCharge = 0
         relayBurnActive = false
         overclockActive = false
         overclockTimer = 0
@@ -1323,23 +1298,14 @@ final class PlayerStats {
         gravityWellOnExpire = false
         executionThreshold = 0.0
         spreadShotInterval = 0
-        spreadShotCount = 3
-        stunChance = 0.0
-        stunDuration = 0.5
 
         // v1.6 Quench cards
-        arcWakeDamage = 0
-        arcWakeDropInterval = 0.25
-        arcWakeLifetime = 1.0
-        staticCrownDamage = 0
-        staticCrownRadius = 90.0
-        bloodPriceBonus = 0.0
         openVeinDamage = 0
         openVeinRadius = 40.0
         ironBloomActive = false
         ironBloomClock = 0
         terraZoneRadius = 0.0
-        terraSlow = 0.30
+        terraSlow = GameConfig.Growth.enemySlow
         thornsoilDPS = 0
         seedFragments = 0
         seedReembed = false
@@ -1385,7 +1351,6 @@ final class PlayerStats {
         overchargeDamagePerSecond = 0
         overchargeMaxBonus = 0.5
         overchargeCurrentBonus = 0
-        glassEngineActive = false
         phaseSkinCooldown = 0
         phaseSkinDuration = 1.0
         phaseSkinTimer = 0

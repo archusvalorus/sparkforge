@@ -10,7 +10,8 @@
 //   CA  the cards, gates, copy and the ladder (CL-49/50/53/66/67/69)
 //   EL  eligibility through the real draw      KS  kill credit
 //   CF  the REAL GameConfig.Guard (extracted from source, compiled here) = the rulings
-//   WR  the scene WIRING (GameScene isn't compiled — its source is read)
+//   WR  the scene WIRING (GameScene isn't compiled — its source is read);
+//       A7b S3 adds WR19, the boss-class census of every hazard call
 // Each validator prints PASS/FAIL; exit 1 on any FAIL. Everything is seeded
 // except EL1/EL2, which sample the REAL card draw (its palette roll is random).
 
@@ -265,7 +266,7 @@ do {
     s.reset()
     check("UB11 a new run clears the window, the rescue and the shield",
           !s.unbrokenWindow.isActive && s.unbrokenWindow.bonusMultiplier == 0
-            && !s.unbrokenRescueAvailable && !s.projectileShield.isOwned && !s.unbrokenCoreOwned)
+            && !s.unbrokenRescueAvailable && !s.projectileShield.isOwned)
 }
 
 // SH — the projectile shield: one block, then 6s to rearm; invulnerability wins.
@@ -472,12 +473,12 @@ do {
         syn.pickCard(card(id, syn), stats: st, level: i + 1)
         _ = syn.checkSynergies(stats: st)
         if i == 2 { at3 = st.ironhideActive && st.thornsContactReflect == 0 }
-        if i == 4 { at5 = st.thornsContactReflect == 1.50 && !st.unbrokenCoreOwned }
+        if i == 4 { at5 = st.thornsContactReflect == 1.50 && !st.projectileShield.isOwned }
     }
     check("CA16 ×3 Ironhide switches on the % model (CL-52)", at3)
     check("CA17 ×5 Thornwall = 1.50 (CL-53)", at5)
     check("CA18 ×7 arms Unbroken's rescue AND equips the ready shield; the shrink stays (0.70 × 0.85)",
-          st.unbrokenCoreOwned && st.unbrokenRescueAvailable && st.projectileShield.isReady
+          st.projectileShield.isOwned && st.unbrokenRescueAvailable && st.projectileShield.isReady
             && near(st.collisionShrink, 0.70 * 0.85))
     let plain = PlayerStats()
     plain.defense = 30
@@ -564,10 +565,17 @@ do {
 // every pure rule above is only worth anything if the scene calls it.
 do {
     let path = ProcessInfo.processInfo.environment["GUARD_SCENE"] ?? ""
-    guard let src = try? String(contentsOfFile: path, encoding: .utf8) else {
+    guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else {
         check("WR0 GameScene.swift is readable", false, path)
         exit(1)
     }
+    // v2.1 A7b: match CODE only. Every check below (body() and the direct
+    // lookups alike) reads the scene through the shared lexical sanitizer:
+    // line, block and nested block comments removed, string literals intact
+    // (corrective 2 — cutting lines at `//` let a block comment satisfy WR18).
+    let src = SwiftSource.code(raw)
+    check("WR0b the scene is read as code: comments removed (sanitising again changes nothing), strings intact (anchor: applyPlayerDamage)",
+          raw != src && SwiftSource.code(src) == src && src.contains("private func applyPlayerDamage("))
     /// The body of `private func name(` up to the next `    private func`.
     func body(_ name: String) -> String {
         guard let r = src.range(of: "private func \(name)(") else { return "" }
@@ -660,6 +668,70 @@ do {
     check("WR15 death: the window ends, Grounded keeps earned DEF but loses progress, the stance breaks (CL-55/65)",
           died.contains("playerStats.unbrokenWindow.end()") && died.contains("playerStats.resetGroundedCoreProgress()")
             && died.contains("playerStats.resetFortify()") && died.contains("repulseFlights.removeAll()"))
+    // v2.1 A7b (S2, the carried A5 test hardening): the pure classifiers are
+    // executed above; here the SCENE must hand each one the body's own flags.
+    // Every call is matched whole (whitespace-normalised) and counted once, so a
+    // miswired argument (`isSnowman: false`, the wrong body) fails.
+    let flat = src.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    func once(_ call: String) -> Bool { flat.components(separatedBy: call).count == 2 }
+    check("WR18 Repulse and Ironhide receive each body's OWN mini-boss/snowman/hittable flags at every scene call (A5 carried; the arena boss is never a snowman)",
+          once("let launchable = RepulseFlight.isLaunchable(isMiniBoss: enemy.isMiniBoss, isSnowman: enemy.isSnowman)")
+            && once("let shove = RepulseFlight.shoveDistance(tierShove: playerStats.knockbackForce, t1Shove: GameConfig.Guard.repulseShove[0], isMiniBoss: enemy.isMiniBoss, isSnowman: enemy.isSnowman)")
+            && once("guard enemy.parent != nil, !enemy.isDying, !enemy.isSnowman else {")
+            && once("&& RepulseFlight.isPin(isMiniBoss: other.isMiniBoss, isSnowman: other.isSnowman, isHittable: isHittable(other)) {")
+            && once("Ironhide.qualifies(surfaceDistance: enemy.position.distance(to: player.position) - enemy.hitBodyRadius, radius: ironhideRadius, hittable: isHittable(enemy), snowman: enemy.isSnowman) {")
+            && once("Ironhide.qualifies(surfaceDistance: b.position.distance(to: player.position) - b.hitBodyRadius, radius: ironhideRadius, hittable: isHittable(b), snowman: false) {")
+            && flat.components(separatedBy: "RepulseFlight.isLaunchable(").count == 2
+            && flat.components(separatedBy: "RepulseFlight.shoveDistance(").count == 2
+            && flat.components(separatedBy: "RepulseFlight.isPin(").count == 2
+            && flat.components(separatedBy: "Ironhide.qualifies(").count == 3)   // the enemies' call and the boss's
+    // WR19 — A7b S3 (G1.2, the carried A5 item): Grounder's danger pulse and the
+    // Relay Imp arc are Arena 3 ENEMIES, not boss-class, so they pass
+    // `fromBossClass: false` like the Anvilborn slam (no Giantkiller DR; the Boss
+    // Mode ATK dial never applies). Ruled: fix those two sites only — the six
+    // genuine boss hazards keep the default, and the default stays `true`. Read
+    // on the EXECUTABLE view (no comments, string contents or inactive `#if`
+    // regions): every hazard call in the scene, by enclosing function and exact
+    // argument list, is exactly this census, and the flag reaches the pipeline.
+    let hazardCensus: [(function: String, args: [String])] = [
+        ("private func updateEnemies(", ["AnvilbornNode.slamDamage, shakeIntensity: 8, fromBossClass: false"]),
+        ("private func spawnGrounder(", ["damage, shakeIntensity: 8, fromBossClass: false"]),
+        ("private func updateRelayArcs(", ["cfg.relayArcDamage, shakeIntensity: 6, fromBossClass: false"]),
+        ("private func spawnUnmadeStar(", ["damage, shakeIntensity: 7"]),
+        ("private func spawnBoss(", ["damage, shakeIntensity: 10, shakeDuration: 0.3"]),     // the Slag Titan
+        ("private func spawnQuenchWarden(", ["damage, shakeIntensity: 6"]),
+        ("private func spawnDynamoChoir(", ["damage, shakeIntensity: 6"]),
+        ("private func spawnFacetedLie(", ["damage, shakeIntensity: 6"]),
+        ("private func spawnMarchwarden(", ["damage, shakeIntensity: 7"]),
+    ]
+    /// Every `applyBossHazardDamage(` CALL in `text` (the declaration excluded),
+    /// its argument list whitespace-normalised.
+    func hazardCalls(_ text: String) -> [String] {
+        var out: [String] = [], from = text.startIndex
+        while let r = text.range(of: "applyBossHazardDamage(", range: from..<text.endIndex) {
+            from = r.upperBound
+            if text[..<r.lowerBound].hasSuffix("func ") { continue }
+            var depth = 1, end = r.upperBound
+            while end < text.endIndex {
+                if text[end] == "(" { depth += 1 } else if text[end] == ")" { depth -= 1; if depth == 0 { break } }
+                end = text.index(after: end)
+            }
+            out.append(text[r.upperBound..<end].split(whereSeparator: { $0.isWhitespace }).joined(separator: " "))
+        }
+        return out
+    }
+    let exec = SwiftSource.executable(raw)
+    let misplaced = hazardCensus.filter { site in
+        guard let b = SwiftSource.block(in: raw, after: site.function) else { return true }
+        return hazardCalls(String(b.exec[b.open...b.close])) != site.args
+    }.map { $0.function }
+    let flatExec = exec.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    let hazard = body("applyBossHazardDamage")
+    check("WR19 Grounder's pulse and the Relay Imp arc are NOT boss-class (fromBossClass: false, as Anvilborn); the six boss hazards keep the true default (A5 carried, ruled two sites only)",
+          misplaced.isEmpty && hazardCalls(exec).sorted() == hazardCensus.flatMap { $0.args }.sorted()
+            && flatExec.contains("private func applyBossHazardDamage(_ damage: Int, shakeIntensity: CGFloat, shakeDuration: TimeInterval = 0.2, fromBossClass: Bool = true) {")
+            && hazard.components(separatedBy: "let outcome = applyPlayerDamage(damage, fromBossClass: fromBossClass)").count == 2,
+          "misplaced \(misplaced); calls \(hazardCalls(exec))")
 }
 
 print("\n\(passed) passed, \(failed) failed")

@@ -100,6 +100,12 @@ enum GameConfig {
         static let maxZones: Int = 4
         /// Enemy slow inside cultivated ground.
         static let enemySlow: CGFloat = 0.30
+        /// Rich Soil widens every garden by this much — within the garden cap
+        /// below like every growth path (A7b S14, CL-124d; the value was a literal).
+        static let richSoilRadiusScale: CGFloat = 1.22
+        /// A Wildbloom flower roots at least this far inside the arena wall and
+        /// off solid geometry (A7b S14, CL-124c).
+        static let flowerRootMargin: CGFloat = 10
         /// How often ground effects tick (seconds). Damage is per-tick, so the
         /// DPS on a card means what it says.
         static let tickInterval: TimeInterval = 1.0
@@ -187,6 +193,9 @@ enum GameConfig {
         /// Union-box width ÷ standing-body width across the lion's frames.
         static let lionFrameBoxRatio: CGFloat = 1.040
         static var lionSpeed: CGFloat { 210 * DeviceScale.gameplay }
+        /// The lion's ground footprint for the geometry resolve after each step
+        /// (A7b S14, CL-124b) — an ordinary body's.
+        static var lionFootprintRadius: CGFloat { GameConfig.Enemy.visualRadius }
         /// Lion contact damage per maul, as a fraction of Spark's ATK.
         static let lionMaulMult: CGFloat = 0.6
         /// Seconds between mauls. Before this existed the lion dealt its maul on
@@ -373,6 +382,10 @@ enum GameConfig {
         /// line-of-sight tests. Slightly under the true visual so grazing a
         /// corner favors the shooter — generosity reads better than pedantry.
         static let projectileTravelRadius: CGFloat = 3
+        /// v2.1 A7b S13 (CL-109 / CL-123a): the swept thickness of an arc or hop
+        /// (Chain Lightning, Relay Burn, Electro Pulse, Sentry T1–T3) — its target
+        /// needs a clear EXACT segment at this radius.
+        static let arcTravelRadius: CGFloat = 3
     }
 
     // MARK: - v2.1 (Geometry 1B): route guidance
@@ -551,8 +564,9 @@ enum GameConfig {
     /// not competition.
     enum BGM {
         static let volume: Float = 0.4
-        /// Context-change fade (title→run, run→boss). Track-to-track within
-        /// a pool is a straight segue.
+        /// The fade for starting the deck and for the BGM toggle (OFF fades
+        /// out, ON fades the same song back in). Track-to-track is a straight
+        /// segue; a context change never changes the song (geometry Unit 4).
         static let crossfade: Float = 0.9
     }
 
@@ -888,10 +902,11 @@ enum GameConfig {
         static let eventHorizonPeaceDuration: TimeInterval = 3.5  // breather after the wipe, then spawns resume
 
         /// Arena-scaled Event Horizon timer factor (Brandon, Jul 20). Preplanning
-        /// for future arenas — every shipped arena runs at 0.5×. Keyed by the
-        /// 0-based arena id, so `...10` covers Arenas 1–11 (fix ruled → A7b).
+        /// for future arenas — every shipped arena runs at 0.5×. The caller
+        /// passes the 0-based arena id; the bands are 1-based arena NUMBERS,
+        /// so the switch adds 1 (CL-101, A7b G1.4: `...10` is Arenas 1–10).
         static func eventHorizonScale(arena: Int) -> CGFloat {
-            switch arena {
+            switch arena + 1 {
             case ...10:   return 0.5    // halved
             case 11...20: return 0.65   // 35% reduced
             case 21...30: return 0.8    // 20% reduced
@@ -966,8 +981,11 @@ enum GameConfig {
         static let resolveDuration: TimeInterval = 0.45 // he fades into existence
         static let regardPause: TimeInterval = 0.5     // he looks at you (just long enough to register)
         static let crossDuration: TimeInterval = 0.18  // impossible speed
-        /// Dev-only: skip the mastery gate to test the sequence.
+        #if DEBUG
+        /// Dev-only: skip the mastery gate to test the sequence. Release never
+        /// compiles it, and a hot flag is badged on the HUD (A7b S2).
         static let debugForceEntrance: Bool = false
+        #endif
     }
 
     enum Everglow {
@@ -1197,6 +1215,9 @@ enum GameConfig {
         static let overloadLinkedBossDuration: TimeInterval = 0.5
         /// CL-2: per-target immunity after an Overload stun ends.
         static let overloadImmunity: TimeInterval = 3.0
+        /// Storm Engine (Shock ×7, CL-98): its every-3rd spread volley fires
+        /// the normal pellet count + this (3 at base, 6 with Scatter T3).
+        static let stormEngineBonusPellets: Int = 2
 
         // Lightning Sentry (Q-S3, CL-13)
         static let sentryDamageFraction: CGFloat = 0.50
@@ -1269,6 +1290,15 @@ enum GameConfig {
         /// T3: an elite melted by damage takes this much of its max HP on top
         /// of the hit that melted it.
         static let snowmanEliteMeltFraction: CGFloat = 0.20
+
+        // Shatter (Chill ×5; CL-99/CL-118 — A7b S10 moved these out of literals,
+        // values unchanged): a struck foe slowed at least the threshold may
+        // shatter. Normal enemies die; elites take the elite chunk.
+        static let shatterChance: CGFloat = 0.20
+        static let shatterSlowThreshold: CGFloat = 0.40
+        /// Absolute Zero (Chill ×7) lowers the threshold to this.
+        static let absoluteZeroShatterThreshold: CGFloat = 0.30
+        static let shatterEliteFraction: CGFloat = 0.20
     }
 
     // MARK: - v2.1 Abilities A4: Bleed rework

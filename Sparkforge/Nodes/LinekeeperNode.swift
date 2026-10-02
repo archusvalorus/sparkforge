@@ -26,6 +26,8 @@ final class LinekeeperNode: EnemyNode {
     var resolveFiringAnchor: ((CGPoint, CGPoint) -> CGPoint?)?
     var onAnchorChosen: (() -> Void)?
     var onRelocate: (() -> Void)?
+    /// v2.1 geometry Unit 4: the aim begins (its tone plays in the scene).
+    var onAimStart: (() -> Void)?
 
     private var phase: Phase = .seek
     private var phaseTimer: TimeInterval = 0
@@ -166,6 +168,7 @@ final class LinekeeperNode: EnemyNode {
         let C = GameConfig.Linekeeper.self
         phase = .aim
         phaseTimer = C.aimDuration
+        onAimStart?()
         lockedDir = (goal - position).normalized
 
         let path = CGMutablePath()

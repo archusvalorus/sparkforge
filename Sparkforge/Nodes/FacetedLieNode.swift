@@ -21,7 +21,11 @@
 
 import SpriteKit
 
-final class FacetedLieNode: SKNode, ArenaBossNode {
+final class FacetedLieNode: SKNode, ArenaBossNode, PlayerReachHazards {
+
+    /// v2.1 A7b S15 (CL-127d): Spark's live (Harden-shrunk) body, written by the
+    /// scene before each update; every hazard here reaches it.
+    var playerHitRadius: CGFloat = GameConfig.Player.collisionRadius
 
     // MARK: - Tuning
 
@@ -67,7 +71,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
     // MARK: - State
 
     private(set) var health: Int
-    var vulnerabilityMultiplier: CGFloat = 1.0   // v1.9: capstone-debuff vulnerability
+    var vulnerability = VulnerabilityChannels()   // v1.9 capstone-debuff vulnerability; A7b S6 channels
     var challengeFlatReduction: Int = 0          // v2.0 (B3): Boss Mode DEF dial
     private(set) var maxHealth: Int
     private(set) var isDead: Bool = false
@@ -462,7 +466,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
 
         // Live window: standing on a PURPLE plate hurts. Silver is inert.
         if falseSafeBeat == 1 && !falseSafeStruck {
-            let reach = FacetedLieNode.falseSafePlateReach + GameConfig.Player.collisionRadius
+            let reach = FacetedLieNode.falseSafePlateReach + playerHitRadius
             for (plate, danger) in falseSafePlates where danger {
                 if playerPosition.distance(to: plate.position) < reach {
                     falseSafeStruck = true
@@ -613,7 +617,7 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
             run(SKAction.fadeAlpha(to: 1.0, duration: 0.12), withKey: "paneFade")
             emitReentryBurst()
 
-            let reach = FacetedLieNode.paneBurstRadius + GameConfig.Player.collisionRadius
+            let reach = FacetedLieNode.paneBurstRadius + playerHitRadius
             if playerPosition.distance(to: paneReentry) < reach {
                 onHazardDamage?(FacetedLieNode.paneBurstDamage)
             }
@@ -705,11 +709,11 @@ final class FacetedLieNode: SKNode, ArenaBossNode {
     private(set) var isIntangible = false
 
     @discardableResult
-    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool, resolved: Int?) -> Bool {
         guard !isDead else { return false }
-        let scaled = vulnerabilityMultiplier == 1.0
+        let scaled = resolved ?? (vulnerabilityMultiplier == 1.0
             ? amount
-            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))
         let healthBefore = health
         let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
         health -= dealt

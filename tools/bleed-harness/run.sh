@@ -31,7 +31,7 @@ cp "$ROOT/Sparkforge/Systems/BleedState.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
    "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
        "$BUILD/BleedState.swift" "$BUILD/KillContext.swift" "$BUILD/FireClock.swift" \
        "$BUILD/BarrierTellState.swift" \

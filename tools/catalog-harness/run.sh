@@ -23,6 +23,7 @@ cp "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/Sparkforge/Systems/VoidState.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$ROOT/Sparkforge/Systems/CodexManager.swift" \
+   "$ROOT/tools/signature-draw-harness/SwiftSource.swift" \
    "$HERE/main.swift" "$BUILD/"
 # The REAL CodexManager replaces the shared stub (F3.D: a real offer path must
 # be proven to record discovery). Strip the stub's marked block.
@@ -30,8 +31,8 @@ awk '/CODEX-STUB-BEGIN/{skip=1} !skip{print} /CODEX-STUB-END/{skip=0}' \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" > "$BUILD/Stubs.swift"
 grep -q 'final class CodexManager' "$BUILD/Stubs.swift" && { echo "stub CodexManager not stripped" >&2; exit 1; }
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda
-swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock
+swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" "$BUILD/SwiftSource.swift" \
        "$BUILD/UpgradeManager.swift" "$BUILD/PlayerStats.swift" \
        "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/GameTimer.swift" \
        "$BUILD/CodexManager.swift"

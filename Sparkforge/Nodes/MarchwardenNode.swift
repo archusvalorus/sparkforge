@@ -34,7 +34,7 @@ final class MarchwardenNode: SKNode, ArenaBossNode {
     private(set) var health: Int
     private(set) var maxHealth: Int
     private(set) var isDead = false
-    var vulnerabilityMultiplier: CGFloat = 1.0
+    var vulnerability = VulnerabilityChannels()   // A7b S6: capstone-debuff vulnerability channels
     var challengeFlatReduction: Int = 0
     var healthPercent: CGFloat { maxHealth > 0 ? CGFloat(health) / CGFloat(maxHealth) : 0 }
     let contactDamage: Int = GameConfig.Marchwarden.contactDamage
@@ -56,6 +56,8 @@ final class MarchwardenNode: SKNode, ArenaBossNode {
     var onHazardDamage: ((Int) -> Void)?
     var onChargeShove: ((CGPoint) -> Void)?
     var onMuster: ((Int) -> Void)?
+    /// v2.1 geometry Unit 4: the Muster Signal is called (its horn plays in the scene).
+    var onMusterCalled: (() -> Void)?
     var onColumnAdvances: (() -> Void)?
     var onCharge: (() -> Void)?
     var onStandardLanded: (() -> Void)?
@@ -483,6 +485,7 @@ final class MarchwardenNode: SKNode, ArenaBossNode {
         let C = GameConfig.Marchwarden.self
         phase = .muster
         phaseTimer = C.musterSignalDuration
+        onMusterCalled?()
         let angles = gateAngles?() ?? []
         // The gate OPPOSITE the warden (largest angular distance).
         let mine = atan2(position.y, position.x)
@@ -537,9 +540,9 @@ final class MarchwardenNode: SKNode, ArenaBossNode {
     var statusTellAnchor: CGPoint { CGPoint(x: GameConfig.Marchwarden.bodyRadius * 1.2 + 6, y: GameConfig.Marchwarden.bodyRadius + 22) }
 
     @discardableResult
-    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool, resolved: Int?) -> Bool {
         guard !isDead else { return false }
-        let scaled = vulnerabilityMultiplier == 1.0 ? amount : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+        let scaled = resolved ?? (vulnerabilityMultiplier == 1.0 ? amount : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))
         let healthBefore = health
         let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
         health -= dealt

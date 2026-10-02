@@ -6,6 +6,10 @@
 //       guard itself is proven by the sim ledger's gunVolleysDuringForm = 0)
 //   MS  body-radius-aware sector overlap (CL-41)   TB  the Carrier blocks it (CL-38)
 //   RC  the card: dual gate, tags, copy (CL-45/48)   KS  kill credit
+//   MW  the hit meters at the SCENE boundary (A7b S2: GameScene is read as code through
+//       SwiftSource, not compiled; MW7 proves the gun's registrations are unconditional;
+//       MW8 pins their exact accepted token prefixes; A7b S3 G1.1 adds the boss hit's Apex;
+//       A7b S10 MW9: the gun's Shatter exit charges both meters, CL-118c)
 // Each validator prints PASS/FAIL; exit 1 on any FAIL. Everything is seeded
 // except RC6/RC7, which sample the REAL card draw (its palette roll is random).
 
@@ -512,6 +516,201 @@ do {
 check("KS1 a melee kill is FULL credit (on-kill effects, bestiary, gates); the prune stays reward-only",
       KillSource.melee.credit == .full && KillSource.sweep.credit == .rewardOnly
         && KillSource(rawValue: "melee") == .melee)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MW — the hit meters at the SCENE boundary (the carried A4c test hardening,
+// v2.1 A7b S2). MC1–MC4 execute RedSmileContact; these prove every scene site
+// reaches it, so the exact A4c omissions (F1: the boss contact skipping Apex;
+// F2: the Shatter branch returning past both meters) fail an executed run. The
+// scene is read as CODE (comments stripped).
+do {
+    guard let raw = try? String(contentsOfFile: ProcessInfo.processInfo.environment["REDSMILE_SCENE"] ?? "", encoding: .utf8) else {
+        check("MW0 GameScene.swift is readable", false)
+        exit(1)
+    }
+    // Read as CODE through the shared lexical sanitizer (line, block and nested
+    // block comments removed; strings intact) — corrective 2: a `/* … */`
+    // block must not keep a removed meter call alive.
+    let scene = SwiftSource.code(raw)
+    func body(_ signature: String) -> String {
+        guard let r = scene.range(of: signature) else { return "" }
+        let rest = scene[r.upperBound...]
+        return String(rest[..<(rest.range(of: "\n    private func ")?.lowerBound ?? rest.endIndex)])
+    }
+    func count(_ text: String, _ needle: String) -> Int { text.components(separatedBy: needle).count - 1 }
+    func codeLines(_ text: String) -> [String] {
+        text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+    let hit = body("private func redSmileHit(_ enemy: EnemyNode, guaranteedCrit: Bool) -> Int? {")
+    let boss = body("private func redSmileHitBoss(_ bossNode: any ArenaBossNode, guaranteedCrit: Bool) {")
+    let helper = body("private func chargeRedSmileHitMeters(_ contact: RedSmileContact) {")
+    check("MW1 the scene charges the meters at exactly three contact sites: .shatter and .enemy in the enemy hit, .boss in the boss hit",
+          count(scene, "chargeRedSmileHitMeters(") == 4
+            && count(hit, "chargeRedSmileHitMeters(.shatter)") == 1 && count(hit, "chargeRedSmileHitMeters(.enemy)") == 1
+            && count(boss, "chargeRedSmileHitMeters(.boss)") == 1)
+    // Every `return` TOKEN counts (a one-line `…; return nil` or `if x { return }`
+    // is an exit too — internal review MED-1).
+    let returnWord = try! NSRegularExpression(pattern: #"\breturn\b"#)
+    func returns(_ text: String) -> Int { returnWord.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text)) }
+    let lines = codeLines(hit)
+    let exits = lines.indices.filter { lines[$0].hasPrefix("return") }
+    let unguarded = exits.filter { $0 == 0 || !lines[$0 - 1].hasPrefix("chargeRedSmileHitMeters(") }.map { lines[$0] }
+    check("MW2 every exit from a landed enemy contact charges first (A4c F2): both returns in redSmileHit follow their charge, and there are no others",
+          exits.count == 2 && unguarded.isEmpty && returns(hit) == 2, "exits=\(exits.count) tokens=\(returns(hit)) unguarded=\(unguarded)")
+    check("MW3 a landed boss contact ends with its charge and never returns before it (A4c F1)",
+          Array(codeLines(boss).suffix(2)) == ["chargeRedSmileHitMeters(.boss)", "}"] && returns(boss) == 0,
+          "\(codeLines(boss).suffix(2)) returns=\(returns(boss))")
+    check("MW4 neither Red Smile hit function registers a meter directly (only through the one helper)",
+          !hit.isEmpty && !boss.isEmpty
+            && [hit, boss].allSatisfy { !$0.contains("apexRegisterAttack()") && !$0.contains("erasureRegisterHit()") })
+    check("MW5 the helper hands RedSmileContact the meters' own methods (their cooldown and capacity stay authoritative)",
+          helper.contains("contact.chargeHitMeters(apex: { apexRegisterAttack() }, erasure: { erasureRegisterHit() })"))
+    let gun = body("private func handleProjectileHit(")
+    let gunBoss = body("private func handleProjectileHitBoss(")
+    // Each registration is its own unconditional line (a guarded `if … { apexRegisterAttack() }` fails).
+    // A7b S3 (G1.1, contract change): the boss hit charges The Hunter too, so
+    // it registers Apex AND Erasure once each, like the enemy hit.
+    // CONTRACT CHANGE, A7b S10 (CL-118c, A4c F2's twin; Oct 1): the gun's Shatter
+    // exit — a Shatter that ends the hit — registers Apex and Erasure once before
+    // it returns, so the enemy hit spells each registration TWICE: the exit's
+    // (MW9) and the unconditional direct-body one (MW7/MW8). Every path that
+    // lands still registers each meter exactly once.
+    check("MW6 the gun's enemy hit registers Apex and Erasure on its Shatter exit and once unconditionally after it; its boss hit once each, unconditionally",
+          count(gun, "apexRegisterAttack()") == 2 && count(gun, "erasureRegisterHit()") == 2
+            && count(gunBoss, "apexRegisterAttack()") == 1 && count(gunBoss, "erasureRegisterHit()") == 1
+            && codeLines(gun).filter { $0 == "apexRegisterAttack()" || $0 == "erasureRegisterHit()" }.count == 4
+            && codeLines(gunBoss).filter { $0 == "apexRegisterAttack()" || $0 == "erasureRegisterHit()" }.count == 2,
+          "gun apex=\(count(gun, "apexRegisterAttack()")) erasure=\(count(gun, "erasureRegisterHit()")) boss apex=\(count(gunBoss, "apexRegisterAttack()")) erasure=\(count(gunBoss, "erasureRegisterHit()"))")
+    // Corrective 2–4: each registration is an EXECUTABLE call (not text in a
+    // string, not in an inactive `#if` region: SwiftSource's executable view)
+    // directly in its hit function's body (depth 1), and the body's DIRECT
+    // control-flow skeleton before it is exactly the accepted baseline (the
+    // freeze-3 production code), not a count of `return`s. The enemy hit: the
+    // boss-route `if`, the node `guard … else`, then 20 direct-body `if` blocks
+    // (the Glass Blood, Void-secondary and Shatter exits among them). The boss
+    // hit: the node `guard … else`, then 9 direct-body `if` blocks. Any added
+    // guard (whatever ends its else: return, fatalError, throw, a Never call),
+    // `if`, loop, closure or switch before the registration changes the skeleton.
+    // Corrective 5: and each is a STANDALONE statement on its own line (not a
+    // call embedded in a larger expression such as a ternary), in the frozen
+    // accepted shape — a reformatted equivalent fails on purpose.
+    // A7b S3 (G1.1): the boss hit's new Apex registration sits under the same
+    // 9-`if` skeleton, directly before its Erasure one (the enemy hit's order).
+    // CONTRACT CHANGE, A7b S7 (G1.9 94a; authorized re-pin, Sep 30): the three
+    // truncating amplifier `if` blocks (Permafrost, Brittle Cold, Open Wounds)
+    // leave the enemy hit, and Open Wounds' `if` leaves the boss hit — they fold
+    // into ONE DirectHitDamage.resolve statement (no control flow). The enemy
+    // skeleton goes from 20 to 17 direct-body `if` blocks, the boss's from 9 to 8.
+    let enemyHitSkeleton = ["if", "{", "guard", "else", "{"] + Array(repeating: ["if", "{"], count: 17).flatMap { $0 }
+    let bossHitSkeleton = ["guard", "else", "{"] + Array(repeating: ["if", "{"], count: 8).flatMap { $0 }
+    // A7b S10: the DIRECT-BODY registration (depth 1) — exactly one; the Shatter
+    // exit's nested pair is MW9's.
+    func unconditional(_ signature: String, _ call: String, skeleton: [String]) -> Int? {
+        guard let b = SwiftSource.block(in: raw, after: signature) else { return nil }
+        let at = b.executableOffsets(of: call).filter { b.depth(at: $0) == 1 }
+        guard at.count == 1, b.depth(at: at[0]) == 1, b.isStandaloneStatement(at: at[0], length: call.count),
+              b.skeleton(before: at[0]) == skeleton else { return nil }
+        return at[0]
+    }
+    let apexAt = unconditional("private func handleProjectileHit(", "apexRegisterAttack()", skeleton: enemyHitSkeleton)
+    let erasureAt = unconditional("private func handleProjectileHit(", "erasureRegisterHit()", skeleton: enemyHitSkeleton)
+    let bossApexAt = unconditional("private func handleProjectileHitBoss(", "apexRegisterAttack()", skeleton: bossHitSkeleton)
+    let bossErasureAt = unconditional("private func handleProjectileHitBoss(", "erasureRegisterHit()", skeleton: bossHitSkeleton)
+    check("MW7 the gun's registrations are executable, standalone direct-body statements whose preceding control-flow skeleton is exactly the accepted baseline (enemy hit, boss hit); Apex before Erasure on both",
+          apexAt != nil && erasureAt != nil && bossApexAt != nil && bossErasureAt != nil
+            && (apexAt ?? 0) < (erasureAt ?? 0) && (bossApexAt ?? 0) < (bossErasureAt ?? 0),
+          "apex=\(String(describing: apexAt)) erasure=\(String(describing: erasureAt)) bossApex=\(String(describing: bossApexAt)) bossErasure=\(String(describing: bossErasureAt))")
+    // Corrective 6: the EXACT active executable token prefix of each protected
+    // registration path, pinned as the accepted shape (SwiftSource.tokens: no
+    // whitespace or comments, no inactive `#if` regions, every other lexeme
+    // verbatim, string literals whole). RANGE: from the hit function's body `{`
+    // through and including the registration call; nothing after it. FORM:
+    // SHA-256 of the tokens joined by U+001F, with the token count. These are the
+    // freeze-5 production values; any executable change before or around a
+    // registration changes them, and an intentional source change must update
+    // them here, as a reviewed contract change (not a formality).
+    // CONTRACT CHANGE, A7b S3 (G1.1, approved with the §B7 order on Sep 28;
+    // this pin update authorized in the S3 brief, Sep 29): the boss hit gains
+    // `apexRegisterAttack()` directly before its Erasure registration. The
+    // boss → Erasure pin moves from 378 tokens
+    // `65df1de4…4ae4d97` to 381 `fcb3a70e…ba057576` (the old 375-token prefix
+    // + `apexRegisterAttack ( )` + `erasureRegisterHit ( )`, nothing else), and
+    // boss → Apex is new: 378 tokens `6e1236c7…fce68517` (that same 375-token
+    // prefix + `apexRegisterAttack ( )`). Both enemy-hit pins are unchanged.
+    // CONTRACT CHANGE, A7b S7 (G1.9 94a; authorized re-pin, Sep 30): all four
+    // prefixes move by exactly two token edits (a7b/s7/mw8-token-diff.txt) — the
+    // truncating amplifier `if` blocks are deleted (enemy: Permafrost, Brittle
+    // Cold, Open Wounds, 101 tokens; boss: Open Wounds, 31) and ONE
+    // `damage = DirectHitDamage.resolve(damage, .onEnemy(…) / .onBoss(…),
+    // rounding: projectileNode.hitRounding)` is inserted right after Forge
+    // offense's call (76 / 32 tokens); every other token is identical.
+    //   enemy → Apex     1010 `c7a67a79…` → 985 `aab33724…`
+    //   enemy → Erasure  1013 `5b43f499…` → 988 `7708351a…`
+    //   boss → Apex       378 `6e1236c7…` → 379 `3a133100…`
+    //   boss → Erasure    381 `fcb3a70e…` → 382 `00e2c3a7…`
+    // CONTRACT CHANGE, A7b S8 (G1.9 94b/94c; authorized, Oct 1): every prefix moves
+    // by exactly the S8 edits (a7b/s8/mw8-token-diff.txt): the block's result goes
+    // to `hit` (`var hit` / `let hit`) and gains `overcharge: projectileNode
+    // .overchargeFactor, vulnerability: <target>.vulnerabilityMultiplier`; the
+    // enemy hit's Braceguard halving becomes `hit.shield(by: …)` followed by
+    // `damage = hit.basis`; and `takeDamage(damage…)` becomes `takeDirectHit(hit…)`.
+    // Every other token is identical, and the MW7 skeletons are unchanged.
+    //   enemy → Apex      985 `aab33724…` → 995 `e1b8ecfe…`
+    //   enemy → Erasure   988 `7708351a…` → 998 `98e49879…`
+    //   boss → Apex       379 `3a133100…` → 392 `ec66f1e4…`
+    //   boss → Erasure    382 `00e2c3a7…` → 395 `2032f4c2…`
+    // CONTRACT CHANGE, A7b S10 (G1.11 CL-99/CL-118; Brandon's go, Oct 1): the
+    // enemy hit's Shatter becomes ONE `if let shatter = ShatterRule.outcome(…)`
+    // (same single direct-body `if`, so MW7's skeleton is unchanged) whose damage
+    // is `shatter.damage(health:)`, whose kill keeps `iceburstGeneration`, and
+    // whose exit `if killed || shatter.endsHit {` registers Apex then Erasure
+    // (MW9). The pin now reads the DIRECT-BODY registration (the exit's nested
+    // pair precedes it). Every other token is identical; both boss pins are
+    // unchanged (a7b/s9/prefix-token-diff.txt).
+    //   enemy → Apex      995 `e1b8ecfe…` → 1040 `09d0c3f2…`
+    //   enemy → Erasure   998 `98e49879…` → 1043 `8fb496c3…`
+    let accepted: [(signature: String, call: String, count: Int, digest: String)] = [
+        ("private func handleProjectileHit(", "apexRegisterAttack()", 1040, "09d0c3f295f977d39d3f7c2aea2b10831d894fd24beedac5de0737f794757b34"),
+        ("private func handleProjectileHit(", "erasureRegisterHit()", 1043, "8fb496c3bd0d0ca6aeb6d2c6ecda2855655d39f101098c706c5e87ea2f379f27"),
+        ("private func handleProjectileHitBoss(", "apexRegisterAttack()", 392, "ec66f1e48f2c1ae298b07106f234fba960b89353f1b05d6aeb3ce4ff2cbff5cb"),
+        ("private func handleProjectileHitBoss(", "erasureRegisterHit()", 395, "2032f4c2e7e25c67cd737864d127e91e9f84b914858d8ffb74609888229698ad"),
+    ]
+    let drifted = accepted.compactMap { pin -> String? in
+        guard let b = SwiftSource.block(in: raw, after: pin.signature) else { return "\(pin.call): no block" }
+        let at = b.executableOffsets(of: pin.call).filter { b.depth(at: $0) == 1 }
+        guard at.count == 1 else { return "\(pin.call): \(at.count) direct-body executable occurrences" }
+        let t = b.tokens(from: b.open, to: at[0] + pin.call.count)
+        let d = SwiftSource.digest(t)
+        return t.count == pin.count && d == pin.digest ? nil : "\(pin.signature)…\(pin.call): \(t.count) tokens, \(d.prefix(16)); tail \(t.suffix(8))"
+    }
+    check("MW8 the exact active token prefix through each gun registration is the accepted one (enemy hit → Apex, → Erasure; boss hit → Apex, → Erasure)",
+          drifted.isEmpty, "\(drifted)")
+    // A7b S10 (CL-118c — A4c F2's twin on the gun): the Shatter exit is a landed
+    // hit, so the exit block `if killed || shatter.endsHit {` registers Apex,
+    // then Erasure, each once — executable, standalone statements written
+    // DIRECTLY in that block (a guarded or nested registration fails), on a
+    // straight path from the block's start to its one `return`.
+    let exitHead = "if killed || shatter.endsHit {"
+    let shatterExit: String? = {
+        guard let b = SwiftSource.block(in: raw, after: "private func handleProjectileHit(") else { return "no hit body" }
+        let heads = b.executableOffsets(of: exitHead)
+        guard heads.count == 1, b.depth(at: heads[0]) == 2 else { return "exit heads \(heads.count)" }
+        let open = heads[0] + exitHead.count - 1
+        guard let close = b.matchingClose(of: open) else { return "no exit close" }
+        let inside = { (needle: String) in b.executableOffsets(of: needle).filter { $0 > open && $0 < close } }
+        let apex = inside("apexRegisterAttack()"), erasure = inside("erasureRegisterHit()"), ret = inside("return")
+        guard apex.count == 1, erasure.count == 1, ret.count == 1 else { return "apex \(apex.count) erasure \(erasure.count) return \(ret.count)" }
+        let d = b.depth(at: heads[0]) + 1
+        guard [apex[0], erasure[0], ret[0]].allSatisfy({ b.depth(at: $0) == d }) else { return "not direct statements of the exit block" }
+        guard apex[0] < erasure[0], erasure[0] < ret[0],
+              b.isStandaloneStatement(at: apex[0], length: "apexRegisterAttack()".count),
+              b.isStandaloneStatement(at: erasure[0], length: "erasureRegisterHit()".count),
+              b.exitFree(from: open + 1, to: ret[0]) else { return "order / standalone / straight path" }
+        return nil
+    }()
+    check("MW9 A7b S10 (CL-118c): the gun's Shatter exit registers Apex then Erasure once each, standalone and directly in the exit block, on a straight path to its return",
+          shatterExit == nil, shatterExit ?? "")
+}
 
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

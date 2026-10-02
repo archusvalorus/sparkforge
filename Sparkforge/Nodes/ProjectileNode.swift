@@ -57,6 +57,16 @@ final class ProjectileNode: SKNode {
     /// resolves — so a falling exact sequence (Warp over flight, Riftline per
     /// body) can never realize a rise, while each projectile stays unbiased.
     let a6Rounding = A6Rounding()
+    /// A7b S7 (CL-114e): the direct-hit amplifier block's OWN threshold, drawn
+    /// at launch and independent of `a6Rounding` (reusing a spent threshold for
+    /// a second rounding is biased).
+    let hitRounding = DirectHitRounding()
+    /// A7b S8 (CL-114a): Overcharge's factor in the direct-hit block. A shot from
+    /// fireProjectile / fireIcicle carries its OverchargeSplit's factor, and its
+    /// `damageMultiplier` is then the Overcharge-free part; every other shot
+    /// (acorns, seed fragments, Glass Blood, the Void secondaries) keeps 1 and
+    /// today's whole multiplier.
+    var overchargeFactor: CGFloat = 1
     /// The A6 fraction a secondary Void attack applies to the shot's legacy
     /// damage (Shadow Edge 1.25; a returned shot 1.0) — CL-70 rounds only this.
     var voidDamageFraction: CGFloat = 1

@@ -180,6 +180,12 @@ enum BestiaryFamily: String, CaseIterable {
     case starNeedle   = "star_needle"
     case anvilborn    = "anvilborn"
     case unmadeStar   = "unmade_star"   // Arena 5 monument boss
+    // v2.1 geometry Unit 4 — the Splitworks family (Arena 6). Persistence ids
+    // from the design lock §8 — never rename.
+    case spurhound    = "spurhound"
+    case linekeeper   = "linekeeper"
+    case ramplate     = "ramplate"
+    case marchwarden  = "marchwarden"   // Arena 6 boss
     /// Reserved v2.0 slot — the hidden nemesis. Present in the schema NOW so it
     /// doesn't churn at v2.0; the bestiary page MUST skip entries where
     /// `hiddenUntilFutureVersion` is true until Mote ships. See
@@ -210,13 +216,17 @@ enum BestiaryFamily: String, CaseIterable {
         case .starNeedle:   return "Star Needle"
         case .anvilborn:    return "Anvilborn"
         case .unmadeStar:   return "The Unmade Star"
+        case .spurhound:    return "Spurhound"
+        case .linekeeper:   return "Linekeeper"
+        case .ramplate:     return "Ramplate"
+        case .marchwarden:  return "The Marchwarden"
         case .mote:         return "????"
         }
     }
 
     var isBoss: Bool {
         switch self {
-        case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie, .unmadeStar: return true
+        case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie, .unmadeStar, .marchwarden: return true
         default: return false
         }
     }
@@ -253,6 +263,12 @@ enum BestiaryFamily: String, CaseIterable {
         case .starNeedle:   return "Precision forged into malice. Once it chooses a line, it never reconsiders. You should."
         case .anvilborn:    return "The forge made a body out of weight and impatience. When it plants its feet, reconsider yours."
         case .unmadeStar:   return "A star caught between becoming and breaking. The forge keeps striking. It has decided to include you."
+        // v2.1 geometry Unit 4 — the Splitworks family: the design lock §8's
+        // provisional lines (Lyra), fitted to the live wrapper in Unit 5.
+        case .spurhound:    return "It learned the shortest distance between two points. Then it learned to hunt around corners."
+        case .linekeeper:   return "A firing line given legs. It mistakes patience for permission."
+        case .ramplate:     return "A barricade with forward momentum. The forge forgot that walls should stay put."
+        case .marchwarden:  return "The march ended long ago. Its warden still clears the road for an army that will never come."
         case .mote:         return ""
         }
     }
@@ -281,6 +297,10 @@ enum BestiaryFamily: String, CaseIterable {
         case .starNeedle:   return 0xFFF0C0   // pale starlight
         case .anvilborn:    return 0xC98A4B   // struck bronze
         case .unmadeStar:   return 0xFFD98A   // star gold (entrance banner color)
+        case .spurhound:    return 0xD9D2C4   // pale ceramic route markings
+        case .linekeeper:   return 0xBB44FF   // its firing-line purple (danger)
+        case .ramplate:     return 0xFF7722   // kiln orange (the charge)
+        case .marchwarden:  return 0x3F8F8A   // oxidized teal (entrance banner color)
         case .mote:         return 0x8E44FF
         }
     }

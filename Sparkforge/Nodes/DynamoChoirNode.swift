@@ -18,7 +18,11 @@
 
 import SpriteKit
 
-final class DynamoChoirNode: SKNode, ArenaBossNode {
+final class DynamoChoirNode: SKNode, ArenaBossNode, PlayerReachHazards {
+
+    /// v2.1 A7b S15 (CL-127d): Spark's live (Harden-shrunk) body, written by the
+    /// scene before each update; every hazard here reaches it.
+    var playerHitRadius: CGFloat = GameConfig.Player.collisionRadius
 
     // MARK: - Tuning
 
@@ -58,7 +62,7 @@ final class DynamoChoirNode: SKNode, ArenaBossNode {
     // MARK: - State
 
     private(set) var health: Int
-    var vulnerabilityMultiplier: CGFloat = 1.0   // v1.9: capstone-debuff vulnerability
+    var vulnerability = VulnerabilityChannels()   // v1.9 capstone-debuff vulnerability; A7b S6 channels
     var challengeFlatReduction: Int = 0          // v2.0 (B3): Boss Mode DEF dial
     private(set) var maxHealth: Int
     private(set) var isDead: Bool = false
@@ -462,7 +466,7 @@ final class DynamoChoirNode: SKNode, ArenaBossNode {
 
         // Live window — crossing a lit conduit hurts
         if litanyBeat == 3 {
-            let hitReach = DynamoChoirNode.litanyHitDistance + GameConfig.Player.collisionRadius
+            let hitReach = DynamoChoirNode.litanyHitDistance + playerHitRadius
             for i in 0..<(litanyPoints.count - 1) {
                 if Self.distance(from: playerPosition,
                                  toSegment: litanyPoints[i], litanyPoints[i + 1]) < hitReach {
@@ -683,11 +687,11 @@ final class DynamoChoirNode: SKNode, ArenaBossNode {
     var hitBodyRadius: CGFloat { DynamoChoirNode.bodyRadius }
 
     @discardableResult
-    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool, resolved: Int?) -> Bool {
         guard !isDead else { return false }
-        let scaled = vulnerabilityMultiplier == 1.0
+        let scaled = resolved ?? (vulnerabilityMultiplier == 1.0
             ? amount
-            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))
         let healthBefore = health
         let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
         health -= dealt

@@ -6,9 +6,10 @@
 import CoreGraphics
 import Foundation
 
-// The REAL `GameConfig.Guard`, `.VoidTree`, `.Drafting` and `.Panda` blocks are
-// extracted from the app source by extract-config.sh (every run.sh), so those
-// numbers are never mirrored here (v2.1 A5; A6; A7a CL-90). They read
+// The REAL `GameConfig.Guard`, `.VoidTree`, `.Drafting`, `.Panda`, `.Growth`,
+// `.Chill`, `.BossClass`, `.Erasure` and `.Shock` blocks are extracted from the
+// app source by extract-config.sh (every run.sh), so those numbers are never
+// mirrored here (v2.1 A5; A6; A7a CL-90; A7b S0a; A7b S3 for Shock). They read
 // DeviceScale for a few radii — the phone value is 1.
 enum DeviceScale {
     static var gameplay: CGFloat { 1 }
@@ -33,12 +34,6 @@ enum GameConfig {
         static let maxRange: CGFloat = 400
         static let multishotFanWidthFactor: CGFloat = 1.5
     }
-    enum Growth {
-        static let terraRadius: CGFloat = 110
-        static let seedFragmentsT1: Int = 3
-        static let seedFragmentsT2: Int = 5
-        static let seedFragmentsT3: Int = 6
-    }
     enum Fire {
         static let forgeBreathBonus: [CGFloat] = [0.25, 0.50, 1.00]
         static let crucibleStackCap: Int = 5
@@ -51,47 +46,6 @@ enum GameConfig {
         static let cauterizeThreshold: CGFloat = 0.25
         static let cauterizeInterval: TimeInterval = 3.0
         static let cauterizeHeal: Int = 5
-    }
-    enum Chill {
-        static let frostTouchSlow: [CGFloat] = [0.25, 0.50]
-        static let iceShardSpeedBonus: CGFloat = 0.30
-        static let permafrostBonus: CGFloat = 0.25
-        static let hoarfrostHeal: Int = 5
-        static let hoarfrostInterval: TimeInterval = 7.0
-        static let driftLifetime: [TimeInterval] = [2.0, 3.5, 5.0]
-        static let driftRadius: CGFloat = 22
-        static let driftSizeBonusT3: CGFloat = 0.30
-        static let driftDropInterval: TimeInterval = 0.15
-        static let driftMergeFraction: CGFloat = 0.6
-        static let driftSlow: CGFloat = 0.08
-        static let iceRinkEnemySlow: CGFloat = 0.50
-        static let iceRinkMoveBonus: CGFloat = 0.25
-        static let spikeChancePerSecond: CGFloat = 0.04
-        static let spikeGlobalCooldown: TimeInterval = 0.75
-        static let snowmanChance: CGFloat = 0.12
-        static let snowmanDuration: [TimeInterval] = [3.0, 6.0, 6.0]
-        static let snowmanCooldown: TimeInterval = 10.0
-        static let snowmanEliteMeltFraction: CGFloat = 0.20
-    }
-    enum Shock {
-        static let staticFireRate: [CGFloat] = [0.15, 0.30, 0.50]
-        static let chainRetention: [CGFloat] = [0.50, 0.75, 0.85, 1.00]
-        static let surgeMoveBonus: CGFloat = 0.10
-        static let surgeProjectileSpeed: CGFloat = 0.20
-        static let surgeFireRate: CGFloat = 0.10
-        static let overloadChance: CGFloat = 0.20
-        static let overloadDuration: TimeInterval = 1.0
-        static let overloadLinkedChance: CGFloat = 0.35
-        static let overloadLinkedDuration: TimeInterval = 2.0
-        static let overloadBossDuration: TimeInterval = 0.25
-        static let overloadLinkedBossDuration: TimeInterval = 0.5
-        static let overloadImmunity: TimeInterval = 3.0
-        static let sentryDamageFraction: CGFloat = 0.50
-        static let sentryInterval: TimeInterval = 0.8
-        static let networkDamageFraction: CGFloat = 0.75
-        static let networkInterval: TimeInterval = 0.4
-        static let crownDamageFraction: CGFloat = 1.50
-        static let pulseDamageFraction: CGFloat = 0.40
     }
     enum Bleed {
         static let applyChance: CGFloat = 0.50
@@ -113,16 +67,8 @@ enum GameConfig {
         static let exsanguinateMultiplier: CGFloat = 2.0
         static let glassBloodMaxGeneration: Int = 2
     }
-    enum BossClass {
-        static let dotScale: CGFloat = 0.5
-        static let damageScale: CGFloat = 0.5
-    }
     enum DamagePipeline {
         static let barrierCapFraction: CGFloat = 0.5
-    }
-    enum Erasure {
-        static let unstableTriggerCooldown: TimeInterval = 2.0
-        static let unstableTriggerCooldownT2: TimeInterval = 1.2
     }
     enum Everglow {
         static let baseRadius: CGFloat = 70

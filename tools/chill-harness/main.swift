@@ -1,7 +1,10 @@
 // main.swift — deterministic validators for v2.1 abilities Unit A2 (Chill):
 // Glacial Drift's frozen ground (CL-11), the snowman melt rule (Q-C3, CL-7),
-// and the reworked Chill cards applied through the REAL card pool. Each
-// validator prints PASS/FAIL; exit 1 on any FAIL.
+// and the reworked Chill cards applied through the REAL card pool. A7b S4
+// adds GW, the Growth ground (CL-96 Rootbound, CL-97 Thornsoil): its slow is
+// a Chill-potency slow, and no Growth harness exists. A7b S10 adds SR, the one
+// Shatter rule both hit paths ask (CL-99/CL-118). Each validator prints
+// PASS/FAIL; exit 1 on any FAIL.
 
 import CoreGraphics
 import Foundation
@@ -223,6 +226,116 @@ do {
     // (Polar Vortex is unchanged; its long legacy lines ride the MORE chip.)
     for c in chill where !c.isCapstone { for t in 1...c.maxTier where lines(c.description(forTier: t)) > (c.detail == nil ? 4 : 3) { tooLong.append("\(c.id) T\(t)") } }
     check("E6 every reworked Chill card line fits the selection card", tooLong.isEmpty, "truncated: \(tooLong)")
+}
+
+// GW — the Growth ground, A7b S4 (all through the REAL pool, synergies fired by
+// checkSynergies after each pick as GameScene does; GameConfig.Growth is the
+// REAL extracted block). The scene line that applies terraSlow is pinned in
+// the catalog harness (WR10).
+//   CL-96 Rootbound (G1.5): Growth ×3 adds 0.15 to terraSlow, and the ground
+//   slow IS terraSlow (it read the constant before, so ×3 did nothing).
+//   CL-97 Thornsoil (G1.6): taking Thornsoil never lowers the ground's bite
+//   (after Wildwood's 8 it used to drop to 6).
+do {
+    let G = GameConfig.Growth.self
+    func picks(_ ids: [String], into um: UpgradeManager, _ stats: PlayerStats) -> [String] {
+        var fired: [String] = []
+        for id in ids {
+            um.pickCard(card(um, id), stats: stats, level: um.pickedCardIDs.count + 1)
+            fired += um.checkSynergies(stats: stats).map { "\($0.tag.rawValue)_\($0.tier)" }
+        }
+        return fired
+    }
+    let fresh = PlayerStats()
+    check("GW1 a fresh run's ground slow is the REAL GameConfig.Growth.enemySlow (30%)",
+          near(G.enemySlow, 0.30) && near(fresh.terraSlow, G.enemySlow) && near(fresh.effectiveSlow(fresh.terraSlow), 0.30))
+
+    let um = UpgradeManager(), stats = PlayerStats()
+    let three = picks(["v20_terra", "v20_richsoil", "v20_deeproot"], into: um, stats)
+    check("GW2 CL-96: Growth ×3 (Rootbound) fires through the real pool and the ground slow becomes 45%",
+          three == ["Growth_3"] && near(stats.terraSlow, 0.45) && near(stats.effectiveSlow(stats.terraSlow), 0.45),
+          "fired \(three) terraSlow \(stats.terraSlow)")
+    let chill = picks(["chill_1", "chill_2", "chill_3"], into: um, stats)
+    check("GW3 …with Chill ×3's doubled potency it reaches the 80% cap (45% × 2, capped); the constant alone would give 60%",
+          chill == ["Chill_3"] && near(stats.effectiveSlow(stats.terraSlow), 0.80) && near(stats.effectiveSlow(G.enemySlow), 0.60),
+          "fired \(chill) → \(stats.effectiveSlow(stats.terraSlow))")
+    stats.reset()
+    check("GW4 run reset returns the ground slow to the constant", near(stats.terraSlow, G.enemySlow))
+
+    let wildwoodIDs = ["v20_terra", "v20_richsoil", "v20_deeproot", "v20_vinewall", "v20_seed_spore", "v20_wildbloom", "v20_tree"]
+    let alone = UpgradeManager(), aloneStats = PlayerStats()
+    _ = picks(["v20_thornsoil"], into: alone, aloneStats)
+    let ww = UpgradeManager(), wwStats = PlayerStats()
+    let fired = picks(wildwoodIDs, into: ww, wwStats)
+    let wildwood = wwStats.thornsoilDPS
+    _ = picks(["v20_thornsoil"], into: ww, wwStats)
+    check("GW5 Thornsoil alone bites for 6; Wildwood (Growth ×7, no Thornsoil) for 8",
+          aloneStats.thornsoilDPS == 6 && fired == ["Growth_3", "Growth_5", "Growth_7"] && wildwood == 8,
+          "alone \(aloneStats.thornsoilDPS) fired \(fired) wildwood \(wildwood)")
+    check("GW6 CL-97: Wildwood THEN Thornsoil stays at 8 (the pre-S4 card dropped it to 6)",
+          wwStats.thornsoilDPS == 8, "got \(wwStats.thornsoilDPS)")
+    let rev = UpgradeManager(), revStats = PlayerStats()
+    _ = picks(["v20_thornsoil"] + wildwoodIDs, into: rev, revStats)
+    let reversed = revStats.thornsoilDPS
+    revStats.reset()
+    check("GW7 …and Thornsoil THEN Wildwood is 8 too: order-proof both ways; a run reset clears the bite",
+          rev.pickedCardIDs.count == 8 && reversed == 8 && revStats.thornsoilDPS == 0, "reversed \(reversed)")
+}
+
+// SR — Shatter (Chill ×5), A7b S10 (G1.11; CL-99, CL-118): the ONE rule both
+// hit paths ask (their wiring is pinned in catalog WR16; the chunk on real
+// nodes, vulnerability included, in vulnerability RN6). Chance and threshold
+// unchanged; a normal enemy dies outright, an elite (mini-boss) takes the elite
+// chunk — 20% of max HP through the Anomaly helper — instead of dying.
+do {
+    let C = GameConfig.Chill.self
+    func ask(chance: CGFloat = 0.20, threshold: CGFloat = 0.40, slowed: Bool = true, total: CGFloat = 0.50,
+             elite: Bool = false, maxHP: Int = 100, roll: CGFloat = 0) -> ShatterRule.Outcome? {
+        ShatterRule.outcome(chance: chance, threshold: threshold, slowed: slowed, totalSlow: total,
+                            elite: elite, maxHealth: maxHP, roll: roll)
+    }
+    var leaks: [String] = []
+    for elite in [false, true] { for total in [0.0, 0.4, 0.8, 1.0] as [CGFloat] { for roll in [0.0, 0.5, 0.99] as [CGFloat] {
+        if ask(chance: 0, total: total, elite: elite, roll: roll) != nil { leaks.append("elite \(elite) total \(total) roll \(roll)") }
+    } } }
+    check("SR1 without Shatter (chance 0) nothing ever shatters", leaks.isEmpty, "\(leaks)")
+    check("SR2 the gate: a foe that isn't slowed never shatters (even at an arena-wide total); the total slow qualifies AT the threshold, not a hair below",
+          ask(slowed: false, total: 0.9) == nil && ask(total: 0.40) == .execute
+            && ask(total: CGFloat(0.40).nextDown) == nil && ask(threshold: 0.30, total: 0.30) == .execute)
+    check("SR3 the roll: below the chance shatters, AT the chance doesn't (today's `random < chance`)",
+          ask(roll: 0) == .execute && ask(roll: CGFloat(0.20).nextDown) == .execute && ask(roll: 0.20) == nil && ask(roll: 0.9) == nil)
+    let execute = ask()
+    check("SR4 a normal enemy is executed: the shatter deals its whole remaining health and ends the hit",
+          execute == .execute && execute?.damage(health: 37) == 37 && execute?.damage(health: 1) == 1 && execute?.endsHit == true)
+    let chunks = [19, 90, 100, 4, 1].map { ask(elite: true, maxHP: $0) }
+    let helper = [19, 90, 100, 4, 1].map { ShatterRule.Outcome.chunk(AnomalyState.chunkDamage(maxHealth: $0, fraction: C.shatterEliteFraction)) }
+    let spikes = [19, 90, 100, 4, 1].map { ShatterRule.Outcome.chunk(max(1, Int(CGFloat($0) * C.spikeEliteFraction))) }
+    check("SR5 an elite takes the elite chunk instead (19 → 3, 90 → 18, 100 → 20, never below 1) — the Anomaly helper, the Glacial Spikes value — whatever its health, and the chunk alone doesn't end the hit",
+          chunks == [.chunk(3), .chunk(18), .chunk(20), .chunk(1), .chunk(1)] && chunks == helper && chunks == spikes
+            && chunks[0]?.damage(health: 19) == 3 && chunks[0]?.damage(health: 2) == 3 && chunks[0]?.endsHit == false,
+          "\(chunks)")
+    // Through the REAL pool, synergies fired by checkSynergies after each pick (as GameScene does).
+    func picks(_ ids: [String], into um: UpgradeManager, _ stats: PlayerStats) -> [String] {
+        var fired: [String] = []
+        for id in ids {
+            um.pickCard(card(um, id), stats: stats, level: um.pickedCardIDs.count + 1)
+            fired += um.checkSynergies(stats: stats).map { "\($0.tag.rawValue)_\($0.tier)" }
+        }
+        return fired
+    }
+    let um = UpgradeManager(), stats = PlayerStats()
+    let freshOK = stats.shatterChance == 0 && near(stats.shatterSlowThreshold, C.shatterSlowThreshold)
+    let five = picks(["chill_1", "chill_2", "chill_3", "chill_4", "v16_whiteout"], into: um, stats)
+    let atFive = (stats.shatterChance, stats.shatterSlowThreshold)
+    let seven = picks(["v21_glacial_spikes", "v16_hoarfrost"], into: um, stats)
+    let atSeven = (stats.shatterChance, stats.shatterSlowThreshold, stats.globalEnemySlow)
+    stats.reset()
+    check("SR6 the tuning is GameConfig's, values unchanged (20% / 40% / 30% / 20%): Chill ×5 turns Shatter on, Absolute Zero (×7) lowers the threshold, a reset restores both",
+          near(C.shatterChance, 0.20) && near(C.shatterSlowThreshold, 0.40) && near(C.absoluteZeroShatterThreshold, 0.30) && near(C.shatterEliteFraction, 0.20)
+            && freshOK && five == ["Chill_3", "Chill_5"] && near(atFive.0, C.shatterChance) && near(atFive.1, C.shatterSlowThreshold)
+            && seven == ["Chill_7"] && near(atSeven.0, C.shatterChance) && near(atSeven.1, C.absoluteZeroShatterThreshold) && near(atSeven.2, 0.25)
+            && stats.shatterChance == 0 && near(stats.shatterSlowThreshold, C.shatterSlowThreshold),
+          "fresh \(freshOK) ×5 \(five) \(atFive) ×7 \(seven) \(atSeven)")
 }
 
 print("\n\(passed) passed, \(failed) failed")

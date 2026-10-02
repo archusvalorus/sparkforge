@@ -39,6 +39,10 @@ struct ArenaConfig {
     let bossID: String          // persistence id (defeatedBosses / codex)
     let bossName: String        // player-facing, e.g. locked-card requirement
     let bossFelledAccentHex: UInt32  // "★ NEXT OPEN ★" announcement color
+    /// v2.1 geometry Unit 4 (independent review M1): the title card's victory
+    /// line once this arena's boss is felled AND no later arena exists yet.
+    /// Empty = the generic "★ <BOSS> HAS FALLEN ★".
+    var finalFelledLine: String = ""
 
     // v2.1 (Geometry 1A): everything the arena declares about its shape
     // beyond the circle. `.open` = the five shipped arenas, byte-identical
@@ -167,22 +171,19 @@ struct ArenaConfig {
         bellTime: 160.0,  // doubled field → a longer, more ceremonial escalation
         bossID: "unmade_star",
         bossName: "The Unmade Star",
-        bossFelledAccentHex: 0x9A7AE0
+        bossFelledAccentHex: 0x9A7AE0,
+        finalFelledLine: "★ THE STAR IS UNMADE ★"
     )
 
-    // v2.1 (Geometry 1A): Arena 6 — The Splitworks SHELL. Lyra canon: The
-    // Broken March opens here; a derailed pilgrim carrier cleaves an old
-    // mustering yard into a narrow route and a broad route. This entry is the
-    // Unit 1A shell — geometry + palette only, EXISTING enemies + a placeholder
-    // boss binding, so the foundation can be proven before the roster (Unit 2)
-    // and the Marchwarden (Unit 3) land. Palette per the design lock §9:
-    // charcoal iron, kiln orange, ash-gray stone, oxidized teal signal paint,
-    // pale ceramic route markings, restrained Star Anvil violet inheritance.
-    //
-    // ⚠ NOT REGISTERED in `all` yet — see `splitworksShell` gating below. The
-    // shell is reachable in DEBUG via the geometry proof seam only, so live
-    // progression stays exactly five arenas until Unit 4 registers it.
-    static let splitworksShell = ArenaConfig(
+    // v2.1: Arena 6 — The Splitworks. Lyra canon: The Broken March opens here;
+    // a derailed pilgrim carrier cleaves an old mustering yard into a narrow
+    // route and a broad route. Geometry (1A), the roster (Unit 2) and the
+    // Marchwarden (Unit 3) are built; geometry Unit 4 REGISTERS it, so the
+    // Unmade Star's defeat opens it through the unlock registry like every
+    // arena before it. Palette per the design lock §9: charcoal iron, kiln
+    // orange, ash-gray stone, oxidized teal signal paint, pale ceramic route
+    // markings, restrained Star Anvil violet inheritance.
+    static let splitworks = ArenaConfig(
         id: 5,
         name: "The Splitworks",
         displayName: "ARENA 6: THE SPLITWORKS",
@@ -194,13 +195,14 @@ struct ArenaConfig {
         accentColorHex: 0x3F8F8A,
         radiusScale: 1.15,             // dense, not sprawling (Growth viability)
         bellTime: GameConfig.Wave.miniBossSpawnTime,
-        bossID: "marchwarden",         // Unit 3 fills the fight; id is canon now
+        bossID: "marchwarden",
         bossName: "The Marchwarden",
         bossFelledAccentHex: 0x3F8F8A,
+        finalFelledLine: "★ THE MARCH IS BROKEN ★",
         geometryBuilder: { ArenaGeometry.splitworks }
     )
 
-    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil]
+    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks]
 
     /// v2.0 (B2a): a TRANSIENT arena override for Boss Mode.
     ///
@@ -215,20 +217,9 @@ struct ArenaConfig {
     /// ever offers bosses the player has actually felled, so their home arena is
     /// by definition one the player has already stood in.
     static var overrideID: Int? = nil
-    #if DEBUG
-    /// v2.1 (Geometry 1A): sentinel override id for the Splitworks shell —
-    /// deliberately outside `all`'s index range.
-    static let splitworksShellOverrideID = 5_000
-    #endif
 
     /// The currently selected arena, clamped to what's unlocked.
     static var current: ArenaConfig {
-        #if DEBUG
-        // v2.1 (Geometry 1A): the shell is reachable ONLY through the transient
-        // override (set by GameScene under the dev seam) — never via
-        // progression, never persisted. Release compiles this away.
-        if overrideID == splitworksShellOverrideID { return splitworksShell }
-        #endif
         if let id = overrideID, id >= 0, id < all.count { return all[id] }
         let pm = ProgressionManager.shared
         let maxIndex = min(pm.arenasUnlocked, all.count) - 1

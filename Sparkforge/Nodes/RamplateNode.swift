@@ -167,10 +167,19 @@ final class RamplateNode: EnemyNode {
 
     /// Vulnerable recovery after a miss or a wall — same idiom as the Spurhound.
     override func takeDamage(_ amount: Int) -> Bool {
-        let scaled = punishActive
+        super.takeDamage(punished(amount))
+    }
+
+    /// A7b S8 (CL-114c): the punish window moves to the direct entry unchanged —
+    /// a direct hit's post-vulnerability amount is scaled exactly as before.
+    override func takeDirectHit(_ hit: DirectHit) -> Bool {
+        super.takeDirectHit(DirectHit(basis: hit.basis, dealt: punished(hit.dealt)))
+    }
+
+    private func punished(_ amount: Int) -> Int {
+        punishActive
             ? Int((CGFloat(amount) * GameConfig.Ramplate.punishVulnerability).rounded())
             : amount
-        return super.takeDamage(scaled)
     }
 
     // MARK: - Phases

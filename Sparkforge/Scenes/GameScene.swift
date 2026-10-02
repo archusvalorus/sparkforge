@@ -47,28 +47,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     #endif
 
     /// v2.1 (Geometry 1A): the arena this RUN plays in. Normally
-    /// ArenaConfig.current; under the DEBUG shell seam, the Splitworks shell —
-    /// scoped to the run only, so the title screen / progression / persistence
-    /// never see it (the shell isn't in ArenaConfig.all). Announced by the HUD
-    /// banner; reinstall the sim after switching it back off.
+    /// ArenaConfig.current; under the DEBUG dev pick, that arena — scoped to the
+    /// run only, so the title screen / progression / persistence never see it.
+    /// Announced by the HUD banner. (Unit 4 registered the Splitworks, so the
+    /// old shell seam is gone: it is simply arena 6 of the dev pick.)
     private static func resolveArenaConfig() -> ArenaConfig {
         #if DEBUG
-        // Runtime dev pick (Settings → DEV ARENA) or the compile-time shell
-        // flag. Both ride the transient Boss-Mode override so that
-        // GameConfig.Arena.radius (which reads ArenaConfig.current.radiusScale)
-        // agrees with the arena actually played — never persisted, cleared
-        // with the run like the gauntlet's own override.
-        if let i = DevSeams.arenaOverrideIndex {
-            if i == DevSeams.shellIndex {
-                ArenaConfig.overrideID = ArenaConfig.splitworksShellOverrideID
-                return ArenaConfig.splitworksShell
-            }
+        // Runtime dev pick (Settings → DEV ARENA). It rides the transient
+        // Boss-Mode override so that GameConfig.Arena.radius (which reads
+        // ArenaConfig.current.radiusScale) agrees with the arena actually
+        // played — never persisted, cleared with the run like the gauntlet's.
+        if let i = DevSeams.arenaOverrideIndex, ArenaConfig.all.indices.contains(i) {
             ArenaConfig.overrideID = i
             return ArenaConfig.all[i]
-        }
-        if GeometryDebug.forceSplitworksShell {
-            ArenaConfig.overrideID = ArenaConfig.splitworksShellOverrideID
-            return ArenaConfig.splitworksShell
         }
         #endif
         return ArenaConfig.current
@@ -197,6 +188,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// harness executes (review F5).
     private var volley = VolleyEmission<ProjectileNode>()
     private var bossAnomaly = AnomalyState()
+    /// v2.1 A7b S11 (CL-119 A1): Erasure's Fracture on the arena boss — its
+    /// window on game time (EnemyNode keeps its own).
+    private var bossFractureWindow = GameTimer()
     private var bossDecompose = BossDecompose()
     /// Dead Circuit collapse kills feed NO well (QC).
     private var suppressWellMatter = false
@@ -285,11 +279,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // v2.1 A2: Glacial Spikes — one arena-wide cooldown, tells land on game time.
     private var spikeCooldown = GameTimer()
     private var pendingSpikes: [(enemy: EnemyNode?, isBoss: Bool, timer: GameTimer, mark: SKNode)] = []
-
-    // MARK: - v1.6: Quench Card State (Unit 3)
-
-    private var arcWakeSparks: [(position: CGPoint, expiry: TimeInterval)] = []
-    private var arcWakeDropTimer: TimeInterval = 0
 
     // MARK: - v2.0 Phase C (C1.1): Growth — cultivated ground
     //
@@ -496,6 +485,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(arenaLayer)
 
         setupArena()
+        // v2.1 geometry Unit 4 (design lock §9): the Splitworks opens with one
+        // distant signal horn — and nothing answers it.
+        if arenaConfig.id == ArenaConfig.splitworks.id {
+            run(SKAction.sequence([SKAction.wait(forDuration: 1.0),
+                                   SKAction.run { AudioManager.shared.play(.splitworksHorn) }]))
+        }
         setupPlayer()
         setupJoystick()
         setupHUD()
@@ -599,6 +594,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             buildMirrorwoundMotif(radius: radius)
         case 4:
             buildStarAnvilMotif(radius: radius)
+        case 5:
+            buildSplitworksMotif(radius: radius)   // v2.1 geometry Unit 4
         default:
             buildCrucibleMotif(radius: radius)
         }
@@ -649,8 +646,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v2.1 (Geometry 1A): solid arena geometry gets a READABLE body — the
         // painted footprint and the collision footprint must agree (design
-        // lock §4 readability rules). Shell art: a plated iron slab in the
-        // arena's own palette; final Fallen Carrier art lands in Unit 4.
+        // lock §4 readability rules): a plated iron slab in the arena's own
+        // palette, and (geometry Unit 4) the Fallen Carrier's hull detail
+        // drawn INSIDE that outline. Procedural, like every arena (A9 may refine).
         buildSolidGeometryVisuals()
 
         #if DEBUG
@@ -685,7 +683,108 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 seam.position = CGPoint(x: 0, y: CGFloat(i) * h * 0.28)
                 body.addChild(seam)
             }
+            if f.label == "fallen_carrier" { addCarrierHullDetail(to: body, width: w, height: h) }
             arenaLayer.addChild(body)
+        }
+    }
+
+    /// v2.1 geometry Unit 4 (design lock §9, "the Fallen Carrier as the dominant
+    /// readable silhouette"): a pilgrim carrier's hull, broken. Drawn wholly
+    /// INSIDE the collision outline so painted and solid never disagree — hull
+    /// ribs in ash-gray, a kiln-ember fracture where it broke, and a dark cab.
+    private func addCarrierHullDetail(to body: SKShapeNode, width w: CGFloat, height h: CGFloat) {
+        for k in 0..<7 {
+            for side: CGFloat in [-1, 1] {
+                let rib = SKShapeNode(rectOf: CGSize(width: w * 0.12, height: 1))
+                rib.fillColor = SKColor(hex: 0x8C8680, alpha: 0.30)      // ash-gray stone
+                rib.strokeColor = .clear
+                rib.position = CGPoint(x: side * w * 0.36, y: -h * 0.42 + CGFloat(k) * h * 0.14)
+                body.addChild(rib)
+            }
+        }
+        // The break: a jagged fracture across the hull, faintly ember-lit.
+        let crack = CGMutablePath()
+        crack.move(to: CGPoint(x: -w * 0.42, y: h * 0.06))
+        for (i, x) in stride(from: -0.30, through: 0.42, by: 0.12).enumerated() {
+            crack.addLine(to: CGPoint(x: w * CGFloat(x), y: h * (i % 2 == 0 ? -0.02 : 0.08)))
+        }
+        let fracture = SKShapeNode(path: crack)
+        fracture.strokeColor = SKColor(hex: 0xC8641E, alpha: 0.55)        // kiln ember
+        fracture.lineWidth = 1.6
+        fracture.glowWidth = 3
+        body.addChild(fracture)
+        // The cab at the northern end, darker iron.
+        let cab = SKShapeNode(rectOf: CGSize(width: w * 0.5, height: h * 0.12), cornerRadius: 3)
+        cab.fillColor = SKColor(hex: 0x141210, alpha: 0.9)
+        cab.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.25)
+        cab.lineWidth = 1
+        cab.position = CGPoint(x: 0, y: h * 0.36)
+        body.addChild(cab)
+    }
+
+    /// v2.1 geometry Unit 4 — Arena 6 motif (design lock §9, "a procession
+    /// failing to complete"): procession rails that run into the wreck and stop,
+    /// pale route chevrons along both passages, masonry at the four deployment
+    /// gates, and three broken signal standards. Floor-level and faint, so it
+    /// never competes with the Carrier's silhouette or an enemy body.
+    private func buildSplitworksMotif(radius: CGFloat) {
+        let pale = arenaConfig.detailLineHex, teal = arenaConfig.boundaryColorHex
+        func line(_ a: CGPoint, _ b: CGPoint, _ hex: UInt32, _ alpha: CGFloat, _ width: CGFloat) {
+            let p = CGMutablePath(); p.move(to: a); p.addLine(to: b)
+            let n = SKShapeNode(path: p)
+            n.strokeColor = SKColor(hex: hex, alpha: alpha)
+            n.lineWidth = width
+            n.zPosition = -9.5
+            arenaLayer.addChild(n)
+        }
+        // Procession rails along the Carrier's axis, from each wall INTO the wreck.
+        if let carrier = arenaGeometry.blockedFootprints.first(where: { $0.label == "fallen_carrier" }) {
+            let axis = CGPoint(x: -sin(carrier.rotation), y: cos(carrier.rotation))
+            let across = CGPoint(x: axis.y, y: -axis.x)
+            let reach = carrier.halfExtents.height * 0.6   // they end inside the hull
+            for end: CGFloat in [-1, 1] {
+                let inner = carrier.center + axis * (end * reach)
+                let outer = axis * (end * radius * 0.96)
+                for rail: CGFloat in [-1, 1] {
+                    let off = across * (rail * radius * 0.035)
+                    line(inner + off, outer + off, pale, 0.20, 1.2)
+                }
+                // Sleepers.
+                let span = (outer - inner).length
+                let steps = Int(span / (radius * 0.07))
+                for s in 0...max(0, steps) {
+                    let c = inner + (outer - inner) * (CGFloat(s) / CGFloat(max(1, steps)))
+                    line(c - across * (radius * 0.055), c + across * (radius * 0.055), pale, 0.10, 1)
+                }
+            }
+        }
+        // Route chevrons on both passages, pointing north (the march's way).
+        for node in arenaGeometry.routeNodes where node.label.hasPrefix("narrow") || node.label.hasPrefix("broad") {
+            let c = node.position, s = radius * 0.035
+            line(c + CGPoint(x: -s, y: -s * 0.6), c + CGPoint(x: 0, y: s * 0.4), pale, 0.22, 1.4)
+            line(c + CGPoint(x: s, y: -s * 0.6), c + CGPoint(x: 0, y: s * 0.4), pale, 0.22, 1.4)
+        }
+        // Deployment gates: masonry arcs on the outer wall, with gate posts.
+        for zone in arenaGeometry.spawnZones {
+            let p = CGMutablePath()
+            p.addArc(center: .zero, radius: radius * 0.975, startAngle: zone.startAngle,
+                     endAngle: zone.endAngle, clockwise: false)
+            let wall = SKShapeNode(path: p)
+            wall.strokeColor = SKColor(hex: 0x8C8680, alpha: 0.32)   // ash-gray masonry
+            wall.lineWidth = 4
+            wall.zPosition = -9.5
+            arenaLayer.addChild(wall)
+            for a in [zone.startAngle, zone.endAngle] {
+                let dir = CGPoint(x: cos(a), y: sin(a))
+                line(dir * (radius * 0.93), dir * (radius * 1.0), pale, 0.35, 2)
+            }
+        }
+        // Broken signal standards: a mast and a torn pennant, nothing answering.
+        for a in [CGFloat.pi * 0.22, CGFloat.pi * 1.08, CGFloat.pi * 1.78] {
+            let base = CGPoint(x: cos(a), y: sin(a)) * (radius * 0.84)
+            let top = base + CGPoint(x: 0, y: radius * 0.07)
+            line(base, top, teal, 0.30, 1.5)
+            line(top, top + CGPoint(x: radius * 0.035, y: -radius * 0.012), teal, 0.30, 1.5)
         }
     }
 
@@ -1183,6 +1282,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             seam.position = CGPoint(x: safeLeft, y: -view.bounds.height / 2 + 54)
             seam.zPosition = 300
             seam.name = "geometrySeamBanner"
+            camera.addChild(seam)
+        }
+        // v2.1 A7b (S2): the draft's force-slot and the Mote entrance override
+        // announce themselves too — each silently changes what a run shows.
+        if let forced = UpgradeManager.debugForcedCardID {
+            let seam = SKLabelNode(fontNamed: "Menlo-Bold")
+            seam.text = "⚠︎ DEBUG — forced card: \(forced)"
+            seam.fontSize = 9
+            seam.fontColor = SKColor(hex: 0xFFCC44)
+            seam.horizontalAlignmentMode = .left
+            seam.verticalAlignmentMode = .center
+            seam.position = CGPoint(x: safeLeft, y: -view.bounds.height / 2 + 66)
+            seam.zPosition = 300
+            camera.addChild(seam)
+        }
+        if GameConfig.Mote.debugForceEntrance {
+            let seam = SKLabelNode(fontNamed: "Menlo-Bold")
+            seam.text = "⚠︎ DEBUG — Mote entrance forced"
+            seam.fontSize = 9
+            seam.fontColor = SKColor(hex: 0xFFCC44)
+            seam.horizontalAlignmentMode = .left
+            seam.verticalAlignmentMode = .center
+            seam.position = CGPoint(x: safeLeft, y: -view.bounds.height / 2 + 78)
+            seam.zPosition = 300
             camera.addChild(seam)
         }
         #endif
@@ -2459,7 +2582,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
         if card.id == "v20_vinewall" { raiseVineWall() }
         if card.id == "v20_tree" { growTree(to: upgradeManager.tier(of: card.id)) }
-        if card.id == "v20_richsoil" { modifyAllCultivatedZones(radiusScale: 1.22) }
+        if card.id == "v20_richsoil" { modifyAllCultivatedZones(radiusScale: GameConfig.Growth.richSoilRadiusScale) }
 
         // Refresh the stat HUD + capstone gauges immediately — a DEF/ATK card
         // should move the readout on pick, not wait for the next hit.
@@ -3192,8 +3315,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             dealDirectDamage(GameConfig.BossClass.scaledDamage(damage,
                                                                isBossClass: target.isMiniBoss),
                              toEnemy: target, source: .summon)
-            target.applyKnockback(from: panda.node.position,
-                                  force: GameConfig.Panda.bodyCheckKnockback)
+            shove(target, along: target.position - panda.node.position,
+                  by: GameConfig.Panda.bodyCheckKnockback)   // v2.1 A7b S14 (CL-124a)
             panda.node.bounce()
 
         case .portal:
@@ -3389,7 +3512,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let damage = Int(playerStats.effectiveAttack * GameConfig.Panda.kaijuMeleeMult)
         var killed: [EnemyNode] = []
         for e in enemies where !e.isDying && e.position.distance(to: impact) < reach {
-            e.applyKnockback(from: player.position, force: GameConfig.Panda.kaijuKnockback)
+            shove(e, along: e.position - player.position, by: GameConfig.Panda.kaijuKnockback)   // A7b S14
             if e.takeDamage(GameConfig.BossClass.scaledDamage(damage, isBossClass: e.isMiniBoss)) {
                 killed.append(e)
             }
@@ -3510,7 +3633,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                       e.position.distance(to: panda.node.position) < GameConfig.Panda.rollRadius
                 else { continue }
                 panda.struck.insert(id)
-                e.applyKnockback(from: panda.node.position, force: 30 * DeviceScale.gameplay)
+                shove(e, along: e.position - panda.node.position, by: 30 * DeviceScale.gameplay)   // A7b S14
                 if e.takeDamage(GameConfig.BossClass.scaledDamage(damage,
                                                                   isBossClass: e.isMiniBoss)) {
                     killed.append(e)
@@ -4002,7 +4125,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Knockback is an enemy-only verb — bosses hold their ground (the
             // same line the Vine Wall draws: a wall for the swarm, not titans).
             if case .enemy(let e) = mark {
-                e.applyKnockback(from: origin, force: GameConfig.NatureCanon.deerKnockback)
+                self.shove(e, along: e.position - origin, by: GameConfig.NatureCanon.deerKnockback)   // A7b S14 (CL-124a)
             }
             self.showRingPulse(at: mark.position,
                                radius: GameConfig.NatureCanon.impactRadius,
@@ -4056,7 +4179,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // dragged across the boar's face.
             let rel = e.position - point
             let sign: CGFloat = (rel.x * side.x + rel.y * side.y) < 0 ? -1 : 1
-            e.position += side * sign * missile.shoveForce
+            shove(e, along: side * sign, by: missile.shoveForce)   // v2.1 A7b S14 (CL-124a); the charge itself passes
 
             if e.takeDamage(GameConfig.BossClass.scaledDamage(missile.damage,
                                                               isBossClass: e.isMiniBoss)) {
@@ -4439,6 +4562,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let pad: CGFloat = { if case .boss(let b) = prey { return b.targetingRadius }; return 0 }()
         let dir = (prey.position - lion.position).normalized
         lion.position += dir * GameConfig.Tree.lionSpeed * CGFloat(dt)
+        // v2.1 A7b S14 (CL-124b): resolve out of the Carrier after each step (no
+        // route-steering toward occluded prey — it stalks, it doesn't path).
+        lion.position = arenaGeometry.resolve(lion.position, actorRadius: GameConfig.Tree.lionFootprintRadius)
         lion.setMoving(true)
         lion.face(dir.x)
 
@@ -4470,6 +4596,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// T3 also catches enemy projectiles crossing the hedge.
     private func updateVineWall(_ dt: TimeInterval) {
         guard playerStats.vineWallActive else { return }
+        for zone in cultivatedZones where zone.hasVineWall {
+            let r = zone.radius
+            // T3: the hedge catches enemy projectiles crossing into the garden.
+            if playerStats.vineWallTier >= 3, GameConfig.Growth.vineBlocksProjectiles {
+                enemyProjectiles.removeAll { proj in
+                    guard proj.position.distance(to: zone.position) < r else { return false }
+                    proj.removeFromParent()
+                    return true
+                }
+            }
+        }
+    }
+
+    /// The hedge's edge band: normal enemies crossing it are heavily slowed and
+    /// pushed back OUT. v2.1 A7b S14 (CL-109, the CL-77 precedent): this runs in
+    /// the enemy pass BESIDE the void-well pull, before the frame's geometry
+    /// resolve, so a pushed body never sits inside the Carrier for a frame.
+    private func applyVineWallEdge(_ dt: TimeInterval) {
+        guard playerStats.vineWallActive else { return }
         let repel = GameConfig.Growth.vineRepel
             * (playerStats.vineWallTier >= 2 ? GameConfig.Growth.vineRepelT2Mult : 1.0)
 
@@ -4483,15 +4628,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 e.applySlow(playerStats.effectiveSlow(GameConfig.Growth.vineSlow), duration: 0.3)
                 let out = (e.position - zone.position).normalized
                 e.position += out * repel * CGFloat(dt)            // shoved outward
-            }
-
-            // T3: the hedge catches enemy projectiles crossing into the garden.
-            if playerStats.vineWallTier >= 3, GameConfig.Growth.vineBlocksProjectiles {
-                enemyProjectiles.removeAll { proj in
-                    guard proj.position.distance(to: zone.position) < r else { return false }
-                    proj.removeFromParent()
-                    return true
-                }
             }
         }
     }
@@ -4565,13 +4701,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     /// A random point inside a random cultivated zone — where a flower may root.
+    /// Uniform by area, kept just inside the rim so it reads as ON the ground.
+    /// v2.1 A7b S14 (CL-124c): never in the Carrier or past the arena wall
+    /// (rejection-sampled, executed in geometry G8); the zone's centre, where
+    /// Terra stood, is the always-valid fallback.
     private func randomPointOnCultivatedGround() -> CGPoint? {
         guard let zone = cultivatedZones.randomElement() else { return nil }
-        // Rejection-free: pick a radius with sqrt bias for uniform area coverage,
-        // kept just inside the rim so the flower reads as ON the ground.
-        let r = zone.radius * 0.85 * sqrt(CGFloat.random(in: 0...1))
-        let a = CGFloat.random(in: 0..<(2 * .pi))
-        return zone.position + CGPoint(x: cos(a) * r, y: sin(a) * r)
+        return PlacementSampler.randomPoint(inDiscAt: zone.position, radius: zone.radius * 0.85,
+                                            in: arenaGeometry, arenaRadius: GameConfig.Arena.radius,
+                                            margin: GameConfig.Growth.flowerRootMargin, fallback: zone.position)
     }
 
     /// Each flower acquires a target within range and fires on its cooldown.
@@ -4705,7 +4843,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         guard gameState == .playing else { return }
 
-        // v2.1 BGM: the boss pool ends when the boss does.
+        // v2.1 BGM: the boss context ends when the boss does (the song carries on).
         if MusicManager.shared.context == .boss, boss == nil {
             MusicManager.shared.setContext(.run)
         }
@@ -4753,15 +4891,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.unbrokenWindow.tick(dt) { endUnbrokenWindowPresentation() }
         playerStats.projectileShield.tick(dt)
         
-        let preMovePosition = player.position
         player.move(direction: joystick.direction, deltaTime: dt)
         pushPlayerOutOfMonument()
         resolvePlayerAgainstGeometry(cause: .movement)   // v2.1 (1A)
         if joystick.direction != .zero {
             lastMoveDirection = joystick.direction.normalized
         }
-        // v1.7 Coilworks cards: movement charges Induction Step
-        playerStats.addInductionCharge(distance: player.position.distance(to: preMovePosition))
         updateRepulseFlights(dt) // v2.1 A5 (CL-63) — before the chase, which fliers skip
         updateEnemies(dt)
         updateActiveCombat(dt)   // v2.1 A4c (CL-33) — after this frame's DoT deaths
@@ -4775,7 +4910,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateVoidWells(dt)      // v2.1 A6 — after the hostile shots moved (absorb)
         updateChillTrail(dt)
         updateShockSystems(dt)
-        updateArcWake(dt)
         updateCultivatedGround(dt)
         updateFlowers(dt)
         updateVineWall(dt)
@@ -4827,6 +4961,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }  // end Event Horizon spawn guard
 
         // v1.4: Update boss AI
+        // v2.1 A7b S15 (CL-127d): its hazards reach Spark's LIVE body.
+        (boss as? PlayerReachHazards)?.playerHitRadius = playerStats.effectiveCollisionRadius
         boss?.update(deltaTime: dt, playerPosition: player.position)
         // v2.1 A4a: …then its Burn and Bleed — before the gauntlet hand-off
         // below can put a fresh boss in the slot.
@@ -4857,8 +4993,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let boss = boss, !boss.isDead {
                 let dir = (boss.position - player.position).normalized
                 player.position += dir * fieldImpulseStrength * CGFloat(dt)
-                // Keep the shove inside the arena
-                let maxDist = GameConfig.Arena.radius - GameConfig.Player.collisionRadius
+                // Keep the shove inside the arena (A7b S15: the live body, CL-127d)
+                let maxDist = GameConfig.Arena.radius - playerStats.effectiveCollisionRadius
                 if player.position.length > maxDist {
                     player.position = player.position.normalized * maxDist
                 }
@@ -5085,6 +5221,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 A6 (CL-77): black holes pull BEFORE the resolve below, so a
         // pulled body never sits inside the Carrier for a frame.
         applyVoidWellPull(dt)
+        applyVineWallEdge(dt)    // v2.1 A7b S14: the hedge's push, by the same rule
 
         // v2.1 (Geometry 1A): after every chase / pull / knockback this frame,
         // no ground-bound enemy may remain embedded in solid geometry. One
@@ -5216,16 +5353,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// A small Shock arc jumps from a burning enemy to one nearby enemy.
     /// One hop, no recursion — a bridge, not free chain lightning.
     private func fireRelayBurnArc(from source: EnemyNode) {
-        var closest: EnemyNode?
-        var closestDist = playerStats.relayBurnRadius
-        for enemy in enemies where enemy !== source {
-            let dist = source.position.distance(to: enemy.position)
-            if dist < closestDist {
-                closestDist = dist
-                closest = enemy
-            }
-        }
-        guard let target = closest else { return }
+        // v2.1 A7b S12 (CL-127a): hittable bodies only; S13 (CL-123a): the arc
+        // needs a clear line from the burning source.
+        guard let target = arenaGeometry.nearestVisible(
+            from: source.position, among: enemies.filter { $0 !== source && isHittable($0) },
+            position: { $0.position }, within: playerStats.relayBurnRadius,
+            travelRadius: GameConfig.Geometry.arcTravelRadius) else { return }
 
         let line = SKShapeNode()
         let path = CGMutablePath()
@@ -5478,10 +5611,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return target != nil
         }), let targetPosition = target else { return }
 
-        let totalProjectiles = 1 + playerStats.extraProjectiles
         let baseDirection = (targetPosition - player.position).normalized
         let isSpreadShot = playerStats.recordShot()
-        let shotCount = isSpreadShot ? playerStats.spreadShotCount : totalProjectiles
+        // CL-98 (A7b G1.3): Storm Engine's spread volley is the normal count + 2.
+        let shotCount = playerStats.volleyPelletCount(isSpreadVolley: isSpreadShot)
 
         // v1.9: ONE true source for multishot/spread shape. Regular fire and
         // the Storm Engine spread-shot differ only in pellet COUNT — shape is
@@ -5548,13 +5681,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.9 Skybeam Homing Beacon (T3): your fire prioritizes the lassoed prey.
         // The lasso target is the reusable priority hook other target-selecting
         // effects can read (lassoTargetNode) too.
-        if playerStats.skybeamHoming, let node = lassoTargetNode,
-           player.position.distance(to: node.position) <= range {
-            return node.position
-        }
-
-        var closestPosition: CGPoint?
-        var closestDist: CGFloat = .greatestFiniteMagnitude
         // v2.1 (Unit 2): auto-aim requires line of sight — with no manual
         // targeting (locked canon), firing into stone is a UX failure, not an
         // edge case. An occluded-only field means HOLD FIRE (clean fallback:
@@ -5562,7 +5688,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // short-circuit inside segmentBlocked.
         let solid = arenaGeometry.hasBlockedGeometry
 
-        for enemy in enemies where !enemy.isDying {
+        // v2.1 A7b S12 (CL-126): never an intangible prey — fall through instead.
+        // S13 (CL-109): nor an occluded one — the same line-of-sight predicate
+        // as every other target (the 1A return said this was built; it wasn't).
+        if playerStats.skybeamHoming, let node = lassoTargetNode, isHittableTarget(node),
+           player.position.distance(to: node.position) <= range {
+            if !(solid && arenaGeometry.segmentBlocked(
+                    player.position, node.position,
+                    travelRadius: GameConfig.Geometry.projectileTravelRadius)) {
+                return node.position
+            }
+            geometryDebug.losSuppressedTargets += 1
+        }
+
+        var closestPosition: CGPoint?
+        var closestDist: CGFloat = .greatestFiniteMagnitude
+
+        // v2.1 A7b S12 (CL-126): auto-aim skips intangible targets like every
+        // other targeter — the next visible hittable one, else hold fire.
+        for enemy in enemies where isHittable(enemy) {
             let dist = player.position.distance(to: enemy.position)
             if dist < range && dist < closestDist {
                 if solid, arenaGeometry.segmentBlocked(
@@ -5576,7 +5720,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        if let boss = boss, !boss.isDead {
+        if let boss = boss, isHittable(boss) {
             // Surface distance: a monument's origin can sit far outside range
             // even while the player is pressed against its body.
             let dist = player.position.distance(to: boss.position) - boss.targetingRadius
@@ -5597,6 +5741,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// (echoes, splits, shards, backwash) is `.fragment`.
     private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero,
                                 damageScale: CGFloat = 1.0, allowModifiers: Bool = true,
+                                rollsCrit: Bool = true,
                                 source: KillSource? = nil,
                                 configure: ((ProjectileNode) -> Void)? = nil) {
         // v1.9 Polar Vortex Glacial Condensation (T4): primary shots don't fire
@@ -5610,19 +5755,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        var isCrit = CGFloat.random(in: 0...1) < playerStats.critChance
-        // v1.9 Forge Path Calculated Strike (Cun 15A): every 5th direct attack crits.
-        if playerStats.forgeCalculatedStrike && allowModifiers {
-            forgeCalcStrikeCount += 1
-            if forgeCalcStrikeCount % 5 == 0 { isCrit = true }
-        }
+        // v2.1 A7b S9 (CL-117): the icicle's own shatter shards don't roll crit.
+        let isCrit = rollsCrit && rollShotCrit(directAttack: allowModifiers)
 
+        // v2.1 A7b S8 (CL-114a): Overcharge leaves the shot's integer base and
+        // rides the direct-hit block as a factor (never below today's floor).
+        let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: damageScale))
         let projectile = ProjectileNode(
             direction: direction,
             speed: playerStats.effectiveProjectileSpeed,
             range: playerStats.effectiveProjectileRange,
             pierces: playerStats.pierceCount,
-            damageMultiplier: playerStats.effectiveDamageMultiplier * damageScale,
+            damageMultiplier: overcharge.overchargeFree,
             isCrit: isCrit,
             // v2.1 A6 (CL-87): primary shots only — echoes, fragments, needles,
             // shards and Backwash no longer leave wells.
@@ -5630,6 +5774,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             voidStyle: playerStats.erasureVoidTouched,
             frostStyle: playerStats.polarVortexTier >= 1
         )
+        projectile.overchargeFactor = overcharge.factor
         projectile.killSource = source ?? (allowModifiers ? .primary : .fragment)
         // Every caller but the volley passes allowModifiers: false, so this is
         // exactly the gun's primary pellet.
@@ -5696,6 +5841,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    /// A shot's crit roll. A direct attack — a modifier-bearing shot, or the
+    /// icicle that replaces one (A7b S9, CL-117) — also advances Forge Path's
+    /// Calculated Strike (Cun 15A): every 5th direct attack crits.
+    private func rollShotCrit(directAttack: Bool) -> Bool {
+        var isCrit = CGFloat.random(in: 0...1) < playerStats.critChance
+        if playerStats.forgeCalculatedStrike && directAttack {
+            forgeCalcStrikeCount += 1
+            if forgeCalcStrikeCount % 5 == 0 { isCrit = true }
+        }
+        return isCrit
+    }
+
     // MARK: - Projectile Updates
     
     private func updateProjectiles(_ dt: TimeInterval) {
@@ -6254,31 +6411,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// path-tested: two in one frame (a 2-pellet volley, a bounce plus a hit)
     /// could otherwise carry a body clean through the Carrier before the
     /// frame's geometry resolve, which would pop it out the far side. The shove
-    /// stops at the last free point instead. (Away from Spark, like the legacy
-    /// `applyKnockback`; open arenas skip the test.)
+    /// stops at the last free point instead. (Away from Spark; open arenas skip
+    /// the test. A7b S14: through the shared `shove`, identical behaviour.)
     private func guardShove(_ enemy: EnemyNode, distance: CGFloat) {
-        guard distance > 0 else { return }
-        let from = enemy.position
-        let to = from + (from - player.position).normalized * distance
-        let r = enemy.hitBodyRadius
-        enemy.position = arenaGeometry.segmentBlockedExact(from, to, travelRadius: r)
-            ? lastFreePoint(from: from, to: to, radius: r)
-            : to
+        shove(enemy, along: enemy.position - player.position, by: distance)
     }
 
-    /// The farthest point on from→to a body of `radius` reaches before solid
-    /// geometry (a short bisection — `from` is assumed free).
-    private func lastFreePoint(from: CGPoint, to: CGPoint, radius: CGFloat) -> CGPoint {
-        var lo: CGFloat = 0, hi: CGFloat = 1
-        for _ in 0..<6 {
-            let mid = (lo + hi) / 2
-            if arenaGeometry.segmentBlockedExact(from, from + (to - from) * mid, travelRadius: radius) {
-                hi = mid
-            } else {
-                lo = mid
-            }
-        }
-        return from + (to - from) * lo
+    /// v2.1 A7b S14 (CL-109 / CL-124a): THE path-tested shove for every instant
+    /// knock — Guard's, the deer's, the rescue and boar shoves, Implosion's pull,
+    /// the Panda's body check and roll, the kaiju swipe. The body stops at the
+    /// last free point before solid geometry (ArenaGeometry.pathShove, executed in
+    /// geometry G7); open arenas skip the test.
+    private func shove(_ enemy: EnemyNode, along direction: CGPoint, by distance: CGFloat) {
+        guard distance > 0 else { return }
+        let from = enemy.position
+        enemy.position = arenaGeometry.pathShove(from: from, to: from + direction.normalized * distance,
+                                                 radius: enemy.hitBodyRadius)
     }
 
     /// Repulse T3's placeholder trail: a small steel mote left where the
@@ -6333,7 +6481,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             // The Carrier: stop at the last free point along the step.
             if to != from, arenaGeometry.segmentBlockedExact(from, to, travelRadius: r) {
-                to = lastFreePoint(from: from, to: to, radius: r)
+                to = arenaGeometry.pathShove(from: from, to: to, radius: r)   // A7b S14: the shared bisection
                 stops = true
                 #if DEBUG
                 combatLedger.launchCarrierStops += 1
@@ -6639,12 +6787,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if playerStats.skybeamCalled, skybeamAttachTime >= GameConfig.Skybeam.calledThreshold {
             switch target {
             case .enemy(let e):
-                e.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
-                    GameConfig.Skybeam.calledVulnerability, isBossClass: e.isMiniBoss)
+                e.vulnerability.set(.called, GameConfig.BossClass.scaledDebuff(
+                    GameConfig.Skybeam.calledVulnerability, isBossClass: e.isMiniBoss))
                 calledEnemy = e
             case .boss(let b):
-                b.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
-                    GameConfig.Skybeam.calledVulnerability, isBossClass: true)
+                b.vulnerability.set(.called, GameConfig.BossClass.scaledDebuff(
+                    GameConfig.Skybeam.calledVulnerability, isBossClass: true))
                 calledBoss = b
             }
         }
@@ -6955,11 +7103,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         clearCalled()
     }
 
-    /// Remove the Called vulnerability from the previously-marked prey.
+    /// Remove the Called vulnerability from the previously-marked prey — its
+    /// Called channel only (A7b S6, CL-107): Marked / Frostbite / Fracture stay.
     private func clearCalled() {
-        calledEnemy?.vulnerabilityMultiplier = 1.0
+        calledEnemy?.vulnerability.clear(.called)
         calledEnemy = nil
-        calledBoss?.vulnerabilityMultiplier = 1.0
+        calledBoss?.vulnerability.clear(.called)
         calledBoss = nil
     }
 
@@ -6995,17 +7144,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // T4 Marked: lingering enemies (and the boss) become vulnerable — boss-class
         // at reduced strength via the global factor. Persists until death.
+        // A7b S6 (CL-107): Marked is its own channel — marked once, whatever
+        // else is on the body (it used to wait for an empty shared slot).
         if playerStats.apexMarked {
             for e in enemies where !e.isDying {
-                if e.timeAlive >= GameConfig.Apex.markLifetime && e.vulnerabilityMultiplier == 1.0 {
-                    e.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
-                        GameConfig.Apex.markVulnerability, isBossClass: e.isMiniBoss)
+                if e.timeAlive >= GameConfig.Apex.markLifetime && !e.vulnerability.isActive(.marked) {
+                    e.vulnerability.set(.marked, GameConfig.BossClass.scaledDebuff(
+                        GameConfig.Apex.markVulnerability, isBossClass: e.isMiniBoss))
                     showRingPulse(at: e.position, radius: 26, colorHex: 0x99304D)
                 }
             }
-            if let b = boss, !b.isDead, b.vulnerabilityMultiplier == 1.0 {
-                b.vulnerabilityMultiplier = GameConfig.BossClass.scaledDebuff(
-                    GameConfig.Apex.markVulnerability, isBossClass: true)
+            if let b = boss, !b.isDead, !b.vulnerability.isActive(.marked) {
+                b.vulnerability.set(.marked, GameConfig.BossClass.scaledDebuff(
+                    GameConfig.Apex.markVulnerability, isBossClass: true))
             }
         }
 
@@ -7336,12 +7487,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if erasureStackTimer > 0 { erasureStackTimer -= dt }
         if erasureTriggerCooldown > 0 { erasureTriggerCooldown -= dt }
 
-        if erasureStacks >= GameConfig.Erasure.unstableGaugeCapacity, erasureTriggerCooldown <= 0,
-           let target = nearestEnemyToPlayer() {
-            erasureStacks = 0
-            erasureGauge.flashRelease()
-            erasureTriggerCooldown = playerStats.erasureTriggerCD
-            triggerUnstable(on: target)
+        // v2.1 A7b S11 (CL-119 A1): the nearest foe; with no foe alive, the arena
+        // boss if it can be hit (the Faceted Lie's vanish holds the charge).
+        if erasureStacks >= GameConfig.Erasure.unstableGaugeCapacity, erasureTriggerCooldown <= 0 {
+            if let target = nearestEnemyToPlayer() {
+                releaseUnstableCharge()
+                triggerUnstable(on: target)
+            } else if let b = boss, isHittable(b) {
+                releaseUnstableCharge()
+                triggerUnstable(onBoss: b)
+            }
         }
 
         // T5: the run-ending void.
@@ -7481,6 +7636,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return nearest
     }
 
+    /// A full meter discharges: it empties and the trigger cooldown starts.
+    private func releaseUnstableCharge() {
+        erasureStacks = 0
+        erasureGauge.flashRelease()
+        erasureTriggerCooldown = playerStats.erasureTriggerCD
+    }
+
     /// Show/hide + sync the Unstable meter with T1 state.
     private func refreshErasureGauge() {
         if playerStats.erasureActive {
@@ -7506,8 +7668,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 5: erasureFracture(enemy)
         default: erasureBackwash(at: pos)
         }
+        fireRiftCannonIfDue()
+    }
 
-        // T3 Rift Cannon — every Nth activation, a rift fires a beam across the arena.
+    /// v2.1 A7b S11 (CL-119 A1): a lurch at a lone arena boss. Only the effects
+    /// that can reach it roll — Rift Burst, Damage Echo, Fracture — each at the
+    /// boss-class 50%. It is an activation like any other (T3's Rift Cannon).
+    private func triggerUnstable(onBoss bossNode: any ArenaBossNode) {
+        playerStats.erasureActivations += 1
+        let pos = bossNode.position
+        showUnstablePop(at: pos)
+        switch Int.random(in: 0..<3) {
+        case 0: erasureRiftBurst(at: pos, includeBoss: true)
+        case 1: erasureDamageEcho(onBoss: bossNode)
+        default: erasureFracture(onBoss: bossNode)
+        }
+        fireRiftCannonIfDue()
+    }
+
+    /// T3 Rift Cannon — every Nth activation, a rift fires a beam across the arena.
+    private func fireRiftCannonIfDue() {
         if playerStats.erasureRiftCannon
             && playerStats.erasureActivations % GameConfig.Erasure.riftCannonEveryN == 0 {
             fireRiftCannon()
@@ -7569,17 +7749,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func erasureImplosion(at pos: CGPoint) {
         let r = GameConfig.Erasure.effectRadius
         for e in enemies where e.position.distance(to: pos) < r {
-            let dir = (pos - e.position).normalized
-            e.position += dir * GameConfig.Erasure.implosionPull
+            shove(e, along: pos - e.position, by: GameConfig.Erasure.implosionPull)   // v2.1 A7b S14 (CL-124a)
         }
         showRingPulse(at: pos, radius: r, colorHex: GameConfig.VoidTree.indigoLightHex)
     }
 
-    /// 2. Rift Burst — Void damage in a small radius.
-    private func erasureRiftBurst(at pos: CGPoint) {
+    /// 2. Rift Burst — Void damage in a small radius (the arena boss too, at the
+    /// boss-class 50%, when the lurch fell back to it — CL-119 A1).
+    private func erasureRiftBurst(at pos: CGPoint, includeBoss: Bool = false) {
         let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.riftBurstMult))
         damageEnemiesInRadius(GameConfig.Erasure.effectRadius, around: pos,
-                              damage: dmg, bossClassScaled: true)
+                              damage: dmg, bossClassScaled: true, includeBoss: includeBoss)
         showRingPulse(at: pos, radius: GameConfig.Erasure.effectRadius, colorHex: GameConfig.VoidTree.indigoHex)
     }
 
@@ -7614,6 +7794,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
+    /// 4′. Damage Echo on a lone arena boss (CL-119 A1): the same delayed
+    /// detonation at the boss-class 50%, if that boss is still the one in the
+    /// slot and can still be hit.
+    private func erasureDamageEcho(onBoss bossNode: any ArenaBossNode) {
+        let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.damageEchoFraction))
+        let target = ObjectIdentifier(bossNode)
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.Erasure.damageEchoDelay),
+            SKAction.run { [weak self] in
+                guard let self = self, let b = self.boss, ObjectIdentifier(b) == target, self.isHittable(b) else { return }
+                self.showRingPulse(at: b.position, radius: 28, colorHex: GameConfig.VoidTree.indigoHex)
+                b.takeDamage(GameConfig.BossClass.scaledDamage(dmg, isBossClass: true))
+            }
+        ]))
+    }
+
     /// 5. Displacement — shove the target a random short distance.
     private func erasureDisplacement(_ enemy: EnemyNode) {
         let ang = CGFloat.random(in: 0..<(2 * .pi))
@@ -7631,6 +7827,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                 GameConfig.Erasure.fractureVulnerability, isBossClass: enemy.isMiniBoss),
                             duration: GameConfig.Erasure.fractureDuration)
         showRingPulse(at: enemy.position, radius: 26, colorHex: GameConfig.VoidTree.indigoLightHex)   // v2.1 A6 (F4)
+    }
+
+    /// 6′. Fracture on a lone arena boss (CL-119 A1): its CL-116 channel at the
+    /// boss-class scale (+20% taken), on the scene's game-time window.
+    private func erasureFracture(onBoss bossNode: any ArenaBossNode) {
+        bossNode.vulnerability.set(.fracture, GameConfig.BossClass.scaledDebuff(
+                                       GameConfig.Erasure.fractureVulnerability, isBossClass: true))
+        bossFractureWindow.start(GameConfig.Erasure.fractureDuration)
+        showRingPulse(at: bossNode.position, radius: 26, colorHex: GameConfig.VoidTree.indigoLightHex)
     }
 
     /// 7. Backwash — a Void-shard burst radiates from the target (reuses the
@@ -7668,19 +7873,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// T4: fire one condensed icicle (200% shot damage) that shatters into shards on impact.
     @discardableResult
     private func fireIcicle(direction: CGPoint, originOffset: CGPoint) -> ProjectileNode {
+        // v2.1 A7b S9 (CL-117): the icicle replaces the primary shot, so it rolls
+        // the shot's crit and counts once toward Calculated Strike.
+        let isCrit = rollShotCrit(directAttack: true)
+        // v2.1 A7b S8 (CL-114a): the icicle's Overcharge rides the block too.
+        let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: GameConfig.PolarVortex.icicleMult))
         let icicle = ProjectileNode(
             direction: direction,
             speed: playerStats.effectiveProjectileSpeed,
             range: playerStats.effectiveProjectileRange,
             pierces: 0,
-            damageMultiplier: playerStats.effectiveDamageMultiplier * GameConfig.PolarVortex.icicleMult,
-            isCrit: false,
+            damageMultiplier: overcharge.overchargeFree,
+            isCrit: isCrit,
             spawnsGravityWell: false,   // v2.1 A6 (CL-87): Gravity Well stays pellet-scoped
             voidStyle: false,
             isIcicle: true
         )
         icicle.position = player.position + originOffset
         icicle.zPosition = 8
+        icicle.overchargeFactor = overcharge.factor
         icicle.killSource = .capstone   // v2.1 A0: the condensed capstone shot
         projectiles.append(icicle)
         worldNode.addChild(icicle)
@@ -7717,6 +7928,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                            originOffset: offset,
                            damageScale: GameConfig.PolarVortex.icicleShardMult,
                            allowModifiers: false,
+                           rollsCrit: false,   // v2.1 A7b S9 (CL-117): the icicle's crit stays on the icicle
                            configure: { $0.appliesFrostTouch = frost; $0.iceburstGeneration = 1 })
         }
         showRingPulse(at: pos, radius: 34, colorHex: 0xCCF2FF)
@@ -7853,7 +8065,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         voidWells.append(well)
         worldNode.addChild(well)
         #if DEBUG
-        combatLedger.recordVoidWell(preset, live: voidWells.count)
+        combatLedger.recordVoidWell(preset, live: voidWells.filter { $0.state.isLive }.count)   // live holes only (A7b S2)
         #endif
     }
 
@@ -8353,13 +8565,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard playerStats.electroPulseActive, joystick.direction != .zero else { return }
         electroPulseTimer += dt
         guard electroPulseTimer >= GameConfig.Shock.pulseInterval else { return }
-        var nearest: EnemyNode?
-        var best = GameConfig.Shock.pulseRange
-        for enemy in enemies where !enemy.isDying {
-            let d = player.position.distance(to: enemy.position)
-            if d < best { best = d; nearest = enemy }
-        }
-        guard let target = nearest else { return }   // stay charged until something is in reach
+        // v2.1 A7b S12 (CL-127a): hittable bodies only; S13 (CL-123a): one Spark
+        // can see — with none, it stays charged.
+        guard let target = arenaGeometry.nearestVisible(
+            from: player.position, among: enemies.filter { isHittable($0) },
+            position: { $0.position }, within: GameConfig.Shock.pulseRange,
+            travelRadius: GameConfig.Geometry.arcTravelRadius) else { return }   // stay charged until something is in reach
         electroPulseTimer = 0
         showRingPulse(at: player.position, radius: 26, colorHex: 0xFFE066)
         shockArc(from: player.position, to: target.position, width: 3)
@@ -8441,13 +8652,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             sentryCoils[i].timer += dt
             guard sentryCoils[i].timer >= interval else { continue }
             let origin = sentryCoils[i].node.position
-            var nearest: EnemyNode?
-            var best = range
-            for enemy in enemies where !enemy.isDying {
-                let d = origin.distance(to: enemy.position)
-                if d < best { best = d; nearest = enemy }
-            }
-            if let target = nearest {
+            // v2.1 A7b S12 (CL-127a): hittable bodies only. S13 (CL-123a/b): a
+            // T1–T3 coil arcs only to what it can see; the T4 Lightning Network
+            // is arena-wide by ruling and approved copy (exempt).
+            let sight = network ? ArenaGeometry.open : arenaGeometry
+            if let target = sight.nearestVisible(
+                from: origin, among: enemies.filter { isHittable($0) },
+                position: { $0.position }, within: range,
+                travelRadius: GameConfig.Geometry.arcTravelRadius) {
                 sentryCoils[i].timer = 0
                 shockArc(from: CGPoint(x: origin.x, y: origin.y + 14), to: target.position, width: network ? 3.5 : 2)
                 if target.takeDamage(damage) {
@@ -8456,7 +8668,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 #if DEBUG
                 combatLedger.coilShocks += 1
                 #endif
-            } else if let b = boss, !b.isDead, origin.distance(to: b.position) - b.targetingRadius < range {
+            } else if let b = boss, isHittable(b), origin.distance(to: b.position) - b.targetingRadius < range,
+                      !sight.segmentBlockedExact(origin, b.position, travelRadius: GameConfig.Geometry.arcTravelRadius) {
                 sentryCoils[i].timer = 0
                 shockArc(from: CGPoint(x: origin.x, y: origin.y + 14), to: b.position, width: network ? 3.5 : 2)
                 b.takeDamage(damage)
@@ -8840,51 +9053,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    // MARK: - v1.6: Arc Wake (Unit 3)
-
-    private func updateArcWake(_ dt: TimeInterval) {
-        guard playerStats.arcWakeDamage > 0 else { return }
-        let now = waveManager.elapsedTime
-
-        // Drop sparks while moving
-        if joystick.direction != .zero {
-            arcWakeDropTimer += dt
-            if arcWakeDropTimer >= playerStats.arcWakeDropInterval {
-                arcWakeDropTimer = 0
-                arcWakeSparks.append((position: player.position,
-                                      expiry: now + playerStats.arcWakeLifetime))
-                spawnArcWakeVisual(at: player.position)
-            }
-        }
-
-        arcWakeSparks.removeAll { $0.expiry <= now }
-        guard !arcWakeSparks.isEmpty else { return }
-
-        // Each spark zaps the first enemy that touches it, then is consumed
-        var consumedSparks: [Int] = []
-        var killed: [EnemyNode] = []
-        for (sIndex, spark) in arcWakeSparks.enumerated() {
-            for enemy in enemies where !killed.contains(where: { $0 === enemy }) {
-                if enemy.position.distance(to: spark.position) < 16 {
-                    if enemy.takeDamage(playerStats.arcWakeDamage) {
-                        killed.append(enemy)
-                    }
-                    consumedSparks.append(sIndex)
-                    break
-                }
-            }
-        }
-        for index in consumedSparks.reversed() {
-            arcWakeSparks.remove(at: index)
-        }
-        for enemy in killed {
-            if let index = enemies.firstIndex(where: { $0 === enemy }) {
-                enemies.remove(at: index)
-                onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .ground)
-            }
-        }
-    }
-
     // MARK: - v1.8 Unit 14: False Opening (Void card)
 
     /// A hard direction-change while moving — a dodge — drops a short-delayed
@@ -8943,21 +9111,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
-    private func spawnArcWakeVisual(at position: CGPoint) {
-        let spark = SKShapeNode(circleOfRadius: 4)
-        spark.fillColor = SKColor(hex: 0xFFE066, alpha: 0.5)
-        spark.strokeColor = SKColor(hex: 0xFFF2AA, alpha: 0.7)
-        spark.lineWidth = 1
-        spark.glowWidth = 3
-        spark.position = position
-        spark.zPosition = 2
-        worldNode.addChild(spark)
-        spark.run(SKAction.sequence([
-            SKAction.fadeOut(withDuration: playerStats.arcWakeLifetime),
-            SKAction.removeFromParent()
-        ]))
-    }
-
     // MARK: - v2.0 Phase C (C1.1): Growth — cultivated ground
 
     /// Plant cultivated ground. Fixed position on purpose: Growth is about
@@ -8990,9 +9143,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// The Terra+ path: reach into EVERY active zone at once. Built before any
     /// Terra+ card exists so those cards stay data rather than new systems —
     /// Rich Soil is a radius multiplier, not a subsystem.
+    /// v2.1 A7b S14 (CL-124d): within the garden cap, like every growth path —
+    /// so a later Growth pick can never shrink a Rich-Soil garden back.
     private func modifyAllCultivatedZones(radiusScale: CGFloat) {
+        let cap = GameConfig.Arena.radius * GameConfig.Growth.maxZoneRadiusFactor
         for zone in cultivatedZones {
-            zone.setRadius(zone.radius * radiusScale)
+            zone.setRadius(min(cap, zone.radius * radiusScale))
         }
     }
 
@@ -9059,7 +9215,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var killed: [EnemyNode] = []
         for enemy in enemies where !enemy.isDying {
             guard cultivatedZones.contains(where: { $0.covers(enemy.position) }) else { continue }
-            enemy.applySlow(playerStats.effectiveSlow(GameConfig.Growth.enemySlow), duration: 0.3)
+            // CL-96 (A7b G1.5): the ground slow is the run's terraSlow (Rootbound adds to it).
+            enemy.applySlow(playerStats.effectiveSlow(playerStats.terraSlow), duration: 0.3)
             if tick, playerStats.thornsoilDPS > 0 {
                 let dmg = GameConfig.BossClass.scaledDamage(playerStats.thornsoilDPS,
                                                             isBossClass: enemy.isMiniBoss)
@@ -9086,8 +9243,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let damage = playerStats.unstableCoreDamage
         
         // Damage nearby enemies
+        // v2.1 A7b S11 (CL-120 B1′): the burst keeps its cadence and its ring,
+        // but costs you only if it struck something.
+        var struck = false
         for enemy in enemies {
             if player.position.distance(to: enemy.position) < radius {
+                if !enemy.isDying { struck = true }
                 enemy.takeDamage(damage)
             }
         }
@@ -9096,7 +9257,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 A5: Unbroken's full invulnerability covers self-damage too
         // (CL-55); a lethal self-hit follows the shared rescue order — Brace
         // first, then Unbroken Core, never both (CL-54).
-        if !playerStats.unbrokenWindow.isActive {
+        if !playerStats.unbrokenWindow.isActive && struck {
             let died = playerStats.takeDamage(playerStats.unstableCoreSelfDamage)
             hpBar.flashDamage()
             AudioManager.shared.play(.playerDamage)
@@ -9370,6 +9531,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case "dynamo_choir":   spawnDynamoChoir()
         case "faceted_lie":    spawnFacetedLie()
         case "unmade_star":    spawnUnmadeStar()
+        case "marchwarden":    spawnMarchwarden()   // v2.1 geometry Unit 4
         default:
             // An entry the scene has no wired spawner for. Skipping is the only
             // safe move — a stage that can never end would soft-lock the run.
@@ -9435,7 +9597,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if card.id == "v20_wildbloom", !cultivatedZones.isEmpty { growFlower() }
             if card.id == "v20_vinewall" { raiseVineWall() }
         if card.id == "v20_tree" { growTree(to: upgradeManager.tier(of: card.id)) }
-        if card.id == "v20_richsoil" { modifyAllCultivatedZones(radiusScale: 1.22) }
+        if card.id == "v20_richsoil" { modifyAllCultivatedZones(radiusScale: GameConfig.Growth.richSoilRadiusScale) }
 
             // A capstone maxed by a grant still earns its reveal.
             if card.maxTier > 1, tierBefore < card.maxTier,
@@ -9592,6 +9754,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         magnetOrbs.forEach(clamp)
         forgeCoins.forEach(clamp)
         xpOrbs.forEach(clamp)
+        // v2.1 geometry Unit 4 (independent review m4, CL-124c): Growth's
+        // persistent placements follow the swap too — a garden's centre (the
+        // flowers' always-valid fallback), its flowers and the Tree may not sit
+        // in the new arena's solid geometry or past its wall. (Boss Mode can now
+        // carry a garden from an open arena into the Splitworks.)
+        cultivatedZones.forEach(clamp)
+        flowers.forEach(clamp)
+        if let tree = treeNode { clamp(tree) }
     }
 
     /// The boss for this stage has fallen. Move to the next one, or finish.
@@ -9752,10 +9922,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !isGauntlet else { return }
         let pm = ProgressionManager.shared
         let alreadyMet = UserDefaults.standard.bool(forKey: "sparkforge_mote_met")
-        var eligible = !alreadyMet
+        let earned = !alreadyMet
             && pm.totalKills >= GameConfig.Mote.requiredLifetimeKills
             && pm.bossKills >= GameConfig.Mote.requiredBossKills
-        if GameConfig.Mote.debugForceEntrance { eligible = true }
+        #if DEBUG
+        let eligible = earned || GameConfig.Mote.debugForceEntrance   // badged in setupHUD
+        #else
+        let eligible = earned
+        #endif
         guard eligible else { return }
         beginMoteEntrance()
     }
@@ -9994,7 +10168,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if elapsed >= GameConfig.Spurhound.firstSpawnTime && roll < GameConfig.Spurhound.spawnChance {
             let hound = SpurhoundNode(health: baseHP, xpValue: xp + 1)
             hound.position = splitworksSpawnPoint()
-            hound.onLungeCommitted = { [weak self] in self?.geometryDebug.spurhoundLunges += 1 }
+            hound.onLungeCommitted = { [weak self] in
+                self?.geometryDebug.spurhoundLunges += 1
+                AudioManager.shared.play(.spurhoundWhine)   // v2.1 geometry Unit 4
+            }
             hound.onLungeOutcome = { [weak self] outcome in
                 guard let self = self else { return }
                 switch outcome {
@@ -10026,6 +10203,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 self?.findFiringAnchor(from: from, toward: goal)
             }
             keeper.onAnchorChosen = { [weak self] in self?.geometryDebug.linekeeperAnchors += 1 }
+            keeper.onAimStart = { AudioManager.shared.play(.linekeeperAim) }   // v2.1 geometry Unit 4
             keeper.onRelocate = { [weak self] in self?.geometryDebug.linekeeperRelocates += 1 }
             enemies.append(keeper)
             worldNode.addChild(keeper)
@@ -10052,7 +10230,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 self.worldNode.shake(intensity: 8, duration: 0.2)
                 self.geometryDebug.ramplateShoves += 1
             }
-            plate.onBrace = { [weak self] in self?.geometryDebug.ramplateBraces += 1 }
+            plate.onBrace = { [weak self] in
+                self?.geometryDebug.ramplateBraces += 1
+                AudioManager.shared.play(.ramplateBrace)   // v2.1 geometry Unit 4
+            }
             plate.onChargeEnded = { [weak self] outcome in
                 switch outcome {
                 case .hit: break
@@ -10228,7 +10409,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let self = self else { return }
             let reach = radius + self.playerStats.effectiveCollisionRadius
             if self.player.position.distance(to: center) <= reach {
-                self.applyBossHazardDamage(damage, shakeIntensity: 8)
+                // A7b G1.2: an Arena 3 enemy, not boss-class (no Giantkiller DR).
+                self.applyBossHazardDamage(damage, shakeIntensity: 8, fromBossClass: false)
             }
         }
         enemies.append(grounder)
@@ -10709,17 +10891,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             for _ in 0..<C.musterHounds {
                 let hound = SpurhoundNode(health: baseHP, xpValue: baseHP + 2)
                 hound.position = self.splitworksSpawnPoint(zone: zone)
-                hound.onLungeCommitted = { [weak self] in self?.geometryDebug.spurhoundLunges += 1 }
+                hound.onLungeCommitted = { [weak self] in
+                    self?.geometryDebug.spurhoundLunges += 1
+                    AudioManager.shared.play(.spurhoundWhine)   // v2.1 geometry Unit 4
+                }
                 self.enemies.append(hound); self.worldNode.addChild(hound)
             }
             self.geometryDebug.wardenMusters += 1
         }
         // The Column Advances: the dead procession appears to move — the
-        // standards and the Carrier ignite in sequence. Visual only; no
-        // collision change (lock §6).
+        // Carrier's solid body ignites (each blocked footprint in sequence;
+        // the Splitworks has one). Visual only; no collision change (lock §6).
         warden.onColumnAdvances = { [weak self] in
             guard let self = self else { return }
-            let solids = self.worldNode.children.filter { ($0.name ?? "").hasPrefix("solidGeometry_") }
+            // (independent review N4: the bodies live in arenaLayer — searching
+            // worldNode's own children found nothing, so this never fired.)
+            let solids = self.arenaLayer.children.filter { ($0.name ?? "").hasPrefix("solidGeometry_") }
             for (i, node) in solids.enumerated() {
                 guard let shape = node as? SKShapeNode else { continue }
                 let base = shape.strokeColor
@@ -10732,16 +10919,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         warden.onCharge = { [weak self] in self?.geometryDebug.wardenCharges += 1 }
+        warden.onMusterCalled = { AudioManager.shared.play(.wardenMuster) }   // v2.1 geometry Unit 4
         warden.onStandardLanded = { [weak self] in self?.geometryDebug.wardenStandards += 1 }
 
         warden.onDeath = { [weak self] pos, xp in
             guard let self = self else { return }
             self.bossDefeatedThisRun = true
             ProgressionManager.shared.recordKill(.boss)
-            // Bestiary entry + Marchworn skin land in Unit 4 (presentation).
-            // The registry chokepoint is wired NOW so the unlock can never be
-            // the missing line again (v2.0.1 lesson).
+            CodexManager.shared.recordDefeat(.marchwarden)   // v2.1 geometry Unit 4
             ProgressionManager.shared.registerArenaBossDefeat("marchwarden")
+            // Clearing Arena 6 earns Marchworn (design lock §8: the first-clear
+            // reward; idempotent like every earned skin).
+            SkinManager.shared.unlockEarned("spark_marchworn")
             for _ in 0..<10 {
                 let offset = CGPoint(x: CGFloat.random(in: -40...40), y: CGFloat.random(in: -40...40))
                 self.spawnXPOrb(at: pos + offset, value: xp / 10)
@@ -10839,7 +11028,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 let dist = distanceFromPoint(player.position,
                                              toSegment: impA.position, impB.position)
                 if dist < cfg.relayArcHitDistance + playerStats.effectiveCollisionRadius {
-                    applyBossHazardDamage(cfg.relayArcDamage, shakeIntensity: 6)
+                    // A7b G1.2: an Arena 3 enemy, not boss-class (no Giantkiller DR).
+                    applyBossHazardDamage(cfg.relayArcDamage, shakeIntensity: 6, fromBossClass: false)
                 }
             } else {
                 // Charging — a faint tell that brightens toward the fire
@@ -10909,7 +11099,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func showBossEntrance(name: String, colorHex: UInt32) {
         AudioManager.shared.play(.bossEntrance)
-        MusicManager.shared.setContext(.boss)   // v2.1: the boss pool takes over
+        MusicManager.shared.setContext(.boss)   // v2.1: the boss context (the song carries on)
         let dim = SKShapeNode(rectOf: CGSize(width: 2000, height: 2000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.5)
         dim.strokeColor = .clear
@@ -11312,6 +11502,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case is GravemoteNode:   return .gravemote
         case is StarNeedleNode:  return .starNeedle
         case is AnvilbornNode:   return .anvilborn
+        // v2.1 geometry Unit 4 — the Splitworks family (Arena 6).
+        case is SpurhoundNode:   return .spurhound
+        case is LinekeeperNode:  return .linekeeper
+        case is RamplateNode:    return .ramplate
         default:                 return .melee
         }
     }
@@ -11593,8 +11787,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if outcome.rescue != .none {
             for enemy in enemies {
                 if player.position.distance(to: enemy.position) < 50 {
-                    let dir = (enemy.position - player.position).normalized
-                    enemy.position += dir * 40
+                    shove(enemy, along: enemy.position - player.position, by: 40)   // v2.1 A7b S14 (CL-124a)
                 }
             }
             worldNode.shake(intensity: 8, duration: 0.25)
@@ -11673,8 +11866,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if outcome.rescue != .none {
             for enemy in enemies {
                 if player.position.distance(to: enemy.position) < 50 {
-                    let dir = (enemy.position - player.position).normalized
-                    enemy.position += dir * 40
+                    shove(enemy, along: enemy.position - player.position, by: 40)   // v2.1 A7b S14 (CL-124a)
                 }
             }
             worldNode.shake(intensity: 8, duration: 0.25)
@@ -11720,27 +11912,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 A6: Warp's curve and Riftline's falloff join here (CL-70 rounding).
         var damage = shotBaseDamage(projectileNode)
 
-        // v1.7 Induction Step: a fully charged attack discharges as bonus Shock
-        let inductionBonus = playerStats.consumeInductionCharge()
-        if inductionBonus > 0 {
-            damage += inductionBonus
-            let burst = SKShapeNode(circleOfRadius: 14)
-            burst.strokeColor = SKColor(hex: 0x44BBFF, alpha: 0.9)
-            burst.fillColor = SKColor(hex: 0x44BBFF, alpha: 0.2)
-            burst.lineWidth = 1.5
-            burst.glowWidth = 4
-            burst.position = enemyNode.position
-            burst.zPosition = 8
-            worldNode.addChild(burst)
-            burst.run(SKAction.sequence([
-                SKAction.group([
-                    SKAction.scale(to: 1.8, duration: 0.18),
-                    SKAction.fadeOut(withDuration: 0.18)
-                ]),
-                SKAction.removeFromParent()
-            ]))
-        }
-
         if projectileNode.isCrit {
             damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
             // v1.9 Forge Path Lucky Break (Cun 15B): a crit may deal +50% more.
@@ -11754,37 +11925,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let execute = playerStats.executeMultiplier(healthPercent: enemyNode.healthPercent)
         if execute > 1 { damage = Int(CGFloat(damage) * execute) }
         
-        // v2.1 A2 Permafrost: ANY slow source counts — including arena-wide
-        // ones (Ice Rink lights it for everyone, Q-C5).
-        if playerStats.slowedDamageBonus > 0 && (enemyNode.isSlowed || playerStats.globalEnemySlow > 0) {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.slowedDamageBonus))
-        }
-
-        // v1.9 Polar Vortex Brittle Cold (T2): +40% vs chilled/frozen/stunned foes.
-        if playerStats.brittleCold && (enemyNode.isSlowed || enemyNode.isFrozen || enemyNode.isStunned) {
-            damage = Int(CGFloat(damage) * GameConfig.PolarVortex.brittleColdVuln)
-        }
-
-        // v1.8 Open Wounds (Bleed 3): bleeding enemies take more damage
-        // (v2.1 A4b: 25%. Direct hits stay integer — its DoT share rides the
-        // ticks before rounding, CL-25.)
-        if playerStats.bleedingEnemyDamageTaken > 0 && enemyNode.isBleeding {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
-        }
-
         // v1.9 Forge Path (Unit 2b) — Ferocity offensive + Opportunist.
+        // A7b S7 (CL-114b): the last INTEGER step, ahead of the amplifier block.
         damage = applyForgeOffense(damage,
                                    healthPercent: enemyNode.healthPercent,
                                    bossClass: enemyNode.isMiniBoss,
                                    impaired: enemyNode.isSlowed || enemyNode.isFrozen || enemyNode.isStunned,
                                    relentlessTarget: enemyNode)
 
+        // v2.1 A7b S7 (G1.9 94a; CL-94/114/115): Permafrost (any slow, incl. an
+        // arena-wide one — Q-C5), Polar Vortex's Brittle Cold (slowed / frozen /
+        // stunned) and Open Wounds (bleeding; its DoT share rides the ticks,
+        // CL-25) fold as fractions and round ONCE, unbiased, on the shot's own
+        // block threshold (DirectHitDamage).
+        // A7b S8 (94b/94c): Overcharge's factor and this enemy's resolved
+        // vulnerability join the SAME rounding (CL-114b).
+        var hit = DirectHitDamage.resolve(damage, .onEnemy(
+            permafrostBonus: playerStats.slowedDamageBonus, slowed: enemyNode.isSlowed,
+            arenaSlowed: playerStats.globalEnemySlow > 0,
+            brittleCold: playerStats.brittleCold, brittleColdFactor: GameConfig.PolarVortex.brittleColdVuln,
+            frozen: enemyNode.isFrozen, stunned: enemyNode.isStunned,
+            openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: enemyNode.isBleeding),
+            overcharge: projectileNode.overchargeFactor, vulnerability: enemyNode.vulnerabilityMultiplier,
+            rounding: projectileNode.hitRounding)
+
         // v1.6: shield reduction applies after all bonuses — flanking doubles output.
         // v1.9 Erasure Void-Touched (T2): shots pierce the shield entirely.
         // v2.1 A6 (CL-71/72): so does a Void-affinity shot (Phase T2).
         if braceguardShielded && !playerStats.erasureVoidTouched && !projectileNode.voidHit.affinity {
-            damage = max(1, Int(CGFloat(damage) * BraceguardNode.shieldDamageMultiplier))
+            hit.shield(by: BraceguardNode.shieldDamageMultiplier)
         }
+        // A7b S8 (CL-114d): Overkill and Chain Lightning keep the pre-vulnerability basis.
+        damage = hit.basis
 
         if playerStats.burnDPS > 0 {
             // v2.1 A1: a Kindle hit — the only thing that can add a Crucible
@@ -11807,18 +11979,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.6: Overload — real stun (was a mislabeled slow)
         rollOverload(on: enemyNode)
 
-        // Shatter check
-        if playerStats.shatterChance > 0 && enemyNode.isSlowed {
-            let totalSlow = enemyNode.currentSlow + playerStats.globalEnemySlow
-            if totalSlow >= playerStats.shatterSlowThreshold &&
-               CGFloat.random(in: 0...1) < playerStats.shatterChance {
-                let killed = enemyNode.takeDamage(enemyNode.health)
-                if killed {
-                    if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
-                        enemies.remove(at: index)
-                    }
-                    onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode, source: projectileNode.killSource)
+        // Shatter (Chill ×5; A7b S10, CL-99/CL-118 — ShatterRule): a normal enemy
+        // dies; an elite takes the elite chunk and, surviving, the rest of the hit.
+        if let shatter = ShatterRule.outcome(chance: playerStats.shatterChance,
+                                             threshold: playerStats.shatterSlowThreshold,
+                                             slowed: enemyNode.isSlowed,
+                                             totalSlow: enemyNode.currentSlow + playerStats.globalEnemySlow,
+                                             elite: enemyNode.isMiniBoss, maxHealth: enemyNode.maxHealth,
+                                             roll: CGFloat.random(in: 0...1)) {
+            let killed = enemyNode.takeDamage(shatter.damage(health: enemyNode.health))
+            if killed {
+                if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
+                    enemies.remove(at: index)
                 }
+                // CL-118c: the kill keeps the shot's Iceburst generation.
+                onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode, source: projectileNode.killSource,
+                              iceburstGeneration: projectileNode.iceburstGeneration)
+            }
+            if killed || shatter.endsHit {
+                // CL-118c (A4c F2's twin): a Shatter that ends the hit still
+                // landed one — Apex, then Erasure, register once.
+                apexRegisterAttack()
+                erasureRegisterHit()
                 if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
                     projectiles.remove(at: index)
                 }
@@ -11837,7 +12019,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         let hpBefore = enemyNode.health
-        let killed = enemyNode.takeDamage(damage)
+        let killed = enemyNode.takeDirectHit(hit)   // A7b S8: no second vulnerability (CL-114c)
 
         // v1.9 Forge Path Overkill (Fer 19): excess damage bursts to nearby foes
         // (capped relative to ATK so executions/big hits don't chain-explode).
@@ -11958,16 +12140,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let execute = playerStats.executeMultiplier(healthPercent: bossNode.healthPercent)
         if execute > 1 { damage = Int(CGFloat(damage) * execute) }
 
-        // v2.1 A4b Open Wounds (CL-25/32): a bleeding boss takes +25% too.
-        if playerStats.bleedingEnemyDamageTaken > 0 && bossStatus.bleed.isBleeding {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
-        }
-
         // v1.9 Forge Path (Unit 2b): offense applies to the boss too (Headsman,
         // Berserker, charges, etc.) — no Relentless target-tracking on the boss.
+        // A7b S7 (CL-114b): the last INTEGER step, ahead of the amplifier block.
         damage = applyForgeOffense(damage,
                                    healthPercent: bossNode.healthPercent,
                                    bossClass: true, impaired: false, relentlessTarget: nil)
+
+        // v2.1 A7b S7 (G1.9 94a): a bleeding boss takes Open Wounds' +25% too
+        // (CL-25/32), as a fraction rounded ONCE (DirectHitDamage). Bosses are
+        // never slowed, so Permafrost and Brittle Cold never apply here.
+        // A7b S8 (94b/94c): Overcharge's factor and the boss's resolved
+        // vulnerability join the same rounding (CL-114b).
+        let hit = DirectHitDamage.resolve(damage, .onBoss(
+            openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: bossStatus.bleed.isBleeding),
+            overcharge: projectileNode.overchargeFactor, vulnerability: bossNode.vulnerabilityMultiplier,
+            rounding: projectileNode.hitRounding)
 
         // v2.1 A4a: bosses take DoTs (Brandon, Sep 17) — the same Kindle hit
         // (Crucible stacks included) and Bloodthirsty roll an enemy gets. Kindle
@@ -11990,7 +12178,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Death flow (XP shower, bossKills, shake) runs via the boss's onDeath callback
         // v2.1 A6 (CL-71/72): Phase T2's shot-class penetration skips the flat
         // Boss Mode DEF dial — nothing else.
-        bossNode.takeDamage(damage, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)
+        bossNode.takeDirectHit(hit, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)
         // v2.1 A6 (CL-73): a primary hit stacks the boss's Anomaly (survivor
         // only) — BEFORE Bloodthirsty, as on enemies, so a boss the chunk kills
         // never "died bleeding" from this same hit's Bleed.
@@ -12001,6 +12189,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                            roll: CGFloat.random(in: 0..<1)) {
             inflictBossBleed(generation: 0)
         }
+        apexRegisterAttack()   // T5 Apex: gun hits on the boss charge the pounce gauge too (A7b G1.1)
         erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too
         if consumed { openBlackholeIfSeeded(projectileNode) }   // v2.1 A6: it stopped here, last
     }
@@ -12017,6 +12206,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     private func isHittable(_ boss: any ArenaBossNode) -> Bool {
         !boss.isDead && !boss.isIntangible
+    }
+    /// v2.1 A7b S12 (CL-126): a targeted node — an enemy or the arena boss.
+    private func isHittableTarget(_ node: SKNode) -> Bool {
+        if let enemy = node as? EnemyNode { return isHittable(enemy) }
+        if let boss = node as? (any ArenaBossNode) { return isHittable(boss) }
+        return true
     }
 
     /// CL-33: active combat = at least one hittable hostile exists in the
@@ -12176,13 +12371,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     /// One primary hit on an enemy (CL-36/37/39). Returns the hit's damage when
-    /// it may seed the swing's single Chain Lightning, or nil for a Shatter
-    /// (which, exactly as for the gun, ends the hit and never chains).
+    /// it may seed the swing's single Chain Lightning, or nil when a Shatter ends
+    /// the hit (exactly as for the gun, it then never chains).
     ///
     /// Classified by each effect's text (CL-39) — carried: crit (+Lucky Break),
     /// the executes, Permafrost, Brittle Cold, Open Wounds, the Forge offense
     /// (per-hit charges and Relentless as usual), Overload and Whiteout ("Hits…"),
-    /// Shatter ("…when struck"), Overkill, the Apex/Erasure hit meters, and the
+    /// Shatter (both paths, CL-118), Overkill, the Apex/Erasure hit meters, and the
     /// guaranteed Bleed, and Calculated Strike (counted per swing by the
     /// caller). NOT carried: Kindle, Frost Touch and Repulse ("Projectiles…"),
     /// Seed Spore Shot ("Your shots…"), and every shot counter or effect that
@@ -12204,7 +12399,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         // CL-36: 2× the CURRENT shot damage, read live (not 200% ATK).
-        var damage = playerStats.shotFractionDamage(GameConfig.RedSmile.damageFraction)
+        // A7b S8 (CL-114a): its Overcharge rides the block, like a shot's.
+        let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: GameConfig.RedSmile.damageFraction))
+        var damage = overcharge.base
 
         // Crit rolls per target, at the swing (a sweep has no fire-time roll).
         if guaranteedCrit || CGFloat.random(in: 0...1) < playerStats.critChance {
@@ -12216,32 +12413,41 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // The damage-taken chain, exactly as a projectile hit builds it.
         let execute = playerStats.executeMultiplier(healthPercent: enemy.healthPercent)
         if execute > 1 { damage = Int(CGFloat(damage) * execute) }
-        if playerStats.slowedDamageBonus > 0 && (enemy.isSlowed || playerStats.globalEnemySlow > 0) {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.slowedDamageBonus))      // Permafrost
-        }
-        if playerStats.brittleCold && (enemy.isSlowed || enemy.isFrozen || enemy.isStunned) {
-            damage = Int(CGFloat(damage) * GameConfig.PolarVortex.brittleColdVuln)     // Brittle Cold
-        }
-        if playerStats.bleedingEnemyDamageTaken > 0 && enemy.isBleeding {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))  // Open Wounds
-        }
         damage = applyForgeOffense(damage,
                                    healthPercent: enemy.healthPercent,
                                    bossClass: enemy.isMiniBoss,
                                    impaired: enemy.isSlowed || enemy.isFrozen || enemy.isStunned,
                                    relentlessTarget: enemy)
+        // A7b S7 (CL-114): Forge ends the integer prefix; Permafrost, Brittle
+        // Cold and Open Wounds then round ONCE, on this target's own threshold —
+        // with Overcharge's factor and the resolved vulnerability since S8.
+        var hit = DirectHitDamage.resolve(damage, .onEnemy(
+            permafrostBonus: playerStats.slowedDamageBonus, slowed: enemy.isSlowed,
+            arenaSlowed: playerStats.globalEnemySlow > 0,
+            brittleCold: playerStats.brittleCold, brittleColdFactor: GameConfig.PolarVortex.brittleColdVuln,
+            frozen: enemy.isFrozen, stunned: enemy.isStunned,
+            openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: enemy.isBleeding),
+            overcharge: overcharge.factor, vulnerability: enemy.vulnerabilityMultiplier,
+            rounding: DirectHitRounding())
 
-        if shielded { damage = max(1, Int(CGFloat(damage) * BraceguardNode.shieldDamageMultiplier)) }
+        if shielded { hit.shield(by: BraceguardNode.shieldDamageMultiplier) }
+        damage = hit.basis   // A7b S8 (CL-114d): the pre-vulnerability basis
         rollOverload(on: enemy)   // Overload: "Hits have a 20% chance to stun"
 
-        // Shatter: "Frozen enemies burst when struck" — the gun's execute, as is.
-        if playerStats.shatterChance > 0 && enemy.isSlowed {
-            let totalSlow = enemy.currentSlow + playerStats.globalEnemySlow
-            if totalSlow >= playerStats.shatterSlowThreshold &&
-               CGFloat.random(in: 0...1) < playerStats.shatterChance {
-                if enemy.takeDamage(enemy.health) {
-                    onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .melee)
-                }
+        // Shatter (A7b S10, CL-99/CL-118 — ShatterRule), as on the gun: a normal
+        // enemy dies; an elite takes the elite chunk and, surviving, the rest of
+        // the swing's hit.
+        if let shatter = ShatterRule.outcome(chance: playerStats.shatterChance,
+                                             threshold: playerStats.shatterSlowThreshold,
+                                             slowed: enemy.isSlowed,
+                                             totalSlow: enemy.currentSlow + playerStats.globalEnemySlow,
+                                             elite: enemy.isMiniBoss, maxHealth: enemy.maxHealth,
+                                             roll: CGFloat.random(in: 0...1)) {
+            let killed = enemy.takeDamage(shatter.damage(health: enemy.health))
+            if killed {
+                onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .melee)
+            }
+            if killed || shatter.endsHit {
                 // A landed Shatter is still a primary hit: its ONE meter
                 // registration, then out — it never seeds the swing's chain.
                 chargeRedSmileHitMeters(.shatter)
@@ -12250,7 +12456,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         let hpBefore = enemy.health
-        let killed = enemy.takeDamage(damage)
+        let killed = enemy.takeDirectHit(hit)   // A7b S8: no second vulnerability (CL-114c)
 
         // Forge Path Overkill: "On kill, excess damage bursts to nearby foes".
         if killed, playerStats.forgeOverkill {
@@ -12294,7 +12500,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// projectile-only (Kindle). The Boss Mode DEF dial applies, as to any
     /// ordinary direct hit (CL-36); there's no special boss penalty.
     private func redSmileHitBoss(_ bossNode: any ArenaBossNode, guaranteedCrit: Bool) {
-        var damage = playerStats.shotFractionDamage(GameConfig.RedSmile.damageFraction)
+        let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: GameConfig.RedSmile.damageFraction))
+        var damage = overcharge.base   // A7b S8 (CL-114a)
         if guaranteedCrit || CGFloat.random(in: 0...1) < playerStats.critChance {
             damage = max(2, Int(CGFloat(damage) * playerStats.critMultiplier))
             if playerStats.forgeLuckyBreak && CGFloat.random(in: 0...1) < 0.10 {
@@ -12303,14 +12510,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         let execute = playerStats.executeMultiplier(healthPercent: bossNode.healthPercent)
         if execute > 1 { damage = Int(CGFloat(damage) * execute) }
-        if playerStats.bleedingEnemyDamageTaken > 0 && bossStatus.bleed.isBleeding {
-            damage = Int(CGFloat(damage) * (1.0 + playerStats.bleedingEnemyDamageTaken))
-        }
         damage = applyForgeOffense(damage, healthPercent: bossNode.healthPercent,
                                    bossClass: true, impaired: false, relentlessTarget: nil)
+        // A7b S7 (CL-114): Open Wounds, rounded ONCE, on this target's own threshold
+        // — with Overcharge's factor and the boss's resolved vulnerability since S8.
+        let hit = DirectHitDamage.resolve(damage, .onBoss(
+            openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: bossStatus.bleed.isBleeding),
+            overcharge: overcharge.factor, vulnerability: bossNode.vulnerabilityMultiplier,
+            rounding: DirectHitRounding())
         // A kill is credited by the boss's own `onLethalHit` chokepoint.
         // v2.1 A6 (CL-72/85): a sweep is not a shot — no Phase T2 penetration.
-        bossNode.takeDamage(damage)
+        bossNode.takeDirectHit(hit)   // A7b S8 (CL-114c); a sweep: the DEF dial applies
         if !bossNode.isDead { applyBossAnomaly(bossNode) }   // v2.1 A6 (CL-85) — before the Bleed
         inflictBossBleed(generation: 0)   // survivors only — guarded inside
         chargeRedSmileHitMeters(.boss)    // Apex AND Erasure (corrective F1)
@@ -12428,6 +12638,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pendingBossDoT = nil
         bossAnomaly.reset()      // v2.1 A6: a new boss starts with no Anomaly
         bossDecompose.reset()
+        bossFractureWindow = GameTimer()   // v2.1 A7b S11: nor an Erasure Fracture window
         retireBossStatusTell()
         bossKillLatch.arm(boss.map { ObjectIdentifier($0) })
         guard let b = boss else { return }
@@ -12511,6 +12722,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                 bleeding: status.bleed.isBleeding)
         bossAnomaly.tick(dt)     // v2.1 A6 (CL-73): the 2s trigger cooldown, on game time
         refreshBossAnomalyTell()
+        if bossFractureWindow.tick(dt) { b.vulnerability.clear(.fracture) }   // v2.1 A7b S11 (CL-119 A1)
         if pay.bleedTicks > 0 { bossStatusTell?.pulseBleed() }
         #if DEBUG
         combatLedger.bleedTicks += pay.bleedTicks
@@ -12559,8 +12771,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 combatLedger.overloadStuns += 1
                 #endif
             }
-        } else {
-            enemy.applyStun(playerStats.stunDuration)   // legacy path (no card grants this any more)
         }
     }
 
@@ -12581,13 +12791,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #endif
 
         for damage in damages {
-            var closest: EnemyNode?
-            var closestDist = GameConfig.Shock.chainRange + playerStats.shockChainRadiusBonus
-            for enemy in enemies where !enemy.isDying && !visited.contains(where: { $0 === enemy }) {
-                let dist = from.distance(to: enemy.position)
-                if dist < closestDist { closestDist = dist; closest = enemy }
-            }
-            guard let target = closest else { break }
+            // v2.1 A7b S13 (CL-123a): the nearest hittable, unvisited enemy the
+            // hop can SEE from the last victim — the Carrier blocks a jump.
+            guard let target = arenaGeometry.nearestVisible(
+                from: from, among: enemies.filter { e in isHittable(e) && !visited.contains(where: { $0 === e }) },
+                position: { $0.position }, within: GameConfig.Shock.chainRange,
+                travelRadius: GameConfig.Geometry.arcTravelRadius) else { break }
             visited.append(target)
 
             // LOUD (spec): the bolt thickens and glows harder with the card's tier.
@@ -13275,6 +13484,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         volley.begin()
         bossAnomaly.reset()
         bossDecompose.reset()
+        bossFractureWindow = GameTimer()   // v2.1 A7b S11
         suppressWellMatter = false
         cultivatedZones.forEach { $0.removeFromParent() }
         cultivatedZones.removeAll()
@@ -13312,8 +13522,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         thawChillGround(newRun: true)
         clearShockSystems()
         chillTrailDropTimer = 0
-        arcWakeSparks.removeAll()
-        arcWakeDropTimer = 0
 
         player.reset()
         player.stats = playerStats

@@ -276,9 +276,29 @@ No structural change. Right of Way reuses committed charge and wall-termination 
 
 No structural change. Includes Marchworn, bestiary, arena registry and progression, final art, sound, presentation, and Boss Mode compatibility.
 
+**Audio subunit (added Oct 1, 2026; recorded during A7b S11/S12, not yet built).** Brandon approved one shuffled deck of all 20 verified Suno recordings, each played once per cycle before the next reshuffle (the older two-per-arena assignment is superseded). On Oct 1 he settled it further: "Incorporate the settled shared 20-track app-session deck and naming plan at the appropriate audio integration step. Keep tracks continuous across contexts and resume after interruptions; reuse procedural SFX."
+
+| Policy | Status |
+|---|---|
+| Selection | ✅ One shared deck of all 20 distinct recordings (identity = the full Suno ID, not the title); no weighting, pair spacing, per-arena or boss-only rules. |
+| Lifetime | ✅ App session: one deck for the whole session; starting or restarting a run and returning to the title never reset it; not persisted (a relaunch reshuffles). |
+| Context changes | ✅ Continuous: title ↔ run ↔ boss transitions keep the current track playing; a new draw happens only when a track finishes. |
+| Interruptions | ✅ Resume: OS audio interruptions, backgrounding and pause resume the current track at its position. **Applied reading, for the listening gate:** BGM OFF → ON resumes too (no new draw). The player's own audio still wins (today's rule). |
+| Consumption | Engineering definition: a draw is consumed when its playback starts. A track that fails to start is dropped from this session's deck with a DEBUG log, and the next is drawn (no spin, no duplicate advance, no silent "completed" cycle). |
+| Cycle boundary | ✅ No back-to-back repeat (Brandon, Oct 1): if a reshuffle would open with the track that just ended, it is swapped deeper into the new cycle. |
+| Arena 6 cues | ✅ Reuse procedural SFX (`AudioManager`'s synthesized buffers) for the design lock §9 cues: hammer cadence, rail strain, unanswered horn, Spurhound whine, Linekeeper aim tone, Ramplate brace, Marchwarden muster. No new audio assets. |
+
+- **Import:** verified copies from `~/Downloads/Sparkforge BGM - Suno/` (raw files and their `manifest.csv` / `verification.json` stay untouched) into `Sparkforge/Audio/BGM/`, named by the verified map (`bgm_<lowercase_title>_<first8SunoID>.mp3`, e.g. `bgm_final_form_frenzy_dc68b53c.mp3`; the map is in the Codex handoff `2026-09-30/task-2/sparkforge-geometry-unit4-audio-20261001/proposed-import-map.csv`, with hashes). Brandon is coordinating the file drops. Generic `bgm_` names only (`bgm_title_` / `bgm_boss_` stay reserved).
+- **Validation:** source-to-copy identity and byte hashes for all 20; the built app holds exactly 20 eligible assets; executed selector tests with controlled randomness (each ID once per cycle, refill only at the boundary, the boundary rule, no draw on a context change, resume without a draw, a failed start drops one asset and draws once); and Brandon's listening gate for transitions, toggles and interruptions.
+- `Sparkforge/Audio/BGM/README.txt` is rewritten with the build (it still describes per-context pools and "no code changes, ever").
+
+**Built Oct 1, 2026 (checkpoint 19, uncommitted):** the Splitworks is registered (arena 6; the DEBUG shell seam is retired); the Marchwarden is in Boss Mode; four bestiary entries; Marchworn; the floor motif and Carrier detail; five procedural cues; and the 20-track deck imported and live. Record: `arena6-production-closeout.md`.
+
 ### Unit 5: Integration and closeout
 
 No structural change. Includes compatibility, tuning, performance, telemetry review, persistence verification, bestiary finalization against shipped behavior and art, and the reusable Arena 6 production closeout.
+
+**Closed Oct 1, 2026:** see `arena6-production-closeout.md` (the reusable checklist, the integration checks and the open items). Its device gate is Brandon's release playtest.
 
 ---
 

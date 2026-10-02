@@ -1,28 +1,31 @@
 // MusicManager.swift
 // Sparkforge
 //
-// v2.1 (interim atmosphere): BGM playback for the Suno "16-bit chaos"
-// batch. Zero-config by design — Brandon drops tracks into the project and
-// they play; no code change per track, ever.
+// BGM playback. v2.1 geometry Unit 4 replaced the per-context pools with ONE
+// shuffled deck of every bundled `bgm_*` track (Brandon's settled plan, Oct 1 —
+// docs/arena6-geometry-reconciliation.md §5 Unit 4, audio subunit):
+//   • one shared deck (BGMDeck): each track once per cycle, then a reshuffle
+//     that never opens with the track that just played; it lives for the app
+//     session and is never persisted;
+//   • CONTINUOUS: title ↔ run ↔ boss never changes the song — a new track is
+//     drawn only when one finishes;
+//   • RESUME: an OS interruption, backgrounding, and BGM OFF → ON all resume
+//     the current track where it was (no new draw);
+//   • a track that can't be opened is dropped for the session and logged — no
+//     spin, no double advance; a start the session refuses is retried on the
+//     next transport event. The rules are one table, BGMPolicy.
+// File names carry no context any more (`bgm_<title>_<id8>.mp3`; see
+// Sparkforge/Audio/BGM/README.txt).
 //
-// TRACK CONVENTION (filename prefixes, any of mp3/m4a/wav):
-//   bgm_title_*   → title-screen pool
-//   bgm_boss_*    → boss-fight pool (falls back to the run pool if empty)
-//   bgm_run_*     → in-run pool
-//   bgm_*         → in-run pool (anything unprefixed-beyond-bgm)
-// Pools shuffle without immediate repeats and loop forever. Context flips
-// crossfade (GameConfig.BGM.crossfade); track-to-track within a pool is a
-// straight segue.
-//
-// POLITENESS RULES:
-//   • The player's own audio wins: if something else is playing when we'd
+// POLITENESS RULES (unchanged):
+//   • The player's own audio wins: if something else is playing at the FIRST
 //     start, BGM stays silent for that app session (SFX unaffected).
-//   • BGM: OFF in Settings fades out live; ON resumes. (The toggle finally
-//     does something — "music coming soon" has arrived.)
+//   • BGM: OFF in Settings fades out live; ON fades the same song back in.
 //   • .ambient session (set by AudioManager): silent switch is respected.
 
 import AVFoundation
 import Foundation
+import UIKit
 
 final class MusicManager: NSObject, AVAudioPlayerDelegate {
 
@@ -30,15 +33,20 @@ final class MusicManager: NSObject, AVAudioPlayerDelegate {
 
     enum Context { case title, run, boss }
 
+    /// The scene's musical context. Tracked for the scenes; it never changes
+    /// the song (continuous playback).
     private(set) var context: Context = .title
-    private var pools: [Context: [URL]] = [:]
-    private var lastTrack: [Context: URL] = [:]
+    private var deck = BGMDeck<URL>([])
+    private var rng = SystemRandomNumberGenerator()
     private var player: AVAudioPlayer?
     /// The user's own audio was playing when we first tried to start —
     /// stand down for the rest of this app session.
     private var deferringToUserAudio = false
+    /// A song has started at least once this session (the user-audio check is
+    /// a first-start rule).
+    private var everStarted = false
 
-    var hasTracks: Bool { !pools.values.allSatisfy { $0.isEmpty } }
+    var hasTracks: Bool { !deck.isEmpty }
 
     private override init() {
         super.init()
@@ -46,114 +54,152 @@ final class MusicManager: NSObject, AVAudioPlayerDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleInterruption(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleDidBecomeActive(_:)),
+            name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
-    /// Find every bundled bgm_* audio file, wherever Xcode flattened it.
+    /// Every bundled bgm_* audio file, wherever Xcode flattened it — one deck.
     private func discoverTracks() {
-        var title: [URL] = [], run: [URL] = [], boss: [URL] = []
+        var urls: [URL] = []
         for ext in ["mp3", "m4a", "wav"] {
             for url in Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? [] {
-                let name = url.deletingPathExtension().lastPathComponent.lowercased()
-                guard name.hasPrefix("bgm_") else { continue }
-                if name.hasPrefix("bgm_title_") { title.append(url) }
-                else if name.hasPrefix("bgm_boss_") { boss.append(url) }
-                else { run.append(url) }   // bgm_run_* and plain bgm_*
+                guard url.deletingPathExtension().lastPathComponent.lowercased().hasPrefix("bgm_") else { continue }
+                urls.append(url)
             }
         }
-        pools = [.title: title, .run: run, .boss: boss.isEmpty ? [] : boss]
+        deck = BGMDeck(urls.sorted { $0.lastPathComponent < $1.lastPathComponent })
         #if DEBUG
-        NSLog("[BGM] discovered title=%d run=%d boss=%d", title.count, run.count, boss.count)
+        NSLog("[BGM] deck of %d tracks", deck.eligible.count)
         #endif
     }
 
     // MARK: - Public surface
 
-    /// Set the musical context. Same context = no-op; a change crossfades.
+    /// Record the musical context. Continuous playback: a playing (or a
+    /// toggle-paused) song carries straight through; only when nothing has
+    /// started yet does this begin the deck (BGMPolicy).
     func setContext(_ new: Context) {
-        if new == context, player?.isPlaying == true { return }
         context = new
-        guard SettingsManager.shared.bgmEnabled, !deferringToUserAudio else { return }
-        playNext(crossfade: true)
+        perform(.contextChanged, fadeIn: true)
     }
 
-    /// Re-evaluate after the BGM toggle flips or the app returns foreground.
+    /// Re-evaluate after the BGM toggle flips. OFF fades out and PAUSES (the
+    /// position is kept); ON fades the same song back in, or starts the deck.
     func refresh() {
         guard hasTracks else { return }
-        if !SettingsManager.shared.bgmEnabled {
+        perform(SettingsManager.shared.bgmEnabled ? .toggledOn : .toggledOff, fadeIn: true)
+    }
+
+    // MARK: - Transport (the rules live in BGMPolicy, executed in tools/bgm-harness)
+
+    private func perform(_ event: BGMPolicy.Event, fadeIn: Bool) {
+        switch BGMPolicy.action(for: event, enabled: SettingsManager.shared.bgmEnabled,
+                                deferring: deferringToUserAudio, hasPlayer: player != nil) {
+        case .none:
+            break
+        case .startDeck:
+            playNext(fadeIn: true)
+        case .resume:
+            if let current = player { resume(current, fadeIn: fadeIn) }
+        case .pause:
             player?.setVolume(0, fadeDuration: TimeInterval(GameConfig.BGM.crossfade))
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(GameConfig.BGM.crossfade)) {
                 [weak self] in
                 if !SettingsManager.shared.bgmEnabled { self?.player?.pause() }
             }
+        case .playNext:
+            playNext(fadeIn: false)   // a straight segue to the deck's next track
+        }
+    }
+
+    private func resume(_ current: AVAudioPlayer, fadeIn: Bool) {
+        guard !current.isPlaying else {
+            current.setVolume(GameConfig.BGM.volume, fadeDuration: TimeInterval(GameConfig.BGM.crossfade))
             return
         }
-        if player?.isPlaying != true { playNext(crossfade: true) }
+        if fadeIn { current.volume = 0 }
+        current.play()
+        if fadeIn { current.setVolume(GameConfig.BGM.volume, fadeDuration: TimeInterval(GameConfig.BGM.crossfade)) }
     }
 
-    // MARK: - Playback
-
-    private func poolForCurrentContext() -> [URL] {
-        let pool = pools[context] ?? []
-        if !pool.isEmpty { return pool }
-        // Boss falls back to run; title falls back to run; run falls back to
-        // ANYTHING — one lonely track should still play everywhere.
-        let runPool = pools[.run] ?? []
-        if !runPool.isEmpty { return runPool }
-        return pools.values.flatMap { $0 }
-    }
-
-    private func playNext(crossfade: Bool) {
-        let pool = poolForCurrentContext()
-        guard !pool.isEmpty else { return }
-
-        // On first-ever start, cede to the player's own audio.
-        if player == nil, AVAudioSession.sharedInstance().isOtherAudioPlaying {
+    /// Draw the deck's next track and start it. A track that can't be OPENED is
+    /// dropped for the session and the next is drawn (bounded by the deck); a
+    /// start the SESSION refuses puts the track back and waits for the next
+    /// transport event to retry (independent review m2), unless that same track
+    /// was just refused too — then it's dropped and the next is drawn.
+    private func playNext(fadeIn: Bool) {
+        // On the first-ever start only, cede to the player's own audio
+        // (review N1: not at every song change).
+        if !everStarted, AVAudioSession.sharedInstance().isOtherAudioPlaying {
             deferringToUserAudio = true
             #if DEBUG
             NSLog("[BGM] user audio detected — standing down this session")
             #endif
             return
         }
-
-        // Shuffle without immediate repeat (when the pool allows it).
-        var candidates = pool
-        if pool.count > 1, let last = lastTrack[context] {
-            candidates.removeAll { $0 == last }
+        for _ in 0...deck.eligible.count {
+            guard let url = deck.draw(using: &rng) else { return }
+            guard let next = try? AVAudioPlayer(contentsOf: url) else {
+                deck.failed(url)
+                #if DEBUG
+                NSLog("[BGM] could not open %@ — dropped for this session", url.lastPathComponent)
+                #endif
+                continue
+            }
+            next.delegate = self
+            next.volume = fadeIn ? 0 : GameConfig.BGM.volume
+            next.prepareToPlay()
+            guard next.play() else {
+                // Once: kept for the next transport event. Twice in a row: the
+                // file's fault — dropped, and the next track is drawn now.
+                let dropped = deck.refused(url)
+                #if DEBUG
+                NSLog(dropped ? "[BGM] %@ refused twice — dropped for this session"
+                              : "[BGM] the session refused %@ — kept for the next try", url.lastPathComponent)
+                #endif
+                if dropped { continue }
+                return
+            }
+            deck.started(url)
+            everStarted = true
+            if fadeIn { next.setVolume(GameConfig.BGM.volume, fadeDuration: TimeInterval(GameConfig.BGM.crossfade)) }
+            player = next
+            #if DEBUG
+            NSLog("[BGM] playing %@ (cycle %d)", url.lastPathComponent, deck.cyclesStarted)
+            #endif
+            return
         }
-        guard let url = candidates.randomElement() else { return }
-        lastTrack[context] = url
-
-        let fade = TimeInterval(GameConfig.BGM.crossfade)
-        if crossfade, let old = player, old.isPlaying {
-            old.setVolume(0, fadeDuration: fade)
-            DispatchQueue.main.asyncAfter(deadline: .now() + fade) { old.stop() }
-        }
-
-        guard let next = try? AVAudioPlayer(contentsOf: url) else { return }
-        next.delegate = self
-        next.volume = crossfade ? 0 : GameConfig.BGM.volume
-        next.prepareToPlay()
-        next.play()
-        if crossfade { next.setVolume(GameConfig.BGM.volume, fadeDuration: fade) }
-        player = next
-        #if DEBUG
-        NSLog("[BGM] playing %@", url.lastPathComponent)
-        #endif
     }
 
-    // MARK: - Delegate + interruptions
+    // MARK: - Delegate, interruptions, foreground
 
     func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully flag: Bool) {
-        guard SettingsManager.shared.bgmEnabled, !deferringToUserAudio else { return }
-        playNext(crossfade: false)   // straight segue within the pool
+        guard p === player else { return }
+        player = nil
+        perform(.trackFinished, fadeIn: false)
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ p: AVAudioPlayer, error: Error?) {
+        guard p === player, let url = p.url else { return }
+        deck.failed(url)
+        player = nil
+        #if DEBUG
+        NSLog("[BGM] decode error in %@ — dropped for this session", url.lastPathComponent)
+        #endif
+        perform(.trackBroken, fadeIn: false)
     }
 
     @objc private func handleInterruption(_ note: Notification) {
         guard let info = note.userInfo,
               let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        if type == .ended, SettingsManager.shared.bgmEnabled, !deferringToUserAudio {
-            player?.play()
-        }
+              AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+        perform(.interruptionEnded, fadeIn: false)
+    }
+
+    /// Back from the background (or any deactivation): the same song resumes —
+    /// or, if a start was refused earlier, the deck starts now.
+    @objc private func handleDidBecomeActive(_ note: Notification) {
+        perform(.becameActive, fadeIn: false)
     }
 }

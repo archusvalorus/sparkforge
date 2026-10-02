@@ -31,7 +31,7 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     private(set) var isDead = false
     var healthPercent: CGFloat { maxHealth > 0 ? max(0, CGFloat(health) / CGFloat(maxHealth)) : 0 }
     let contactDamage: Int
-    var vulnerabilityMultiplier: CGFloat = 1.0
+    var vulnerability = VulnerabilityChannels()   // A7b S6: capstone-debuff vulnerability channels
     var challengeFlatReduction: Int = 0          // v2.0 (B3): Boss Mode DEF dial
     /// Set by `configurePhysics` — monuments are huge, so every range check
     /// (auto-aim, the Apex familiar, Skybeam's lasso) must measure to the body
@@ -191,11 +191,11 @@ class MonumentBossNode: SKNode, ArenaBossNode {
     }
 
     @discardableResult
-    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool) -> Bool {
+    func takeDamage(_ amount: Int, ignoresChallengeDEF: Bool, resolved: Int?) -> Bool {
         guard !isDead else { return true }
-        let scaled = vulnerabilityMultiplier == 1.0
+        let scaled = resolved ?? (vulnerabilityMultiplier == 1.0
             ? amount
-            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded())
+            : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))
         let healthBefore = health
         let dealt = challengedDamage(scaled, raw: amount, ignoresChallengeDEF: ignoresChallengeDEF)
         health -= dealt

@@ -12,6 +12,8 @@
 # failure.
 #
 # Usage (from repo root):  sh tools/redsmile-harness/run.sh
+# v2.1 A7b (S2): it also READS GameScene.swift (REDSMILE_SCENE) for the MW
+# group: the hit meters' wiring at the scene boundary.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -29,12 +31,13 @@ cp "$ROOT/Sparkforge/Systems/CombatPresence.swift" \
    "$ROOT/Sparkforge/Systems/PlayerStats.swift" \
    "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/tools/signature-draw-harness/Stubs.swift" \
+   "$ROOT/tools/signature-draw-harness/SwiftSource.swift" \
    "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda
-swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock
+swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" "$BUILD/SwiftSource.swift" \
        "$BUILD/CombatPresence.swift" "$BUILD/RedSmileState.swift" \
        "$BUILD/MeleeSector.swift" "$BUILD/FireClock.swift" "$BUILD/KillSource.swift" \
        "$BUILD/GameTimer.swift" "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" \
        "$BUILD/PlayerStats.swift" "$BUILD/UpgradeManager.swift"
-"$BUILD/harness"
+REDSMILE_SCENE="$ROOT/Sparkforge/Scenes/GameScene.swift" "$BUILD/harness"
