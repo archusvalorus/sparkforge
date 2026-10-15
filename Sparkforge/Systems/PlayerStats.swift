@@ -341,6 +341,25 @@ final class PlayerStats {
     var fireRateMultiplier: CGFloat = 1.0
     /// Extra projectiles per shot (base: 0, so total = 1 + this)
     var extraProjectiles: Int = 0
+    // v2.2 N3: the pattern tiers (AttackPattern reads them; Scatter's lanes
+    // are 2/3/5/9 TOTAL, so `extraProjectiles` is lanes − 1 for Storm Engine's
+    // volley count; Fracture's branches 3/5/9/17 per shot; Long Shot's tiers
+    // 3 and 4 remove the distance limit and add pierce-all + terrain passage).
+    var scatterTier: Int = 0
+    var fractureTier: Int = 0
+    var longShotTier: Int = 0
+    /// v2.2 N4: Rapid Fire's tier (0 = not owned). T1–T4 are attack speed in
+    /// `fireRateMultiplier`; T5 turns the auto-attack into the chaos beam.
+    var rapidFireTier: Int = 0
+    /// v2.2 N4: Rapid Fire T5 — the auto-attack is the chaos beam.
+    var chaosBeamActive: Bool { rapidFireTier >= GameConfig.Neutral.chaosBeamTier }
+    /// v2.2 N3 Long Shot T3+: shots never expire by distance (cleanup only
+    /// outside the arena's bounding circle + margin).
+    var projectileUnlimitedRange: Bool { longShotTier >= 3 }
+    /// v2.2 N3 Long Shot T4: shots pierce every enemy (no count, no falloff of
+    /// their own) and pass through solid terrain and walls.
+    var projectilePiercesAll: Bool { longShotTier >= 4 }
+    var projectilePassesTerrain: Bool { longShotTier >= 4 }
     /// Projectile speed multiplier (base: 1.0)
     var projectileSpeedMultiplier: CGFloat = 1.0
     /// Projectile range multiplier (base: 1.0)
@@ -538,16 +557,37 @@ final class PlayerStats {
     var relayBurnDamage: Int = 4
     var relayBurnRadius: CGFloat = 90
 
-    /// Overclock — level-ups grant speed briefly
+    /// Overclock — v2.2 N2: after a level-up, +35% movement, +35% attack speed
+    /// and +15% damage for 3 s of ACTIVE play. The scene triggers it when play
+    /// resumes after the last level-up screen (the acquisition level included);
+    /// the timer ticks only in the `.playing` update (`updateMagneticCore`),
+    /// so selection screens, reveals, pause and backgrounding never spend it.
+    /// A trigger REFRESHES the duration — never stacks strength or time.
     var overclockActive: Bool = false
-    var overclockBoost: CGFloat = 0.35
-    var overclockDuration: TimeInterval = 3.0
+    var overclockBoost: CGFloat = GameConfig.Neutral.overclockMoveBoost
+    var overclockDuration: TimeInterval = GameConfig.Neutral.overclockDuration
     private(set) var overclockTimer: TimeInterval = 0
+    var isOverclockRunning: Bool { overclockTimer > 0 }
+    /// Overclock's attack-speed bonus while it runs (0 otherwise); enters
+    /// `effectiveFireInterval` once, beside the other live bonuses.
+    var overclockAttackSpeed: CGFloat { overclockTimer > 0 ? GameConfig.Neutral.overclockAttackSpeed : 0 }
+    /// Overclock's damage bonus while it runs (0 otherwise); enters
+    /// `effectiveDamageMultiplier` once, additively like every other bonus.
+    var overclockDamageBonus: CGFloat { overclockTimer > 0 ? GameConfig.Neutral.overclockDamageBonus : 0 }
 
     func triggerOverclock() {
         guard overclockActive else { return }
         overclockTimer = overclockDuration
     }
+
+    // MARK: - v2.2 N2: the run level cap and XP Boost's granted level (R5)
+
+    /// The run's level cap: 15, raised to 20 by XP Boost T3. Read by
+    /// `PlayerNode` (its ledger banks XP at the cap). Reset to 15 per run.
+    var runLevelCap: Int = GameConfig.Neutral.runLevelCap
+    /// Full level-ups owed by XP Boost T3, consumed by the scene's serialized
+    /// level queue (granted first, then banked earned levels, one screen each).
+    var grantedLevelsPending: Int = 0
 
     /// Grounded Core — v2.1 A5 (CL-65): +1 PERMANENT DEF per uninterrupted
     /// 7.5s still in active combat, cap +30 per run. Replaces the v1.7 0.7s
@@ -780,9 +820,13 @@ final class PlayerStats {
     var silverSkinArmed: Bool = false
 
     /// Fracture Shot (Neutral): each shot launches split fragments at reduced damage.
-    var splitCount: Int = 0                       // 0 = off
-    var splitDamageMultiplier: CGFloat = 0.5
-    var splitAngle: CGFloat = 0.22
+    // v2.2 N3: the v1.8 Fracture fields are RETIRED — nothing in the game
+    // reads or writes them any more (Fracture is `fractureTier` + AttackPattern).
+    // They stay as stored state because the parity comparator compiles the
+    // accepted (pre-N3) engine against this very file; they reset as before.
+    var splitCount: Int = 0                       // retired (v2.2 N3)
+    var splitDamageMultiplier: CGFloat = 0.5      // retired (v2.2 N3)
+    var splitAngle: CGFloat = 0.22                // retired (v2.2 N3)
 
     /// False Opening (Void): a hard direction-change while moving leaves a
     /// short-delayed one-shot Void pulse (NOT a lingering field).
@@ -809,13 +853,16 @@ final class PlayerStats {
     
     /// Magnetic Core: XP pickup grants speed boost
     var magneticCoreSpeedBoost: CGFloat = 0.0
-    var magneticCoreBoostDuration: TimeInterval = 1.5
+    var magneticCoreBoostDuration: TimeInterval = GameConfig.Neutral.magneticBurstDuration   // v2.2 N1
     private(set) var magneticCoreBoostTimer: TimeInterval = 0.0
     
-    /// Chain Reaction: enemies explode on death (separate from Ember Burst)
+    /// Chain Reaction: enemies explode on death (separate from Ember Burst).
+    /// v2.2 N5: three tiers — the base and radius are the owned tier's
+    /// (GameConfig.Neutral), and from T3 each generation escalates (ChainReaction).
     var chainReactionExplode: Bool = false
-    var chainReactionRadius: CGFloat = 35.0
-    var chainReactionDamage: Int = 1
+    var chainReactionRadius: CGFloat = GameConfig.Neutral.chainReactionRadii[0]
+    var chainReactionDamage: Int = GameConfig.Neutral.chainReactionBases[0]
+    var chainReactionTier: Int = 0
     
     /// Static Field: proximity slow aura around player
     
@@ -844,7 +891,9 @@ final class PlayerStats {
             * (1 + frenzyAttackSpeed)
             * (1 + berserkAttackSpeed)
             * (1 + bloodlustAttackSpeed)
-        return GameConfig.Projectile.fireInterval * TimeInterval(fireRateMultiplier) / TimeInterval(live)
+        // v2.2 N2: Overclock's +35% attack speed, once, while it runs.
+        let overclocked = live * (1 + overclockAttackSpeed)
+        return GameConfig.Projectile.fireInterval * TimeInterval(fireRateMultiplier) / TimeInterval(overclocked)
     }
 
     // MARK: - v2.1 A4b: Bleed attack speed, kill rewards, executes
@@ -929,6 +978,10 @@ final class PlayerStats {
     
     /// Effective projectile range
     var effectiveProjectileRange: CGFloat {
+        // v2.2 N3 Long Shot T3+: no distance limit (targeting reaches the whole
+        // arena, line of sight still applies; the shot is cleaned up only
+        // outside the arena's bounding circle + margin).
+        if projectileUnlimitedRange { return .infinity }
         return GameConfig.Projectile.maxRange * projectileRangeMultiplier
     }
     
@@ -996,6 +1049,8 @@ final class PlayerStats {
         }
         // v1.9 Everglow Living Furnace: damage taken permanently grows ATK.
         total += everglowAtkGrowth
+        // v2.2 N2: Overclock's +15% damage, once, while it runs.
+        total += overclockDamageBonus
         return total
     }
 
@@ -1008,6 +1063,7 @@ final class PlayerStats {
             total += CGFloat(defense) * ironSkinDefToDmg
         }
         total += everglowAtkGrowth
+        total += overclockDamageBonus       // v2.2 N2 (mirrors effectiveDamageMultiplier)
         return total
     }
 
@@ -1213,6 +1269,13 @@ final class PlayerStats {
         critMultiplier = 2.0
         fireRateMultiplier = 1.0
         extraProjectiles = 0
+        scatterTier = 0            // v2.2 N3
+        fractureTier = 0
+        longShotTier = 0
+        rapidFireTier = 0          // v2.2 N4
+        splitCount = 0             // retired (v2.2 N3), reset as before
+        splitDamageMultiplier = 0.5
+        splitAngle = 0.22
         projectileSpeedMultiplier = 1.0
         projectileRangeMultiplier = 1.0
         pierceCount = 0
@@ -1269,6 +1332,8 @@ final class PlayerStats {
         relayBurnActive = false
         overclockActive = false
         overclockTimer = 0
+        runLevelCap = GameConfig.Neutral.runLevelCap        // v2.2 N2
+        grantedLevelsPending = 0
         groundedCoreActive = false
         groundedCore.reset()
         fortifyOwned = false
@@ -1334,9 +1399,6 @@ final class PlayerStats {
         redSmileOwned = false
         hasSilverSkin = false
         silverSkinArmed = false
-        splitCount = 0
-        splitDamageMultiplier = 0.5
-        splitAngle = 0.22
         falseOpeningActive = false
         falseOpeningDelay = 0.3
         falseOpeningRadius = 72.0
@@ -1356,11 +1418,12 @@ final class PlayerStats {
         phaseSkinTimer = 0
         phaseSkinCooldownTimer = 0
         magneticCoreSpeedBoost = 0
-        magneticCoreBoostDuration = 1.5
+        magneticCoreBoostDuration = GameConfig.Neutral.magneticBurstDuration
         magneticCoreBoostTimer = 0
         chainReactionExplode = false
-        chainReactionRadius = 35.0
-        chainReactionDamage = 1
+        chainReactionRadius = GameConfig.Neutral.chainReactionRadii[0]
+        chainReactionDamage = GameConfig.Neutral.chainReactionBases[0]
+        chainReactionTier = 0          // v2.2 N5
         executionProtocolThreshold = 0
         executionProtocolMultiplier = 2.0
         unstableCoreActive = false

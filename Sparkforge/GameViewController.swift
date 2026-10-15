@@ -42,7 +42,21 @@ class GameViewController: UIViewController {
               skView.bounds.height > 0 else { return }
         hasPresentedScene = true
 
-        let scene = TitleScene(size: skView.bounds.size)
+        // v2.2 J2 (ruling D1): the ability catalog is loaded once, before the
+        // title. A catalog that fails to load blocks the game behind an error
+        // screen; the full report goes to the log in every build.
+        let scene: SKScene
+        switch AbilityCatalog.installed {
+        case .success(let catalog):
+            #if DEBUG
+            NSLog("[CATALOG] loaded %d cards, %d synergy tiers, %d retired ids (schema %d)",
+                  catalog.cards.count, catalog.synergyEffects.count, catalog.retiredCardIDs.count, AbilityCatalog.supportedSchemaVersion)
+            #endif
+            scene = TitleScene(size: skView.bounds.size)
+        case .failure(let failure):
+            NSLog("[CATALOG] %@", failure.report)
+            scene = CatalogErrorScene(size: skView.bounds.size, failure: failure)
+        }
         scene.scaleMode = .resizeFill
         scene.anchorPoint = CGPoint(x: 0.5, y: 0.5)  // Center origin
         skView.presentScene(scene)

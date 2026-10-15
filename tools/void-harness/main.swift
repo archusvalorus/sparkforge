@@ -404,8 +404,8 @@ do {
 do {
     let um = UpgradeManager()
     let voidCards = um.allCards.filter { $0.tag == .voidT }
-    check("CA1 pool 80 (A5's pool of 79 incl. Panda − Mass Tax + Void Horror + Shadow Edge; 79 draftable + Panda); Void 13 by primary tag (CL-83)",
-          um.allCards.count == 80 && voidCards.count == 13, "pool=\(um.allCards.count) void=\(voidCards.count)")
+    check("CA1 pool 79 (A5's pool of 79 incl. Panda − Mass Tax + Void Horror + Shadow Edge, then v2.2 N1 − Keen Eye; 78 draftable + Panda); Void 13 by primary tag (CL-83)",
+          um.allCards.count == 79 && voidCards.count == 13, "pool=\(um.allCards.count) void=\(voidCards.count)")
     check("CA2 Mass Tax is retired — its id is gone",
           !um.allCards.contains { $0.id == "v16_mass_tax" || $0.name == "Mass Tax" })
     let horror = card("v21_void_horror", um), edge = card("v21_shadow_edge", um)
@@ -921,7 +921,9 @@ do {
     let bossHit = body("handleProjectileHitBoss")
     check("WR6 the gun on the boss: secondaries leave first; Phase T2 skips ONLY the flat dial; primary hits stack its Anomaly",
           order(bossHit, ["resolveVoidSecondaryHitBoss(projectileNode, on: bossNode)", "var damage = shotBaseDamage(projectileNode)",
-                          "bossNode.takeDirectHit(hit, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)",   // A7b S8: the direct entry
+                          // v2.2 N3 corrective: the dial-then-share helper hands the hit (and whether the dial is already applied) to the direct entry
+                          "let (bossHit, ignoresDEF) = fractureBranchOnBoss(hit, projectile: projectileNode, boss: bossNode)",
+                          "bossNode.takeDirectHit(bossHit, ignoresChallengeDEF: ignoresDEF)",   // A7b S8: the direct entry
                           "if projectileNode.isPrimaryHit, !bossNode.isDead { applyBossAnomaly(bossNode) }"]))
     let sweep = body("redSmileHit")
     check("WR7 a sweep target: Anomaly on a survivor (an erase ends it), then the survivor riders and Void Horror (CL-85)",
@@ -1012,7 +1014,7 @@ do {
             && projSrc.contains("} else if voidStyle {"))
     check("WR26 a Warp shot reads its curve at the hit and moves by it; pierce counts bodies struck",
           projSrc.contains("let speedFraction = warp?.speedFraction(age: age) ?? 1")
-            && order(projSrc, ["func onHitEnemy() -> Bool {", "bodiesStruck += 1"])
+            && order(projSrc, ["func onHitEnemy(_ body: SKNode? = nil) -> Bool {", "bodiesStruck += 1"])   // v2.2 N3: the body is recorded (one hit per body)
             && body("shotBaseDamage").contains("warp.damageFraction(age: projectile.age)")
             && body("shotBaseDamage").contains("RiftlineFalloff.fraction(priorHits: projectile.bodiesStruck"))
     check("WR28 a returned shot aimed at a body on the hole's centre never gets a zero heading (it would never expire)",
@@ -1065,8 +1067,10 @@ do {
         return out
     }
     let unflagged = calls.filter { !$0.contains("allowModifiers: false") }.count
-    check("PX9 only the volley's 3 call sites (+ the declaration) fire primary shots",
-          count(spread, "fireProjectile(direction:") == 3 && unflagged == 4, "unflagged=\(unflagged)")
+    // v2.2 N3: the volley is ONE AttackPattern loop whose call fires a primary
+    // only for the fan's centre branch (allowModifiers: branch.isCenter).
+    check("PX9 only the volley's one call site (allowModifiers: branch.isCenter) + the declaration fire primary shots",
+          count(spread, "fireProjectile(direction:") == 1 && spread.contains("allowModifiers: branch.isCenter") && unflagged == 2, "unflagged=\(unflagged)")
     // A7b S8 (CL-114c): the sweep now lands through the boss's DIRECT entry with
     // the dial's default (no Phase T2 penetration) — the same ruled path.
     check("PX10 a sweep on the boss hits through the dial exactly as ruled (positive form)",

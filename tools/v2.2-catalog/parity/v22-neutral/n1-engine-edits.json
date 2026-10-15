@@ -1,0 +1,25 @@
+{
+ "_about": "v2.2 Neutral rework, unit N1 (corrective pass, Oct 12) — the REVIEWED edits that give the ACCEPTED draw engine the N1 pool. The engine is `Sparkforge/Systems/UpgradeManager.swift` as committed at the pinned commit (the legacy pool lives inside it), kept as the FROZEN copy `frozenCopy` beside the fixtures (immutable like them; byte-identical to git, which run.sh re-checks whenever git can show the commit); run.sh refuses it unless its SHA-256 equals `engineSHA256`, applies these exact-once string edits, and builds the comparator from it. The comparator's transcript of the 22 legacy runs is what the current catalog-backed manager's replay must equal byte for byte (JF2b). Unedited, the same engine must reproduce the frozen legacy run fixture byte for byte (JF2b-0). The edits change only the three cards the overlay names: Keen Eye leaves the pool; Swift and Magnetic Core get the overlay's three-tier ladders, written as the same expressions the registry uses so the doubles are identical. Moving the engine (a different commit or hash) or changing an edit is a ruling, never a drive-by.",
+ "unit": "N1",
+ "engineCommit": "31505bd1f754c4fcdf76f581e33ddec2dfbe1415",
+ "enginePath": "Sparkforge/Systems/UpgradeManager.swift",
+ "frozenCopy": "tools/v2.2-catalog/parity/v22-neutral/accepted-engine-31505bd.swift",
+ "engineSHA256": "c48d936fbad8a61caf79cd98ab83fb213adcfdf6681fa9135dab74ca41daa7bd",
+ "edits": [
+  {
+   "name": "Swift: the overlay's three-tier ladder (totals 0.08 / 0.20 / 0.35)",
+   "find": "            id: \"neutral_1\", name: \"Swift\", tag: .neutral,\n            description: \"+12% movement speed\"\n        ) { stats in\n            stats.moveSpeedMultiplier += 0.12\n        })\n",
+   "replace": "            id: \"neutral_1\", name: \"Swift\", tag: .neutral,\n            description: \"+8% movement speed\",\n            apply: { stats in stats.moveSpeedMultiplier += 0.08 },\n            higherTiers: [\n                { stats in stats.moveSpeedMultiplier += 0.20 - 0.08 },\n                { stats in stats.moveSpeedMultiplier += 0.35 - 0.20 }\n            ]\n        ))\n"
+  },
+  {
+   "name": "Keen Eye: retired (leaves the pool in place)",
+   "find": "        cards.append(UpgradeCard(\n            id: \"neutral_2\", name: \"Keen Eye\", tag: .neutral,\n            description: \"+20% XP pickup radius\"\n        ) { stats in\n            stats.pickupRadiusMultiplier += 0.20\n        })\n        \n",
+   "replace": ""
+  },
+  {
+   "name": "Magnetic Core: the overlay's three-tier ladder (radius totals 0.15 / 0.30 / 0.50; burst set to 0.10 / 0.20 / 0.30)",
+   "find": "            id: \"v13_magnetic_core\", name: \"Magnetic Core\", tag: .neutral,\n            description: \"+50% pickup radius, XP gives speed burst\"\n        ) { stats in\n            stats.pickupRadiusMultiplier += 0.50\n            stats.magneticCoreSpeedBoost = 0.30  // +30% speed for 1.5s on pickup\n        })\n",
+   "replace": "            id: \"v13_magnetic_core\", name: \"Magnetic Core\", tag: .neutral,\n            description: \"+15% XP pull; XP gives a speed burst\",\n            apply: { stats in\n                stats.pickupRadiusMultiplier += 0.15\n                stats.magneticCoreSpeedBoost = 0.10\n            },\n            higherTiers: [\n                { stats in\n                    stats.pickupRadiusMultiplier += 0.30 - 0.15\n                    stats.magneticCoreSpeedBoost = 0.20\n                },\n                { stats in\n                    stats.pickupRadiusMultiplier += 0.50 - 0.30\n                    stats.magneticCoreSpeedBoost = 0.30\n                }\n            ]\n        ))\n"
+  }
+ ]
+}

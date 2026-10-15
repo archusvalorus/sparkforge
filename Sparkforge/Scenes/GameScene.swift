@@ -121,6 +121,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var gauntletDraftOpener = true
     /// Draft-opener sequencing.
     private var openerDraftRunning = false
+    /// v2.2 N2: the gauntlet's first stage waits until the level queue (a
+    /// granted or banked level after the opener) has drained.
+    private var gauntletStageStartPending = false
     private var openerDraftRemaining = 0
     private var openerDraftTotal = 0
     /// Counts down in real time while a draft round fades in. update() is
@@ -394,6 +397,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v2.1 A4b (CL-23): the auto-attack cadence — carries the leftover
     /// partial frame, with bounded catch-up and no debt while idle or paused.
     private var fireClock = FireClock()
+    // v2.2 N4: the chaos beam (Rapid Fire T5) — its node, its two active-time
+    // clocks (C1), the Storm window set by the last virtual volley, and the
+    // scoped "targeting ignores terrain" flag the beam sets at Long Shot T4.
+    private let beamNode = BeamNode()
+    private var beamClock = BeamClock()
+    private var beamSpreadWindow = false
+    private var targetingIgnoresTerrain = false
+    /// v2.2 N5 (R6): Chain Reaction's FIFO burst queue, drained once a frame in
+    /// `didFinishUpdate` (contracts Q1–Q6, docs/v2.2-neutral-n5-checkpoint.md).
+    private var chainReactions = ChainReaction.Queue()
+    private var chainRingsThisDrain = 0
 
     /// v2.1 A4c (CL-33): the ONE shared "active combat" state — a hittable
     /// hostile exists anywhere in the encounter, with a 0.5s linger. Red Smile
@@ -2837,11 +2851,44 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// The single resume point after a level-up (and any placement/reveal beat):
     /// deal the next draft round, or hand control back to the player.
     private func resumeAfterLevelUp() {
+        // v2.2 N2 (R5; corrected Oct 12 after the independent review) — the
+        // serialized level queue, pinned order, at EVERY post-choice/reveal/
+        // placement resume, the gauntlet's draft opener included:
+        //   1. XP Boost T3's GRANTED level (keeps the XP as an absolute amount;
+        //      at the cap it has nowhere to go and is dropped),
+        //   2. then each BANKED earned level, one screen at a time,
+        //   3. then the draft opener's next round, if one is running
+        //      (its own granted level, clearing XP; the round count is untouched
+        //      by the screens above),
+        //   4. then play resumes. Never two modals, never a dropped choice,
+        //      never a second grant, never a stage start before the queue drains.
+        if playerStats.grantedLevelsPending > 0 {
+            playerStats.grantedLevelsPending -= 1
+            if player.grantLevel(keepingXP: true) {
+                triggerLevelUp()
+                return
+            }
+        }
+        if player.takeDueLevel() {
+            triggerLevelUp()
+            return
+        }
         // v2.0: the gauntlet's DRAFT opener is a sequence of granted level-ups.
         // Every pick funnels through here, so this is where the next round is
         // dealt — and where the sequence hands off to boss 1.
         if openerDraftRunning {
             stepOpenerDraft()
+            return
+        }
+        // Play resumes: Overclock's active window starts (or refreshes) NOW —
+        // the acquisition level included; a chain of screens leaves one window.
+        playerStats.triggerOverclock()
+        if gauntletStageStartPending {
+            // The draft opener's handoff to boss 1 (no blink; as before N2).
+            gauntletStageStartPending = false
+            invulnerableTimer = 2.5
+            gameState = .playing
+            beginGauntletStage(isFirst: true)
             return
         }
         invulnerableTimer = 2.5
@@ -5595,6 +5642,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Auto-Attack System
     
     private func updateAutoAttack(_ dt: TimeInterval) {
+        // v2.2 N4: the beam is drawn only by a firing beam this frame — hidden
+        // by default (a guard below, no target, or the gun).
+        beamNode.isHidden = true
         // v2.0 (C2): a kaiju does not fire a gun. While transformed Spark drops
         // the auto-attack entirely and commits to the aura and the swipe —
         // leaving projectiles running would undercut the whole transformation,
@@ -5606,6 +5656,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // stops: `fireProjectile` itself stays open for echoes, fragments,
         // turrets and every other independent source.
         guard !redSmile.formActive else { return }
+
+        // v2.2 N4 (R2/R4): Rapid Fire T5 — the chaos beam replaces the gun. The
+        // two guards above freeze its clocks too (no tick debt, C1).
+        if playerStats.chaosBeamActive {
+            updateChaosBeam(dt)
+            return
+        }
 
         // v2.1 A4b: ONE shared firing calculation (CL-22) — Frenzy, Berserk and
         // Bloodlust live inside `effectiveFireInterval` beside Bloodrush.
@@ -5651,30 +5708,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// - 3+ pellets → a V fan with a STATIC cone (spreadAngle × the GameConfig
     ///   factor); adding pellets packs them denser into the same fan rather
     ///   than widening it — so higher spread counts can't balloon the cone.
+    /// v2.2 N3 (R3): the volley is an AttackPattern — `count` lanes under
+    /// Scatter's tier (Storm Engine's +2 ride the same rule; without Scatter
+    /// the legacy count fan stands), each lane fanned by Fracture's tier under
+    /// the shared forward-spread rule. Every branch is a real shot: the fan's
+    /// centre carries the parent's primary identity (modifiers, `.primary`
+    /// credit) at its damage share; the other branches are fragments at theirs.
+    /// Each parent's damage is divided among ALL its branches; the shares are
+    /// chance-rounded at the hit, never floored to 1.
     private func fireShotSpread(count: Int, baseDirection: CGPoint) {
-        guard count > 1 else {
-            fireProjectile(direction: baseDirection)
-            return
-        }
-
-        if count == 2 {
-            let perp = CGPoint(x: -baseDirection.y, y: baseDirection.x)
-            let spacing: CGFloat = 12
-            let startOffset = -spacing * CGFloat(count - 1) / 2
-            for i in 0..<count {
-                let offset = perp * (startOffset + spacing * CGFloat(i))
-                fireProjectile(direction: baseDirection, originOffset: offset)
-            }
-            return
-        }
-
-        let totalSpread = playerStats.spreadAngle * GameConfig.Projectile.multishotFanWidthFactor
-        let startAngle = atan2(baseDirection.y, baseDirection.x) - totalSpread / 2
-        let step = totalSpread / CGFloat(count - 1)
-        for i in 0..<count {
-            let angle = startAngle + step * CGFloat(i)
-            let dir = CGPoint(x: cos(angle), y: sin(angle))
-            fireProjectile(direction: dir)
+        let lanes = AttackPattern.lanes(count: count, scatterTier: playerStats.scatterTier,
+                                        legacyCone: playerStats.spreadAngle * GameConfig.Projectile.multishotFanWidthFactor)
+        let branches = AttackPattern.compose(lanes: lanes, fracture: AttackPattern.fractureOffsets(tier: playerStats.fractureTier))
+        let aim = atan2(baseDirection.y, baseDirection.x)
+        let perp = CGPoint(x: -baseDirection.y, y: baseDirection.x)
+        for branch in branches {
+            let angle = aim + branch.heading
+            fireProjectile(direction: CGPoint(x: cos(angle), y: sin(angle)),
+                           originOffset: perp * branch.originOffset,
+                           allowModifiers: branch.isCenter,
+                           fractureShare: branch.share)
         }
     }
     
@@ -5690,7 +5743,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // edge case. An occluded-only field means HOLD FIRE (clean fallback:
         // nil target = no shot), never a wasted volley. Open arenas
         // short-circuit inside segmentBlocked.
-        let solid = arenaGeometry.hasBlockedGeometry
+        // v2.2 N4: the chaos beam at Long Shot T4 acquires behind terrain
+        // (`targetingIgnoresTerrain`, set only around the beam's own call).
+        let solid = arenaGeometry.hasBlockedGeometry && !targetingIgnoresTerrain
 
         // v2.1 A7b S12 (CL-126): never an intangible prey — fall through instead.
         // S13 (CL-109): nor an occluded one — the same line-of-sight predicate
@@ -5747,6 +5802,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                 damageScale: CGFloat = 1.0, allowModifiers: Bool = true,
                                 rollsCrit: Bool = true,
                                 source: KillSource? = nil,
+                                fractureShare: CGFloat = 1,          // v2.2 N3: this branch's share of its parent's damage
                                 configure: ((ProjectileNode) -> Void)? = nil) {
         // v1.9 Polar Vortex Glacial Condensation (T4): primary shots don't fire
         // immediately — every Nth condenses into one icicle; the rest are absorbed.
@@ -5776,9 +5832,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // shards and Backwash no longer leave wells.
             spawnsGravityWell: allowModifiers && playerStats.gravityWellOnExpire,
             voidStyle: playerStats.erasureVoidTouched,
-            frostStyle: playerStats.polarVortexTier >= 1
+            frostStyle: playerStats.polarVortexTier >= 1,
+            // v2.2 N3 Long Shot: T3+ no distance limit; T4 pierces every body and passes terrain.
+            unlimitedRange: playerStats.projectileUnlimitedRange,
+            piercesAll: playerStats.projectilePiercesAll,
+            passesTerrain: playerStats.projectilePassesTerrain
         )
         projectile.overchargeFactor = overcharge.factor
+        projectile.fractureShare = fractureShare
         projectile.killSource = source ?? (allowModifiers ? .primary : .fragment)
         // Every caller but the volley passes allowModifiers: false, so this is
         // exactly the gun's primary pellet.
@@ -5795,41 +5856,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.9 Erasure Echo (T4): a real shot re-fires 1.5s later from a random
         // arena-edge position, same heading, at reduced damage (no re-echo).
-        if playerStats.erasureEcho {
-            let echoDir = direction
-            run(SKAction.sequence([
-                SKAction.wait(forDuration: GameConfig.Erasure.echoDelay),
-                SKAction.run { [weak self] in
-                    guard let self = self, self.gameState == .playing else { return }
-                    // v2.1 (1A, Ruling 3): a Void origin must be valid; the
-                    // beam/shot itself pierces reality afterwards.
-                    let edge = PlacementSampler.randomPoint(
-                        in: self.arenaGeometry,
-                        minRadius: GameConfig.Arena.radius * 0.85,
-                        maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12)
-                    self.fireProjectile(direction: echoDir,
-                                        originOffset: edge - self.player.position,
-                                        damageScale: GameConfig.Erasure.echoFraction,
-                                        allowModifiers: false)
-                }
-            ]))
-        }
+        if playerStats.erasureEcho { scheduleErasureEcho(direction: direction) }
 
-        // Fracture Shot (Neutral): each shot launches split fragments at
-        // reduced damage, angled off the main line.
-        if playerStats.splitCount > 0 {
-            let baseAngle = atan2(direction.y, direction.x)
-            for k in 0..<playerStats.splitCount {
-                // Fan the fragments symmetrically: -a, +a, -2a, +2a, …
-                let step = CGFloat(k / 2 + 1) * playerStats.splitAngle
-                let sign: CGFloat = (k % 2 == 0) ? -1 : 1
-                let angle = baseAngle + sign * step
-                let dir = CGPoint(x: cos(angle), y: sin(angle))
-                fireProjectile(direction: dir, originOffset: originOffset,
-                               damageScale: damageScale * playerStats.splitDamageMultiplier,
-                               allowModifiers: false)
-            }
-        }
+        // (v2.2 N3: Fracture Shot's branches are laid out by fireShotSpread's
+        // AttackPattern — every branch is its own shot at its parent's share.)
 
         // Mirror Edge (Void): a shot can echo once, later, for less damage.
         if playerStats.echoChance > 0 && CGFloat.random(in: 0...1) < playerStats.echoChance {
@@ -5845,6 +5875,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    /// v1.9 Erasure Echo (T4): one ordinary delayed Echo shot — 1.5s later,
+    /// from a random arena-edge position, on `direction`, at 50% damage
+    /// (`damageScale`, the existing secondary-shot basis), without modifiers
+    /// (`.fragment` credit; it never echoes again). Moved here VERBATIM from
+    /// `fireProjectile` (v2.2 N4 Echo ruling, Oct 13) so the gun's primary
+    /// shot and the chaos beam's virtual parent lanes schedule the SAME Echo.
+    /// Sampled when scheduled: the heading. Sampled when it fires: the game
+    /// state (not `.playing` → dropped, never re-queued), the edge origin, and
+    /// everything `fireProjectile` reads (damage, crit, speed, range, pierce).
+    /// The wait is a scene action: it keeps running through level-up and the
+    /// pause menu (the scene is not paused there) and freezes only while the
+    /// scene itself is paused (app background).
+    private func scheduleErasureEcho(direction: CGPoint) {
+        let echoDir = direction
+        run(SKAction.sequence([
+            SKAction.wait(forDuration: GameConfig.Erasure.echoDelay),
+            SKAction.run { [weak self] in
+                guard let self = self, self.gameState == .playing else { return }
+                // v2.1 (1A, Ruling 3): a Void origin must be valid; the
+                // beam/shot itself pierces reality afterwards.
+                let edge = PlacementSampler.randomPoint(
+                    in: self.arenaGeometry,
+                    minRadius: GameConfig.Arena.radius * 0.85,
+                    maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12)
+                self.fireProjectile(direction: echoDir,
+                                    originOffset: edge - self.player.position,
+                                    damageScale: GameConfig.Erasure.echoFraction,
+                                    allowModifiers: false)
+            }
+        ]))
+    }
+
     /// A shot's crit roll. A direct attack — a modifier-bearing shot, or the
     /// icicle that replaces one (A7b S9, CL-117) — also advances Forge Path's
     /// Calculated Strike (Cun 15A): every 5th direct attack crits.
@@ -5867,7 +5929,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let prev = projectile.position
             if projectile.move(deltaTime: dt) {
                 toRemove.append(index)
-            } else if solid, arenaGeometry.segmentBlocked(
+            } else if projectile.position.length > GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin {
+                // v2.2 N3: the cleanup rule — nothing reachable lies this far
+                // outside the arena's bounding circle (the arena is the circle
+                // of GameConfig.Arena.radius about the origin; every shape sits
+                // inside it). A spent primary still leaves its Gravity Well
+                // below, where it stopped.
+                toRemove.append(index)
+            } else if solid, !projectile.passesTerrain, arenaGeometry.segmentBlocked(
                         prev, projectile.position,
                         travelRadius: GameConfig.Geometry.projectileTravelRadius) {
                 // v2.1 (Unit 2): ordinary shots stop at iron — swept test, so
@@ -6702,8 +6771,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v1.9 Forge Path (Unit 2b): apply the Ferocity offensive + Opportunist
     /// damage modifiers (conditional mults, Rising Heat / Warpath / Relentless
     /// stacks) and consume the Cold Fury / Killing Stroke charges.
-    private func applyForgeOffense(_ base: Int, healthPercent: CGFloat, bossClass: Bool,
-                                   impaired: Bool, relentlessTarget: EnemyNode?) -> Int {
+    /// v2.2 N4: Forge Path's offense as FACTORS, with its side effects (Relentless
+    /// stacks, Cold Fury / Killing Stroke consumption, Warpath's idle reset)
+    /// applied exactly once per hit — shared by the gun's integer composition
+    /// below and the chaos beam's exact one.
+    private struct ForgeOffense {
+        let mult: CGFloat
+        let coldFury: Bool
+        let killingStroke: Bool
+        static let coldFuryFactor: CGFloat = 1.10
+        static let killingStrokeFactor: CGFloat = 1.75
+        /// The beam's exact factor (no integer step between the parts).
+        var exact: CGFloat {
+            mult * (coldFury ? Self.coldFuryFactor : 1) * (killingStroke ? Self.killingStrokeFactor : 1)
+        }
+    }
+
+    private func forgeOffense(healthPercent: CGFloat, bossClass: Bool,
+                              impaired: Bool, relentlessTarget: EnemyNode?) -> ForgeOffense {
         var mult: CGFloat = 1.0
         if playerStats.forgeBerserker, playerStats.hpPercent < 0.5 { mult += 0.05 }
         if playerStats.forgeHeadsman, bossClass { mult += 0.10 }
@@ -6725,14 +6810,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             forgeRelentlessTimer = 2.0
         }
-        var dmg = Int(CGFloat(base) * mult)
-        if playerStats.forgeColdFury, forgeColdFuryArmed {
-            dmg = Int(CGFloat(dmg) * 1.10); forgeColdFuryArmed = false; forgeTimeSinceKill = 0
-        }
-        if playerStats.forgeKillingStroke, forgeKillingStrokeArmed {
-            dmg = Int(CGFloat(dmg) * 1.75); forgeKillingStrokeArmed = false; forgeKillingStrokeCooldown = 12.0
-        }
+        let coldFury = playerStats.forgeColdFury && forgeColdFuryArmed
+        if coldFury { forgeColdFuryArmed = false; forgeTimeSinceKill = 0 }
+        let killingStroke = playerStats.forgeKillingStroke && forgeKillingStrokeArmed
+        if killingStroke { forgeKillingStrokeArmed = false; forgeKillingStrokeCooldown = 12.0 }
         forgeWarpathIdleTime = 0   // this hit counts toward Warpath's continuous window
+        return ForgeOffense(mult: mult, coldFury: coldFury, killingStroke: killingStroke)
+    }
+
+    private func applyForgeOffense(_ base: Int, healthPercent: CGFloat, bossClass: Bool,
+                                   impaired: Bool, relentlessTarget: EnemyNode?) -> Int {
+        let f = forgeOffense(healthPercent: healthPercent, bossClass: bossClass,
+                             impaired: impaired, relentlessTarget: relentlessTarget)
+        var dmg = Int(CGFloat(base) * f.mult)
+        if f.coldFury { dmg = Int(CGFloat(dmg) * ForgeOffense.coldFuryFactor) }
+        if f.killingStroke { dmg = Int(CGFloat(dmg) * ForgeOffense.killingStrokeFactor) }
         return dmg
     }
 
@@ -7587,6 +7679,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             e.removeFromParent()
         }
         enemies.removeAll()
+        chainReactions.reset()   // v2.2 N5 (Q6): pending bursts belonged to the erased board
         // Normal mode: the boss is erased outright. (Boss Mode's catastrophic-
         // damage variant is v2.0 — see the Event-Horizon spec memory.)
         if let b = boss, !b.isDead { b.takeDamage(b.health) }
@@ -8394,7 +8487,41 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         guard voidFraction else { return max(1, Int(projectile.damageMultiplier)) }
         // Review F3: the projectile's ONE threshold, shared by all its hits.
+        // (v2.2 N3 corrective: a Fracture branch's share is NOT applied here —
+        // it is the hit chain's last step, on its own threshold; see
+        // fractureBranch / fractureBranchOnBoss.)
         return projectile.a6Rounding.damage(multiplier: projectile.damageMultiplier, fraction: fraction)
+    }
+
+    /// v2.2 N3 corrective (R1/R2): a Fracture branch's damage is its share of
+    /// the PARENT's fully processed hit — the whole-shot prefix (base, crit,
+    /// executes, Forge), the direct-hit block, the Braceguard shield — divided
+    /// as the LAST step, chance-rounded with no floor on the projectile's own
+    /// share threshold (independent of the A6 and block thresholds). So the
+    /// parent's expected damage is conserved across all its branches, every
+    /// legacy floor belongs to the parent, and a share may resolve to 0.
+    /// A whole shot (share 1) passes through unchanged.
+    private func fractureBranch(_ hit: DirectHit, projectile: ProjectileNode) -> DirectHit {
+        guard projectile.fractureShare < 1 else { return hit }
+        var branch = hit
+        branch.scale(by: projectile.fractureShare, rounding: projectile.shareRounding)
+        return branch
+    }
+
+    /// The boss form of `fractureBranch`: the Boss Mode DEF dial the node would
+    /// apply (`challengedDamage`, exactly as the node calls it: the resolved
+    /// amount, the basis as `raw`, Phase T2's penetration) is applied to the
+    /// PARENT first, then the share, and the node is told the dial is already
+    /// applied. A whole shot is handed over untouched with the dial still the
+    /// node's to apply.
+    private func fractureBranchOnBoss(_ hit: DirectHit, projectile: ProjectileNode,
+                                      boss: any ArenaBossNode) -> (hit: DirectHit, ignoresChallengeDEF: Bool) {
+        let penetrates = projectile.voidHit.flatDEFPenetration
+        guard projectile.fractureShare < 1 else { return (hit, penetrates) }
+        var branch = DirectHit(basis: hit.basis,
+                               dealt: boss.challengedDamage(hit.dealt, raw: hit.basis, ignoresChallengeDEF: penetrates))
+        branch.scale(by: projectile.fractureShare, rounding: projectile.shareRounding)
+        return (branch, true)
     }
 
     /// Shadow Edge (CL-75): one wide blade alongside the volley — 125% shot
@@ -9397,6 +9524,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // 1) Board wipe — silent, no XP orbs, no drops.
         for e in enemies { e.removeFromParent() }
         enemies.removeAll()
+        chainReactions.reset()   // v2.2 N5 (Q6)
 
         // 2) Pickup spawns off for the fight.
         monumentFightActive = true
@@ -9639,7 +9767,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pendingCapstones = []
         if !synergyQueue.isEmpty || !capstoneQueue.isEmpty {
             gameState = .synergyReveal
-            presentNextReveal()
+            presentNextReveal()           // drains into resumeAfterLevelUp()
+        } else if playerStats.grantedLevelsPending > 0 || player.isLevelDue {
+            // v2.2 N2: a granted XP Boost T3 (or banked XP) gets its REAL
+            // level-up screen; beginGauntletStage defers behind the modal.
+            resumeAfterLevelUp()
+        } else {
+            // v2.2 N2: eight granted levels — Overclock starts with play.
+            playerStats.triggerOverclock()
         }
     }
 
@@ -9681,10 +9816,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             openerDraftRunning = false
             levelUpOverlay.alpha = 0
             // completeLevelUp() was intercepted, so the resume it normally
-            // performs happens here instead.
-            invulnerableTimer = 2.5
-            gameState = .playing
-            beginGauntletStage(isFirst: true)
+            // performs happens through resumeAfterLevelUp() instead — which
+            // first drains the level queue (v2.2 N2: a granted level taken in
+            // the draft, or banked XP), then begins stage 1.
+            gauntletStageStartPending = true
+            resumeAfterLevelUp()
             return
         }
         openerDraftRemaining -= 1
@@ -9780,6 +9916,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // and shots need collecting here.)
         for e in enemies { e.removeFromParent() }
         enemies.removeAll()
+        chainReactions.reset()   // v2.2 N5 (Q6)
         for p in enemyProjectiles { p.removeFromParent() }
         enemyProjectiles.removeAll()
         // v2.1 A6: the player's black holes belong to that stage's arena too.
@@ -11278,7 +11415,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// is a full kill with its on-kill effects. On-kill effects can read
     /// `source` to decide whether they react (A1–A6).
     private func onEnemyKilled(at position: CGPoint, xpValue: Int, enemy: EnemyNode? = nil,
-                               source: KillSource, iceburstGeneration: Int = 0) {
+                               source: KillSource, iceburstGeneration: Int = 0,
+                               chainGeneration: Int = 0) {
         if let enemy = enemy {
             guard !enemy.killCredited else {
                 #if DEBUG
@@ -11290,12 +11428,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if let index = enemies.firstIndex(where: { $0 === enemy }) {
                 enemies.remove(at: index)
             }
+            // v2.2 N5 (R6, Q1): cascade ELIGIBILITY is separate from credit —
+            // every credited death of a non-arena-boss enemy emits ONE Chain
+            // Reaction burst, whatever its source; it is queued, never run here
+            // (Q2). A chain victim carries its lethal burst's generation + 1;
+            // every other death is a root (generation 0).
+            if playerStats.chainReactionExplode {
+                chainReactions.enqueue(ChainReaction.Burst(
+                    origin: position,
+                    generation: source == .chainReaction ? chainGeneration : 0,
+                    emitter: ObjectIdentifier(enemy)))
+            }
         }
         #if DEBUG
         combatLedger.recordKill(source)
         #endif
         guard source.credit == .full else {
             spawnXPOrb(at: position, value: xpValue)
+            // v2.2 N5 (C1): a Chain Reaction victim is ALSO recorded in the
+            // Codex/bestiary — and nothing else (no counters, no on-kill effects).
+            if source.credit == .rewardRecorded, let enemy {
+                CodexManager.shared.recordDefeat(bestiaryFamily(for: enemy))
+            }
             return
         }
 
@@ -11469,10 +11623,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             explosionAt(ctx.position)
         }
 
-        // v1.3: Chain Reaction — separate from Ember Burst
-        if playerStats.chainReactionExplode {
-            chainReactionAt(ctx.position)
-        }
+        // (v2.2 N5: Chain Reaction no longer bursts here — every CREDITED death
+        // queues its burst in onEnemyKilled, full credit or not; see Q1.)
     }
 
     /// Blood Barrier gain (A0's pool: cap 50% max HP; any positive gain
@@ -11514,25 +11666,62 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func chainReactionAt(_ position: CGPoint) {
-        let radius = playerStats.chainReactionRadius
-        let damage = playerStats.chainReactionDamage
-        
-        for enemy in enemies {
-            if enemy.position.distance(to: position) < radius && enemy.position != position {
-                enemy.takeDamage(damage)
-            }
+    // MARK: - v2.2 N5: Chain Reaction (R6)
+
+    /// The frame's last word (SKScene: after update, actions and physics, so
+    /// every death this frame is already queued): drain Chain Reaction's FIFO
+    /// queue in one loop. A burst that kills queues its victims' bursts on the
+    /// same queue, so a whole cascade resolves here, iteratively (Q2).
+    override func didFinishUpdate() {
+        drainChainReactions()
+    }
+
+    private func drainChainReactions() {
+        guard !chainReactions.isEmpty else { return }
+        chainRingsThisDrain = 0
+        while let burst = chainReactions.next() {
+            chainReactionBurst(burst)
         }
-        
+    }
+
+    /// One burst (Q4, D1–D3): every live, uncredited enemy other than the
+    /// emitter whose centre is strictly inside the owned tier's radius takes
+    /// the exact amount — the tier base × the generation bonus (T3) × the
+    /// boss-class half for a mini-boss — rounded ONCE with the vulnerability
+    /// folded in, as a direct hit (no second rounding at the node). Zero stays
+    /// zero. The arena boss is never in `enemies`. Victims are credited AFTER
+    /// the loop (`.chainReaction`, generation + 1), in `enemies` order.
+    private func chainReactionBurst(_ burst: ChainReaction.Burst) {
+        let radius = playerStats.chainReactionRadius
+        var lethal: [EnemyNode] = []
+        for enemy in enemies where !enemy.isDying && !enemy.killCredited
+            && ObjectIdentifier(enemy) != burst.emitter
+            && enemy.position.distance(to: burst.origin) < radius {
+            let exact = ChainReaction.exactDamage(base: playerStats.chainReactionDamage,
+                                                  tier: playerStats.chainReactionTier,
+                                                  generation: burst.generation, bossClass: enemy.isMiniBoss)
+            let hit = ChainReaction.hit(exact: exact, vulnerability: enemy.vulnerabilityMultiplier,
+                                        rounding: DirectHitRounding())
+            guard hit.basis > 0 || hit.dealt > 0 else { continue }      // zero stays zero: no hit at all
+            // N5-R1: delivered through the entry contract — a positive hit always melts Whiteout's snowman.
+            if enemy.takeDirectHit(ChainReaction.entry(hit)) { lethal.append(enemy) }
+        }
+        for victim in lethal {
+            onEnemyKilled(at: victim.position, xpValue: victim.xpValue, enemy: victim,
+                          source: .chainReaction, chainGeneration: burst.generation + 1)
+        }
+        // Visual only (Q5): capped per drain; every burst above still hit.
+        guard chainRingsThisDrain < GameConfig.Neutral.chainReactionRingsPerDrain else { return }
+        chainRingsThisDrain += 1
         // Visual: orange-white flash ring
         let ring = SKShapeNode(circleOfRadius: radius)
         ring.strokeColor = SKColor(hex: 0xFFCC44, alpha: 0.7)
         ring.fillColor = SKColor(hex: 0xFF8800, alpha: 0.2)
         ring.lineWidth = 1.5
-        ring.position = position
+        ring.position = burst.origin
         ring.zPosition = 6
         worldNode.addChild(ring)
-        
+
         ring.run(SKAction.sequence([
             SKAction.group([
                 SKAction.scale(to: 1.4, duration: 0.2),
@@ -11892,6 +12081,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let enemyNode = enemyBody.node as? EnemyNode else { return }
+        // v2.2 N3: one hit per body per projectile (piercing shots never strike
+        // the same enemy twice, however the bodies move).
+        guard !projectileNode.hasStruck(enemyNode) else { return }
 
         // v2.1 A4b Glass Blood (CL-27): a fragment is plain damage + a Bleed.
         if projectileNode.glassBloodGeneration > 0 {
@@ -11959,6 +12151,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if braceguardShielded && !playerStats.erasureVoidTouched && !projectileNode.voidHit.affinity {
             hit.shield(by: BraceguardNode.shieldDamageMultiplier)
         }
+        // v2.2 N3 corrective (R1/R2): a Fracture branch takes its share of the
+        // PARENT's fully processed hit here — the last step — on its own threshold.
+        hit = fractureBranch(hit, projectile: projectileNode)
         // A7b S8 (CL-114d): Overkill and Chain Lightning keep the pre-vulnerability basis.
         damage = hit.basis
 
@@ -12014,7 +12209,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         
-        let consumed = projectileNode.onHitEnemy()
+        let consumed = projectileNode.onHitEnemy(enemyNode)
         if consumed {
             if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
                 projectiles.remove(at: index)
@@ -12023,7 +12218,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         let hpBefore = enemyNode.health
-        let killed = enemyNode.takeDirectHit(hit)   // A7b S8: no second vulnerability (CL-114c)
+        let killed = enemyNode.takeDirectHit(hit.targetEntry)   // A7b S8: no second vulnerability (CL-114c); v2.2 W1: a positive hit melts Whiteout
 
         // v1.9 Forge Path Overkill (Fer 19): excess damage bursts to nearby foes
         // (capped relative to ATK so executions/big hits don't chain-explode).
@@ -12108,6 +12303,412 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if consumed { openBlackholeIfSeeded(projectileNode) }
     }
     
+    // MARK: - v2.2 N4: the chaos beam (Rapid Fire T5)
+
+    /// One rendered/logical beam line: a branch of a parent lane.
+    private struct BeamLine {
+        let branch: AttackPattern.Branch
+        let origin: CGPoint
+        let direction: CGPoint
+        let length: CGFloat
+        var end: CGPoint { CGPoint(x: origin.x + direction.x * length, y: origin.y + direction.y * length) }
+    }
+
+    /// The beam's frame (C1): target → clocks → (virtual volley) → lines →
+    /// draw → (damage tick). Called only from `updateAutoAttack` after its
+    /// kaiju / Red Smile guards, on `.playing` frames.
+    private func updateChaosBeam(_ dt: TimeInterval) {
+        if beamNode.parent == nil { worldNode.addChild(beamNode) }
+        // Nearest valid enemy within range AND line of sight; Long Shot T4 acquires behind terrain.
+        targetingIgnoresTerrain = playerStats.projectilePassesTerrain
+        let target = findNearestTargetPosition()
+        targetingIgnoresTerrain = false
+        let (volley, tick) = beamClock.advance(dt, volleyInterval: playerStats.effectiveFireInterval,
+                                               firing: target != nil)
+        guard let targetPosition = target else { return }       // not drawn; the clocks hold ready
+        let aim = (targetPosition - player.position).normalized
+        var verdict = VolleyCounter.Result.nothing
+        if volley {
+            // A virtual volley is a primary volley (C1): Storm's every-3rd window, ONE counter.
+            beamSpreadWindow = playerStats.recordShot()
+            verdict = volleyCounter.register(emitted: true,
+                                             blackholeOwned: playerStats.voidBlackhole,
+                                             bladeOwned: playerStats.shadowEdgeActive,
+                                             tuning: GameConfig.VoidTree.volleyTuning)
+        }
+        let lines = beamLines(aim: aim)
+        if volley { beamVolleyEffects(verdict, lines: lines, aim: aim) }
+        beamNode.draw(lines.map { ($0.origin, $0.end) })
+        if tick { beamTick(lines) }
+    }
+
+    /// The beam's lines this frame: the lane set of the current cadence window
+    /// (Storm's +2 lanes after a spread volley), each lane fanned by Fracture,
+    /// composed under the shared ±90° rule (N3 AttackPattern); each line runs
+    /// to the first of its range, the first solid terrain (unless Long Shot
+    /// T4) and the arena boundary.
+    private func beamLines(aim: CGPoint) -> [BeamLine] {
+        let lanes = AttackPattern.lanes(count: playerStats.volleyPelletCount(isSpreadVolley: beamSpreadWindow),
+                                        scatterTier: playerStats.scatterTier,
+                                        legacyCone: playerStats.spreadAngle * GameConfig.Projectile.multishotFanWidthFactor)
+        let branches = AttackPattern.compose(lanes: lanes, fracture: AttackPattern.fractureOffsets(tier: playerStats.fractureTier))
+        let aimAngle = atan2(aim.y, aim.x)
+        let perp = CGPoint(x: -aim.y, y: aim.x)
+        let geometry = arenaGeometry
+        let blocked: ((CGPoint, CGPoint) -> Bool)? = geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain
+            ? { a, b in geometry.segmentBlocked(a, b, travelRadius: GameConfig.Geometry.projectileTravelRadius) }
+            : nil
+        return branches.map { branch in
+            let angle = aimAngle + branch.heading
+            let direction = CGPoint(x: cos(angle), y: sin(angle))
+            let origin = player.position + perp * branch.originOffset
+            let length = BeamTick.length(origin: origin, direction: direction,
+                                         maxLength: playerStats.effectiveProjectileRange,
+                                         arenaRadius: GameConfig.Arena.radius, blocked: blocked,
+                                         steps: GameConfig.Neutral.beamTerrainBisectionSteps)
+            return BeamLine(branch: branch, origin: origin, direction: direction, length: length)
+        }
+    }
+
+    /// A virtual volley's effects (R4): Gravity Well once per PARENT lane at its
+    /// terminus (the lane's centre line; never per branch or rendered segment),
+    /// the Blackhole every 5th volley at the LEAD lane's terminus, Shadow Edge
+    /// every 7th — and (Echo ruling, Oct 13) Erasure T4's ordinary Echo shot
+    /// once per PARENT lane, on that lane's heading: Storm's +2 lanes count
+    /// once each on their volley; Fracture's branches, contacts and rendered
+    /// segments add none (as on the gun, where only a lane's centre shot
+    /// carries modifiers).
+    private func beamVolleyEffects(_ verdict: VolleyCounter.Result, lines: [BeamLine], aim: CGPoint) {
+        let centres = lines.filter { $0.branch.isCenter }
+        if playerStats.gravityWellOnExpire {
+            for line in centres { spawnVoidWell(.gravityWell, at: line.end) }
+        }
+        if playerStats.erasureEcho {
+            for line in centres { scheduleErasureEcho(direction: line.direction) }
+        }
+        if verdict.blackhole, let lead = centres.first { spawnVoidWell(.blackhole, at: lead.end) }
+        if verdict.blade { fireShadowEdge(direction: aim) }
+        #if DEBUG
+        combatLedger.gunVolleys += 1   // the A4c proof counts beam volleys too: frozen under Red Smile's form
+        combatLedger.recordVolley(emitted: true, blackhole: verdict.blackhole, blade: verdict.blade, count: volleyCounter.volleys)
+        #endif
+    }
+
+    /// One damage tick (R2/R4): every parent lane is a direct attack (ONE crit
+    /// roll, Calculated Strike counted once); every contacted target takes ONE
+    /// hit per lane carrying the summed share of that lane's branches that
+    /// touched it (conserved: k × 1/n), with the riders, procs and credit
+    /// rolled once per (lane, target, tick).
+    private func beamTick(_ lines: [BeamLine]) {
+        let split = OverchargeSplit(playerStats.overchargeParts(scale: 1))
+        let laneTick = BeamTick.laneTick(basis: split.base, interval: playerStats.effectiveFireInterval)
+        var nodes: [EnemyNode] = []
+        var targets: [BeamTick.Target] = []
+        for enemy in enemies where isHittable(enemy) {
+            targets.append(BeamTick.Target(index: nodes.count, position: enemy.position, radius: enemy.hitBodyRadius))
+            nodes.append(enemy)
+        }
+        let bossIndex = nodes.count
+        if let b = boss, isHittable(b) {
+            targets.append(BeamTick.Target(index: bossIndex, position: b.position, radius: b.hitBodyRadius))
+        }
+        let contacts = lines.map {
+            BeamTick.contacts(origin: $0.origin, direction: $0.direction, length: $0.length,
+                              halfWidth: GameConfig.Neutral.beamContactHalfWidth, targets: targets)
+        }
+        beamNode.sizzle(at: contacts.flatMap { $0.map { $0.point } })   // visual only
+        // ONE crit roll per parent lane per tick, in lane order, hit or miss (a lane-tick is a shot).
+        var crits: [Int: BeamTick.LaneCrit] = [:]
+        for lane in Set(lines.map { $0.branch.lane }).sorted() {
+            let isCrit = rollShotCrit(directAttack: true)
+            crits[lane] = BeamTick.LaneCrit(
+                isCrit: isCrit,
+                luckyBreak: isCrit && playerStats.forgeLuckyBreak
+                    && CGFloat.random(in: 0...1) < GameConfig.Neutral.beamLuckyBreakChance)
+        }
+        var shots: [Int: (primary: ProjectileNode, fragment: ProjectileNode)] = [:]
+        for hit in BeamTick.group(branches: lines.map { $0.branch }, contacts: contacts) {
+            let crit = crits[hit.lane] ?? .none
+            let pair = shots[hit.lane] ?? (beamShot(primary: true, split: split, crit: crit),
+                                           beamShot(primary: false, split: split, crit: crit))
+            shots[hit.lane] = pair
+            let shot = hit.centre ? pair.primary : pair.fragment
+            shot.fractureShare = hit.share
+            if hit.target == bossIndex, let bossNode = boss, isHittable(bossNode) {
+                let parent = beamParentHitBoss(laneTick: laneTick, hit: hit, crit: crit,
+                                               overcharge: split.factor, bossNode: bossNode)
+                landBeamHitOnBoss(parent, projectileNode: shot, bossNode: bossNode)
+            } else if hit.target < nodes.count, isHittable(nodes[hit.target]) {
+                let enemyNode = nodes[hit.target]
+                let parent = beamParentHit(laneTick: laneTick, hit: hit, crit: crit, overcharge: split.factor,
+                                           projectileNode: shot, enemyNode: enemyNode)
+                let branchHit = fractureBranch(parent, projectile: shot)
+                landBeamHit(branchHit, damage: branchHit.basis, projectileNode: shot, enemyNode: enemyNode)
+            }
+        }
+    }
+
+    /// The lane-tick's carrier for the shared riders: never fired, never in
+    /// `projectiles`, never consumed (it pierces all). The centre's is a
+    /// primary hit (`.primary`, Void affinity); the side branches' a fragment.
+    /// Warp and Mirror Edge are inert on the beam (C2): no warp, no echo.
+    /// (Erasure T4's Echo is scheduled per parent lane by the virtual volley.)
+    private func beamShot(primary: Bool, split: OverchargeSplit, crit: BeamTick.LaneCrit) -> ProjectileNode {
+        let shot = ProjectileNode(direction: CGPoint(x: 0, y: 1), damageMultiplier: CGFloat(split.base),
+                                  isCrit: crit.isCrit, unlimitedRange: true, piercesAll: true, passesTerrain: true)
+        shot.overchargeFactor = split.factor
+        shot.killSource = primary ? .primary : .fragment
+        if primary { shot.voidHit = .primaryShot(phaseT2: playerStats.phasePenetrates) }
+        return shot
+    }
+
+    /// A (lane, target) hit on an enemy, exact (R2): the lane tick × Riftline
+    /// rank × crit × execute × Forge, then the block's amplifiers, Overcharge,
+    /// vulnerability and the Braceguard shield (folded in as a fraction),
+    /// rounded ONCE with no floor on a fresh block threshold. The Fracture
+    /// share follows (`fractureBranch`, its own threshold).
+    private func beamParentHit(laneTick: CGFloat, hit: BeamTick.LaneHit, crit: BeamTick.LaneCrit, overcharge: CGFloat,
+                               projectileNode: ProjectileNode, enemyNode: EnemyNode) -> DirectHit {
+        var braceguardShielded = false
+        if let braceguard = enemyNode as? BraceguardNode, braceguard.blocksHit(from: player.position) {
+            braceguardShielded = true
+            braceguard.flashShield()
+        }
+        let forge = forgeOffense(healthPercent: enemyNode.healthPercent, bossClass: enemyNode.isMiniBoss,
+                                 impaired: enemyNode.isSlowed || enemyNode.isFrozen || enemyNode.isStunned,
+                                 relentlessTarget: enemyNode)
+        let prefix = BeamTick.exactPrefix(laneTick: laneTick, riftlineRank: hit.rank,
+                                          riftlineActive: playerStats.riftlineActive,
+                                          riftlineFalloff: GameConfig.VoidTree.riftlineFalloff,
+                                          crit: crit, critMultiplier: playerStats.critMultiplier,
+                                          luckyBreakFactor: GameConfig.Neutral.beamLuckyBreakFactor,
+                                          execute: playerStats.executeMultiplier(healthPercent: enemyNode.healthPercent),
+                                          forge: forge.exact)
+        let shielded = braceguardShielded && !playerStats.erasureVoidTouched && !projectileNode.voidHit.affinity
+        return DirectHitDamage.resolveExact(prefix, .onEnemy(
+            permafrostBonus: playerStats.slowedDamageBonus, slowed: enemyNode.isSlowed,
+            arenaSlowed: playerStats.globalEnemySlow > 0,
+            brittleCold: playerStats.brittleCold, brittleColdFactor: GameConfig.PolarVortex.brittleColdVuln,
+            frozen: enemyNode.isFrozen, stunned: enemyNode.isStunned,
+            openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: enemyNode.isBleeding),
+            overcharge: overcharge, vulnerability: enemyNode.vulnerabilityMultiplier,
+            extra: shielded ? BraceguardNode.shieldDamageMultiplier : 1, rounding: DirectHitRounding())
+    }
+
+    /// A (lane, boss) hit, exact as above with the boss's own amplifiers; the
+    /// DEF dial is applied to this parent and then the share by the shared
+    /// boss riders (`fractureBranchOnBoss`, N3).
+    private func beamParentHitBoss(laneTick: CGFloat, hit: BeamTick.LaneHit, crit: BeamTick.LaneCrit, overcharge: CGFloat,
+                                   bossNode: any ArenaBossNode) -> DirectHit {
+        let forge = forgeOffense(healthPercent: bossNode.healthPercent, bossClass: true, impaired: false, relentlessTarget: nil)
+        let prefix = BeamTick.exactPrefix(laneTick: laneTick, riftlineRank: hit.rank,
+                                          riftlineActive: playerStats.riftlineActive,
+                                          riftlineFalloff: GameConfig.VoidTree.riftlineFalloff,
+                                          crit: crit, critMultiplier: playerStats.critMultiplier,
+                                          luckyBreakFactor: GameConfig.Neutral.beamLuckyBreakFactor,
+                                          execute: playerStats.executeMultiplier(healthPercent: bossNode.healthPercent),
+                                          forge: forge.exact)
+        return DirectHitDamage.resolveExact(prefix, .onBoss(
+            openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: bossStatus.bleed.isBleeding),
+            overcharge: overcharge, vulnerability: bossNode.vulnerabilityMultiplier, extra: 1, rounding: DirectHitRounding())
+    }
+
+    /// The gun's post-damage riders, for a beam hit on an enemy. VERBATIM copy
+    /// of `handleProjectileHit`'s section after `damage = hit.basis` — the
+    /// catalog harness pins their executable tokens EQUAL (NB), so the beam can
+    /// never drift from the gun's Kindle / Frost Touch / Repulse / Overload /
+    /// Shatter / Overkill / Seed / kill credit / Anomaly / Void Horror /
+    /// Bloodthirsty / Whiteout / Apex / Erasure / Chain Lightning sequence.
+    private func landBeamHit(_ hit: DirectHit, damage: Int, projectileNode: ProjectileNode, enemyNode: EnemyNode) {
+        if playerStats.burnDPS > 0 {
+            // v2.1 A1: a Kindle hit — the only thing that can add a Crucible
+            // stack. Forge Breath's Fire bonus rides the Burn, not the shot.
+            let stacked = enemyNode.applyBurn(playerStats.effectiveBurnDPS,
+                                              duration: playerStats.burnDuration,
+                                              source: .kindleHit,
+                                              stackCap: playerStats.burnStackCap)
+            #if DEBUG
+            if stacked { combatLedger.recordBurnStack(enemyNode.burnStacks) }
+            #endif
+        }
+        // v2.1 A2 (CL-3): Iceburst shards / icicle fragments only at Frost Touch T3.
+        if playerStats.slowAmount > 0, projectileNode.appliesFrostTouch {
+            enemyNode.applySlow(playerStats.effectiveSlow(playerStats.slowAmount), duration: playerStats.slowDuration)
+        }
+        if playerStats.knockbackForce > 0 {
+            applyRepulse(to: enemyNode)   // v2.1 A5: the Guard signature (CL-62/63)
+        }
+        // v1.6: Overload — real stun (was a mislabeled slow)
+        rollOverload(on: enemyNode)
+
+        // Shatter (Chill ×5; A7b S10, CL-99/CL-118 — ShatterRule): a normal enemy
+        // dies; an elite takes the elite chunk and, surviving, the rest of the hit.
+        if let shatter = ShatterRule.outcome(chance: playerStats.shatterChance,
+                                             threshold: playerStats.shatterSlowThreshold,
+                                             slowed: enemyNode.isSlowed,
+                                             totalSlow: enemyNode.currentSlow + playerStats.globalEnemySlow,
+                                             elite: enemyNode.isMiniBoss, maxHealth: enemyNode.maxHealth,
+                                             roll: CGFloat.random(in: 0...1)) {
+            let killed = enemyNode.takeDamage(shatter.damage(health: enemyNode.health))
+            if killed {
+                if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
+                    enemies.remove(at: index)
+                }
+                // CL-118c: the kill keeps the shot's Iceburst generation.
+                onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode, source: projectileNode.killSource,
+                              iceburstGeneration: projectileNode.iceburstGeneration)
+            }
+            if killed || shatter.endsHit {
+                // CL-118c (A4c F2's twin): a Shatter that ends the hit still
+                // landed one — Apex, then Erasure, register once.
+                apexRegisterAttack()
+                erasureRegisterHit()
+                if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
+                    projectiles.remove(at: index)
+                }
+                openBlackholeIfSeeded(projectileNode)   // v2.1 A6: it stopped here
+                projectileNode.removeFromParent()
+                return
+            }
+        }
+        
+        let consumed = projectileNode.onHitEnemy(enemyNode)
+        if consumed {
+            if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
+                projectiles.remove(at: index)
+            }
+            projectileNode.removeFromParent()
+        }
+        
+        let hpBefore = enemyNode.health
+        let killed = enemyNode.takeDirectHit(hit.targetEntry)   // A7b S8: no second vulnerability (CL-114c); v2.2 W1: a positive hit melts Whiteout
+
+        // v1.9 Forge Path Overkill (Fer 19): excess damage bursts to nearby foes
+        // (capped relative to ATK so executions/big hits don't chain-explode).
+        if killed, playerStats.forgeOverkill {
+            let excess = damage - max(0, hpBefore)
+            if excess > 0 {
+                let transfer = min(Int(CGFloat(excess) * 0.25), Int(playerStats.effectiveAttack * 2))
+                if transfer > 0 {
+                    damageEnemiesInRadius(GameConfig.ForgePath.holdLineRadius, around: enemyNode.position,
+                                          damage: transfer, bossClassScaled: true)
+                }
+            }
+        }
+
+        // v2.0 Phase C (C1.4): Seed Spore Shot — embed on hit.
+        //   • a normal shot (gen 0) plants a primary seed (gen 1)
+        //   • a burst FRAGMENT re-embeds a secondary seed (gen 2) only at T3,
+        //     and only one generation deeper — the chain guard
+        // Set BEFORE the kill check so a killing shot still seeds → bursts.
+        if playerStats.seedShotActive {
+            if projectileNode.seedGeneration == 0 {
+                enemyNode.seedGeneration = max(enemyNode.seedGeneration, 1)
+            } else if playerStats.seedReembed, projectileNode.seedGeneration < 2 {
+                enemyNode.seedGeneration = max(enemyNode.seedGeneration, 2)
+            }
+        }
+
+        if killed {
+            let deathPos = enemyNode.position
+            let xpValue = enemyNode.xpValue
+            if let index = enemies.firstIndex(where: { $0 === enemyNode }) {
+                enemies.remove(at: index)
+            }
+            onEnemyKilled(at: deathPos, xpValue: xpValue, enemy: enemyNode, source: projectileNode.killSource,
+                          iceburstGeneration: projectileNode.iceburstGeneration)
+        }
+        // v2.1 A6 (CL-73/80): Phase's Anomaly, then Void Horror, ride a PRIMARY
+        // hit on a SURVIVOR (the icicle included; echoes, fragments and shards
+        // are not primary). An erase is a kill — nothing after it lands.
+        var alive = !killed
+        if alive, projectileNode.isPrimaryHit {
+            if applyAnomaly(to: enemyNode, source: projectileNode.killSource) {
+                alive = false
+            } else {
+                rollVoidHorror(on: enemyNode)
+            }
+        }
+        // v2.1 A4a: Bloodthirsty (CL-1) — a primary hit may inflict the ticking
+        // Bleed, on a SURVIVOR only (Brandon, Sep 21): a killing hit never
+        // counts its own Bleed toward "killed a bleeding enemy" rewards.
+        if alive, playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
+                                                    roll: CGFloat.random(in: 0..<1)) {
+            if enemyNode.applyBleed(tickDamage: playerStats.bleedTickDamage) { noteBleedStarted() }
+        }
+        // v2.1 A2 Whiteout: any player projectile that lands may make a snowman.
+        if alive, playerStats.whiteoutTier >= 1,
+           CGFloat.random(in: 0...1) < GameConfig.Chill.snowmanChance,
+           enemyNode.becomeSnowman(duration: playerStats.snowmanDuration,
+                                   meltsOnDamage: playerStats.whiteoutTier >= 3) {
+            #if DEBUG
+            combatLedger.snowmen += 1
+            #endif
+        }
+        apexRegisterAttack()   // T5 Apex: a beam hit charges the pounce gauge like a shot's
+
+        erasureRegisterHit()   // T1 Erasure: every player hit charges the Unstable meter
+
+        // v1.9 Polar Vortex (T4): the icicle shatters into shards on first impact.
+        if projectileNode.isIcicle { iceShatter(at: enemyNode.position) }
+
+        // v2.1 A3 (Brandon, Sep 18): a LETHAL hit chains too — from the victim's
+        // impact position. Three boundaries: ONE sequence per triggering hit
+        // (here, never from the death handler); every victim visited once,
+        // the original included; and the basis is THIS hit's damage, not what
+        // the victim had left — killing a 1-HP enemy must not shrink the chain.
+        if playerStats.chainTargets > 0 {
+            chainLightning(from: enemyNode, primaryDamage: damage)
+        }
+        // v2.1 A6 (CL-76): the seeded lead shot stopped here. Opened LAST, after
+        // this hit's own kills — as on the Shatter path — so the shot that
+        // opens a hole never feeds it matter (internal review, lifecycle L3).
+        if consumed { openBlackholeIfSeeded(projectileNode) }
+    }
+
+    /// The gun's post-damage riders on the boss, for a beam hit. VERBATIM copy
+    /// of `handleProjectileHitBoss`'s section after the block (pinned equal, NB).
+    private func landBeamHitOnBoss(_ hit: DirectHit, projectileNode: ProjectileNode, bossNode: any ArenaBossNode) {
+        // v2.1 A4a: bosses take DoTs (Brandon, Sep 17) — the same Kindle hit
+        // (Crucible stacks included) and Bloodthirsty roll an enemy gets. Kindle
+        // ignites BEFORE the damage, as on enemies; if a monument dies inside
+        // takeDamage the slot (and this status) is cleared on the spot anyway.
+        if playerStats.burnDPS > 0 {
+            bossStatus.burn.ignite(dps: playerStats.effectiveBurnDPS, duration: playerStats.burnDuration,
+                                   source: .kindleHit, stackCap: playerStats.burnStackCap,
+                                   stackInterval: GameConfig.Fire.crucibleStackInterval)
+        }
+
+        let consumed = projectileNode.onHitEnemy(bossNode)
+        if consumed {
+            if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
+                projectiles.remove(at: index)
+            }
+            projectileNode.removeFromParent()
+        }
+
+        // Death flow (XP shower, bossKills, shake) runs via the boss's onDeath callback
+        // v2.1 A6 (CL-71/72): Phase T2's shot-class penetration skips the flat
+        // Boss Mode DEF dial — nothing else.
+        // v2.2 N3 corrective (R1): a Fracture branch takes its share AFTER the
+        // dial (applied to the parent here), then enters with the dial bypassed.
+        let (bossHit, ignoresDEF) = fractureBranchOnBoss(hit, projectile: projectileNode, boss: bossNode)
+        bossNode.takeDirectHit(bossHit, ignoresChallengeDEF: ignoresDEF)
+        // v2.1 A6 (CL-73): a primary hit stacks the boss's Anomaly (survivor
+        // only) — BEFORE Bloodthirsty, as on enemies, so a boss the chunk kills
+        // never "died bleeding" from this same hit's Bleed.
+        if projectileNode.isPrimaryHit, !bossNode.isDead { applyBossAnomaly(bossNode) }
+        // Bloodthirsty lands on a boss that SURVIVED the hit — never on a dead
+        // one (a monument's slot is already clear by now).
+        if playerStats.bloodthirstyApplies(isPrimaryHit: projectileNode.isPrimaryHit,
+                                           roll: CGFloat.random(in: 0..<1)) {
+            inflictBossBleed(generation: 0)
+        }
+        apexRegisterAttack()   // T5 Apex: beam hits on the boss charge the pounce gauge too
+        erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too
+        if consumed { openBlackholeIfSeeded(projectileNode) }   // v2.1 A6: it stopped here, last
+    }
+
     // MARK: - v1.6: Projectile ↔ Boss
 
     /// Boss damage pipeline. Crits, executes (one ×2, CL-26) and Open Wounds apply.
@@ -12116,6 +12717,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func handleProjectileHitBoss(projectileBody: SKPhysicsBody) {
         guard let projectileNode = projectileBody.node as? ProjectileNode,
               let bossNode = boss, !bossNode.isDead else { return }
+        guard !projectileNode.hasStruck(bossNode) else { return }   // v2.2 N3: one hit per body
 
         // v2.1 A4b Glass Blood (CL-27): fragments hit and Bleed the boss too.
         if projectileNode.glassBloodGeneration > 0 {
@@ -12171,7 +12773,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                    stackInterval: GameConfig.Fire.crucibleStackInterval)
         }
 
-        let consumed = projectileNode.onHitEnemy()
+        let consumed = projectileNode.onHitEnemy(bossNode)
         if consumed {
             if let index = projectiles.firstIndex(where: { $0 === projectileNode }) {
                 projectiles.remove(at: index)
@@ -12182,7 +12784,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Death flow (XP shower, bossKills, shake) runs via the boss's onDeath callback
         // v2.1 A6 (CL-71/72): Phase T2's shot-class penetration skips the flat
         // Boss Mode DEF dial — nothing else.
-        bossNode.takeDirectHit(hit, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)
+        // v2.2 N3 corrective (R1): a Fracture branch takes its share AFTER the
+        // dial (applied to the parent here), then enters with the dial bypassed.
+        let (bossHit, ignoresDEF) = fractureBranchOnBoss(hit, projectile: projectileNode, boss: bossNode)
+        bossNode.takeDirectHit(bossHit, ignoresChallengeDEF: ignoresDEF)
         // v2.1 A6 (CL-73): a primary hit stacks the boss's Anomaly (survivor
         // only) — BEFORE Bloodthirsty, as on enemies, so a boss the chunk kills
         // never "died bleeding" from this same hit's Bleed.
@@ -12846,9 +13451,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v1.3: Magnetic Core — speed boost on XP pickup
         playerStats.triggerMagneticCoreBoost()
         
-        if player.addXP(orbNode.xpValue) {
-            triggerLevelUp()
+        // v2.2 N2 (R5): the ledger banks the XP (at the cap too); ONE due level
+        // opens its screen now, and any further due level — or XP Boost's
+        // granted level — follows one screen at a time from resumeAfterLevelUp().
+        // While a screen is up the XP still banks; the level is taken at resume.
+        if player.addXP(orbNode.xpValue), gameState == .playing {
+            takeNextLevel()
         }
+    }
+
+    /// v2.2 N2: take ONE due level and open its level-up screen.
+    private func takeNextLevel() {
+        if player.takeDueLevel() { triggerLevelUp() }
     }
     
     // MARK: - Level Up
@@ -12859,7 +13473,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func triggerLevelUp() {
         AudioManager.shared.play(.levelUp)
-        playerStats.triggerOverclock()  // v1.7: level-ups grant speed briefly
+        // (v2.2 N2: Overclock is triggered when play RESUMES — resumeAfterLevelUp —
+        // so the acquisition level counts and chained levels leave one fresh window.)
         xpBar.flashLevelUp()
         levelLabel.text = "LV \(player.currentLevel)"
 
@@ -13066,6 +13681,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func playerDied() {
         guard gameState == .playing else { return }
         gameState = .dead
+        beamNode.isHidden = true   // v2.2 N4: the beam stops with Spark
         // v2.1 A4c (CL-34): death ends the form and zeroes the cycle — a revive
         // starts it over (restart does too).
         #if DEBUG
@@ -13453,6 +14069,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func restartGame() {
         for enemy in enemies { enemy.removeFromParent() }
         enemies.removeAll()
+        chainReactions.reset()   // v2.2 N5 (Q6): no burst outlives its run
         
         for proj in projectiles { proj.removeFromParent() }
         projectiles.removeAll()
@@ -13537,6 +14154,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         waveManager.reset()
         adReviveManager.reset()
         fireClock.reset()
+        beamClock.reset()            // v2.2 N4: a new run — no beam time banked,
+        beamSpreadWindow = false     // no Storm window, nothing drawn
+        beamNode.isHidden = true
         // v2.1 A4c: a new run — no form, a fresh cycle, out of combat, and
         // facing back to its deterministic up-screen default (CL-35: facing
         // must never carry across restarts). `player.reset()` above already

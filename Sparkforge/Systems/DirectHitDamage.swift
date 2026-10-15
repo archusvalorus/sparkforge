@@ -65,6 +65,16 @@ struct DirectHitRounding: Equatable {
     init(unit: CGFloat = CGFloat.random(in: 0..<1)) {
         self.unit = unit
     }
+
+    /// Chance-rounding WITHOUT a floor (v2.2 N3): `exact` resolves to ⌊exact⌋
+    /// or ⌊exact⌋ + 1 with probability (exact − ⌊exact⌋) for the latter, so the
+    /// expectation is exactly `exact` and 0 stays 0. CL-70's `VoidRounding.damage`
+    /// keeps its minimum of 1 for the whole-shot paths it serves.
+    static func chanceRound(_ exact: CGFloat, unit: CGFloat) -> Int {
+        guard exact > 0 else { return 0 }
+        let whole = exact.rounded(.down)
+        return Int(whole) + (unit < exact - whole ? 1 : 0)
+    }
 }
 
 /// A7b S8 (CL-114a): Overcharge split out of a shot's integer base. `multiplier`
@@ -117,9 +127,37 @@ struct DirectHit: Equatable {
     }
 
     /// The Braceguard's directional halving — after the block, on both values.
+    /// A positive hit keeps its floor of 1 (legacy); a zero hit stays zero
+    /// (v2.2 N3 corrective: a Fracture share that resolved to 0 is never
+    /// resurrected by the shield).
     mutating func shield(by multiplier: CGFloat) {
-        basis = max(1, Int(CGFloat(basis) * multiplier))
-        dealt = max(1, Int(CGFloat(dealt) * multiplier))
+        basis = basis == 0 ? 0 : max(1, Int(CGFloat(basis) * multiplier))
+        dealt = dealt == 0 ? 0 : max(1, Int(CGFloat(dealt) * multiplier))
+    }
+
+    /// v2.2 N3 corrective (R1/R2): a Fracture branch's share of its PARENT's
+    /// fully processed hit — the last step of the chain, so every integer
+    /// floor above (the crit's 2, the block's and shield's 1, the DEF dial's 1)
+    /// belongs to the parent and is divided with it. Both values are
+    /// chance-rounded on the share's own threshold with NO floor:
+    /// expectation = parent × share exactly; a sub-1 share is 0 or 1, never a
+    /// free 1. `share == 1` is a whole shot and changes nothing.
+    mutating func scale(by share: CGFloat, rounding: DirectHitRounding) {
+        guard share < 1 else { return }
+        basis = DirectHitRounding.chanceRound(CGFloat(basis) * share, unit: rounding.unit)
+        dealt = DirectHitRounding.chanceRound(CGFloat(dealt) * share, unit: rounding.unit)
+    }
+
+    /// v2.2 Whiteout × Fracture / beam (Oct 14, contract W1): the hit as DELIVERED
+    /// at the final enemy entry. A resolved hit's `basis` is read there only by
+    /// Whiteout's melt test (and the elite-melt rebuild); the health lost is
+    /// `dealt`. A Fracture share or a sub-1 beam prefix can resolve to basis 0 /
+    /// positive dealt, which would cost health WITHOUT melting — so such a hit is
+    /// delivered with basis 1. `dealt` is unchanged; any other hit (a true zero
+    /// included) is delivered as is. Used ONLY at the gun handler's and the beam
+    /// copy's final `takeDirectHit` — never earlier, so riders keep the original basis.
+    var targetEntry: DirectHit {
+        dealt > 0 && basis == 0 ? DirectHit(basis: 1, dealt: dealt) : self
     }
 }
 
@@ -133,6 +171,19 @@ enum DirectHitDamage {
         let exact = CGFloat(prefix) * amplifiers.product * overcharge
         return DirectHit(basis: VoidRounding.damage(exact, unit: rounding.unit),
                          dealt: VoidRounding.damage(exact * vulnerability, unit: rounding.unit))
+    }
+
+    /// v2.2 N4: the block for an EXACT (fractional) prefix — the chaos beam's
+    /// lane-tick hits. `extra` folds in a further exact factor (the Braceguard
+    /// shield on the beam). Rounded ONCE each, unbiased, on the hit's own
+    /// threshold, with NO floor: the expectation is the exact product and a
+    /// zero stays zero (`DirectHitRounding.chanceRound`). Whole shots keep
+    /// `resolve(_:…)` and its legacy minimum of 1.
+    static func resolveExact(_ prefix: CGFloat, _ amplifiers: DirectHitAmplifiers, overcharge: CGFloat,
+                             vulnerability: CGFloat, extra: CGFloat, rounding: DirectHitRounding) -> DirectHit {
+        let exact = prefix * amplifiers.product * overcharge * extra
+        return DirectHit(basis: DirectHitRounding.chanceRound(exact, unit: rounding.unit),
+                         dealt: DirectHitRounding.chanceRound(exact * vulnerability, unit: rounding.unit))
     }
 
     /// S7's form (no Overcharge, no vulnerability): the same block, one value.

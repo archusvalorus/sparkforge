@@ -20,7 +20,7 @@ cp "$ROOT/Sparkforge/Config/ArenaGeometry.swift" \
    "$ROOT/Sparkforge/Utils/VectorMath.swift" \
    "$HERE/Stubs.swift" "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Geometry Arena Growth
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Geometry Arena Growth Neutral
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
        "$BUILD/ArenaGeometry.swift" "$BUILD/MeleeSector.swift" "$BUILD/VectorMath.swift" \
        "$BUILD/ExtractedConfig.swift"

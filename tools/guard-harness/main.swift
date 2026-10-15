@@ -394,8 +394,8 @@ do {
 do {
     let um = UpgradeManager()
     let guardCards = um.allCards.filter { $0.tag == .guardT }
-    check("CA1 Guard stays 10 cards (primary tag); the pool is 80 after A6 (CL-83)",
-          guardCards.count == 10 && um.allCards.count == 80, "guard=\(guardCards.count) pool=\(um.allCards.count)")
+    check("CA1 Guard stays 10 cards (primary tag); the pool is 79 after A6 (CL-83) and v2.2 N1 (Keen Eye retired)",
+          guardCards.count == 10 && um.allCards.count == 79, "guard=\(guardCards.count) pool=\(um.allCards.count)")
     let repulse = card("guard_2", um)
     check("CA2 Repulse is the PERMANENT Guard signature: 3 tiers, provides .guardUnlocked, no requires (CL-49)",
           repulse.isSignature && repulse.provides == [.guardUnlocked] && repulse.requires.isEmpty && repulse.maxTier == 3)

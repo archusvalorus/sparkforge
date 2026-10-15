@@ -149,6 +149,7 @@ extension ArenaBossNode {
     /// never fall below 1, so a dialled-up boss still takes chip damage.
     func challengedDamage(_ scaled: Int, raw: Int, ignoresChallengeDEF: Bool = false) -> Int {
         guard challengeFlatReduction > 0, !ignoresChallengeDEF else { return scaled }
+        guard scaled > 0 else { return 0 }          // v2.2 N3: a zero hit (a Fracture share) stays zero — never resurrected by the dial
         if raw >= health { return scaled }          // execute — always lands full
         return max(1, scaled - challengeFlatReduction)
     }

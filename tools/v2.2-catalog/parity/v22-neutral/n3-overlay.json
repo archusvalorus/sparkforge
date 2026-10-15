@@ -1,0 +1,389 @@
+{
+ "_about": "v2.2 Neutral rework, unit N3 — the REVIEWED expectations for every card the rework has changed so far (N1 + N2 carried over unchanged; N3 adds Long Shot, Scatter and Fracture Shot on projectiles per the R3 ruling), grounded in docs/v2.2-neutral-design-spec.md §2 and N0 §4 R3/R4. The frozen legacy fixtures are never edited; ParityAttribution builds the expected current documents from them plus this overlay. `cards` = dump-shaped records of every card whose AUTHORED record changed; `expectedDeltas` = the reviewed PlayerStats effects of the cards whose EFFECT changed (a card in `cards` with no entry here changed copy only); `addedFields` = stored fields that did not exist in the legacy record. Supersedes n2-overlay.json (kept as evidence).",
+ "unit": "N3",
+ "retired": [
+  "neutral_2"
+ ],
+ "fields": [
+  "moveSpeedMultiplier",
+  "pickupRadiusMultiplier",
+  "magneticCoreSpeedBoost",
+  "xpMultiplier",
+  "runLevelCap",
+  "grantedLevelsPending",
+  "projectileRangeMultiplier",
+  "extraProjectiles",
+  "spreadAngle",
+  "scatterTier",
+  "fractureTier",
+  "longShotTier",
+  "splitCount"
+ ],
+ "fieldsNote": "N1: Swift adds its rungs to moveSpeedMultiplier (0.08, 0.12, 0.15); Magnetic Core adds its rungs to pickupRadiusMultiplier (0.15, 0.15, 0.20) and SETS magneticCoreSpeedBoost (0.10, 0.20, 0.30); Keen Eye's +0.20 radius is gone. N2: XP Boost adds its rungs to xpMultiplier (0.25, 0.25, 0.00) and at T3 sets runLevelCap 15 → 20 and adds 1 to grantedLevelsPending. Overclock's effect (overclockActive) is unchanged; its +35% attack speed / +15% damage are computed properties read while its timer runs, not stored fields. N3: Long Shot adds its rungs to projectileRangeMultiplier (0.25, 0.25, 0, 0) and sets longShotTier 1–4; Scatter adds lanes−1 to extraProjectiles (1, 1, 2, 4) and sets scatterTier 1–4 — it no longer adds 0.15 to spreadAngle (the legacy T1 did; spreadAngle now only shapes the no-Scatter legacy cone); Fracture Shot sets fractureTier 1–4 and no longer writes splitCount (the v1.8 split fields are retired: unread, unwritten, still stored so the accepted engine compiles against the current PlayerStats).",
+ "addedFields": {
+  "runLevelCap": "int:15",
+  "grantedLevelsPending": "int:0",
+  "scatterTier": "int:0",
+  "fractureTier": "int:0",
+  "longShotTier": "int:0"
+ },
+ "addedFieldsNote": "PlayerStats stored fields introduced in N2 (the run level cap and XP Boost's owed level). They appear in fieldPaths/defaultState and change only through XP Boost T3.",
+ "cards": {
+  "neutral_1": {
+   "id": "neutral_1",
+   "name": "Swift",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+8% movement speed",
+   "detail": "Permanent movement speed: +8%, then +20%, then +35% (totals). Adds to your other movement bonuses.",
+   "tierDescriptions": [
+    "+8% movement speed",
+    "+20% movement speed",
+    "+35% movement speed"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "v13_magnetic_core": {
+   "id": "v13_magnetic_core",
+   "name": "Magnetic Core",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+15% XP pull; XP gives a speed burst",
+   "detail": "XP orbs are pulled from 15% / 30% / 50% farther (totals). Each XP orb collected grants +10% / +20% / +30% movement speed for 1.5s; another pickup refreshes the time, never the strength. Health orbs are never magnetized.",
+   "tierDescriptions": [
+    "+15% XP pull; +10% burst",
+    "+30% XP pull; +20% burst",
+    "+50% XP pull; +30% burst"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "neutral_5": {
+   "id": "neutral_5",
+   "name": "XP Boost",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+25% XP gain",
+   "detail": "Run XP gain: +25%, then +50% (totals). The run's level cap is 15; tier 3 raises it to 20 and grants one full level-up right away (card and stat), keeping the XP you have. XP collected at the cap is banked.",
+   "tierDescriptions": [
+    "+25% XP gain",
+    "+50% XP gain",
+    "+50% XP; cap 20; +1 level now"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "v17_overclock": {
+   "id": "v17_overclock",
+   "name": "Overclock",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 1,
+   "description": "Level-ups: a 3s overdrive",
+   "detail": "After each level-up, when play resumes: +35% movement speed, +35% attack speed and +15% damage for 3 seconds of play. Another level-up refreshes the time; it never stacks.",
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "neutral_4": {
+   "id": "neutral_4",
+   "name": "Long Shot",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 4,
+   "description": "+25% shot range",
+   "detail": "Shot range: +25%, then +50% (totals). Tier 3: shots never expire by distance. Tier 4: unlimited range, and shots pierce every enemy and pass through walls and terrain. Adds to your other range bonuses.",
+   "tierDescriptions": [
+    "+25% shot range",
+    "+50% shot range",
+    "No range limit",
+    "No limit; pierce all, pass walls"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "neutral_6": {
+   "id": "neutral_6",
+   "name": "Scatter",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 4,
+   "description": "2 parallel shots per volley",
+   "detail": "Every volley fires 2 parallel shots, then 3 (center and one to each side), then 5, then 9 across a wide fan. Each is a full-strength shot with all your shot effects. Storm Engine's bonus pellets add lanes to the same pattern.",
+   "tierDescriptions": [
+    "2 parallel shots per volley",
+    "3 shots: center + 2 angled",
+    "5 shots: center + 4 angled",
+    "9 shots in a wide fan"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "v18_fracture_shot": {
+   "id": "v18_fracture_shot",
+   "name": "Fracture Shot",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 4,
+   "description": "Each shot splits 3 ways",
+   "detail": "Each shot splits into 3 branches over 30°, then 5 over 60°, 9 over 120°, 17 over 180°. The shot's damage is shared evenly across all its branches (the center included); several branches can hit one enemy. Fans never spread past 90° to either side.",
+   "tierDescriptions": [
+    "Each shot splits 3 ways",
+    "Splits 5 ways, 60° fan",
+    "Splits 9 ways, 120° fan",
+    "Splits 17 ways, 180° fan"
+   ],
+   "provides": [
+    "pelletEffect"
+   ],
+   "requires": [],
+   "blockedBy": [
+    "glacialCondensation"
+   ],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  }
+ },
+ "expectedDeltas": {
+  "neutral_1": [
+   {
+    "moveSpeedMultiplier": [
+     "num:1.0",
+     "num:1.08"
+    ]
+   },
+   {
+    "moveSpeedMultiplier": [
+     "num:1.08",
+     "num:1.2000000000000002"
+    ]
+   },
+   {
+    "moveSpeedMultiplier": [
+     "num:1.2000000000000002",
+     "num:1.35"
+    ]
+   }
+  ],
+  "v13_magnetic_core": [
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.0",
+     "num:1.15"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.0",
+     "num:0.1"
+    ]
+   },
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.15",
+     "num:1.2999999999999998"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.1",
+     "num:0.2"
+    ]
+   },
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.2999999999999998",
+     "num:1.4999999999999998"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.2",
+     "num:0.3"
+    ]
+   }
+  ],
+  "neutral_5": [
+   {
+    "xpMultiplier": [
+     "num:1.0",
+     "num:1.25"
+    ]
+   },
+   {
+    "xpMultiplier": [
+     "num:1.25",
+     "num:1.5"
+    ]
+   },
+   {
+    "runLevelCap": [
+     "int:15",
+     "int:20"
+    ],
+    "grantedLevelsPending": [
+     "int:0",
+     "int:1"
+    ]
+   }
+  ],
+  "neutral_4": [
+   {
+    "projectileRangeMultiplier": [
+     "num:1.0",
+     "num:1.25"
+    ],
+    "longShotTier": [
+     "int:0",
+     "int:1"
+    ]
+   },
+   {
+    "projectileRangeMultiplier": [
+     "num:1.25",
+     "num:1.5"
+    ],
+    "longShotTier": [
+     "int:1",
+     "int:2"
+    ]
+   },
+   {
+    "longShotTier": [
+     "int:2",
+     "int:3"
+    ]
+   },
+   {
+    "longShotTier": [
+     "int:3",
+     "int:4"
+    ]
+   }
+  ],
+  "neutral_6": [
+   {
+    "extraProjectiles": [
+     "int:0",
+     "int:1"
+    ],
+    "scatterTier": [
+     "int:0",
+     "int:1"
+    ]
+   },
+   {
+    "extraProjectiles": [
+     "int:1",
+     "int:2"
+    ],
+    "scatterTier": [
+     "int:1",
+     "int:2"
+    ]
+   },
+   {
+    "extraProjectiles": [
+     "int:2",
+     "int:4"
+    ],
+    "scatterTier": [
+     "int:2",
+     "int:3"
+    ]
+   },
+   {
+    "extraProjectiles": [
+     "int:4",
+     "int:8"
+    ],
+    "scatterTier": [
+     "int:3",
+     "int:4"
+    ]
+   }
+  ],
+  "v18_fracture_shot": [
+   {
+    "fractureTier": [
+     "int:0",
+     "int:1"
+    ]
+   },
+   {
+    "fractureTier": [
+     "int:1",
+     "int:2"
+    ]
+   },
+   {
+    "fractureTier": [
+     "int:2",
+     "int:3"
+    ]
+   },
+   {
+    "fractureTier": [
+     "int:3",
+     "int:4"
+    ]
+   }
+  ]
+ },
+ "expectedDeltasNote": "Pairs are from the DEFAULT state (byte for byte); from a mid-run state the same per-tier CHANGE is required. XP Boost T3's xpMultiplier rung is +0.00 (T3 keeps +50%), so it does not appear in T3's diff; T3's cap is a max() to 20 and the granted level is += 1. N3: Long Shot T3/T4 add +0 range (totals stay +50%), so only longShotTier appears in their diffs.",
+ "retiredNotes": {
+  "neutral_2": "v2.2 N1 Neutral (Keen Eye, merged into Magnetic Core)"
+ },
+ "counts": {
+  "total": 79,
+  "draftable": 78,
+  "secret": 1,
+  "regularNeutral": 9,
+  "neutralTiers": 24,
+  "tiersTotal": 160,
+  "retired": 9
+ }
+}

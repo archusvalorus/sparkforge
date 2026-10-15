@@ -11,9 +11,12 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 BUILD="$(mktemp -d)"
+# v2.2 J2: UpgradeManager reads the authored catalog through the stub AbilityCatalogSource.
+export SPARKFORGE_CATALOG_PATH="${SPARKFORGE_CATALOG_PATH:-$ROOT/Sparkforge/Catalog/ability-catalog.json}"
 trap 'rm -rf "$BUILD"' EXIT
 # PlayerStats holds A0's damage-pipeline state, so its value types ride along.
 cp "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
+   "$ROOT/Sparkforge/Systems/AbilityCatalog.swift" "$ROOT/Sparkforge/Systems/AbilityBehaviors.swift" \
    "$ROOT/Sparkforge/Systems/PlayerStats.swift" \
    "$ROOT/Sparkforge/Systems/PlayerDamagePipeline.swift" \
    "$ROOT/Sparkforge/Systems/GuardState.swift" \
@@ -21,8 +24,8 @@ cp "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$HERE/Stubs.swift" "$HERE/main.swift" "$BUILD/"
 sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
-   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock
+   "$ROOT/Sparkforge/Config/GameConfig.swift" "$BUILD/ExtractedConfig.swift" Guard VoidTree Drafting Panda Growth Chill BossClass Erasure Shock Neutral
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" \
-       "$BUILD/UpgradeManager.swift" "$BUILD/PlayerStats.swift" \
+       "$BUILD/UpgradeManager.swift" "$BUILD/AbilityCatalog.swift" "$BUILD/AbilityBehaviors.swift" "$BUILD/PlayerStats.swift" \
        "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/GameTimer.swift"
 "$BUILD/harness"

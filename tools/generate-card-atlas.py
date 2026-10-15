@@ -9,7 +9,7 @@ stable.
 v2.1 A7a (CL-103): the card data no longer comes from regexes over the Swift
 source (a comment above a card could supply or flip its fields). The catalog
 harness compiles the REAL UpgradeManager and dumps `allCards` and the synergy
-ladders as JSON (`sh tools/catalog-harness/run.sh --dump <file>`); this script
+ladders from the authored catalog `Sparkforge/Catalog/ability-catalog.json` (v2.2 J3-a); this script
 only renders that, and asserts the exact expected counts first.
 
 Usage (from repo root):
@@ -30,15 +30,15 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else 'sparkforge-card-atlas.html'
 FAM = {
  'fire':   ('\U0001F525','FIRE','#FF7722'), 'chill': ('❄️','CHILL','#7EC8E3'),
  'shock':  ('⚡','SHOCK','#F6D36B'), 'bleed': ('\U0001FA78','BLEED','#CC4444'),
- 'guardT': ('\U0001F6E1','GUARD','#8899AA'), 'voidT': ('\U0001F573','VOID','#9B59D0'),
+ 'guard': ('\U0001F6E1','GUARD','#8899AA'), 'void': ('\U0001F573','VOID','#9B59D0'),
  'growth': ('\U0001F331','GROWTH','#6FBF73'),'neutral':('◇','NEUTRAL','#B0A89C'),
 }
 CAP_LENS = {
- 'cap_fire_everglow':    ('AoE ✓','Pulses + arena eruption are AoE, and both take the 50% boss-class scale. OPEN (A7b): the pulse never reaches the arena boss.', False),
+ 'cap_fire_everglow':    ('AoE ✓','Pulses + arena eruption are AoE. By ruling the pulse skips arena bosses and mini-bosses take half (A7b S11, CL-121 C2, copy option E1); the eruption reaches both at the 50% boss-class scale.', False),
  'cap_guard_ironmaiden': ('Mixed','Thorns/Retaliate/T5 are single-target retaliation; T4 kinetic burst is AoE (misses the arena boss). Boss-scale retrofit DONE in A5: thorns + Retaliate take 50% on mini-bosses and bosses (CL-67).', False),
  'cap_shock_skybeam':    ('Mixed','T1–T4 strike one target. T5 (A3, CL-8) strikes every 5s on its own clock: 300% ATK on the lassoed prey or the nearest enemy, plus 150% ATK splash within 80pt.', False),
  'cap_bleed_apex':       ('ST ⚠','Familiar hunts one target; execute is single-target. AoE-audit candidate (splash ≈50% of primary, never a second damage source).', True),
- 'cap_void_erasure':     ('Global ✓','Event Horizon (Erasure T5 — the ×5 Void synergy is Listlessness now) is arena-wide by design. T1/T3 need a normal enemy to target, so they are silent in boss-only fights (A7b, CL-95).', False),
+ 'cap_void_erasure':     ('Global ✓','Event Horizon (Erasure T5 — the ×5 Void synergy is Listlessness now) is arena-wide by design. T1\'s lurch is no longer silent against a lone boss: it falls back to the boss at 50% (A7b S11, CL-119 A1; the rung reads "a lone boss: 50%").', False),
  'cap_chill_polarvortex':('AoE ✓','Storm is a field effect.', False),
  'v20_tree':             ('Mixed','Summon roster varies — audit per-animal (the NatureCanon roster in GameScene).', False),
 }
@@ -55,13 +55,13 @@ PROPOSALS = [
 # stops the page from generating.
 EXPECT = {k: v for k, v in json.load(open(os.path.join(ROOT, 'tools/catalog-expect.json'))).items() if k != '_about'}
 
+sys.path.insert(0, os.path.join(ROOT, 'tools/v2.2-catalog'))
+import catalog_reader   # v2.2 J3-a: the authored file, as the game loads it
+
+
 def load_catalog():
-    """Compile the real catalog and read it back (CL-103)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        out = os.path.join(tmp, 'catalog.json')
-        subprocess.run(['sh', os.path.join(ROOT, 'tools/catalog-harness/run.sh'), '--dump', out],
-                       check=True, cwd=ROOT, stdout=subprocess.DEVNULL)
-        data = json.load(open(out))
+    """The authored catalog (`Sparkforge/Catalog/ability-catalog.json`), no Swift compile (v2.2 J3-a; CL-103 was the dump)."""
+    data = catalog_reader.load()
     def chips(d):
         return {int(k): ' + '.join(v) for k, v in d.items()}
     cards = []
@@ -134,12 +134,12 @@ def card_html(c, fam_color):
 # commit. Under the single-unit-commit workflow the Atlas is rendered from the
 # unit's uncommitted tree, so HEAD at render time names the previous unit's
 # commit, not the source shown. The count is the authoritative expected total.
-PROVENANCE = 'Source: compiled runtime catalog · {} cards'
+PROVENANCE = 'Source: authored catalog · {} cards'
 
 def build(cards, SYN, panda_cfg):
     source = PROVENANCE.format(EXPECT['total'])
     today = datetime.date.today().strftime('%b %d %Y')
-    order = ['fire','chill','shock','bleed','guardT','voidT','growth','neutral']
+    order = ['fire','chill','shock','bleed','guard','void','growth','neutral']   # portable tree keys (v2.2 J3)
     nav, sections = '', ''
     for tag in order:
         emoji, label, color = FAM[tag]
@@ -181,7 +181,7 @@ def build(cards, SYN, panda_cfg):
 <div class="stats"><span><b>{len(cards)}</b> cards</span><span><b>7</b> trees + Neutral + 1 secret · <b>{sum(1 for c in cards if not c['secret'])}</b> draftable</span><span><b>{caps}</b> capstones</span><span><b>7</b> synergy ladders (×3/×5/×7)</span><span class="provenance">{esc(source)}</span><span>generated {today}</span></div>
 <nav>{nav}<a href="#tree-secret" style="--fc:#775544">\U0001F43C SECRET</a><a href="#proposals" style="--fc:#FFB84D">\U0001F6E0 PROPOSALS</a></nav>
 {sections}
-<footer class="page">Generated by <code>tools/generate-card-atlas.py</code> from the compiled <code>UpgradeManager.allCards</code> (catalog harness dump). Tier text is the live in-game copy. \U0001F451 = tree capstone. ★ = the tree's SIGNATURE (thesis card; the deterministic first pick). "AoE lens" = the capstones-need-AoE audit (⚠ = single-target falloff candidate). Gate lines show the eligibility layer: grants / needs, per-tier needs and grants, and "not offered once" (a card something you own has silenced). Reference card <code>ids</code> when proposing changes.</footer>
+<footer class="page">Generated by <code>tools/generate-card-atlas.py</code> from the authored <code>Sparkforge/Catalog/ability-catalog.json</code>, the file the game loads. Tier text is the live in-game copy. \U0001F451 = tree capstone. ★ = the tree's SIGNATURE (thesis card; the deterministic first pick). "AoE lens" = the capstones-need-AoE audit (⚠ = single-target falloff candidate). Gate lines show the eligibility layer: grants / needs, per-tier needs and grants, and "not offered once" (a card something you own has silenced). Reference card <code>ids</code> when proposing changes.</footer>
 </div>'''
 
 def assert_rendered(page, cards):
@@ -217,11 +217,11 @@ def assert_rendered(page, cards):
 # width, bidi and variation selectors, tags …) and whitespace collapsed; matching
 # is case-folded. The rendered card copy is never changed.
 # The model the page must resolve to:
-#   * exactly ONE source claim ("source:" or "compiled runtime catalog", any
+#   * exactly ONE source claim ("source:" or "authored catalog", any
 #     case) across everything painted or announced (text not `not rendered`,
 #     and the attributes of elements not `not rendered`), in EVERY reading;
 #     and a fully SHOWN item (none of the three flags) reading exactly
-#     "Source: compiled runtime catalog · N cards", N = catalog-expect.json's
+#     "Source: authored catalog · N cards", N = catalog-expect.json's
 #     total = the <article id=…> cards rendered;
 #   * exactly ONE date value on the same channels, and a SHOWN item reading
 #     exactly "generated Mon DD YYYY", a real calendar date;
@@ -356,7 +356,7 @@ def _attr_items(root, excluded):
 
 MONTHS = r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)'
 DATE = r'(?<![^\W\d_])' + MONTHS + r'\s+\d{1,2}\s+\d{4}(?!\d)|(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)'
-SOURCE_CLAIM = [r'source\s*:', r'compiled\s*runtime\s*catalog']
+SOURCE_CLAIM = [r'source\s*:', r'authored\s*catalog']
 FORBIDDEN = [('"commit"', r'commit'), ('"@"', r'@'), ('"rev-parse"', r'rev-parse'),
              ('"git"', r'(?<![^\W\d_])git(?![^\W\d_])'), ('"head"', r'(?<![^\W\d_])head(?![^\W\d_])'),
              ('a hash', r'(?<![^\W_])[0-9a-f]{7,}(?![^\W_])')]
@@ -375,7 +375,7 @@ def assert_provenance(page):
     tree.feed(page)
     tree.close()
     total = json.load(open(os.path.join(ROOT, 'tools/catalog-expect.json')))['total']
-    label = f'Source: compiled runtime catalog · {total} cards'           # its own copy, never PROVENANCE
+    label = f'Source: authored catalog · {total} cards'           # its own copy, never PROVENANCE
     readings = {(ch, pol): _reading(tree.root, pol, ex) + _attr_items(tree.root, ex)
                 for ch, ex in CHANNELS.items() for pol in POLICIES}
     shown_text = _reading(tree.root, 'semantic', CHANNELS['shown'])

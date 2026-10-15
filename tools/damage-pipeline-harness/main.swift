@@ -269,8 +269,11 @@ do {
     let rewardOnly = KillSource.allCases.filter { $0.credit == .rewardOnly }
     check("P11a only bursts and the sweep are XP-only (legacy)",
           Set(rewardOnly) == [.burst, .sweep], "got \(rewardOnly)")
-    check("P11b every other source is a full kill",
-          KillSource.allCases.filter { $0.credit == .full }.count == KillSource.allCases.count - 2)
+    // CONTRACT CHANGE, v2.2 N5 (R6): .chainReaction is the one .rewardRecorded source (XP orb +
+    // Codex/bestiary record); every source other than it and the two XP-only ones is a full kill.
+    check("P11b every other source is a full kill (v2.2 N5: .chainReaction alone is reward-recorded)",
+          KillSource.allCases.filter { $0.credit == .full }.count == KillSource.allCases.count - 3
+            && KillSource.allCases.filter { $0.credit == .rewardRecorded } == [.chainReaction])
 }
 
 // P12 — game-time timers.

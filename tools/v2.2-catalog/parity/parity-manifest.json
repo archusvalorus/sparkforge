@@ -1,0 +1,76 @@
+{
+ "_about": "v2.2 catalog migration J1 — parity fixtures recorded from the LEGACY implementation (UpgradeManager.buildCardPool and its synergy switch), before the JSON catalog or its behaviour registry existed. Generated; never edit. Re-record: sh tools/catalog-harness/run.sh --record-parity tools/v2.2-catalog/parity",
+ "recordedAtUTC": "2026-10-05T21:26:38Z",
+ "head": "31505bd1f754c4fcdf76f581e33ddec2dfbe1415",
+ "fixtures": {
+  "legacy-effect-deltas.json": "a27c76f2456b16911b8b2c65e2803442c47ad23b7c3189ef551d0df38260795b",
+  "legacy-run-transcripts.json": "975813573f724a1e8d8520ff84b88f9871310d1117b28b7afdb44f4bb07ca59b"
+ },
+ "repeatCapture": "A second capture in a separate process produced byte-identical files.",
+ "sourcesAtCapture": {
+  "Sparkforge/Systems/UpgradeManager.swift": {
+   "sha256": "c48d936fbad8a61caf79cd98ab83fb213adcfdf6681fa9135dab74ca41daa7bd",
+   "unmodifiedAgainstHEAD": true
+  },
+  "Sparkforge/Systems/PlayerStats.swift": {
+   "sha256": "6d048764f107bf243691075278eca5e8525add9819ae89fedfc04a3af4fb6ad2",
+   "unmodifiedAgainstHEAD": true
+  },
+  "Sparkforge/Systems/CodexManager.swift": {
+   "sha256": "5583c9d9fbe91ba2063eb984d028a78875172b591789ccc78ed8d1d46b1ef36f",
+   "unmodifiedAgainstHEAD": true
+  },
+  "Sparkforge/Systems/PlayerDamagePipeline.swift": {
+   "sha256": "fb7592e245ae667e28edfefb0fcb0ce867449fb0fee9f1c4ac5d465341ae0239",
+   "unmodifiedAgainstHEAD": true
+  },
+  "Sparkforge/Systems/GuardState.swift": {
+   "sha256": "079329fc9918f2a28a1414de360ef3b014e3c7099c55fa8e99053d2a8bd519f4",
+   "unmodifiedAgainstHEAD": true
+  },
+  "Sparkforge/Systems/VoidState.swift": {
+   "sha256": "eb2631d800184784d79273f2ea669fc8588968dd91c5edd7a5a39338aade918e",
+   "unmodifiedAgainstHEAD": true
+  },
+  "Sparkforge/Systems/GameTimer.swift": {
+   "sha256": "f181698fab05ad8e7fce30b7e7584dee536eb2c39a186e61fb41e7619af2869a",
+   "unmodifiedAgainstHEAD": true
+  },
+  "Sparkforge/Config/GameConfig.swift": {
+   "sha256": "0ccc2b2060685e7c3166729200d12b14d536769ef18ababbfbc7ef001af0903a",
+   "unmodifiedAgainstHEAD": true
+  },
+  "tools/signature-draw-harness/Stubs.swift": {
+   "sha256": "0f16b55ca61e8c468a256d85470e9ec8e9678ae03f5284ca2e5516c882812c03",
+   "unmodifiedAgainstHEAD": true
+  }
+ },
+ "config": {
+  "extractedFromRealGameConfig": [
+   "Guard",
+   "VoidTree",
+   "Drafting",
+   "Panda",
+   "Growth",
+   "Chill",
+   "BossClass",
+   "Erasure",
+   "Shock"
+  ],
+  "handMirroredInSharedStubs": [
+   "Player",
+   "LevelUp",
+   "Projectile",
+   "Fire",
+   "Bleed",
+   "DamagePipeline",
+   "Everglow",
+   "ForgePath",
+   "IronMaiden",
+   "PolarVortex",
+   "Skybeam",
+   "Apex"
+  ],
+  "note": "The recorded numbers for the mirrored blocks are the stub's, not read from GameConfig.swift. Both sides of every comparison read the same values."
+ }
+}

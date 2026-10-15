@@ -170,15 +170,16 @@ do {
     let scatter = card(um, "neutral_6")
     var normal = [stats.volleyPelletCount(isSpreadVolley: false)]
     var spread = [stats.volleyPelletCount(isSpreadVolley: true)]
-    for level in 8...10 {
+    for level in 8...11 {
         um.pickCard(scatter, stats: stats, level: level)
         normal.append(stats.volleyPelletCount(isSpreadVolley: false))
         spread.append(stats.volleyPelletCount(isSpreadVolley: true))
     }
-    check("SE2 Scatter T0–T3 through the real pool: normal volleys fire 1 / 2 / 3 / 4",
-          normal == [1, 2, 3, 4] && scatter.maxTier == 3, "got \(normal)")
-    check("SE3 CL-98: Storm Engine's spread volley fires the normal count + 2 = 3 / 4 / 5 / 6 (never fewer than a normal volley)",
-          spread == [3, 4, 5, 6] && zip(normal, spread).allSatisfy { $1 == $0 + 2 }, "got \(spread)")
+    // v2.2 N3: Scatter is TOTAL lanes 2 / 3 / 5 / 9 (four tiers); Storm's +2 rides on top.
+    check("SE2 Scatter T0–T4 through the real pool: normal volleys fire 1 / 2 / 3 / 5 / 9 (v2.2 N3 totals)",
+          normal == [1, 2, 3, 5, 9] && scatter.maxTier == 4, "got \(normal)")
+    check("SE3 CL-98: Storm Engine's spread volley fires the normal count + 2 = 3 / 4 / 5 / 7 / 11 (never fewer than a normal volley)",
+          spread == [3, 4, 5, 7, 11] && zip(normal, spread).allSatisfy { $1 == $0 + 2 }, "got \(spread)")
     check("SE4 the +2 is the REAL GameConfig.Shock.stormEngineBonusPellets (extracted from source)",
           S.stormEngineBonusPellets == 2)
     stats.reset()

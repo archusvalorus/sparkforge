@@ -1,0 +1,705 @@
+{
+ "_about": "v2.2 J0 baseline \u2014 where each card's numbers live today.",
+ "source": "Sparkforge/Systems/UpgradeManager.swift",
+ "summary": {
+  "literal": 18,
+  "config": 21,
+  "switch": 35,
+  "mixed": 5,
+  "none": 1
+ },
+ "cards": [
+  {
+   "id": "fire_1",
+   "name": "Kindle",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.burnDPS += 0.5 },"
+   ]
+  },
+  {
+   "id": "fire_2",
+   "name": "Forge Breath",
+   "kind": "config",
+   "config": [
+    "GameConfig.Fire.forgeBreathBonus"
+   ],
+   "literals": []
+  },
+  {
+   "id": "fire_3",
+   "name": "Ember Burst",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "fire_4",
+   "name": "Crucible",
+   "kind": "config",
+   "config": [
+    "GameConfig.Fire.crucibleStackCap"
+   ],
+   "literals": []
+  },
+  {
+   "id": "shock_1",
+   "name": "Static",
+   "kind": "mixed",
+   "config": [
+    "GameConfig.Shock.staticFireRate"
+   ],
+   "literals": [
+    "apply: { stats in stats.fireRateMultiplier /= (1 + GameConfig.Shock.staticFireRate[0]) },",
+    "{ stats in stats.fireRateMultiplier *= (1 + GameConfig.Shock.staticFireRate[0]) / (1 + GameConfig.Shock.staticFireRate[1]) },",
+    "{ stats in stats.fireRateMultiplier *= (1 + GameConfig.Shock.staticFireRate[1]) / (1 + GameConfig.Shock.staticFireRate[2]) }"
+   ]
+  },
+  {
+   "id": "shock_2",
+   "name": "Chain Lightning",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.chainTargets += 1; stats.chainLightningTier = 1 },",
+    "{ stats in stats.chainTargets += 1; stats.chainLightningTier = 2 },",
+    "{ stats in stats.chainTargets += 1; stats.chainLightningTier = 3 },",
+    "{ stats in stats.chainTargets += 1; stats.chainLightningTier = 4 }"
+   ]
+  },
+  {
+   "id": "shock_3",
+   "name": "Surge",
+   "kind": "mixed",
+   "config": [
+    "GameConfig.Shock.surgeFireRate",
+    "GameConfig.Shock.surgeMoveBonus",
+    "GameConfig.Shock.surgeProjectileSpeed"
+   ],
+   "literals": [
+    "stats.fireRateMultiplier /= (1 + GameConfig.Shock.surgeFireRate)"
+   ]
+  },
+  {
+   "id": "shock_4",
+   "name": "Overload",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v21_lightning_sentry",
+   "name": "Lightning Sentry",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v21_electro_pulse",
+   "name": "Electro Pulse",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v21_bloodthirsty",
+   "name": "Bloodthirsty",
+   "kind": "config",
+   "config": [
+    "GameConfig.Bleed.applyChance"
+   ],
+   "literals": []
+  },
+  {
+   "id": "bleed_1",
+   "name": "Gouge",
+   "kind": "config",
+   "config": [
+    "GameConfig.Bleed.gougeCritTotals"
+   ],
+   "literals": []
+  },
+  {
+   "id": "bleed_2",
+   "name": "Hemorrhage",
+   "kind": "config",
+   "config": [
+    "GameConfig.Bleed.hemorrhageCritBonus"
+   ],
+   "literals": []
+  },
+  {
+   "id": "bleed_3",
+   "name": "Frenzy",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v21_berserk",
+   "name": "Berserk",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "bleed_4",
+   "name": "Siphon",
+   "kind": "config",
+   "config": [
+    "GameConfig.Bleed.siphonHealTotals"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v21_sanguinarian",
+   "name": "Sanguinarian",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "guard_1",
+   "name": "Brace",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.lethalSaves = max(stats.lethalSaves, 1) },"
+   ]
+  },
+  {
+   "id": "guard_2",
+   "name": "Repulse",
+   "kind": "config",
+   "config": [
+    "GameConfig.Guard.repulseShove"
+   ],
+   "literals": []
+  },
+  {
+   "id": "guard_3",
+   "name": "Harden",
+   "kind": "config",
+   "config": [
+    "GameConfig.Guard.hardenShrink"
+   ],
+   "literals": []
+  },
+  {
+   "id": "guard_4",
+   "name": "Fortify",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "void_1",
+   "name": "Warp Shot",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "void_2",
+   "name": "Gravity Well",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "void_3",
+   "name": "Phase",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "void_4",
+   "name": "Devour",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v21_void_horror",
+   "name": "Void Horror",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v21_shadow_edge",
+   "name": "Shadow Edge",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "chill_1",
+   "name": "Frost Touch",
+   "kind": "config",
+   "config": [
+    "GameConfig.Chill.frostTouchSlow"
+   ],
+   "literals": []
+  },
+  {
+   "id": "chill_2",
+   "name": "Ice Shard",
+   "kind": "config",
+   "config": [
+    "GameConfig.Chill.iceShardSpeedBonus"
+   ],
+   "literals": []
+  },
+  {
+   "id": "chill_3",
+   "name": "Permafrost",
+   "kind": "config",
+   "config": [
+    "GameConfig.Chill.permafrostBonus"
+   ],
+   "literals": []
+  },
+  {
+   "id": "chill_4",
+   "name": "Glacial Drift",
+   "kind": "config",
+   "config": [
+    "GameConfig.Chill.iceRinkEnemySlow",
+    "GameConfig.Chill.iceRinkMoveBonus"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v21_glacial_spikes",
+   "name": "Glacial Spikes",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "neutral_1",
+   "name": "Swift",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.moveSpeedMultiplier += 0.12"
+   ]
+  },
+  {
+   "id": "neutral_2",
+   "name": "Keen Eye",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.pickupRadiusMultiplier += 0.20"
+   ]
+  },
+  {
+   "id": "neutral_3",
+   "name": "Rapid Fire",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.fireRateMultiplier *= 0.90"
+   ]
+  },
+  {
+   "id": "neutral_4",
+   "name": "Long Shot",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.projectileRangeMultiplier += 0.20"
+   ]
+  },
+  {
+   "id": "neutral_5",
+   "name": "XP Boost",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.xpMultiplier += 0.25"
+   ]
+  },
+  {
+   "id": "neutral_6",
+   "name": "Scatter",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.extraProjectiles += 1",
+    "stats.spreadAngle += 0.15",
+    "{ stats in stats.extraProjectiles += 1 },",
+    "{ stats in stats.extraProjectiles += 1 }"
+   ]
+  },
+  {
+   "id": "v13_overcharge",
+   "name": "Overcharge",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.overchargeDamagePerSecond = 0.05"
+   ]
+  },
+  {
+   "id": "v13_magnetic_core",
+   "name": "Magnetic Core",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "stats.pickupRadiusMultiplier += 0.50",
+    "stats.magneticCoreSpeedBoost = 0.30"
+   ]
+  },
+  {
+   "id": "v13_chain_reaction",
+   "name": "Chain Reaction",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v13_glass_engine",
+   "name": "Glass Engine",
+   "kind": "mixed",
+   "config": [
+    "GameConfig.Fire.glassEngineFireRateBonus",
+    "GameConfig.Fire.glassEngineMaxHPLoss"
+   ],
+   "literals": [
+    "stats.fireRateMultiplier /= (1.0 + GameConfig.Fire.glassEngineFireRateBonus)"
+   ]
+  },
+  {
+   "id": "v13_phase_skin",
+   "name": "Phase Skin",
+   "kind": "config",
+   "config": [
+    "GameConfig.Guard.phaseSkinCooldown",
+    "GameConfig.Guard.phaseSkinDuration"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v13_execution",
+   "name": "Execution Protocol",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.executionProtocolThreshold = 0.30 },"
+   ]
+  },
+  {
+   "id": "v13_unstable_core",
+   "name": "Unstable Core",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v16_static_crown",
+   "name": "Static Crown",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v16_open_vein",
+   "name": "Open Vein",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.openVeinDamage = 2 },"
+   ]
+  },
+  {
+   "id": "v16_iron_bloom",
+   "name": "Iron Bloom",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v16_aegis_pulse",
+   "name": "Aegis",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v20_terra",
+   "name": "Terra",
+   "kind": "config",
+   "config": [
+    "GameConfig.Growth.terraRadius"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v20_thornsoil",
+   "name": "Thornsoil",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.thornsoilDPS = max(stats.thornsoilDPS, 6) },"
+   ]
+  },
+  {
+   "id": "v20_richsoil",
+   "name": "Rich Soil",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.growthRegenBonusHP += 2 },"
+   ]
+  },
+  {
+   "id": "v20_deeproot",
+   "name": "Deeproot",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.deeprootDEF += 6 },"
+   ]
+  },
+  {
+   "id": "v20_tree",
+   "name": "Tree",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "GameConfig.Panda.cardID",
+   "name": "Pandas.",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v20_vinewall",
+   "name": "Vine Wall",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v20_seed_spore",
+   "name": "Seed Spore Shot",
+   "kind": "config",
+   "config": [
+    "GameConfig.Growth.seedFragmentsT1",
+    "GameConfig.Growth.seedFragmentsT2",
+    "GameConfig.Growth.seedFragmentsT3"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v20_wildbloom",
+   "name": "Wildbloom",
+   "kind": "none",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v16_null_bloom",
+   "name": "Null Bloom",
+   "kind": "config",
+   "config": [
+    "GameConfig.VoidTree.nullBloomChance"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v16_hoarfrost",
+   "name": "Hoarfrost",
+   "kind": "config",
+   "config": [
+    "GameConfig.Chill.hoarfrostInterval"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v16_whiteout",
+   "name": "Whiteout",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v16_cauterize",
+   "name": "Cauterize",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v17_relay_burn",
+   "name": "Relay Burn",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v17_overclock",
+   "name": "Overclock",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v17_dead_circuit",
+   "name": "Dead Circuit",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v17_grounded_core",
+   "name": "Grounded Core",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v18_bloodlust",
+   "name": "Bloodlust",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v18_riftline",
+   "name": "Riftline",
+   "kind": "config",
+   "config": [
+    "GameConfig.VoidTree.riftlinePierce",
+    "GameConfig.VoidTree.riftlineRange"
+   ],
+   "literals": []
+  },
+  {
+   "id": "v18_mirror_edge",
+   "name": "Mirror Edge",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.echoChance = 0.35 },"
+   ]
+  },
+  {
+   "id": "v18_glass_blood",
+   "name": "Glass Blood",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v18_silver_skin",
+   "name": "Silver Skin",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v18_fracture_shot",
+   "name": "Fracture Shot",
+   "kind": "literal",
+   "config": [],
+   "literals": [
+    "apply: { stats in stats.splitCount = 2 },"
+   ]
+  },
+  {
+   "id": "v18_red_smile",
+   "name": "Red Smile",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "v18_false_opening",
+   "name": "False Opening",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "cap_fire_everglow",
+   "name": "Everglow",
+   "kind": "mixed",
+   "config": [
+    "GameConfig.Everglow.basePulseMult",
+    "GameConfig.Everglow.baseRadius"
+   ],
+   "literals": [
+    "stats.everglowPulseRadius *= 2",
+    "stats.everglowBasePulseMult *= 2"
+   ]
+  },
+  {
+   "id": "cap_guard_ironmaiden",
+   "name": "Iron Maiden",
+   "kind": "mixed",
+   "config": [
+    "GameConfig.IronMaiden.defBonusT1",
+    "GameConfig.IronMaiden.defBonusT5",
+    "GameConfig.IronMaiden.defToDmgT1",
+    "GameConfig.IronMaiden.defToDmgT2",
+    "GameConfig.IronMaiden.retaliateMult",
+    "GameConfig.IronMaiden.thornsT1",
+    "GameConfig.IronMaiden.thornsT2"
+   ],
+   "literals": [
+    "stats.defense += max(1, Int(CGFloat(stats.defense) * GameConfig.IronMaiden.defBonusT1))",
+    "stats.defense += max(1, Int(CGFloat(stats.defense) * GameConfig.IronMaiden.defBonusT5))"
+   ]
+  },
+  {
+   "id": "cap_shock_skybeam",
+   "name": "Skybeam",
+   "kind": "config",
+   "config": [
+    "GameConfig.Skybeam.acquireRangeT1",
+    "GameConfig.Skybeam.acquireRangeT2",
+    "GameConfig.Skybeam.tickMultT1",
+    "GameConfig.Skybeam.tickMultT2"
+   ],
+   "literals": []
+  },
+  {
+   "id": "cap_bleed_apex",
+   "name": "Apex",
+   "kind": "switch",
+   "config": [],
+   "literals": []
+  },
+  {
+   "id": "cap_void_erasure",
+   "name": "Erasure",
+   "kind": "config",
+   "config": [
+    "GameConfig.Erasure.unstableTriggerCooldown",
+    "GameConfig.Erasure.unstableTriggerCooldownT2"
+   ],
+   "literals": []
+  },
+  {
+   "id": "cap_chill_polarvortex",
+   "name": "Polar Vortex",
+   "kind": "config",
+   "config": [
+    "GameConfig.PolarVortex.iceburstShardsT1",
+    "GameConfig.PolarVortex.iceburstShardsT2",
+    "GameConfig.PolarVortex.iceburstShardsT5",
+    "GameConfig.PolarVortex.windchillRadius",
+    "GameConfig.PolarVortex.windchillRadiusT5Mult"
+   ],
+   "literals": []
+  }
+ ]
+}

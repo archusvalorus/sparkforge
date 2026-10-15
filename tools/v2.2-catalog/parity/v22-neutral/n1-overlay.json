@@ -1,0 +1,128 @@
+{
+ "_about": "v2.2 Neutral rework, unit N1 — the REVIEWED expectations for the cards this unit changes, grounded in docs/v2.2-neutral-design-spec.md §2. The frozen legacy fixtures (tools/v2.2-catalog/parity/legacy-*.json) are never edited; the catalog harness compares the current game to them with exactly these differences allowed and named. Anything else that differs still fails.",
+ "unit": "N1",
+ "retired": [
+  "neutral_2"
+ ],
+ "fields": [
+  "moveSpeedMultiplier",
+  "pickupRadiusMultiplier",
+  "magneticCoreSpeedBoost"
+ ],
+ "fieldsNote": "The only PlayerStats fields N1 changes the values of. Swift adds its rungs to moveSpeedMultiplier (deltas 0.08, 0.12, 0.15); Magnetic Core adds its rungs to pickupRadiusMultiplier (0.15, 0.15, 0.20) and SETS magneticCoreSpeedBoost to the tier's total (0.10, 0.20, 0.30). Keen Eye's +0.20 to pickupRadiusMultiplier is gone with the card.",
+ "expectedDeltas": {
+  "neutral_1": [
+   {
+    "moveSpeedMultiplier": [
+     "num:1.0",
+     "num:1.08"
+    ]
+   },
+   {
+    "moveSpeedMultiplier": [
+     "num:1.08",
+     "num:1.2000000000000002"
+    ]
+   },
+   {
+    "moveSpeedMultiplier": [
+     "num:1.2000000000000002",
+     "num:1.35"
+    ]
+   }
+  ],
+  "v13_magnetic_core": [
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.0",
+     "num:1.15"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.0",
+     "num:0.1"
+    ]
+   },
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.15",
+     "num:1.2999999999999998"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.1",
+     "num:0.2"
+    ]
+   },
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.2999999999999998",
+     "num:1.4999999999999998"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.2",
+     "num:0.3"
+    ]
+   }
+  ]
+ },
+ "expectedDeltasNote": "Per tier, from any starting state in which the card itself has not been taken (its own steps are excluded when the harness builds a state): the value before → after. Floating-point sums as Swift's additive rungs produce them.",
+ "cards": {
+  "neutral_1": {
+   "id": "neutral_1",
+   "name": "Swift",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+8% movement speed",
+   "detail": "Permanent movement speed: +8%, then +20%, then +35% (totals). Adds to your other movement bonuses.",
+   "tierDescriptions": [
+    "+8% movement speed",
+    "+20% movement speed",
+    "+35% movement speed"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "v13_magnetic_core": {
+   "id": "v13_magnetic_core",
+   "name": "Magnetic Core",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+15% XP pull; XP gives a speed burst",
+   "detail": "XP orbs are pulled from 15% / 30% / 50% farther (totals). Each XP orb collected grants +10% / +20% / +30% movement speed for 1.5s; another pickup refreshes the time, never the strength. Health orbs are never magnetized.",
+   "tierDescriptions": [
+    "+15% XP pull; +10% burst",
+    "+30% XP pull; +20% burst",
+    "+50% XP pull; +30% burst"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  }
+ },
+ "retiredNotes": {
+  "neutral_2": "v2.2 N1 Neutral (Keen Eye, merged into Magnetic Core)"
+ },
+ "counts": {
+  "total": 79,
+  "draftable": 78,
+  "secret": 1,
+  "regularNeutral": 9,
+  "neutralTiers": 15,
+  "tiersTotal": 151,
+  "retired": 9
+ }
+}

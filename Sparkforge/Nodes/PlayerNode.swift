@@ -19,8 +19,14 @@ final class PlayerNode: SKNode {
 
     // MARK: - State
 
-    private(set) var currentLevel: Int = 1
-    private(set) var currentXP: Int = 0
+    // v2.2 N2: level and XP live in a pure ledger (XPLedger.swift) — the cap,
+    // the bank, the carried fraction and the granted level are its rules.
+    private var ledger = XPLedger()
+    var currentLevel: Int { ledger.level }
+    var currentXP: Int { ledger.xp }
+    /// The run's level cap (15; XP Boost T3 raises it to 20 via PlayerStats).
+    var levelCap: Int { stats?.runLevelCap ?? GameConfig.Neutral.runLevelCap }
+    var isAtLevelCap: Bool { ledger.level >= levelCap }
     var isDead: Bool = false
 
     /// Reference to runtime stats — set by GameScene
@@ -736,22 +742,38 @@ final class PlayerNode: SKNode {
 
     // MARK: - XP & Leveling
 
+    /// v2.2 N2 (R5): collect XP — scaled by the run multiplier with the
+    /// fractional remainder carried to the next pickup; banked at the level
+    /// cap. Returns whether a level is now due. The level itself is taken by
+    /// the scene, one at a time (`takeDueLevel`), so earned levels queue
+    /// through one reward screen each instead of overlapping.
     @discardableResult
     func addXP(_ amount: Int) -> Bool {
         guard !isDead else { return false }
+        ledger.collect(amount, multiplier: stats?.xpMultiplier ?? 1.0)
+        return ledger.isLevelDue(cap: levelCap)
+    }
 
-        let xpMult = stats?.xpMultiplier ?? 1.0
-        let adjusted = Int(CGFloat(amount) * xpMult)
-        currentXP += adjusted
+    /// An earned level is waiting (threshold met, below the cap).
+    var isLevelDue: Bool { ledger.isLevelDue(cap: levelCap) }
 
-        let required = xpRequired(forLevel: currentLevel + 1)
-        if currentXP >= required {
-            currentXP -= required
-            currentLevel += 1
-            onLevelUp()
-            return true
-        }
-        return false
+    /// Take ONE due level (its visuals fire); false when none is due or the cap
+    /// holds. The caller presents the level-up screen before asking again.
+    @discardableResult
+    func takeDueLevel() -> Bool {
+        guard !isDead, ledger.takeDueLevel(cap: levelCap) else { return false }
+        onLevelUp()
+        return true
+    }
+
+    /// v2.2 N2: XP Boost T3's granted level — one step up below the cap,
+    /// KEEPING the XP already earned as an absolute amount (the next threshold
+    /// is the new level's). False at the cap.
+    @discardableResult
+    func grantLevel(keepingXP: Bool) -> Bool {
+        guard !isDead, ledger.grantLevel(cap: levelCap, keepingXP: keepingXP) else { return false }
+        onLevelUp()
+        return true
     }
 
     /// v2.0 (Boss Mode opener): advance one level WITHOUT earning the XP.
@@ -852,24 +874,18 @@ final class PlayerNode: SKNode {
         nourishHalo = halo
     }
 
+    /// The gauntlet opener's grant: CLEARS the XP (its empty-XP
+    /// initialization — distinct from XP Boost's `grantLevel(keepingXP:)`).
+    /// v2.2 N2: never past the cap.
     func grantLevel() {
-        guard !isDead else { return }
-        currentXP = 0
-        currentLevel += 1
+        guard !isDead, ledger.grantLevel(cap: levelCap, keepingXP: false) else { return }
         onLevelUp()
     }
 
-    func xpRequired(forLevel level: Int) -> Int {
-        let base = Double(GameConfig.Leveling.baseXPRequired)
-        let factor = GameConfig.Leveling.xpScalingFactor
-        return Int(base * pow(factor, Double(level - 2)))
-    }
+    func xpRequired(forLevel level: Int) -> Int { XPLedger.xpRequired(forLevel: level) }
 
-    var xpProgress: CGFloat {
-        let required = xpRequired(forLevel: currentLevel + 1)
-        guard required > 0 else { return 0 }
-        return CGFloat(currentXP) / CGFloat(required)
-    }
+    /// Bar fill: full at the cap; else the fraction of the next threshold.
+    var xpProgress: CGFloat { ledger.progress(cap: levelCap) }
 
     // MARK: - v1.7: Level-based Feel
 
@@ -1686,8 +1702,7 @@ final class PlayerNode: SKNode {
         setGuardShields(aegisTier: 0, unbrokenOwned: false, unbrokenReadiness: 0)   // v2.1 A5
         setUnbrokenWindow(false)
         isDead = false
-        currentLevel = 1
-        currentXP = 0
+        ledger.reset()          // v2.2 N2: level, XP and the carried fraction
         position = .zero
         alpha = 1.0
         glowNode.setScale(1.0)

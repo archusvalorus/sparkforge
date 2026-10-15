@@ -1594,6 +1594,114 @@ enum GameConfig {
     /// Per-award stat increments for the level-up cadence: even levels let the
     /// player CHOOSE one of these, odd levels auto-award a random one. Starting
     /// values — balance-sensitive; tuned against the stable post-v1.8 baseline.
+    // MARK: - Neutral cards (v2.2 Neutral rework, N1: `docs/v2.2-neutral-design-spec.md`)
+    enum Neutral {
+        /// Swift: permanent movement-speed bonus, TOTAL at each tier (the rungs
+        /// add the difference; the multiplier is additive with Forge Path and
+        /// the Tree's ground bonus, which it never overwrites).
+        static let swiftMoveTotals: [CGFloat] = [0.08, 0.20, 0.35]
+        /// Magnetic Core: XP pickup-radius bonus, TOTAL at each tier (additive
+        /// with Forge Path's pickup nodes). Health orbs are never magnetized.
+        static let magneticRadiusTotals: [CGFloat] = [0.15, 0.30, 0.50]
+        /// Magnetic Core: the movement burst on each XP orb collected, TOTAL at
+        /// each tier — the strength is the tier's value, never a stack.
+        static let magneticBurstTotals: [CGFloat] = [0.10, 0.20, 0.30]
+        /// Every burst lasts this long; another pickup refreshes it.
+        static let magneticBurstDuration: TimeInterval = 1.5
+
+        // v2.2 N2 (R1/R5 rulings, Oct 11) — XP Boost, the run level cap, Overclock.
+        /// XP Boost: run-XP bonus, TOTAL at each tier (T3 keeps T2's +50%).
+        static let xpBoostTotals: [CGFloat] = [0.25, 0.50, 0.50]
+        /// The run's level cap in the campaign and in Boss Mode alike. XP still
+        /// collects at the cap (it banks); no level-up occurs past it.
+        static let runLevelCap: Int = 15
+        /// XP Boost T3 raises the cap to this (NOT 22 — R1 keeps the four-card
+        /// maximum intentionally unreachable in one natural run).
+        static let xpBoostLevelCap: Int = 20
+        /// XP Boost T3 grants this many full level-ups, through the normal
+        /// card/stat reward flow, keeping the XP already earned.
+        static let xpBoostGrantedLevels: Int = 1
+        /// Overclock after a level-up, for `overclockDuration` of ACTIVE play
+        /// (starts when play resumes; another level-up refreshes, never stacks).
+        static let overclockMoveBoost: CGFloat = 0.35
+        static let overclockAttackSpeed: CGFloat = 0.35
+        static let overclockDamageBonus: CGFloat = 0.15
+        static let overclockDuration: TimeInterval = 3.0
+
+        // v2.2 N3 (R3 ruling, Oct 11) — Scatter, Fracture Shot, Long Shot on projectiles.
+        /// Scatter: TOTAL lanes per volley by tier (index 0 = no Scatter).
+        static let scatterLaneCounts: [Int] = [1, 2, 3, 5, 9]
+        /// Scatter: the angular step between lanes by tier (degrees; T1 is
+        /// parallel, so unused there): T2 0/±15, T3 0/±15/±30, T4 0/±14.75…±59.
+        static let scatterStepDegrees: [CGFloat] = [0, 0, 15, 15, 14.75]
+        /// Scatter T1 (and the legacy 2-pellet volley): parallel lanes this far apart.
+        static let scatterParallelSpacing: CGFloat = 12
+        /// Fracture Shot: TOTAL branches per incoming shot by tier (index 0 = none).
+        static let fractureBranchCounts: [Int] = [1, 3, 5, 9, 17]
+        /// Fracture Shot: the fan's total coverage by tier (degrees), centre included.
+        static let fractureCoverageDegrees: [CGFloat] = [0, 30, 60, 120, 180]
+        /// The shared forward-spread bound: a composed set whose outermost
+        /// branch would pass ±this is scaled uniformly so it lands exactly here.
+        static let patternForwardBoundDegrees: CGFloat = 90
+        /// Long Shot: shot-range bonus, TOTAL at each tier (T3/T4 keep +50% and
+        /// remove the distance limit; T4 also pierces foes and passes terrain).
+        static let longShotRangeTotals: [CGFloat] = [0.25, 0.50, 0.50, 0.50]
+        /// A projectile is removed once it is this far outside the arena's
+        /// bounding circle — nothing reachable lies beyond, so no shot that
+        /// could still hit is ever discarded (the cleanup rule for unlimited range).
+        static let projectileCleanupMargin: CGFloat = 48
+
+        // v2.2 N4 (R2/R4 rulings, Oct 11) — Rapid Fire's ladder and the chaos beam.
+        /// Rapid Fire: attack-speed TOTALS at T1–T4 (+10 / +25 / +50 / +90 %);
+        /// the firing interval is divided by 1 + total. T5 keeps the +90 %.
+        /// Written into `fireRateMultiplier` as rate ratios (the convention
+        /// Static uses), so every other attack-speed source composes with it.
+        static let rapidFireSpeedTotals: [CGFloat] = [0.10, 0.25, 0.50, 0.90]
+        /// Rapid Fire T5: the tier at which shots become the chaos beam.
+        static let chaosBeamTier: Int = 5
+        /// The beam deals damage every this much ACTIVE beam time.
+        static let beamTickInterval: TimeInterval = 0.5
+        /// Parent lane tick = retention × D × (beamTickInterval ÷ I): 75 % of the
+        /// gun's pre-conversion lane damage per second (the 50 % reduction is
+        /// superseded and must not return).
+        static let beamDamageRetention: CGFloat = 0.75
+        /// A target is in a beam line's contact when its body circle reaches
+        /// within this many points of the line (the beam's logical half-width).
+        static let beamContactHalfWidth: CGFloat = 4
+        /// Rendering only (never a contact rule): line widths and the locked
+        /// palette — neon green, astral blue, orange.
+        static let beamCoreWidth: CGFloat = 2.5
+        static let beamGlowWidth: CGFloat = 7
+        static let beamNeonGreenHex: UInt32 = 0x39FF14
+        static let beamAstralBlueHex: UInt32 = 0x3D7BFF
+        static let beamOrangeHex: UInt32 = 0xFF8A1F
+        /// Pixel-flame sizzles at contact points: visual ONLY (no Burn, no
+        /// damage). A pooled set, recycled; the cap never touches hits.
+        static let beamSizzlePoolSize: Int = 40
+        static let beamSizzleLifetime: TimeInterval = 0.18
+        static let beamSizzleSize: CGFloat = 3
+        /// Termini against terrain are found by bisection to this many steps.
+        static let beamTerrainBisectionSteps: Int = 14
+        /// The beam's Lucky Break, rolled once per lane-tick with its crit:
+        /// MIRRORS the gun's Forge Path Cun 15B (10 % for +50 %), whose literals
+        /// live in the shot handlers (pinned equal by the catalog harness, NB).
+        static let beamLuckyBreakChance: CGFloat = 0.10
+        static let beamLuckyBreakFactor: CGFloat = 1.5
+
+        // ── v2.2 N5: Chain Reaction (R6) ──
+        /// Flat burst base per tier (T1–T3) — a Neutral burst, not ATK-scaled.
+        static let chainReactionBases: [Int] = [1, 2, 3]
+        /// Burst radius per tier, points (the purchased tier; never grows along a chain).
+        static let chainReactionRadii: [CGFloat] = [35, 50, 70]
+        /// From this tier each generation adds `chainGenerationStep` of the base, additively…
+        static let chainEscalationTier = 3
+        static let chainGenerationStep: CGFloat = 0.10
+        /// …counting at most this many generations (+100% at generation 10 and beyond).
+        static let chainGenerationCap = 10
+        /// Visual only: rings drawn per frame's drain. Every burst still hits.
+        static let chainReactionRingsPerDrain = 24
+    }
+
     enum LevelUp {
         // v2.0 tuning (Brandon, Jul 24): ATK 2→5, DEF 1→5. The old values were
         // undertuned out of caution — clears leaned on revives once the arena

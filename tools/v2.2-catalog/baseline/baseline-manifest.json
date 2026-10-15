@@ -1,0 +1,103 @@
+{
+ "_about": "Sparkforge v2.2 catalog migration, unit J0 — baseline manifest. Captured Oct 4 2026 from the working tree, before any v2.2 change. Report: docs/v2.2-catalog-j0-return.md.",
+ "head": "31505bd1f754c4fcdf76f581e33ddec2dfbe1415",
+ "originMain": "31505bd1f754c4fcdf76f581e33ddec2dfbe1415",
+ "appVersion": "2.1 (8) — MARKETING_VERSION / CURRENT_PROJECT_VERSION in the working-tree project file (uncommitted)",
+ "export": {
+  "file": "tools/v2.2-catalog/baseline/compiled-catalog-export.json",
+  "sha256": "97c3a62124dc542d51faf9a4e7662539d71a70efec6e90a2bf09c65ec048233d",
+  "command": "sh tools/catalog-harness/run.sh --dump tools/v2.2-catalog/baseline/compiled-catalog-export.json",
+  "note": "The compiled Swift catalog as the existing dump mode writes it. Dump mode skips every check; the checks were run separately (see checks).",
+  "counts": {
+   "cards": 80,
+   "draftable": 79,
+   "secret": 1,
+   "regularNeutral": 10,
+   "signatures": 7,
+   "capstones": 7,
+   "synergyTiers": 21,
+   "retiredIds": 8,
+   "tiersTotal": 148,
+   "ladderedCards": 24,
+   "cardsWithDetail": 48,
+   "dualTag": 4
+  }
+ },
+ "exportSourceInputs": {
+  "Sparkforge/Systems/UpgradeManager.swift": "c48d936fbad8a61caf79cd98ab83fb213adcfdf6681fa9135dab74ca41daa7bd",
+  "Sparkforge/Systems/PlayerStats.swift": "6d048764f107bf243691075278eca5e8525add9819ae89fedfc04a3af4fb6ad2",
+  "Sparkforge/Systems/CodexManager.swift": "5583c9d9fbe91ba2063eb984d028a78875172b591789ccc78ed8d1d46b1ef36f",
+  "Sparkforge/Config/GameConfig.swift": "0ccc2b2060685e7c3166729200d12b14d536769ef18ababbfbc7ef001af0903a",
+  "tools/catalog-harness/main.swift": "0750da1f3b1d243554c51a64de805edf95e39d5c3462f3fcf4337e47b80a4afc",
+  "tools/catalog-harness/run.sh": "c1bbe5db55d4b1650f66cf882629ddd578e2925da6ec84085c26dbfc3c7b4f56",
+  "tools/signature-draw-harness/Stubs.swift": "0f16b55ca61e8c468a256d85470e9ec8e9678ae03f5284ca2e5516c882812c03",
+  "tools/signature-draw-harness/extract-config.sh": "4fbe05d75b6a3f70316868ecf9cc6a92488bb70d1a932c3f76845685009510e2"
+ },
+ "exportSourceInputsNote": "All eight are unmodified against HEAD (none is in the dirty set below).",
+ "tuningInventory": {
+  "file": "tools/v2.2-catalog/baseline/tuning-ownership-inventory.json",
+  "sha256": "343e203e42f33a7b9c44c0808e89d35bdf30abe9b45e0fe94639029604b139fb",
+  "command": "python3 tools/v2.2-catalog/baseline/inventory.py tools/v2.2-catalog/baseline/tuning-ownership-inventory.json",
+  "note": "Heuristic over source text; not a check."
+ },
+ "consumerInputs": {
+  "tools/catalog-expect.json": "f3a01200eee4f2a63481c32ce822f1c6364dc45b66a1ec1d0c17e52c815cbf5e",
+  "tools/generate-ability-canon.py": "1eefbdd7db58ca10c9f9a5507605550f1a08cf30b16758eb859a72ab8fd1221d",
+  "tools/generate-card-atlas.py": "f813bb248fdd2544eb9a7424b864e5301a504e419dd31c0c8582305f8c52ecad",
+  "tools/card-atlas.css": "12ac04d5afbb4660860c16b3b91778e19a6bfbf6e1a68de11cbd442c8af9014a",
+  "tools/catalog-harness/mutations.py": "3cb3c3cdadb1e9fd720d43ef296848a4d83ae44a7c6171a925500cf1ec8a7ea5"
+ },
+ "canon": {
+  "check": "python3 tools/generate-ability-canon.py --check docs/v2.1-ability-canon.md → valid (80 cards, 21 synergy tiers), on the working tree's canon + sidecar (both carry uncommitted edits)",
+  "fingerprint": "sha256:730a60b69266207f9e680ef826c961cdb7d652f9fdd7e19dfc060729b9bc0f6e",
+  "inputs": {
+   "catalog": "ee3209d5d4eaf782f7a3f653147a8d429a88093eb4144eee2d0ddf33f80002cd",
+   "sidecar": "d7880a13bfc2aefa615fb9fd2475a0852934bf6aa147067c0e88b08efa223a25",
+   "expect": "c05cf5070108a4aea8733b11c7a9352da8e3f2b6d3bb4be34550c7e263709407",
+   "generator": "1eefbdd7db58ca10c9f9a5507605550f1a08cf30b16758eb859a72ab8fd1221d"
+  }
+ },
+ "checks": [
+  {
+   "what": "catalog harness, all groups",
+   "command": "sh tools/catalog-harness/run.sh",
+   "result": "124 passed, 0 failed"
+  },
+  {
+   "what": "canon packet validation",
+   "command": "python3 tools/generate-ability-canon.py --check docs/v2.1-ability-canon.md",
+   "result": "valid"
+  },
+  {
+   "what": "NOT run in J0",
+   "result": "the other harnesses, the mutation suite, the Atlas generator (it would rewrite the user-owned root Atlas), xcodebuild (no production change)"
+  }
+ ],
+ "dirtyTreeAtCapture": {
+  "note": "Preserved as found. SHA-256 of working-tree content at capture, before J0 wrote anything. CLAUDE.md was edited AFTER capture (live-version flip + v2.2 status line), so its current digest differs.",
+  "modifiedUnstaged": {
+   "CLAUDE.md": "14aeadf0394d9532625a5a732bbc672a0eb36131c14ca326cfbbe561d4d69aee",
+   "Sparkforge.xcodeproj/project.pbxproj": "50dff03214a11bcec36a3d435530ce4a67ba51e6667946e3d5f7a2148b145453",
+   "Sparkforge/Info.plist": "e6d8f775774d4050b86a7bb95ccae6d59907d0d1560b4b2d76e3b5a106b2ab88",
+   "docs/arena6-geometry-reconciliation.md": "7b1ff7ef70a31a70d72d9b0fd06dd878fae5148a2c3fcb083b688a8751b4e8c1",
+   "docs/arena6-production-closeout.md": "0dd52c30d1f103208aedcb4fb73fc2d4ef1ab57a6c81e6e0ca8452c728d2c7e0",
+   "docs/v2.1-ability-canon-sidecar.json": "ad35458f01750f32d295691a0b3ea6e5bc86e1260e6f6cb321f35e005201be13",
+   "docs/v2.1-ability-canon.md": "ed7ec26bd2a77bd19731d426e05267aeda7451f68771bcb9d5d5f9a6fa78d013"
+  },
+  "staged": {
+   "Sparkforge/Assets.xcassets/AppIcon.appiconset/Contents.json": "efe803392a13db5e5bd7c93b9756d43c5d7cd6078b1c4b13cce9919f67dfdad4",
+   "Sparkforge/Assets.xcassets/AppIcon.appiconset/Sparkforge New App Icon.png (+ ' 1', ' 2', identical)": "169d0badfe0d1cfec23a2e49f632ac9af940c3a6e1a7abfe9fce4eab29740de7",
+   "deleted": [
+    "App Store Icon.png",
+    "App Store Icon 1.png",
+    "App Store Icon 2.png"
+   ]
+  },
+  "untracked": {
+   "sparkforge-card-atlas.html": "809352942883573281c635160e3dec9d2d669f3e746a137b4f4115799fb77d85",
+   "docs/v2.2-catalog-kickoff.md": "36fa1a5ac0951752b0bc4307832e35973adc59236dbd480a14f18845f8ae6d59",
+   "Sparkforge.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings": "97704a8960b4facceef54397a08fb5d0a456247c3627359215aa2a27df22656c",
+   "output/": "not ours; not read"
+  }
+ }
+}

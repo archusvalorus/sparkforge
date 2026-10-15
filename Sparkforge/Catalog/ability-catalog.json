@@ -1,0 +1,1567 @@
+{
+  "schema": "sparkforge.ability-catalog",
+  "schemaVersion": 1,
+  "trees": [
+    {
+      "key": "fire",
+      "name": "Fire"
+    },
+    {
+      "key": "shock",
+      "name": "Shock"
+    },
+    {
+      "key": "bleed",
+      "name": "Bleed"
+    },
+    {
+      "key": "guard",
+      "name": "Guard"
+    },
+    {
+      "key": "void",
+      "name": "Void"
+    },
+    {
+      "key": "chill",
+      "name": "Chill"
+    },
+    {
+      "key": "growth",
+      "name": "Growth"
+    },
+    {
+      "key": "neutral",
+      "name": "Neutral"
+    }
+  ],
+  "capabilities": [
+    "growthUnlocked",
+    "fireUnlocked",
+    "chillUnlocked",
+    "shockUnlocked",
+    "bleedUnlocked",
+    "guardUnlocked",
+    "voidUnlocked",
+    "glacialDrift",
+    "whiteout",
+    "voidWell",
+    "critSource",
+    "polarVortex",
+    "glacialCondensation",
+    "pelletEffect"
+  ],
+  "cards": [
+    {
+      "id": "fire_1",
+      "name": "Kindle",
+      "tree": "fire",
+      "signature": true,
+      "face": "Projectiles ignite enemies: +0.5 burn DPS, 2s",
+      "detail": "Projectiles ignite enemies (+0.5 burn DPS, 2s). Bosses and mini-bosses take 50% less Burn damage.",
+      "provides": [
+        "fireUnlocked"
+      ],
+      "behavior": "fire_1"
+    },
+    {
+      "id": "fire_2",
+      "name": "Forge Breath",
+      "tree": "fire",
+      "face": "+25% Fire damage.",
+      "detail": "Boosts Burn, Ember Burst, Everglow, and Inferno Crown damage.",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "+25% Fire damage."
+        },
+        {
+          "face": "+50% Fire damage."
+        },
+        {
+          "face": "+100% Fire damage."
+        }
+      ],
+      "behavior": "fire_2"
+    },
+    {
+      "id": "fire_3",
+      "name": "Ember Burst",
+      "tree": "fire",
+      "face": "Kills explode for 25% damage in a medium radius",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "behavior": "fire_3"
+    },
+    {
+      "id": "fire_4",
+      "name": "Crucible",
+      "tree": "fire",
+      "face": "Kindle hits stack Burn on an enemy, up to 5x",
+      "detail": "Kindle hits build Burn to 5 stacks, adding at most 1 stack every 3s per enemy. Each stack deals full Burn damage. When Burn ends, its damage stops and stacks fade one every 2s. Reignite the enemy to preserve its remaining stacks.",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "behavior": "fire_4"
+    },
+    {
+      "id": "shock_1",
+      "name": "Static",
+      "tree": "shock",
+      "face": "+15% attack speed",
+      "requires": [
+        "shockUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "+15% attack speed"
+        },
+        {
+          "face": "+30% attack speed"
+        },
+        {
+          "face": "+50% attack speed"
+        }
+      ],
+      "behavior": "shock_1"
+    },
+    {
+      "id": "shock_2",
+      "name": "Chain Lightning",
+      "tree": "shock",
+      "signature": true,
+      "face": "Hits chain to 1 nearby enemy at 50% damage",
+      "detail": "Each jump strikes a different enemy. T2 and T3 lose damage per jump, compounding (75% / 85% of the hit before). T4: hits chain to 4 additional enemies with no damage falloff. Chain Current adds one more jump. Hits on bosses never chain, and jumps never strike bosses.",
+      "provides": [
+        "shockUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Hits chain to 1 nearby enemy at 50% damage"
+        },
+        {
+          "face": "Chains to 2; each jump keeps 75%"
+        },
+        {
+          "face": "Chains to 3; each jump keeps 85%"
+        },
+        {
+          "face": "Chains to 4 with no damage falloff"
+        }
+      ],
+      "behavior": "shock_2"
+    },
+    {
+      "id": "shock_3",
+      "name": "Surge",
+      "tree": "shock",
+      "face": "+10% move, +20% shot speed, +10% attack speed",
+      "requires": [
+        "shockUnlocked"
+      ],
+      "behavior": "shock_3"
+    },
+    {
+      "id": "shock_4",
+      "name": "Overload",
+      "tree": "shock",
+      "face": "Hits have a 20% chance to stun for 1s",
+      "detail": "Hits have a 20% chance to stun enemies for 1s. Chain Lightning hits can also trigger this effect. With maxed Chain Lightning: 35% stun chance and 2s stun duration. An enemy can't be stunned again for 3s after a stun ends. Mini-bosses are stunned for 0.25s, or 0.5s with maxed Chain Lightning. Arena bosses are immune.",
+      "requires": [
+        "shockUnlocked"
+      ],
+      "behavior": "shock_4"
+    },
+    {
+      "id": "v21_lightning_sentry",
+      "name": "Lightning Sentry",
+      "tree": "shock",
+      "face": "Deploy a Tesla coil that shocks enemies",
+      "detail": "Deploy a Tesla coil near you that shocks enemies in range for 50% of your attack damage. T4 Lightning Network: merge your coils into one central coil with arena-wide coverage. Each shock deals 75% of your attack damage.",
+      "requires": [
+        "shockUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Deploy a Tesla coil that shocks enemies"
+        },
+        {
+          "face": "Deploy a second Tesla coil"
+        },
+        {
+          "face": "Deploy a third Tesla coil"
+        },
+        {
+          "face": "Network: one arena-wide coil, 75% damage"
+        }
+      ],
+      "behavior": "v21_lightning_sentry"
+    },
+    {
+      "id": "v21_electro_pulse",
+      "name": "Electro Pulse",
+      "tree": "shock",
+      "face": "Moving: every 3s, shock the nearest enemy",
+      "detail": "While moving, pulse every 3s: a static shock arcs to the nearest enemy for 40% damage. It can trigger Chain Lightning.",
+      "requires": [
+        "shockUnlocked"
+      ],
+      "behavior": "v21_electro_pulse"
+    },
+    {
+      "id": "v21_bloodthirsty",
+      "name": "Bloodthirsty",
+      "tree": "bleed",
+      "signature": true,
+      "face": "Primary hits: 50% chance to Bleed: 10% ATK/0.5s, 3s",
+      "detail": "Primary hits have a 50% chance to inflict Bleed, dealing 10% ATK every 0.5s for 3s. Reapplying Bleed refreshes its duration without stacking damage or delaying the next tick. Bosses and mini-bosses take 50% less Bleed damage.",
+      "provides": [
+        "bleedUnlocked"
+      ],
+      "behavior": "v21_bloodthirsty"
+    },
+    {
+      "id": "bleed_1",
+      "name": "Gouge",
+      "tree": "bleed",
+      "face": "+10% critical hit chance",
+      "provides": [
+        "critSource"
+      ],
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "+10% critical hit chance"
+        },
+        {
+          "face": "+20% critical hit chance"
+        }
+      ],
+      "behavior": "bleed_1"
+    },
+    {
+      "id": "bleed_2",
+      "name": "Hemorrhage",
+      "tree": "bleed",
+      "face": "Critical hits deal 3x damage instead of 2x",
+      "requires": [
+        "bleedUnlocked",
+        "critSource"
+      ],
+      "behavior": "bleed_2"
+    },
+    {
+      "id": "bleed_3",
+      "name": "Frenzy",
+      "tree": "bleed",
+      "face": "Kill a bleeding foe: +15% attack speed for 4s",
+      "detail": "Killing a bleeding enemy grants +15% attack speed for 4s. Further qualifying kills reset the duration. An enemy counts as bleeding only if it was already bleeding before the killing hit.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "behavior": "bleed_3"
+    },
+    {
+      "id": "v21_berserk",
+      "name": "Berserk",
+      "tree": "bleed",
+      "face": "+0.5% attack speed per 1% HP missing",
+      "detail": "Gain attack speed as health falls: +0.5% for every 1% of max HP missing.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "behavior": "v21_berserk"
+    },
+    {
+      "id": "bleed_4",
+      "name": "Siphon",
+      "tree": "bleed",
+      "face": "Kills restore 1 HP.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Kills restore 1 HP."
+        },
+        {
+          "face": "Kills restore 2 HP."
+        },
+        {
+          "face": "Kills restore 4 HP."
+        },
+        {
+          "face": "Kills restore 5 HP."
+        }
+      ],
+      "behavior": "bleed_4"
+    },
+    {
+      "id": "v21_sanguinarian",
+      "name": "Sanguinarian",
+      "tree": "bleed",
+      "face": "Kills grant Blood Barrier: 20% of the finishing hit",
+      "detail": "Kills grant Blood Barrier equal to 20% of the finishing hit's damage (at least 1), excluding overkill. Barrier absorbs damage before health, up to 50% of max HP. It expires 4s after the last positive gain. With Siphon: Siphon's overhealing becomes Blood Barrier.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "behavior": "v21_sanguinarian"
+    },
+    {
+      "id": "guard_1",
+      "name": "Brace",
+      "tree": "guard",
+      "face": "Survive one lethal hit.",
+      "detail": "Survive one lethal hit (triggers at 0 HP). Brace saves you first, Unbroken Core second — never both on one hit.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "behavior": "guard_1"
+    },
+    {
+      "id": "guard_2",
+      "name": "Repulse",
+      "tree": "guard",
+      "signature": true,
+      "face": "Projectiles knock enemies back",
+      "detail": "Projectiles knock enemies back 20pt (T2: 60pt). T3: they are launched up to 400pt instead, and each one damages up to 3 enemies it crashes into for 25% ATK. Walls stop them. Mini-bosses are only knocked back 20pt; bosses and snowmen can't be moved.",
+      "provides": [
+        "guardUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Projectiles knock enemies back"
+        },
+        {
+          "face": "Knockback goes farther"
+        },
+        {
+          "face": "Knocked enemies fly and bowl others over"
+        }
+      ],
+      "behavior": "guard_2"
+    },
+    {
+      "id": "guard_3",
+      "name": "Harden",
+      "tree": "guard",
+      "face": "Collision radius −30%. Enemies bounce off you",
+      "detail": "Your collision radius shrinks 30%. Enemies that touch you are shoved 40pt away. The bounce never hurts you, but a bounced enemy can come back.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "behavior": "guard_3"
+    },
+    {
+      "id": "guard_4",
+      "name": "Fortify",
+      "tree": "guard",
+      "face": "Stand still: +2 DEF per second (max 30)",
+      "detail": "Standing still grants +1 temporary DEF every 0.5s, up to +30. Any movement resets it.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "behavior": "guard_4"
+    },
+    {
+      "id": "void_1",
+      "name": "Warp Shot",
+      "tree": "void",
+      "face": "Slow shots that speed up. Slower = more damage.",
+      "detail": "Your primary shots launch at 40% speed and reach full speed after 0.6s. They deal 150% damage at launch, falling to 100% at full speed. No effect on Rapid Fire's chaos beam. Damage between whole numbers rounds up by chance.",
+      "provides": [
+        "pelletEffect"
+      ],
+      "requires": [
+        "voidUnlocked"
+      ],
+      "blockedBy": [
+        "glacialCondensation"
+      ],
+      "behavior": "void_1"
+    },
+    {
+      "id": "void_2",
+      "name": "Gravity Well",
+      "tree": "void",
+      "face": "Spent shots leave a pull zone (1s)",
+      "detail": "Primary shots that reach max range or hit a wall leave a pull zone for 1s. Pull zones count as black holes for your Void synergies.",
+      "provides": [
+        "voidWell",
+        "pelletEffect"
+      ],
+      "requires": [
+        "voidUnlocked"
+      ],
+      "blockedBy": [
+        "glacialCondensation"
+      ],
+      "behavior": "void_2"
+    },
+    {
+      "id": "void_3",
+      "name": "Phase",
+      "tree": "void",
+      "signature": true,
+      "face": "Primary hits add Anomaly. Triggers at 4 stacks.",
+      "detail": "Primary hits apply Anomaly. At 4 stacks, normal enemies are erased; elites take 20% max HP damage and bosses take 3%. Triggering Anomaly clears its stacks. Elites and bosses cannot gain new stacks for 2s afterward. Elites are mini-bosses. T2: your shots ignore Braceguard shields and the Boss Mode flat DEF setting. It does not bypass other defenses.",
+      "provides": [
+        "voidUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Primary hits add Anomaly. Triggers at 4 stacks."
+        },
+        {
+          "face": "Your shots bypass Braceguard + DEF."
+        },
+        {
+          "face": "Each primary hit applies 2 Anomaly stacks."
+        }
+      ],
+      "behavior": "void_3"
+    },
+    {
+      "id": "void_4",
+      "name": "Devour",
+      "tree": "void",
+      "face": "XP orbs are pulled to you from 2x range.",
+      "requires": [
+        "voidUnlocked"
+      ],
+      "behavior": "void_4"
+    },
+    {
+      "id": "v21_void_horror",
+      "name": "Void Horror",
+      "tree": "void",
+      "face": "Primary hits may make enemies flee.",
+      "detail": "Primary hits have an 8% chance to make enemies flee for 0.5s (elites 0.25s). Afterward, they resist fear for 2s. Bosses are immune.",
+      "requires": [
+        "voidUnlocked"
+      ],
+      "behavior": "v21_void_horror"
+    },
+    {
+      "id": "v21_shadow_edge",
+      "name": "Shadow Edge",
+      "tree": "void",
+      "face": "Every 7th volley also fires a shadow blade.",
+      "detail": "Every 7th primary volley also fires a wide shadow blade. It deals 125% damage, strikes up to 3 enemies, and carries Void affinity, so Braceguard shields can't halve it. It is not a shot or a primary hit.",
+      "requires": [
+        "voidUnlocked"
+      ],
+      "behavior": "v21_shadow_edge"
+    },
+    {
+      "id": "chill_1",
+      "name": "Frost Touch",
+      "tree": "chill",
+      "signature": true,
+      "face": "Projectiles slow enemies 25% for 2s",
+      "detail": "T3: Iceburst shards and icicle fragments apply Frost Touch on hit. T3 requires Polar Vortex.",
+      "provides": [
+        "chillUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Projectiles slow enemies 25%"
+        },
+        {
+          "face": "Projectiles slow enemies 50%"
+        },
+        {
+          "face": "Shards apply it too (with Polar Vortex)",
+          "requires": [
+            "polarVortex"
+          ]
+        }
+      ],
+      "behavior": "chill_1"
+    },
+    {
+      "id": "chill_2",
+      "name": "Ice Shard",
+      "tree": "chill",
+      "face": "+30% projectile speed",
+      "requires": [
+        "chillUnlocked"
+      ],
+      "behavior": "chill_2"
+    },
+    {
+      "id": "chill_3",
+      "name": "Permafrost",
+      "tree": "chill",
+      "face": "Hits deal +25% to slowed enemies",
+      "detail": "Your projectiles and Red Smile sweeps deal 25% more damage to slowed enemies, whatever slowed them. Damage between whole numbers rounds up by chance.",
+      "requires": [
+        "chillUnlocked"
+      ],
+      "behavior": "chill_3"
+    },
+    {
+      "id": "chill_4",
+      "name": "Glacial Drift",
+      "tree": "chill",
+      "face": "Leave a chill trail that slows enemies",
+      "detail": "Trail time is per patch of ground. T4's frozen ground lasts for the arena. T5 Ice Rink: freeze the arena, slowing non-boss enemies by 50% and increasing your movement speed by 25%. Replaces your chill trail. Requires Whiteout.",
+      "provides": [
+        "glacialDrift"
+      ],
+      "requires": [
+        "chillUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Leave a chill trail that slows enemies (2s)"
+        },
+        {
+          "face": "Trail lingers 3.5s"
+        },
+        {
+          "face": "Trail lingers 5s and is 30% wider"
+        },
+        {
+          "face": "Trail is permanent"
+        },
+        {
+          "face": "Ice Rink: enemies -50% speed, you +25%",
+          "requires": [
+            "whiteout"
+          ]
+        }
+      ],
+      "behavior": "chill_4"
+    },
+    {
+      "id": "v21_glacial_spikes",
+      "name": "Glacial Spikes",
+      "tree": "chill",
+      "face": "Chilled ground can impale enemies (4%/s)",
+      "detail": "Enemies on chilled ground have a 4% chance each second to be impaled. Executes normal enemies; deals 20% max HP to elites or 3% to bosses. At most one spike triggers every 0.75s across the arena.",
+      "requires": [
+        "glacialDrift"
+      ],
+      "behavior": "v21_glacial_spikes"
+    },
+    {
+      "id": "neutral_1",
+      "name": "Swift",
+      "tree": "neutral",
+      "face": "+8% movement speed",
+      "detail": "Permanent movement speed: +8%, then +20%, then +35% (totals). Adds to your other movement bonuses.",
+      "tiers": [
+        {
+          "face": "+8% movement speed"
+        },
+        {
+          "face": "+20% movement speed"
+        },
+        {
+          "face": "+35% movement speed"
+        }
+      ],
+      "behavior": "neutral_1"
+    },
+    {
+      "id": "neutral_3",
+      "name": "Rapid Fire",
+      "tree": "neutral",
+      "face": "+10% attack speed",
+      "detail": "Attack speed: +10%, then +25%, +50%, +90% (totals). Tier 5 turns your shots into a continuous chaos beam: it pierces enemies, stops at walls, and deals 75% of your shot damage every 0.5s, scaled up by all your attack speed. Scatter and Fracture split the beam. Warp Shot and Mirror Edge don't affect the beam; Erasure's Echo re-fires each beam lane as a normal shot. Can't be combined with Polar Vortex's icicle.",
+      "tiers": [
+        {
+          "face": "+10% attack speed"
+        },
+        {
+          "face": "+25% attack speed"
+        },
+        {
+          "face": "+50% attack speed"
+        },
+        {
+          "face": "+90% attack speed"
+        },
+        {
+          "face": "Shots become a chaos beam",
+          "provides": [
+            "pelletEffect"
+          ],
+          "blockedBy": [
+            "glacialCondensation"
+          ]
+        }
+      ],
+      "behavior": "neutral_3"
+    },
+    {
+      "id": "neutral_4",
+      "name": "Long Shot",
+      "tree": "neutral",
+      "face": "+25% shot range",
+      "detail": "Shot range: +25%, then +50% (totals). Tier 3: shots never expire by distance. Tier 4: unlimited range, and shots pierce every enemy and pass through walls and terrain. Adds to your other range bonuses.",
+      "tiers": [
+        {
+          "face": "+25% shot range"
+        },
+        {
+          "face": "+50% shot range"
+        },
+        {
+          "face": "No range limit"
+        },
+        {
+          "face": "No limit; pierce all, pass walls"
+        }
+      ],
+      "behavior": "neutral_4"
+    },
+    {
+      "id": "neutral_5",
+      "name": "XP Boost",
+      "tree": "neutral",
+      "face": "+25% XP gain",
+      "detail": "Run XP gain: +25%, then +50% (totals). The run's level cap is 15; tier 3 raises it to 20 and grants one full level-up right away (card and stat), keeping the XP you have. XP collected at the cap is banked.",
+      "tiers": [
+        {
+          "face": "+25% XP gain"
+        },
+        {
+          "face": "+50% XP gain"
+        },
+        {
+          "face": "+50% XP; cap 20; +1 level now"
+        }
+      ],
+      "behavior": "neutral_5"
+    },
+    {
+      "id": "neutral_6",
+      "name": "Scatter",
+      "tree": "neutral",
+      "face": "2 parallel shots per volley",
+      "detail": "Every volley fires 2 parallel shots, then 3 (center and one to each side), then 5, then 9 across a wide fan. Each is a full-strength shot with all your shot effects. Storm Engine's bonus pellets add lanes to the same pattern.",
+      "tiers": [
+        {
+          "face": "2 parallel shots per volley"
+        },
+        {
+          "face": "3 shots: center + 2 angled"
+        },
+        {
+          "face": "5 shots: center + 4 angled"
+        },
+        {
+          "face": "9 shots in a wide fan"
+        }
+      ],
+      "behavior": "neutral_6"
+    },
+    {
+      "id": "v13_overcharge",
+      "name": "Overcharge",
+      "tree": "fire",
+      "face": "+5% damage/s unhit, max +50%. Resets on hit",
+      "detail": "Gain +5% damage each second without taking a hit, up to +50%. Taking a hit resets the bonus.",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "behavior": "v13_overcharge"
+    },
+    {
+      "id": "v13_magnetic_core",
+      "name": "Magnetic Core",
+      "tree": "neutral",
+      "face": "+15% XP pull; XP gives a speed burst",
+      "detail": "XP orbs are pulled from 15% / 30% / 50% farther (totals). Each XP orb collected grants +10% / +20% / +30% movement speed for 1.5s; another pickup refreshes the time, never the strength. Health orbs are never magnetized.",
+      "tiers": [
+        {
+          "face": "+15% XP pull; +10% burst"
+        },
+        {
+          "face": "+30% XP pull; +20% burst"
+        },
+        {
+          "face": "+50% XP pull; +30% burst"
+        }
+      ],
+      "behavior": "v13_magnetic_core"
+    },
+    {
+      "id": "v13_chain_reaction",
+      "name": "Chain Reaction",
+      "tree": "neutral",
+      "face": "Enemies explode on death",
+      "detail": "Every enemy that dies explodes, hitting enemies within 35 range, then 50, then 70, for 1, then 2, then 3 damage. Enemies a blast kills explode too. Tier 3: each link down a chain adds +10% blast damage, up to +100%. Mini-bosses take half; the arena boss is unaffected. Blast kills give XP but no other on-kill effects.",
+      "tiers": [
+        {
+          "face": "Deaths explode: 1 damage, small blast"
+        },
+        {
+          "face": "Blasts deal 2 in a wider radius"
+        },
+        {
+          "face": "Blasts deal 3; +10% per chain link"
+        }
+      ],
+      "behavior": "v13_chain_reaction"
+    },
+    {
+      "id": "v13_glass_engine",
+      "name": "Glass Engine",
+      "tree": "fire",
+      "face": "+100% attack speed, -50% max HP",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "behavior": "v13_glass_engine"
+    },
+    {
+      "id": "v13_phase_skin",
+      "name": "Phase Skin",
+      "tree": "guard",
+      "face": "Ignore the next hit and gain 1s invulnerability (3.5s cd)",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "behavior": "v13_phase_skin"
+    },
+    {
+      "id": "v13_execution",
+      "name": "Execution Protocol",
+      "tree": "bleed",
+      "face": "2x damage to enemies below 30% HP",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "behavior": "v13_execution"
+    },
+    {
+      "id": "v13_unstable_core",
+      "name": "Unstable Core",
+      "tree": "void",
+      "face": "Every 4s, a burst hurts nearby enemies and you",
+      "detail": "Every 4s, deal 2 damage to enemies within 60pt. Each burst also costs you 10 HP minus your DEF (at least 1). With nothing in range, it can't hurt you.",
+      "requires": [
+        "voidUnlocked"
+      ],
+      "behavior": "v13_unstable_core"
+    },
+    {
+      "id": "v16_static_crown",
+      "name": "Static Crown",
+      "tree": "shock",
+      "face": "Level-ups release an expanding electro pulse",
+      "detail": "Level-ups release an electro pulse that expands from you for 4s, dealing 150% damage to each enemy the ring passes.",
+      "requires": [
+        "shockUnlocked"
+      ],
+      "behavior": "v16_static_crown"
+    },
+    {
+      "id": "v16_open_vein",
+      "name": "Open Vein",
+      "tree": "bleed",
+      "face": "Bleeding enemies burst on death",
+      "detail": "Enemies that were already bleeding when they die burst, dealing 2 damage to nearby enemies.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "behavior": "v16_open_vein"
+    },
+    {
+      "id": "v16_iron_bloom",
+      "name": "Iron Bloom",
+      "tree": "guard",
+      "face": "Every 4s, iron spikes deal 50% DEF around you",
+      "detail": "Every 4s, iron spikes strike every enemy within 70pt for 50% of your current DEF (at least 1). Piercing: ignores flat enemy DEF. Walls block the spikes.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "behavior": "v16_iron_bloom"
+    },
+    {
+      "id": "v16_aegis_pulse",
+      "name": "Aegis",
+      "tree": "guard",
+      "face": "Astral shield: take 25% less damage",
+      "detail": "T1: take 25% less damage. T2: enemies that touch you bounce 40pt and take spikes for 50% of your current DEF. T3: 35% less damage; they bounce 70pt and the spikes deal 75% DEF. Shares the 90% damage-reduction cap.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Astral shield: take 25% less damage"
+        },
+        {
+          "face": "Melee attackers bounce off and take spikes"
+        },
+        {
+          "face": "Bigger shield: 35% less damage, harder spikes"
+        }
+      ],
+      "behavior": "v16_aegis_pulse"
+    },
+    {
+      "id": "v20_terra",
+      "name": "Terra",
+      "tree": "growth",
+      "signature": true,
+      "face": "Cultivate the arena. Your ground mends you. Unlock Growth cards.",
+      "provides": [
+        "growthUnlocked"
+      ],
+      "behavior": "v20_terra"
+    },
+    {
+      "id": "v20_thornsoil",
+      "name": "Thornsoil",
+      "tree": "growth",
+      "face": "Cultivated ground wounds what walks on it",
+      "requires": [
+        "growthUnlocked"
+      ],
+      "behavior": "v20_thornsoil"
+    },
+    {
+      "id": "v20_richsoil",
+      "name": "Rich Soil",
+      "tree": "growth",
+      "face": "Your cultivated ground spreads wider and mends you harder",
+      "requires": [
+        "growthUnlocked"
+      ],
+      "behavior": "v20_richsoil"
+    },
+    {
+      "id": "v20_deeproot",
+      "name": "Deeproot",
+      "tree": "growth",
+      "secondaryTree": "guard",
+      "face": "Rooted and sturdy: gain DEF while standing on cultivated ground",
+      "requires": [
+        "growthUnlocked"
+      ],
+      "behavior": "v20_deeproot"
+    },
+    {
+      "id": "v20_tree",
+      "name": "Tree",
+      "tree": "growth",
+      "capstone": true,
+      "face": "Plant a sapling. Help it become a problem.",
+      "requires": [
+        "growthUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Sapling — a tree takes root in your garden, and the ground grows"
+        },
+        {
+          "face": "Rootreach — you move faster while standing on cultivated ground"
+        },
+        {
+          "face": "Shelter — you slowly heal while standing on cultivated ground"
+        },
+        {
+          "face": "Wild Domain — the Tree matures; your territory swells"
+        },
+        {
+          "face": "The Forest Wakes — the NATURE CANON fires woodland animals at your enemies"
+        }
+      ],
+      "behavior": "v20_tree"
+    },
+    {
+      "id": "v20_panda",
+      "name": "Pandas.",
+      "tree": "neutral",
+      "secret": true,
+      "face": "???",
+      "tiers": [
+        {
+          "name": "Pandas.",
+          "face": "???"
+        },
+        {
+          "name": "Panda!",
+          "face": "???"
+        },
+        {
+          "name": "Panda...?",
+          "face": "???"
+        },
+        {
+          "name": "Panda.",
+          "face": "???"
+        },
+        {
+          "name": "PANDA.",
+          "face": "???"
+        }
+      ],
+      "behavior": "v20_panda"
+    },
+    {
+      "id": "v20_vinewall",
+      "name": "Vine Wall",
+      "tree": "growth",
+      "face": "A thorny hedge rings your cultivated ground, repelling the swarm",
+      "requires": [
+        "growthUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "A thorny hedge rings your cultivated ground, repelling the swarm"
+        },
+        {
+          "face": "The bramble shoves harder — the swarm barely gets a foot in"
+        },
+        {
+          "face": "The hedge thickens, catching enemy shots that cross it"
+        }
+      ],
+      "behavior": "v20_vinewall"
+    },
+    {
+      "id": "v20_seed_spore",
+      "name": "Seed Spore Shot",
+      "tree": "growth",
+      "face": "Your shots seed enemies; a seeded enemy bursts into spores when it dies",
+      "requires": [
+        "growthUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Your shots seed enemies; a seeded enemy bursts into spores when it dies"
+        },
+        {
+          "face": "More spores, flung farther"
+        },
+        {
+          "face": "Spores can re-seed the enemies they strike — the bloom spreads"
+        }
+      ],
+      "behavior": "v20_seed_spore"
+    },
+    {
+      "id": "v20_wildbloom",
+      "name": "Wildbloom",
+      "tree": "growth",
+      "face": "Grow a defensive flower on your cultivated ground",
+      "requires": [
+        "growthUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Grow a defensive flower on your cultivated ground"
+        },
+        {
+          "face": "Grow a second flower — the garden bares its thorns"
+        },
+        {
+          "face": "Grow a third flower — the whole bed is watching"
+        }
+      ],
+      "behavior": "v20_wildbloom"
+    },
+    {
+      "id": "v16_null_bloom",
+      "name": "Null Bloom",
+      "tree": "void",
+      "face": "Kills may leave small black holes.",
+      "detail": "30% of kills leave a small black hole for 0.8s. It pulls enemies in, and your Void synergies upgrade it like any black hole.",
+      "provides": [
+        "voidWell"
+      ],
+      "requires": [
+        "voidUnlocked"
+      ],
+      "behavior": "v16_null_bloom"
+    },
+    {
+      "id": "v16_hoarfrost",
+      "name": "Hoarfrost",
+      "tree": "chill",
+      "face": "Regenerate 5 HP every 7s",
+      "requires": [
+        "chillUnlocked"
+      ],
+      "behavior": "v16_hoarfrost"
+    },
+    {
+      "id": "v16_whiteout",
+      "name": "Whiteout",
+      "tree": "chill",
+      "face": "Hits have a 12% chance to make a snowman (3s)",
+      "detail": "Hits have a 12% chance to turn an enemy into a snowman for 3s (elites for half as long). Each enemy can transform once every 10s. T3: damaging a snowman melts it. Normal enemies die instantly; elites take an additional 20% of max HP as damage. Bosses cannot become snowmen.",
+      "provides": [
+        "whiteout"
+      ],
+      "requires": [
+        "chillUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Hits have a 12% chance to make a snowman (3s)"
+        },
+        {
+          "face": "Snowmen last 6s"
+        },
+        {
+          "face": "Damaging a snowman melts it: normals die"
+        }
+      ],
+      "behavior": "v16_whiteout"
+    },
+    {
+      "id": "v16_cauterize",
+      "name": "Cauterize",
+      "tree": "fire",
+      "face": "Below 25% HP: heal 5 HP every 3s",
+      "detail": "While below 25% max HP, recover 5 HP every 3s. Leaving this threshold resets the timer.",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "behavior": "v16_cauterize"
+    },
+    {
+      "id": "v17_relay_burn",
+      "name": "Relay Burn",
+      "tree": "fire",
+      "secondaryTree": "shock",
+      "face": "Burning foes can arc Shock",
+      "detail": "Each burning enemy arcs Shock roughly once a second to the nearest other enemy within 90pt, dealing 4 damage. Arcs don't chain.",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "behavior": "v17_relay_burn"
+    },
+    {
+      "id": "v17_overclock",
+      "name": "Overclock",
+      "tree": "neutral",
+      "face": "Level-ups: a 3s overdrive",
+      "detail": "After each level-up, when play resumes: +35% movement speed, +35% attack speed and +15% damage for 3 seconds of play. Another level-up refreshes the time; it never stacks.",
+      "behavior": "v17_overclock"
+    },
+    {
+      "id": "v17_dead_circuit",
+      "name": "Dead Circuit",
+      "tree": "void",
+      "face": "Black holes grow as they feed, then burst.",
+      "detail": "Your black holes last 50% longer and damage enemies inside. Each enemy killed inside one, or hostile projectile it absorbs, makes it grow. At 3, it collapses in a void burst for 150% ATK. Requires Gravity Well or Null Bloom.",
+      "requires": [
+        "voidUnlocked",
+        "voidWell"
+      ],
+      "behavior": "v17_dead_circuit"
+    },
+    {
+      "id": "v17_grounded_core",
+      "name": "Grounded Core",
+      "tree": "guard",
+      "face": "In combat, stand still: +1 DEF per 7.5s (max 30)",
+      "detail": "Each uninterrupted 7.5s standing still in combat grants +1 DEF, permanent for the run (up to +30). Moving or leaving combat resets progress toward the next point.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "behavior": "v17_grounded_core"
+    },
+    {
+      "id": "v18_bloodlust",
+      "name": "Bloodlust",
+      "tree": "bleed",
+      "face": "Kill a bleeding foe: +0.1% attack speed, max +30%",
+      "detail": "Killing a bleeding enemy permanently grants +0.1% attack speed this run, up to +30%.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "behavior": "v18_bloodlust"
+    },
+    {
+      "id": "v18_riftline",
+      "name": "Riftline",
+      "tree": "void",
+      "face": "Shots pierce 2 enemies (3 hits). +25% range.",
+      "detail": "Shots pass through up to 2 enemies, so each shot can hit up to 3. Each enemy after the first takes 75% of the previous hit's damage (100% → 75% → 56%). +25% projectile range.",
+      "provides": [
+        "pelletEffect"
+      ],
+      "requires": [
+        "voidUnlocked"
+      ],
+      "blockedBy": [
+        "glacialCondensation"
+      ],
+      "behavior": "v18_riftline"
+    },
+    {
+      "id": "v18_mirror_edge",
+      "name": "Mirror Edge",
+      "tree": "void",
+      "face": "Shots have a 35% chance to echo for 50% damage.",
+      "detail": "Each primary shot has a 35% chance to fire again 0.15s later for 50% damage. No effect on Rapid Fire's chaos beam. Echoes don't echo, split or leave pull zones, and aren't primary hits.",
+      "provides": [
+        "pelletEffect"
+      ],
+      "requires": [
+        "voidUnlocked"
+      ],
+      "blockedBy": [
+        "glacialCondensation"
+      ],
+      "behavior": "v18_mirror_edge"
+    },
+    {
+      "id": "v18_glass_blood",
+      "name": "Glass Blood",
+      "tree": "bleed",
+      "face": "Bleed-killed foes burst: fragments hurt + Bleed",
+      "detail": "Enemies killed by Bleed burst into fragments that damage and inflict Bleed on nearby enemies. Each outbreak spreads at most two hops.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "behavior": "v18_glass_blood"
+    },
+    {
+      "id": "v18_silver_skin",
+      "name": "Silver Skin",
+      "tree": "guard",
+      "secondaryTree": "void",
+      "face": "After a level-up, block the next hit.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "behavior": "v18_silver_skin"
+    },
+    {
+      "id": "v18_fracture_shot",
+      "name": "Fracture Shot",
+      "tree": "neutral",
+      "face": "Each shot splits 3 ways",
+      "detail": "Each shot splits into 3 branches over 30°, then 5 over 60°, 9 over 120°, 17 over 180°. The shot's damage is shared evenly across all its branches (the center included); several branches can hit one enemy. Fans never spread past 90° to either side.",
+      "tiers": [
+        {
+          "face": "Each shot splits 3 ways"
+        },
+        {
+          "face": "Splits 5 ways, 60° fan"
+        },
+        {
+          "face": "Splits 9 ways, 120° fan"
+        },
+        {
+          "face": "Splits 17 ways, 180° fan"
+        }
+      ],
+      "provides": [
+        "pelletEffect"
+      ],
+      "blockedBy": [
+        "glacialCondensation"
+      ],
+      "behavior": "v18_fracture_shot"
+    },
+    {
+      "id": "v18_red_smile",
+      "name": "Red Smile",
+      "tree": "bleed",
+      "secondaryTree": "void",
+      "face": "Every 10s: 3s of Void melee. 2× damage + Bleed.",
+      "detail": "Every 10s in combat, become the Thing From Below for 3s. Replace projectile attacks with sweeping melee attacks that deal 200% of projectile damage as Void damage and always inflict Bleed. Requires both Bleed and Void signatures. Existing projectiles remain active during transformation. Sweeps strike in your last move direction. They count as primary hits, not shots or projectiles.",
+      "requires": [
+        "bleedUnlocked",
+        "voidUnlocked"
+      ],
+      "behavior": "v18_red_smile"
+    },
+    {
+      "id": "v18_false_opening",
+      "name": "False Opening",
+      "tree": "void",
+      "face": "A sharp turn leaves a delayed Void pulse.",
+      "detail": "A sharp turn while moving marks the spot. 0.3s later it pulses, dealing 12 damage to enemies within 72pt and slowing them 30% for 1.2s. 1.1s cooldown.",
+      "requires": [
+        "voidUnlocked"
+      ],
+      "behavior": "v18_false_opening"
+    },
+    {
+      "id": "cap_fire_everglow",
+      "name": "Everglow",
+      "tree": "fire",
+      "capstone": true,
+      "face": "Become the fire at the center of the arena.",
+      "detail": "Every 2s, a pulse deals 50% ATK to nearby enemies. T2 doubles its radius. T3: each hit you take adds +1% pulse damage, up to +100%. T4 doubles pulse damage, and each hit you take adds +0.5% ATK, up to +50%. T5: every 20s, after a short warning, erupt for 500% ATK across the whole arena. The pulse skips bosses; mini-bosses take half. Bosses and mini-bosses take half eruption damage.",
+      "requires": [
+        "fireUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Inner Heat: pulse every 2s for 50% ATK nearby"
+        },
+        {
+          "face": "Burning Reach: pulse radius doubled"
+        },
+        {
+          "face": "Ragekindled: getting hit grows the pulse"
+        },
+        {
+          "face": "Living Furnace: pulse ×2; getting hit grows ATK"
+        },
+        {
+          "face": "Everglow: erupt for 500% ATK every 20s"
+        }
+      ],
+      "behavior": "cap_fire_everglow"
+    },
+    {
+      "id": "cap_guard_ironmaiden",
+      "name": "Iron Maiden",
+      "tree": "guard",
+      "capstone": true,
+      "face": "Turn every impact into stored punishment.",
+      "detail": "Thorns deal 5 damage to enemies that touch you (17 from T2). Damaging hits store energy: 4 release a 200% DEF burst, and T5 fires what's stored at a priority foe every 20s. The +5% and +15% DEF are one-time grants of at least +1. Retaliate has a 1s cooldown. Bosses and mini-bosses take 50% less thorn and Retaliate damage.",
+      "requires": [
+        "guardUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Iron Skin: DEF fuels damage; +5% DEF; Thorns bite touchers"
+        },
+        {
+          "face": "Barbed Armor: Thorns +240%; more DEF→damage"
+        },
+        {
+          "face": "Retaliate: return 150% of the hit"
+        },
+        {
+          "face": "Kinetic Reserve: 200% DEF burst at 4"
+        },
+        {
+          "face": "Iron Maiden: +15% DEF; energy fires every 20s"
+        }
+      ],
+      "behavior": "cap_guard_ironmaiden"
+    },
+    {
+      "id": "cap_shock_skybeam",
+      "name": "Skybeam",
+      "tree": "shock",
+      "capstone": true,
+      "face": "Lasso your prey. Call judgment from above.",
+      "detail": "The lasso tethers the nearest foe in reach and deals 15% ATK Shock each second (T2: 30% ATK, double reach). T4: after 2s on the same prey, it takes +35% damage from all sources. T5: every 5s, a strike lands 1s after its warning: 300% ATK to the lassoed prey (or the nearest target), and 150% ATK to every other enemy within 80pt. Bosses and mini-bosses take half Skybeam damage and half the +35%.",
+      "requires": [
+        "shockUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Lightning Lasso: tether the nearest foe for 15% ATK Shock/s"
+        },
+        {
+          "face": "Extended Circuit: lasso damage and range doubled"
+        },
+        {
+          "face": "Homing Beacon: your shots favor the lassoed prey"
+        },
+        {
+          "face": "Heaven's Call: prey lassoed 2s takes +35% damage"
+        },
+        {
+          "face": "Skybeam: every 5s a 300% ATK strike with splash"
+        }
+      ],
+      "behavior": "cap_shock_skybeam"
+    },
+    {
+      "id": "cap_bleed_apex",
+      "name": "Apex",
+      "tree": "bleed",
+      "capstone": true,
+      "face": "Feed the familiar. Become the hunt.",
+      "detail": "The bat heals you for half its damage. T2: +5 max HP per 10 kills (up to +100); 1% of max HP adds to ATK. T3: bites execute normal enemies below 20% HP. T5: shots, bat bites and Red Smile sweeps charge a 4-step gauge; when full, the bat executes the nearest weakened enemy (2s cooldown): normal enemies below 50% HP, bosses and mini-bosses at 10% or less. Bosses and mini-bosses take half bat damage and half the Marked bonus.",
+      "requires": [
+        "bleedUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Blood Familiar: an invulnerable bat hunts; kills grow its bite"
+        },
+        {
+          "face": "Bloodfed: +5 max HP per 10 kills; HP feeds ATK"
+        },
+        {
+          "face": "Bloodhound: bat favors bleeders, executes the weak"
+        },
+        {
+          "face": "Marked: bosses at once, foes after 10s: +35%"
+        },
+        {
+          "face": "The Hunter: hits charge an execute pounce"
+        }
+      ],
+      "behavior": "cap_bleed_apex"
+    },
+    {
+      "id": "cap_void_erasure",
+      "name": "Erasure",
+      "tree": "void",
+      "capstone": true,
+      "face": "Destabilize reality. Accept the final cost.",
+      "detail": "Lurch cooldown: 2s, or 1.2s from T2. T5 in Arenas 1-10: 37.5s, then 52.5s.",
+      "requires": [
+        "voidUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Unstable: hits charge the void; full meter → a lurch (a lone boss: 50%)"
+        },
+        {
+          "face": "Void-Touched: ignore shields; lurch more often"
+        },
+        {
+          "face": "Rift Cannon: every 3rd lurch, a 300% ATK beam"
+        },
+        {
+          "face": "Echo: shots echo 1.5s later from afar (50% damage)"
+        },
+        {
+          "face": "Event Horizon: a timer erases the arena, then you"
+        }
+      ],
+      "behavior": "cap_void_erasure"
+    },
+    {
+      "id": "cap_chill_polarvortex",
+      "name": "Polar Vortex",
+      "tree": "chill",
+      "capstone": true,
+      "face": "Carry the storm. Freeze enemies to the soul.",
+      "detail": "Impaired: slowed, frozen or stunned. T3: the storm follows you and adds 1 Chill a second. T4: the icicle (200% damage) replaces your shot; Erasure's Echo stops. T4 is mutually exclusive with Warp Shot, Gravity Well, Mirror Edge, Fracture Shot and Riftline: whichever side you own first blocks the other. T5: 5 Chill freezes an enemy for 3s; then it takes +100% damage for 4s. Mini-bosses are slowed 85% instead of frozen, then take +50%. The storm ignores bosses.",
+      "provides": [
+        "polarVortex"
+      ],
+      "requires": [
+        "chillUnlocked"
+      ],
+      "tiers": [
+        {
+          "face": "Iceburst: chilled foes that die burst into 3 ice shards"
+        },
+        {
+          "face": "Brittle Cold: 5 shards; +40% vs impaired foes"
+        },
+        {
+          "face": "Windchill: storm slows 30%, adds Chill"
+        },
+        {
+          "face": "Glacial Condensation: 3 shots → 1 icicle",
+          "provides": [
+            "glacialCondensation"
+          ],
+          "blockedBy": [
+            "pelletEffect"
+          ]
+        },
+        {
+          "face": "Polar Vortex: storm ×2.1; 5 Chill freezes"
+        }
+      ],
+      "behavior": "cap_chill_polarvortex"
+    }
+  ],
+  "synergies": [
+    {
+      "tree": "fire",
+      "threshold": 3,
+      "title": "Spreading Flame",
+      "effect": "Burns leap to nearby enemies",
+      "behavior": "fire.3"
+    },
+    {
+      "tree": "fire",
+      "threshold": 5,
+      "title": "Wildfire Heart",
+      "effect": "Burns last 4s, spread farther and hit harder",
+      "behavior": "fire.5"
+    },
+    {
+      "tree": "fire",
+      "threshold": 7,
+      "title": "Inferno Crown",
+      "effect": "Non-boss enemies take fire damage over time",
+      "behavior": "fire.7"
+    },
+    {
+      "tree": "shock",
+      "threshold": 3,
+      "title": "Chain Current",
+      "effect": "Lightning chains to 1 additional enemy",
+      "behavior": "shock.3"
+    },
+    {
+      "tree": "shock",
+      "threshold": 5,
+      "title": "Tesla Field",
+      "effect": "A charged aura damages nearby enemies",
+      "behavior": "shock.5"
+    },
+    {
+      "tree": "shock",
+      "threshold": 7,
+      "title": "Storm Engine",
+      "effect": "Every 3rd shot fires a chaining spread",
+      "behavior": "shock.7"
+    },
+    {
+      "tree": "bleed",
+      "threshold": 3,
+      "title": "Open Wounds",
+      "effect": "Bleeding enemies take 25% more damage",
+      "behavior": "bleed.3"
+    },
+    {
+      "tree": "bleed",
+      "threshold": 5,
+      "title": "Exsanguinate",
+      "effect": "Enemies below 25% HP take 2× damage",
+      "behavior": "bleed.5"
+    },
+    {
+      "tree": "bleed",
+      "threshold": 7,
+      "title": "Red Harvest",
+      "effect": "Killing a bleeding enemy restores 1 HP",
+      "behavior": "bleed.7"
+    },
+    {
+      "tree": "guard",
+      "threshold": 3,
+      "title": "Ironhide",
+      "effect": "Nearby enemies cut damage taken, up to 90%",
+      "behavior": "guard.3"
+    },
+    {
+      "tree": "guard",
+      "threshold": 5,
+      "title": "Thornwall",
+      "effect": "Reflect 150% of contact damage; bosses take half",
+      "behavior": "guard.5"
+    },
+    {
+      "tree": "guard",
+      "threshold": 7,
+      "title": "Unbroken Core",
+      "effect": "Survive a lethal hit: 10s invulnerable, +ATK equal to DEF. A shield blocks projectiles.",
+      "behavior": "guard.7"
+    },
+    {
+      "tree": "void",
+      "threshold": 3,
+      "title": "Blackhole",
+      "effect": "Every 5th primary volley creates a black hole. Your black holes absorb hostile projectiles and impair enemy movement.",
+      "behavior": "void.3"
+    },
+    {
+      "tree": "void",
+      "threshold": 5,
+      "title": "Listlessness",
+      "effect": "Enemies entering your black holes become trapped (elites for half as long; bosses never). Absorbed hostile projectiles return toward enemies, infused with Void.",
+      "behavior": "void.5"
+    },
+    {
+      "tree": "void",
+      "threshold": 7,
+      "title": "Singularity",
+      "effect": "Trapped enemies decompose: normal enemies until they die, elites up to 20% max HP per trap. Bosses caught in a black hole take 1% max HP per second.",
+      "behavior": "void.7"
+    },
+    {
+      "tree": "chill",
+      "threshold": 3,
+      "title": "Frostbite",
+      "effect": "Chilled enemies move even slower",
+      "behavior": "chill.3"
+    },
+    {
+      "tree": "chill",
+      "threshold": 5,
+      "title": "Shatter",
+      "effect": "Slowed foes may shatter (elites: 20% HP)",
+      "behavior": "chill.5"
+    },
+    {
+      "tree": "chill",
+      "threshold": 7,
+      "title": "Absolute Zero",
+      "effect": "Non-boss foes slow; shatters come easy",
+      "behavior": "chill.7"
+    },
+    {
+      "tree": "growth",
+      "threshold": 3,
+      "title": "Rootbound",
+      "effect": "Cultivated ground grips harder — enemies on it are slower",
+      "behavior": "growth.3"
+    },
+    {
+      "tree": "growth",
+      "threshold": 5,
+      "title": "Verdant Rise",
+      "effect": "Your ground heals 3 HP per tick",
+      "behavior": "growth.5"
+    },
+    {
+      "tree": "growth",
+      "threshold": 7,
+      "title": "Wildwood",
+      "effect": "The whole garden bites what stands on it",
+      "behavior": "growth.7"
+    }
+  ],
+  "retired": [
+    {
+      "id": "v13_static_field",
+      "note": "A2 Chill (Static Field)"
+    },
+    {
+      "id": "v16_arc_wake",
+      "note": "A3 Shock (Arc Wake)"
+    },
+    {
+      "id": "v16_live_wire",
+      "note": "A3 Shock (Live Wire)"
+    },
+    {
+      "id": "v17_induction_step",
+      "note": "A3 Shock (Induction Step)"
+    },
+    {
+      "id": "v17_copper_vein",
+      "note": "A3 Shock (Copper Vein)"
+    },
+    {
+      "id": "v18_needlepoint",
+      "note": "A4a Bleed (Needlepoint)"
+    },
+    {
+      "id": "v16_blood_price",
+      "note": "A4b Bleed (Blood Price)"
+    },
+    {
+      "id": "v16_mass_tax",
+      "note": "A6 Void (Mass Tax)"
+    },
+    {
+      "id": "neutral_2",
+      "note": "v2.2 N1 Neutral (Keen Eye, merged into Magnetic Core)"
+    }
+  ]
+}

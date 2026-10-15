@@ -43,6 +43,10 @@ enum KillSource: String, CaseIterable {
     /// v2.1 A6 (CL-75 / QB): Shadow Edge's blade — a secondary Void attack.
     /// Full credit, its own source.
     case shadowEdge
+    /// v2.2 N5 (R6): a Chain Reaction burst. Reward-recorded credit: the XP orb
+    /// and the Codex/bestiary record, no on-kill procs — but the victim's own
+    /// Chain Reaction burst still fires (cascade eligibility is separate).
+    case chainReaction
 
     /// Credit tier — legacy-preserving. Radius bursts and the sweep have only
     /// ever paid the XP orb: no kill count, bestiary, arena gates or on-kill
@@ -51,6 +55,7 @@ enum KillSource: String, CaseIterable {
     var credit: KillCredit {
         switch self {
         case .burst, .sweep: return .rewardOnly
+        case .chainReaction: return .rewardRecorded
         default: return .full
         }
     }
@@ -61,4 +66,8 @@ enum KillCredit: Equatable {
     case full
     /// XP orb only.
     case rewardOnly
+    /// v2.2 N5 (R6): the XP orb and the Codex encounter + bestiary kill count
+    /// (`CodexManager.recordDefeat`) — nothing else (no kill count, gate
+    /// counters, progression kill types or on-kill effects).
+    case rewardRecorded
 }

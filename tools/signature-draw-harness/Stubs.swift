@@ -144,6 +144,20 @@ enum ReviewMode {
     static var isActive = false
 }
 
+// v2.2 J2: the harness-side AbilityCatalogSource (the app's reads the bundle).
+// Every run.sh exports SPARKFORGE_CATALOG_PATH = the authored file; a missing
+// variable is a loud failure, never a fallback.
+enum AbilityCatalogSource {
+    struct Unavailable: Error, CustomStringConvertible { let description: String }
+    static func data() throws -> Data {
+        guard let path = ProcessInfo.processInfo.environment["SPARKFORGE_CATALOG_PATH"], !path.isEmpty else {
+            throw Unavailable(description: "SPARKFORGE_CATALOG_PATH is not set (run.sh exports it)")
+        }
+        do { return try Data(contentsOf: URL(fileURLWithPath: path)) }
+        catch { throw Unavailable(description: "\(path) could not be read: \(error.localizedDescription)") }
+    }
+}
+
 enum UpgradeCardNode {
     static func emoji(for tag: UpgradeManager.Tag) -> String { "•" }
 }

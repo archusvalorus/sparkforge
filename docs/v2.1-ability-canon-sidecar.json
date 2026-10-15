@@ -30,8 +30,8 @@
    "source": "Brandon + Lyra (v2.0 Phase C); untouched in v2.1"
   },
   "Neutral": {
-   "thesis": "Not a tree: the palette's constant. Stat, XP and utility picks, never gated. Redesign deferred to v2.2+.",
-   "source": "Brandon (Sep 15)"
+   "thesis": "Not a tree: the palette's constant. Stat, XP and utility picks, never gated. v2.2 rework in progress (N1: Swift and Magnetic Core ladders; Keen Eye merged into Magnetic Core).",
+   "source": "Brandon (Sep 15); v2.2 Neutral design spec (Oct 9)"
   }
  },
  "entries": {
@@ -151,7 +151,7 @@
     "CL-110",
     "CL-117"
    ],
-   "sensitivities": "T4 silences the pellet cards (CL-93 blockedBy, A7a) and Brittle Cold multiplies into the one unbiased direct-hit rounding, so it moves 1-damage hits too (CL-94, A7b S7); Frostbite is its own vulnerability channel (CL-107, A7b S6): the strongest active of Frostbite, Marked, Called and Fracture applies, never stacked, and Called ending no longer wipes a Frostbite window. A7b S9 (CL-110/117): the icicle rolls crit like the primary shot it replaces and counts once toward Calculated Strike (the absorbed pellets never count); its own shards never crit, while Iceburst's keep their roll. CL-93 is SYMMETRIC (Command Center correction, Sep 25): owning any pellet card (Warp Shot, Gravity Well, Mirror Edge, Fracture Shot, Riftline) closes T4 — T1–T3 stay open — and a Polar Vortex stalled at T3 neither gets its guarantee nor locks other capstones out (Brandon, Sep 25)."
+   "sensitivities": "T4 silences the pellet cards (CL-93 blockedBy, A7a) and Brittle Cold multiplies into the one unbiased direct-hit rounding, so it moves 1-damage hits too (CL-94, A7b S7); Frostbite is its own vulnerability channel (CL-107, A7b S6): the strongest active of Frostbite, Marked, Called and Fracture applies, never stacked, and Called ending no longer wipes a Frostbite window. A7b S9 (CL-110/117): the icicle rolls crit like the primary shot it replaces and counts once toward Calculated Strike (the absorbed pellets never count); its own shards never crit, while Iceburst's keep their roll. CL-93 is SYMMETRIC (Command Center correction, Sep 25): owning any pellet card (Warp Shot, Gravity Well, Mirror Edge, Fracture Shot, Riftline) closes T4 — T1–T3 stay open — and a Polar Vortex stalled at T3 neither gets its guarantee nor locks other capstones out (Brandon, Sep 25). v2.2 N4 (R4): Rapid Fire's T5 (the chaos beam) joins the symmetric exclusion — it provides pelletEffect and is blocked by glacialCondensation; Rapid Fire T1–T4 stay compatible."
   },
   "cap_fire_everglow": {
    "family": [
@@ -242,7 +242,7 @@
     "CL-119",
     "CL-124"
    ],
-   "sensitivities": "A7b S11 (CL-119 A1): a full meter no longer sits idle in boss-only fights, and boss lurches advance T3's Rift Cannon too; its T1 rung says so, '… (a lone boss: 50%)' (Brandon's pick at the S11 copy gate; modal held at 665pt); T2 copy overclaims and T5 copy says 75s/105s while arenas 1-10 run 37.5s/52.5s (CL-101); the Boss Mode 'catastrophic damage' T5 branch was never built (closeout); Fracture is CL-107's fourth vulnerability channel (CL-116, A7b S6): it never overwrites a stronger mark, and its expiry clears only itself."
+   "sensitivities": "A7b S11 (CL-119 A1): a full meter no longer sits idle in boss-only fights, and boss lurches advance T3's Rift Cannon too; its T1 rung says so, '… (a lone boss: 50%)' (Brandon's pick at the S11 copy gate; modal held at 665pt); T2 copy overclaims and T5 copy says 75s/105s while arenas 1-10 run 37.5s/52.5s (CL-101); the Boss Mode 'catastrophic damage' T5 branch was never built (closeout); Fracture is CL-107's fourth vulnerability channel (CL-116, A7b S6): it never overwrites a stronger mark, and its expiry clears only itself. v2.2 N4 (Brandon's Echo ruling, Oct 13, superseding the provisional inert mapping): on Rapid Fire T5's chaos beam, T4 schedules one ordinary Echo shot per virtual parent lane at the beam's virtual-volley cadence (the live firing interval), through the gun's own scheduler (1.5 s, 50%, fragment credit, no re-echo; dropped if play isn't running when it comes due, as on the gun)."
   },
   "chill_1": {
    "family": [
@@ -468,40 +468,30 @@
    ],
    "geometry": "n/a",
    "targeting": "Self.",
-   "hitClass": "Stat only: +12% movement speed (additive to the move-speed multiplier).",
+   "hitClass": "Stat only: permanent movement speed, totals +8% / +20% / +35% by tier (additive to the move-speed multiplier beside Forge Path and the Tree's ground bonus).",
    "bossClass": "n/a",
    "killSource": "n/a",
    "tell": "None beyond the HUD move-speed row.",
    "rulings": [],
-   "sensitivities": "Neutral ships unchanged in v2.1; its redesign is deferred to v2.2+."
-  },
-  "neutral_2": {
-   "family": [
-    "passive stat"
-   ],
-   "geometry": "n/a",
-   "targeting": "XP orbs only; health orbs stay non-magnetized.",
-   "hitClass": "Stat only: +20% XP-orb magnet radius.",
-   "bossClass": "n/a",
-   "killSource": "n/a",
-   "tell": "None.",
-   "rulings": [],
-   "sensitivities": "Stacks with Magnetic Core and Devour's 2x."
+   "sensitivities": "v2.2 N1 ladder (Neutral rework). Magnetic Core is the conditional burst beside this permanent option."
   },
   "neutral_3": {
    "family": [
-    "passive stat"
+    "passive stat",
+    "direct projectile"
    ],
-   "geometry": "n/a",
-   "targeting": "Self (the gun).",
-   "hitClass": "Stat only: firing interval x0.90, a real +11.1% firing rate.",
-   "bossClass": "n/a",
-   "killSource": "n/a",
-   "tell": "None beyond the HUD ATK SPD row.",
+   "geometry": "T1–T4 n/a (stat). T5: the chaos beam — one line per AttackPattern branch (Scatter lanes × Fracture fan under the shared ±90° rule; Storm Engine's +2 lanes for that cadence window), each from Spark along its heading to the first of its range (Long Shot T1/T2 and Riftline extend it), the first solid terrain (unless Long Shot T4) and the arena boundary; it pierces every enemy on the line.",
+   "targeting": "Self (the gun) for T1–T4. T5: the nearest valid enemy within range AND line of sight (Long Shot T3 removes the range limit, terrain still blocks; T4 also acquires behind terrain); with none, the beam is not drawn and does not tick.",
+   "hitClass": "T1–T4: attack-speed totals +10 / +25 / +50 / +90% (firing interval ÷ 1.10 / 1.25 / 1.50 / 1.90, a rate ratio beside every other speed source). T5 keeps the +90% and replaces the gun: every 0.5 s of active beam time each parent lane deals 0.75 × D × (0.5 s ÷ I) — D the gun's standard-shot basis (Overcharge split included), I the effective firing interval with every attack-speed source once — before Fracture and target modifiers; exact arithmetic, one unbiased rounding, no floor. One crit roll and one Calculated Strike count per parent lane per tick; each target takes one hit per parent lane per tick carrying the summed share of that lane's branches that touched it; the centre branch makes it a primary hit, else a fragment hit; the gun's riders (Kindle, Frost Touch, Repulse, Overload, Shatter, Overkill, Seed, Anomaly, Void Horror, Bloodthirsty, Whiteout, Apex, Erasure, Chain Lightning) follow once per such hit.",
+   "bossClass": "Boss hits use the boss's own amplifiers and vulnerability; the Boss Mode DEF dial applies to the parent, then the share (N3's rule).",
+   "killSource": "primary (centre branch) / fragment (side branches)",
+   "tell": "T5: a layered neon green / astral blue / orange beam per line and visual-only sizzles at contacts (pooled; no damage).",
    "rulings": [
-    "CL-101"
+    "CL-101",
+    "R2",
+    "R4"
    ],
-   "sensitivities": "CL-101 compatibility copy: '+10% attack speed' -> '+11%' (the firing-rate convention)."
+   "sensitivities": "A virtual volley at the live interval I (C1) is a primary volley: Storm's every 3rd, ONE volley counter (Blackhole every 5th at the lead lane's terminus, Shadow Edge every 7th) and a Gravity Well once per parent lane at its terminus. Warp Shot and Mirror Edge are inert on the beam (C2). Erasure T4's Echo (Brandon's ruling, Oct 13: ordinary Echo shots) fires one ordinary delayed Echo shot per PARENT lane per virtual volley — Storm's +2 lanes once each, Fracture's branches none — 1.5 s later at the existing 50% secondary-shot basis, fragment credit, never echoing again; the same scheduler as the gun's. Red Smile's form and the kaiju freeze the beam's clocks (no tick debt). T5 provides pelletEffect and is blocked by glacialCondensation: symmetric with Polar Vortex T4; T1–T4 stay compatible. Beam feel, device timing and performance are deferred to the combined playtest."
   },
   "neutral_4": {
    "family": [
@@ -509,12 +499,12 @@
    ],
    "geometry": "n/a",
    "targeting": "Every projectile built from effective range, including the auto-aim acquisition range, Shadow Edge and returned shots.",
-   "hitClass": "Stat only: +20% projectile range.",
+   "hitClass": "Stat only: +25% then +50% shot range (totals). T3: shots never expire by distance. T4: unlimited range; shots pierce every enemy and pass through walls and terrain (no falloff, no finite count).",
    "bossClass": "n/a",
    "killSource": "n/a",
    "tell": "None.",
    "rulings": [],
-   "sensitivities": "The only range source besides Riftline's +25% since Phase lost its range in A6."
+   "sensitivities": "Rungs add the difference, so Riftline's +25% range survives. Unlimited shots are removed only outside the arena's bounding circle + margin; Gravity Well forms where the shot stopped (a wall at T3, the boundary at T4)."
   },
   "neutral_5": {
    "family": [
@@ -522,20 +512,20 @@
    ],
    "geometry": "n/a",
    "targeting": "Self.",
-   "hitClass": "Stat only: +25% XP gained.",
+   "hitClass": "Stat only: +25% then +50% run XP (totals). T3 raises the run's level cap 15 → 20 and grants one full level-up at once (card and stat), keeping the XP already earned; XP at the cap is banked.",
    "bossClass": "n/a",
    "killSource": "n/a",
    "tell": "None.",
    "rulings": [],
-   "sensitivities": ""
+   "sensitivities": "Scaled XP carries its fractional remainder (no rounding loss on 1-XP orbs); the granted level resolves through the serialized level queue before banked levels."
   },
   "neutral_6": {
    "family": [
     "direct projectile"
    ],
-   "geometry": "Ordinary direct projectiles.",
+   "geometry": "AttackPattern lanes about the aim; Storm Engine's +2 pellets add lanes at the next outward step (parallel at T1); without Scatter the v1.9 count fan stands.",
    "targeting": "Adds pellets to each auto-aim volley: 2 pellets fire as parallel columns, 3+ fan into a static cone.",
-   "hitClass": "Each extra pellet is a full primary shot (every modifier, echo, Fracture, Warp and Gravity Well roll), while the volley still counts once for the Void volley counter.",
+   "hitClass": "2 / 3 / 5 / 9 full-strength shots per volley: T1 two parallel lanes 12 pt apart; T2 0/±15°; T3 0/±15°/±30°; T4 nine lanes 0/±14.75°…±59° (118°). Each lane carries every shot effect.",
    "bossClass": "No special treatment.",
    "killSource": "primary",
    "tell": "None beyond the extra pellets.",
@@ -544,7 +534,7 @@
     "CL-101",
     "CL-76"
    ],
-   "sensitivities": "Storm Engine's spread volley is the normal count + 2 (CL-98), so every Scatter tier adds a pellet to it too; CL-101 copy: T1 '(wider spread)' -> two parallel shots; Polar Vortex T4 absorbs the pellets."
+   "sensitivities": "Polar Vortex T4's icicle replaces each lane's pellet (every Nth primary across lanes). Composed with Fracture under the shared ±90° forward-spread rule."
   },
   "shock_1": {
    "family": [
@@ -567,7 +557,7 @@
    "family": [
     "on-hit rider"
    ],
-   "geometry": "Enemy-to-enemy hops are not occlusion-tested, so chains cross the Carrier; no geometry ruling names chain hops.",
+   "geometry": "Enemy-to-enemy hops require a clear exact segment from the last victim to the nearest hittable, unvisited enemy in range; the Carrier blocks a hop, and the chain ends when no visible target remains (A7b S13, CL-123a).",
    "targeting": "From the struck enemy, repeatedly the nearest unvisited enemy within 80pt×DeviceScale of the last victim — distinct targets, skipping anything that can't be hit, dying or intangible (A7b S12, CL-127a).",
    "hitClass": "Chain hop: flat compounded damage off the triggering hit (T1 50%, T2 75%, T3 85% per jump, T4 100%, floor 1) with only an Overload roll; fires from any projectile hit on an enemy (not Glass Blood fragments or Void secondaries), Electro Pulse, and once per Red Smile swing.",
    "bossClass": "Boss hits never start a chain and chains never jump to the arena boss; mini-bosses take hops unscaled.",
@@ -622,19 +612,20 @@
    "family": [
     "on-hit rider"
    ],
-   "geometry": "Point burst at the corpse with no occlusion test (not reviewed under the section 3 matrix).",
-   "targeting": "On every full-credit kill (and an arena boss's death, once), every EnemyNode within 35pt of the death point.",
-   "hitClass": "On-kill radius burst of a bare 1 flat damage (no riders, not ATK-scaled).",
-   "bossClass": "Never damages the arena boss; mini-bosses take the flat 1.",
-   "killSource": "None at the hit: its kills fall to the frame-top prune (sweep, reward-only), so it can't chain.",
-   "tell": "An orange-yellow (0xFFCC44 / 0xFF8800) ring at the death point.",
+   "geometry": "Point burst at the death position, no occlusion test; a target counts when its centre is strictly inside the owned tier's radius (35 / 50 / 70 pt, never grown along a chain); the dying body is excluded by identity, so a distinct enemy standing on the death point is hit.",
+   "targeting": "On EVERY credited death of a non-arena-boss enemy, whatever the kill source (full, reward-only, sweep or another blast) — cascade eligibility is separate from credit. Bursts are queued and drained once a frame (after update, actions and physics), FIFO in death order, iteratively; a victim's generation is its lethal burst's + 1 (first lethal hit wins), any other death is a root at 0. Hits every live, uncredited EnemyNode in range; never the arena boss.",
+   "hitClass": "A flat Neutral burst (not ATK-scaled, no crit, Fire, Overcharge, Forge or direct-hit amplifiers): base 1 / 2 / 3 by tier; at T3 × (1 + 0.1 × min(generation, 10)), additive. Per victim the exact amount (× 0.5 on a mini-boss) is chance-rounded ONCE with the victim's vulnerability folded in and delivered as a direct hit (no second rounding at the node); zero stays zero (no hit).",
+   "bossClass": "Never damages the arena boss and an arena boss's death no longer bursts (v2.2 N5, R6: excluded as target and emitter; the legacy boss-death burst is gone); mini-bosses are targets at half (BossClass.damageScale, before the rounding) and emit their own burst when they die.",
+   "killSource": "chainReaction — reward-recorded: the XP orb and the Codex/bestiary record only (no kill count, gate counters, progression kill types, Siphon, Frenzy, Apex growth, Open Vein or any other on-kill effect); its own Chain Reaction burst still fires, so it cascades.",
+   "tell": "An orange-yellow (0xFFCC44 / 0xFF8800) ring at the death point; at most 24 rings per frame's drain (visual only — every burst still hits).",
    "rulings": [
     "CL-29",
     "CL-95",
     "CL-109",
-    "CL-123"
+    "CL-123",
+    "R6"
    ],
-   "sensitivities": "Inert in boss-only fights (CL-95 list); reward-only kills are a closeout audit item. A7b (CL-123c): a point burst, exempt under Geo Ruling 1 (non-travel radius effects pass; at 35pt it can't reach across the Carrier anyway)."
+   "sensitivities": "Inert in boss-only fights (CL-95 list). A7b (CL-123c): a point burst, exempt under Geo Ruling 1 (non-travel radius effects pass). v2.2 N5 (R6): the single rounding replaces the node's legacy `Int((1 × v).rounded())` under a vulnerability (expectation kept, e.g. ×1.5 → 1.5, no longer always 2); Spurhound/Ramplate's punish window and Whiteout's melt apply inside the node as on every source; the queue is cleared on restart and at the board wipes. Cascade feel and density are deferred to the combined playtest."
   },
   "v13_execution": {
    "family": [
@@ -673,12 +664,12 @@
    ],
    "geometry": "n/a",
    "targeting": "XP orbs; the speed burst on each XP orb collected.",
-   "hitClass": "Stat only: +50% XP-orb magnet radius and +30% move speed for 1.5s on each XP orb collected.",
+   "hitClass": "Stat only: XP-orb magnet radius totals +15% / +30% / +50% by tier, and a movement burst of +10% / +20% / +30% (the tier's total, never stacked) for 1.5s on each XP orb collected; another pickup refreshes the time.",
    "bossClass": "n/a",
    "killSource": "n/a",
    "tell": "None.",
    "rulings": [],
-   "sensitivities": "With Chain Reaction it fires the 'Clear Engine' build hint."
+   "sensitivities": "v2.2 N1: Keen Eye (neutral_2, retired) merged in. With Chain Reaction it fires the 'Clear Engine' build hint. Health orbs stay non-magnetized."
   },
   "v13_overcharge": {
    "family": [
@@ -923,19 +914,19 @@
     "passive stat"
    ],
    "geometry": "n/a",
-   "targeting": "Self, on each level-up.",
-   "hitClass": "Stat only: +35% move speed for 3s after each level-up.",
+   "targeting": "Self, when play resumes after a level-up (the acquisition level included).",
+   "hitClass": "Stat only: after each level-up, once play resumes, +35% move speed, +35% attack speed and +15% damage for 3 s of active play; another level-up refreshes the time, never stacks.",
    "bossClass": "n/a",
    "killSource": "n/a",
    "tell": "None.",
    "rulings": [],
-   "sensitivities": ""
+   "sensitivities": "The window counts only active play (selection screens, reveals, pause and background do not spend it); attack speed and damage enter once beside the other live bonuses."
   },
   "v17_relay_burn": {
    "family": [
     "DoT status"
    ],
-   "geometry": "Instant enemy-to-enemy arc with no occlusion test, so it crosses the Carrier; no geometry ruling names enemy-to-enemy arcs.",
+   "geometry": "The arc selects the nearest other hittable enemy in range with a clear exact segment from the burning source; the Carrier blocks the arc (A7b S13, CL-123a).",
    "targeting": "Each burning enemy (Kindle or tesla-field Burn) rolls 0.9/s; target = nearest other enemy within a fixed 90pt (not DeviceScale), skipping dying or intangible bodies (A7b S12, CL-127a).",
    "hitClass": "Secondary flat 4-damage Shock arc: no crit, amplifiers, Overload roll or Chain Lightning.",
    "bossClass": "Enemies only — a burning boss never arcs and the boss is never a target; mini-bosses take the flat 4.",
@@ -993,16 +984,16 @@
    "family": [
     "direct projectile"
    ],
-   "geometry": "Ordinary direct projectiles, blocked by the Carrier.",
+   "geometry": "AttackPattern fan centred on each lane's heading; if the outermost branch would pass ±90° from the aim every angle is scaled uniformly by 90°/max (Scatter T4 + Fracture T4: 153 branches, scale 90/149).",
    "targeting": "Each primary pellet also fires 2 fragments angled 0.22 rad either side of its line.",
-   "hitClass": "Secondary projectile (no modifiers): 50% of the pellet's damage with standard projectile riders, no primary-only riders, never re-splits.",
+   "hitClass": "Each shot splits into 3 / 5 / 9 / 17 branches over 30 / 60 / 120 / 180°, centre included; the parent's damage is divided equally among ALL branches (chance-rounded at the hit on the projectile's one threshold, never floored to 1). Several branches may hit one enemy; coincident branches both hit.",
    "bossClass": "No special treatment.",
    "killSource": "fragment",
    "tell": "None beyond the extra shots.",
    "rulings": [
     "CL-93"
    ],
-   "sensitivities": "Silenced by Polar Vortex T4, and CL-93 (A7a) stops offering it once T4 is owned; fragments pick up Riftline pierce and falloff and Repulse. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+   "sensitivities": "The fan's centre branch carries the parent's primary identity (Warp, Gravity Well, Mirror Edge, blackhole seeding, `.primary` credit) at its share; the other branches are `.fragment` fragments at theirs. Blocked by Glacial Condensation (CL-93, unchanged)."
   },
   "v18_glass_blood": {
    "family": [
@@ -1037,7 +1028,7 @@
     "CL-93",
     "CL-101"
    ],
-   "sensitivities": "Silenced by Polar Vortex T4, and CL-93 (A7a) stops offering it once T4 is owned; CL-101 copy: state the 35% chance and 50% damage. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+   "sensitivities": "Silenced by Polar Vortex T4, and CL-93 (A7a) stops offering it once T4 is owned; CL-101 copy: state the 35% chance and 50% damage. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered. v2.2 N4: inert on Rapid Fire T5's chaos beam (no shot to echo); the copy says so on both cards."
   },
   "v18_red_smile": {
    "family": [
@@ -1318,7 +1309,7 @@
    "family": [
     "aura (player-centred)"
    ],
-   "geometry": "Instant player-to-target arc with no occlusion test, so it crosses the Carrier.",
+   "geometry": "The strike selects the nearest hittable enemy in range with a clear exact segment from Spark; the Carrier blocks the arc, and the pulse stays charged when no visible target is available (A7b S13, CL-123a).",
    "targeting": "Charges only while the stick is deflected; every 3s strikes the nearest hittable enemy (A7b S12, CL-127a) within 220pt×DeviceScale, holding its charge until one is in range; enemies only.",
    "hitClass": "Secondary strike for 40% shot damage (min 1) that rolls Overload on a survivor and can start one Chain Lightning.",
    "bossClass": "Never targets the arena boss; mini-bosses unscaled.",
@@ -1354,7 +1345,7 @@
     "well / rooted object",
     "summon"
    ],
-   "geometry": "Coils are placed on valid ground (isBlocked check with a resolve fallback; T4 resolves a central anchor), but their shock arcs aren't occlusion-tested and cross the Carrier.",
+   "geometry": "Coils are placed on valid ground (isBlocked check with a resolve fallback; T4 resolves a central anchor). T1–T3 shock arcs require a clear exact segment from the coil, including the boss fallback, so the Carrier blocks them. T4 Lightning Network remains arena-wide and exempt from occlusion checks (A7b S13, CL-123a/b).",
    "targeting": "Each coil shocks the nearest hittable enemy within 140pt×DeviceScale (T4 unlimited) every 0.8s (T4 0.4s), falling back to the arena boss only when no enemy is in range and the boss can be hit — never the vanished Faceted Lie (A7b S12, CL-127a).",
    "hitClass": "Summon strike on the hit scale: 50% shot damage (T4 75%), min 1, with no crit, riders, Overload or chains.",
    "bossClass": "The boss takes full damage (no BossClass scaling) with the Boss Mode DEF dial; mini-bosses unscaled.",
@@ -1444,7 +1435,7 @@
     "A6-Q3",
     "CL-93"
    ],
-   "sensitivities": "Warp feel vs payoff and probabilistic rounding (A6 watch 1-2); silenced by Polar Vortex T4's icicle, and CL-93 (A7a) stops offering it once T4 is owned; A7b S7–S8 extended CL-70-style rounding to the direct-hit block on its own threshold: the amplifiers (94a), then Overcharge and the resolved vulnerability (94b/94c). CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered."
+   "sensitivities": "Warp feel vs payoff and probabilistic rounding (A6 watch 1-2); silenced by Polar Vortex T4's icicle, and CL-93 (A7a) stops offering it once T4 is owned; A7b S7–S8 extended CL-70-style rounding to the direct-hit block on its own threshold: the amplifiers (94a), then Overcharge and the resolved vulnerability (94b/94c). CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered. v2.2 N4: inert on Rapid Fire T5's chaos beam (no travel to curve); the copy says so on both cards."
   },
   "void_2": {
    "family": [
@@ -1496,7 +1487,7 @@
    ],
    "geometry": "n/a",
    "targeting": "XP orbs only; health orbs stay non-magnetized.",
-   "hitClass": "Stat only: XP orbs start their pull from 2x the current effective pickup radius (stacks with Keen Eye and Magnetic Core); collection is unchanged.",
+   "hitClass": "Stat only: XP orbs start their pull from 2x the current effective pickup radius (stacks with Magnetic Core); collection is unchanged.",
    "bossClass": "n/a",
    "killSource": "n/a",
    "tell": "No dedicated tell; orbs simply start drifting sooner.",

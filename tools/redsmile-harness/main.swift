@@ -425,8 +425,8 @@ do {
     }
     check("RC4 the face fits 3 lines of 17 beside the MORE chip", lines(red.description) <= 3,
           "lines=\(lines(red.description))")
-    check("RC5 still one card, one pool entry: Bleed 13 (by primary tag), pool 80 (A6: −Mass Tax +Void Horror +Shadow Edge, CL-83)",
-          um.allCards.filter { $0.tag == .bleed }.count == 13 && um.allCards.count == 80,
+    check("RC5 still one card, one pool entry: Bleed 13 (by primary tag), pool 79 (A6: −Mass Tax +Void Horror +Shadow Edge, CL-83; v2.2 N1: −Keen Eye)",
+          um.allCards.filter { $0.tag == .bleed }.count == 13 && um.allCards.count == 79,
           "bleed=\(um.allCards.filter { $0.tag == .bleed }.count) pool=\(um.allCards.count)")
 
     // The dual gate through the REAL draw: a run with both colours active.
@@ -601,8 +601,12 @@ do {
     // leave the enemy hit, and Open Wounds' `if` leaves the boss hit — they fold
     // into ONE DirectHitDamage.resolve statement (no control flow). The enemy
     // skeleton goes from 20 to 17 direct-body `if` blocks, the boss's from 9 to 8.
-    let enemyHitSkeleton = ["if", "{", "guard", "else", "{"] + Array(repeating: ["if", "{"], count: 17).flatMap { $0 }
-    let bossHitSkeleton = ["guard", "else", "{"] + Array(repeating: ["if", "{"], count: 8).flatMap { $0 }
+    // CONTRACT CHANGE, v2.2 N3 (authorized re-pin, Oct 13): one hit per body —
+    // each hit function gains ONE direct-body `guard !projectileNode.hasStruck(…)
+    // else { return }` right after the node guard, before any damage. Nothing
+    // else in either skeleton moves (17 and 8 `if` blocks as before).
+    let enemyHitSkeleton = ["if", "{", "guard", "else", "{", "guard", "else", "{"] + Array(repeating: ["if", "{"], count: 17).flatMap { $0 }
+    let bossHitSkeleton = ["guard", "else", "{", "guard", "else", "{"] + Array(repeating: ["if", "{"], count: 8).flatMap { $0 }
     // A7b S10: the DIRECT-BODY registration (depth 1) — exactly one; the Shatter
     // exit's nested pair is MW9's.
     func unconditional(_ signature: String, _ call: String, skeleton: [String]) -> Int? {
@@ -669,11 +673,23 @@ do {
     // unchanged (a7b/s9/prefix-token-diff.txt).
     //   enemy → Apex      995 `e1b8ecfe…` → 1040 `09d0c3f2…`
     //   enemy → Erasure   998 `98e49879…` → 1043 `8fb496c3…`
+    // CONTRACT CHANGE, v2.2 N3 (authorized re-pin, Oct 13): every prefix moves by
+    // exactly +13 tokens — the one-hit-per-body guard (12) and the body argument
+    // on onHitEnemy (1); 1040 → 1053, 1043 → 1056, 392 → 405, 395 → 408. Every
+    // other token is identical (the previous digests stay in git history).
     let accepted: [(signature: String, call: String, count: Int, digest: String)] = [
-        ("private func handleProjectileHit(", "apexRegisterAttack()", 1040, "09d0c3f295f977d39d3f7c2aea2b10831d894fd24beedac5de0737f794757b34"),
-        ("private func handleProjectileHit(", "erasureRegisterHit()", 1043, "8fb496c3bd0d0ca6aeb6d2c6ecda2855655d39f101098c706c5e87ea2f379f27"),
-        ("private func handleProjectileHitBoss(", "apexRegisterAttack()", 392, "ec66f1e48f2c1ae298b07106f234fba960b89353f1b05d6aeb3ce4ff2cbff5cb"),
-        ("private func handleProjectileHitBoss(", "erasureRegisterHit()", 395, "2032f4c2e7e25c67cd737864d127e91e9f84b914858d8ffb74609888229698ad"),
+        // CONTRACT CHANGE, v2.2 N3 corrective (authorized re-pin, Oct 13): the enemy
+        // prefixes gain the 10-token share step `hit = fractureBranch(hit, projectile:
+        // projectileNode)` after the shield (1053 → 1063, 1056 → 1066); the boss
+        // prefixes swap the 13-token direct entry for the 18-token dial-then-share
+        // helper plus the 10-token entry (+15: 405 → 420, 408 → 423). Nothing else.
+        // CONTRACT CHANGE, v2.2 Whiteout × Fracture / beam (owner-approved bounded correction, Oct 14): the
+        // enemy prefixes gain exactly the 2 tokens `. targetEntry` in the final entry
+        // `enemyNode.takeDirectHit(hit.targetEntry)` (1063 → 1065, 1066 → 1068); the boss prefixes are unchanged.
+        ("private func handleProjectileHit(", "apexRegisterAttack()", 1065, "d4bc505163f0fbf5cca49196d8f933d05703ca0d731a8bf4de6a4eca6ddec6f6"),
+        ("private func handleProjectileHit(", "erasureRegisterHit()", 1068, "bbba5bddc7c462aa385124d9b12eb87574c6b509d7f5d9472b3771708911f692"),
+        ("private func handleProjectileHitBoss(", "apexRegisterAttack()", 420, "524763162fbacea3dc43c820bb802775a6338f48b6b9b23bb6b8f8ec9c2ce394"),
+        ("private func handleProjectileHitBoss(", "erasureRegisterHit()", 423, "0ba8c0e89ad5510a422bc4ac019b7dd09ed16e42c35e5c9db7ce6c26bc9edd45"),
     ]
     let drifted = accepted.compactMap { pin -> String? in
         guard let b = SwiftSource.block(in: raw, after: pin.signature) else { return "\(pin.call): no block" }
@@ -681,7 +697,7 @@ do {
         guard at.count == 1 else { return "\(pin.call): \(at.count) direct-body executable occurrences" }
         let t = b.tokens(from: b.open, to: at[0] + pin.call.count)
         let d = SwiftSource.digest(t)
-        return t.count == pin.count && d == pin.digest ? nil : "\(pin.signature)…\(pin.call): \(t.count) tokens, \(d.prefix(16)); tail \(t.suffix(8))"
+        return t.count == pin.count && d == pin.digest ? nil : "\(pin.signature)…\(pin.call): \(t.count) tokens, \(d); tail \(t.suffix(8))"
     }
     check("MW8 the exact active token prefix through each gun registration is the accepted one (enemy hit → Apex, → Erasure; boss hit → Apex, → Erasure)",
           drifted.isEmpty, "\(drifted)")

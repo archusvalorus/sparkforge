@@ -27,6 +27,20 @@ typealias Tag = UpgradeManager.Tag
 
 let colours: [Tag] = [.fire, .chill, .shock, .bleed, .guardT, .voidT, .growth]
 
+// MARK: - v2.2 J2: the startup gate, first
+//
+// The game consults `AbilityCatalog.installed` before anything can draw a
+// card (GameViewController), so the harness does the same: a catalog that
+// does not load is ONE reported failure here, never a crash further down
+// (`AbilityCatalog.current` would stop the process, as it would the app's
+// backstop). Every mode, the dump and the recorder included, is behind it.
+if case .failure(let failure) = AbilityCatalog.installed {
+    print("FAIL  JS0 the installed catalog loads (the game's startup gate)  \(failure.summary)")
+    print("\n0 passed, 1 failed")
+    exit(1)
+}
+print("PASS  JS0 the installed catalog loads (the game's startup gate)")
+
 // MARK: - Dump mode
 
 func caps(_ s: Set<Cap>) -> [String] { s.map { $0.rawValue }.sorted() }
@@ -34,10 +48,12 @@ func tierCaps(_ d: [Int: Set<Cap>]) -> [String: [String]] {
     Dictionary(uniqueKeysWithValues: d.map { (String($0.key), caps($0.value)) })
 }
 
-if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--dump" {
-    let um = UpgradeManager(seed: 1)
+/// The catalog as the dump writes it, from any source of cards, synergy copy
+/// and retired ids (v2.2 J1: the legacy pool and the JSON catalog go through
+/// this one function, so their dumps can be compared byte for byte).
+func catalogDump(cards source: [Card], synergyTiers: (Tag) -> [UpgradeManager.SynergyTier], retired: [String: String]) throws -> Data {
     var cards: [[String: Any]] = []
-    for c in um.allCards {
+    for c in source {
         var e: [String: Any] = [
             "id": c.id, "name": c.name,
             "tag": c.tag.rawValue, "tagKey": String(describing: c.tag),
@@ -55,22 +71,58 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--dump" {
     }
     var synergies: [String: [[String: Any]]] = [:]
     for t in colours {
-        synergies[String(describing: t)] = UpgradeManager.synergyTiers(for: t).map {
+        synergies[String(describing: t)] = synergyTiers(t).map {
             ["threshold": $0.threshold, "title": $0.title, "effect": $0.effect]
         }
     }
     let out: [String: Any] = [
         "cards": cards,
         "synergies": synergies,
-        "retired": UpgradeManager.retiredCardIDs,
+        "retired": retired,
         "tags": Tag.allCases.map { ["key": String(describing: $0), "name": $0.rawValue] },
         "panda": ["chance": Double(GameConfig.Panda.eligibilityChance),
                   "window": [GameConfig.Panda.firstOfferWindow.lowerBound, GameConfig.Panda.firstOfferWindow.upperBound]],
     ]
-    let data = try JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
+    return try JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
+}
+
+if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--dump" {
+    let um = UpgradeManager(seed: 1)
+    let data = try catalogDump(cards: um.allCards, synergyTiers: UpgradeManager.synergyTiers(for:), retired: UpgradeManager.retiredCardIDs)
     try data.write(to: URL(fileURLWithPath: CommandLine.arguments[2]))
-    print("dumped \(cards.count) cards → \(CommandLine.arguments[2])")
+    print("dumped \(um.allCards.count) cards → \(CommandLine.arguments[2])")
     exit(0)
+}
+
+// MARK: - v2.2 J1: record the parity fixtures
+//
+// `--record-parity <dir> [--force]` skips the checks and writes the two parity
+// fixtures from the CURRENT implementation (tools/v2.2-catalog/harness). The
+// committed fixtures were recorded in J1 from the legacy pool and are the only
+// record of it, so an EXISTING output directory is refused unless `--force` is
+// given explicitly (v2.2 J3-e); even then JF1 fails until the manifest is
+// rewritten under a ruling.
+
+if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--record-parity" {
+    do {
+        let dir = URL(fileURLWithPath: CommandLine.arguments[2])
+        let force = CommandLine.arguments.dropFirst(3).contains("--force")
+        if FileManager.default.fileExists(atPath: dir.path) && !force {
+            print("record-parity refused: \(dir.path) already exists. A recording there would replace the legacy record; "
+                  + "pass --force only under a ruling, and rewrite parity-manifest.json with it.")
+            exit(2)
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let effects = try ParityJSON.data(ParityEffects.document(.runtime()))
+        let runs = try ParityJSON.data(ParityRuns.document(), compact: true)
+        try effects.write(to: dir.appendingPathComponent("legacy-effect-deltas.json"))
+        try runs.write(to: dir.appendingPathComponent("legacy-run-transcripts.json"))
+        print("recorded legacy-effect-deltas.json (\(effects.count) bytes) and legacy-run-transcripts.json (\(runs.count) bytes) → \(dir.path)")
+        exit(0)
+    } catch {
+        print("record-parity failed: \(error)")
+        exit(1)
+    }
 }
 
 // MARK: - Check plumbing
@@ -195,13 +247,13 @@ do {
 // MARK: - CA · catalog expectations
 
 do {
-    let expected: [Tag: Int] = [.fire: 9, .chill: 8, .shock: 8, .bleed: 13, .guardT: 10, .voidT: 13, .growth: 8, .neutral: 10]
+    let expected: [Tag: Int] = [.fire: 9, .chill: 8, .shock: 8, .bleed: 13, .guardT: 10, .voidT: 13, .growth: 8, .neutral: 9]   // v2.2 N1: Keen Eye retired
     var byTag: [Tag: Int] = [:]
     for c in draftable { byTag[c.tag, default: 0] += 1 }
-    check("CA1 pool 80 = 79 draftable + 1 secret (Panda) (CL-106)",
-          pool.count == 80 && draftable.count == 79 && pool.filter { $0.isSecret }.map { $0.id } == ["v20_panda"],
+    check("CA1 pool 79 = 78 draftable + 1 secret (Panda) (CL-106; v2.2 N1 retired Keen Eye)",
+          pool.count == 79 && draftable.count == 78 && pool.filter { $0.isSecret }.map { $0.id } == ["v20_panda"],
           "pool=\(pool.count) draftable=\(draftable.count)")
-    check("CA2 draftable by primary tree: Fire 9 · Chill 8 · Shock 8 · Bleed 13 · Guard 10 · Void 13 · Growth 8 · Neutral 10",
+    check("CA2 draftable by primary tree: Fire 9 · Chill 8 · Shock 8 · Bleed 13 · Guard 10 · Void 13 · Growth 8 · Neutral 9",
           byTag == expected, "\(byTag)")
     let perTree = colours.allSatisfy { t in
         pool.filter { $0.tag == t && $0.isSignature }.count == 1 && pool.filter { $0.tag == t && $0.isCapstone }.count == 1
@@ -253,10 +305,16 @@ do {
               && providers(of: .glacialCondensation).map { $0.id } == ["cap_chill_polarvortex"]
               && card("cap_chill_polarvortex").tierBlockedBy == [4: [.pelletEffect]])
     let pellet: Set<String> = ["void_1", "void_2", "v18_mirror_edge", "v18_fracture_shot", "v18_riftline"]
-    check("CA14 CL-93 (symmetric) exactly Warp Shot, Gravity Well, Mirror Edge, Fracture Shot and Riftline are blocked by it AND grant pelletEffect (Erasure neither)",
-          blocked == pellet && Set(providers(of: .pelletEffect).map { $0.id }) == pellet
+    // CONTRACT CHANGE, v2.2 N4 (R4, ruled): Rapid Fire's T5 — and ONLY its T5 —
+    // also provides pelletEffect and is closed by glacialCondensation (the
+    // symmetric chaos beam ↔ Polar Vortex T4 exclusion); T1–T4 carry no gate.
+    let rf = card("neutral_3")
+    let rfGate = rf.provides.isEmpty && rf.blockedBy.isEmpty && rf.requires.isEmpty
+        && rf.tierProvides == [5: [.pelletEffect]] && rf.tierBlockedBy == [5: [.glacialCondensation]]
+    check("CA14 CL-93 (symmetric) exactly Warp Shot, Gravity Well, Mirror Edge, Fracture Shot and Riftline are blocked by it AND grant pelletEffect (Erasure neither); v2.2 N4: Rapid Fire's T5 tier alone joins both sides",
+          blocked == pellet && Set(providers(of: .pelletEffect).map { $0.id }) == pellet.union(["neutral_3"]) && rfGate
               && card("cap_void_erasure").blockedBy.isEmpty && !card("cap_void_erasure").provides.contains(.pelletEffect),
-          "\(blocked.sorted())")
+          "\(blocked.sorted()) gate \(rfGate)")
 }
 
 // MARK: - RW · reachability through the real normal-campaign draw
@@ -341,7 +399,7 @@ do {
         if r.offered != runs / 2 || r.maxed != runs / 2 || r.refused > 0 { newMisses.append("\(c.id) \(r.offered)/\(r.maxed) refused=\(r.refused)") }
     }
     check("RW2 new save (arena 1): all \(nonGrowth.count) non-Growth draftable cards offered and maxed in every run",
-          nonGrowth.count == 71 && newMisses.isEmpty, "count=\(nonGrowth.count) \(newMisses)")
+          nonGrowth.count == 70 && newMisses.isEmpty, "count=\(nonGrowth.count) \(newMisses)")   // v2.2 N1: 71 → 70 (Keen Eye retired)
 
     // Growth stays absent on a new save (its colour unlocks at arena 5).
     var growthSeen = false
@@ -716,21 +774,22 @@ do {
     let live = UpgradeManager.catalogIDs
     let retired = Set(UpgradeManager.retiredCardIDs.keys)
     check("CT1 catalogIDs is the live pool, in pool order", live == pool.map { $0.id })
-    check("CT2 8 retired ids, none of them live", retired.count == 8 && retired.isDisjoint(with: live))
+    check("CT2 9 retired ids (8 from v2.1 + Keen Eye, v2.2 N1), none of them live", retired.count == 9 && retired.isDisjoint(with: live))
     check("CT3 every v2.0-shipped id is live or registered as retired (an unregistered deletion fails here)",
           v20.count == 80 && Set(v20).isSubset(of: Set(live).union(retired)),
           "\(Set(v20).subtracting(Set(live).union(retired)).sorted())")
     let newIDs = Set(live).subtracting(v20)
     let veteran = UpgradeManager.codexTally(offered: v20 + Array(newIDs), liveIDs: live)
-    check("CT4 a veteran who saw all 80 v2.0 cards + the 8 new: 80/80 discovered, 8 retired, 0 unknown",
-          newIDs.count == 8 && veteran == .init(discovered: 80, total: 80, retired: retired.sorted(), unknown: []), "\(veteran)")
+    check("CT4 a veteran who saw all 80 v2.0 cards + the 8 new: 79/79 discovered, 9 retired (Keen Eye among them), 0 unknown",
+          newIDs.count == 8 && veteran == .init(discovered: 79, total: 79, retired: retired.sorted(), unknown: []), "\(veteran)")
     let v20Only = UpgradeManager.codexTally(offered: v20, liveIDs: live)
-    check("CT5 the v2.0 set alone: 72/80, 8 retired", v20Only.discovered == 72 && v20Only.total == 80 && v20Only.retired.count == 8)
+    check("CT5 the v2.0 set alone: 71/79, 9 retired (an old save's Keen Eye counts as retired, never discovered)",
+          v20Only.discovered == 71 && v20Only.total == 79 && v20Only.retired.count == 9 && v20Only.retired.contains("neutral_2"))
     let empty = UpgradeManager.codexTally(offered: [], liveIDs: live)
-    check("CT6 a fresh save: 0/80", empty == .init(discovered: 0, total: 80, retired: [], unknown: []))
+    check("CT6 a fresh save: 0/79", empty == .init(discovered: 0, total: 79, retired: [], unknown: []))
     let junk = UpgradeManager.codexTally(offered: ["fire_1", "not_a_card", "fire_1"], liveIDs: live)
     check("CT7 an unknown id counts as unknown, never discovered; repeats count once",
-          junk == .init(discovered: 1, total: 80, retired: [], unknown: ["not_a_card"]), "\(junk)")
+          junk == .init(discovered: 1, total: 79, retired: [], unknown: ["not_a_card"]), "\(junk)")
     var rng = UpgradeManager.DrawRandom(seed: 7)
     var bounded = true
     for _ in 0..<500 {
@@ -1115,9 +1174,11 @@ do {
         ("v13_unstable_core face", card("v13_unstable_core").description, "Every 4s, a burst hurts nearby enemies and you"),
         // A7b S11 (CL-120 B1′, its copy approved Sep 28): the burst can't hurt you when it struck nothing.
         ("v13_unstable_core detail", card("v13_unstable_core").detail, "Every 4s, deal 2 damage to enemies within 60pt. Each burst also costs you 10 HP minus your DEF (at least 1). With nothing in range, it can't hurt you."),
-        ("neutral_3 face", card("neutral_3").description, "+11% attack speed"),
-        ("neutral_6 face", card("neutral_6").description, "+1 projectile (two parallel shots)"),
-        ("neutral_6 T1 rung", tierLine("neutral_6", 1), "+1 projectile (two parallel shots)"),
+        ("neutral_3 face", card("neutral_3").description, "+10% attack speed"),   // CONTRACT CHANGE, v2.2 N4: the T1 step is +10% (ladder 10/25/50/90%)
+        // v2.2 N3: Scatter's copy follows its approved TOTAL lanes (2/3/5/9); the
+        // CL-100 "+1 projectile" wording described the retired +1-per-tier ladder.
+        ("neutral_6 face", card("neutral_6").description, "2 parallel shots per volley"),
+        ("neutral_6 T1 rung", tierLine("neutral_6", 1), "2 parallel shots per volley"),
     ]
     let wrong = approved.filter { $0.1 != $0.2 }.map { $0.0 }
     check("CP1 the approved faces and short details are in place, exactly (\(approved.count) strings)", wrong.isEmpty, "\(wrong)")
@@ -1392,6 +1453,16 @@ func body(_ src: String, _ signature: String) -> String {
     let end = rest.range(of: "\n    private func ") ?? rest.range(of: "\n    func ")
     return String(rest[..<(end?.lowerBound ?? rest.endIndex)])
 }
+/// v2.2 N4: the scene split at the chaos beam's section (its MARK up to the
+/// `v1.6: Projectile ↔ Boss` MARK). The gun's A7b censuses keep their exact
+/// counts on `gun`; the beam's own additions are counted exactly on `beam`.
+/// Both marks must occur once, in order, or the split is empty (fails closed).
+func beamSplit(_ src: String) -> (gun: String, beam: String) {
+    let open = "    // MARK: - v2.2 N4: the chaos beam (Rapid Fire T5)\n", close = "    // MARK: - v1.6: Projectile ↔ Boss\n"
+    guard src.components(separatedBy: open).count == 2, src.components(separatedBy: close).count == 2,
+          let a = src.range(of: open), let b = src.range(of: close), a.upperBound <= b.lowerBound else { return ("", "") }
+    return (String(src[..<a.lowerBound]) + String(src[b.lowerBound...]), String(src[a.lowerBound..<b.lowerBound]))
+}
 do {
     let scene = code("Sparkforge/Scenes/GameScene.swift")
     let opener = body(scene, "private func runRandomOpener(")
@@ -1456,7 +1527,7 @@ do {
     let dormant = ["arcWake", "ArcWake", "inductionStep", "InductionStep", "InductionCharge", "inductionCharge", "shockChainRadiusBonus",
                    "stunChance", "stunDuration", "bloodPriceBonus", "staticCrownDamage", "staticCrownRadius",
                    "glassEngineActive", "unbrokenCoreOwned"]
-    let survivors = dormant.filter { scene.contains($0) || stats.contains($0) || code("Sparkforge/Systems/UpgradeManager.swift").contains($0) }
+    let survivors = dormant.filter { scene.contains($0) || stats.contains($0) || code("Sparkforge/Systems/UpgradeManager.swift").contains($0) || code("Sparkforge/Systems/AbilityBehaviors.swift").contains($0) }
     check("WR7 A7b S1 the dormant runtime stays deleted (Arc Wake, Induction Step, Copper Vein radius, the legacy stun, Blood Price, Static Crown stats, the Glass Engine and Unbroken flags)",
           survivors.isEmpty && scene.contains("private func chainLightning(") && scene.contains("private func rollOverload(on enemy: EnemyNode) {")
             && stats.contains("guard overloadOwned else { return 0 }") && stats.contains("var effectiveDamageMultiplier: CGFloat {")
@@ -1546,7 +1617,7 @@ do {
         return b.depth(at: verdict[0]) == 1 && b.depth(at: fire[0]) == 1
             && b.tokens(from: verdict[0], to: fire[0] + fireCall.count) == volleyTokens
     }
-    let retired = ["spreadShotCount"].filter { scene.contains($0) || stats.contains($0) || code("Sparkforge/Systems/UpgradeManager.swift").contains($0) }
+    let retired = ["spreadShotCount"].filter { scene.contains($0) || stats.contains($0) || code("Sparkforge/Systems/UpgradeManager.swift").contains($0) || code("Sparkforge/Systems/AbilityBehaviors.swift").contains($0) }
     check("WR9 A7b S3 Storm Engine: the gun fires PlayerStats.volleyPelletCount's count (normal + 2 on a spread volley, CL-98), and nothing else sets it",
           volleyWired() && !scene.contains("extraProjectiles") && retired.isEmpty
             && stats.contains("func volleyPelletCount(isSpreadVolley: Bool) -> Int {"),
@@ -1660,8 +1731,24 @@ do {
     // arguments, and no other scene read.
     let chainReads = ["vulnerability: enemyNode.vulnerabilityMultiplier": 1, "vulnerability: enemy.vulnerabilityMultiplier": 1,
                       "vulnerability: bossNode.vulnerabilityMultiplier": 2]
-    let sceneReadsOK = consumers["Scenes/GameScene.swift"] == 4
-        && chainReads.allSatisfy { (flatApp["Scenes/GameScene.swift"] ?? "").components(separatedBy: $0.key).count - 1 == $0.value }
+    // CONTRACT CHANGE, v2.2 N4: the chaos beam's two exact parents (enemy, boss)
+    // add exactly one read each; outside the beam section the four stand as they were.
+    let wr12Split = beamSplit(raw("Sparkforge/Scenes/GameScene.swift"))
+    let wr12Gun = SwiftSource.executable(wr12Split.gun).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    let wr12Beam = SwiftSource.executable(wr12Split.beam).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    let beamReads = ["vulnerability: enemyNode.vulnerabilityMultiplier": 1, "vulnerability: bossNode.vulnerabilityMultiplier": 1]
+    // CONTRACT CHANGE, v2.2 N5 (R6, D2): Chain Reaction's burst reads each victim's resolved
+    // vulnerability ONCE, into its single rounding (`chainReactionBurst`); outside that function
+    // (and the beam section) the scene's reads stand exactly as before.
+    let n5Burst = SwiftSource.block(in: raw("Sparkforge/Scenes/GameScene.swift"), after: "private func chainReactionBurst(")
+        .map { String($0.exec[$0.open...$0.close]).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") } ?? ""
+    let wr12Rest = !n5Burst.isEmpty && wr12Gun.components(separatedBy: n5Burst).count == 2 ? wr12Gun.replacingOccurrences(of: n5Burst, with: "") : ""
+    let sceneReadsOK = consumers["Scenes/GameScene.swift"] == 7
+        && chainReads.allSatisfy { wr12Rest.components(separatedBy: $0.key).count - 1 == $0.value }
+        && n5Burst.components(separatedBy: "vulnerabilityMultiplier").count - 1 == 1
+        && n5Burst.components(separatedBy: "vulnerability: enemy.vulnerabilityMultiplier").count - 1 == 1
+        && beamReads.allSatisfy { wr12Beam.components(separatedBy: $0.key).count - 1 == $0.value }
+        && wr12Beam.components(separatedBy: "vulnerabilityMultiplier").count - 1 == 2
     let consumedOnce = bodies.allSatisfy { b in
         (flatApp[b] ?? "").components(separatedBy: consume).count == 2 && consumers[b] == (b == "Nodes/EnemyNode.swift" ? 3 : 2)
     } && Set(consumers.keys) == Set(bodies + ["Scenes/GameScene.swift"]) && sceneReadsOK
@@ -1722,7 +1809,7 @@ do {
     let s7Chains: [S7Chain] = [
         S7Chain(name: "gun → enemy", signature: "private func handleProjectileHit(",
                 routineEnd: "rounding: projectileNode.hitRounding)",
-                consumption: "let killed = enemyNode.takeDirectHit(hit)",
+                consumption: "let killed = enemyNode.takeDirectHit(hit.targetEntry)",   // CONTRACT CHANGE, v2.2 Whiteout W1 (Oct 14): delivered through the melt-capable entry
                 shielded: true,
                 forgeThenBlock: ["damage", "=", "applyForgeOffense", "(", "damage", ",", "healthPercent", ":", "enemyNode", ".",
                                 "healthPercent", ",", "bossClass", ":", "enemyNode", ".", "isMiniBoss", ",", "impaired", ":",
@@ -1737,10 +1824,13 @@ do {
                                 "bleeding", ":", "enemyNode", ".", "isBleeding", ")", ",", "overcharge", ":", "projectileNode",
                                 ".", "overchargeFactor", ",", "vulnerability", ":", "enemyNode", ".", "vulnerabilityMultiplier", ",", "rounding",
                                 ":", "projectileNode", ".", "hitRounding", ")"],
-                prefixCount: 706, prefixDigest: "e409a68a8d0f9b548a855e2f854aedaec81e5ec9e7e163cc9dd58a68b4c68ba4"),
+                // v2.2 N3: +13 tokens — the one-hit-per-body guard (`guard !projectileNode.hasStruck(enemyNode) else { return }`) and `onHitEnemy(enemyNode)`; the chain itself is untouched.
+                // v2.2 N3 corrective: +10 tokens — the share step `hit = fractureBranch(hit, projectile: projectileNode)` after the shield (719 → 729).
+                // CONTRACT CHANGE, v2.2 Whiteout W1 (Oct 14): +2 tokens (`. targetEntry`) in the final entry; 729 → 731.
+                prefixCount: 731, prefixDigest: "6118d1451376da05021a7cc86eaa5835edd2c599d1f8db3f9476d3af53761b23"),
         S7Chain(name: "gun → boss", signature: "private func handleProjectileHitBoss(",
                 routineEnd: "rounding: projectileNode.hitRounding)",
-                consumption: "bossNode.takeDirectHit(hit, ignoresChallengeDEF: projectileNode.voidHit.flatDEFPenetration)",
+                consumption: "bossNode.takeDirectHit(bossHit, ignoresChallengeDEF: ignoresDEF)",   // v2.2 N3 corrective: the dial-then-share helper precedes it
                 shielded: false,
                 forgeThenBlock: ["damage", "=", "applyForgeOffense", "(", "damage", ",", "healthPercent", ":", "bossNode", ".",
                                 "healthPercent", ",", "bossClass", ":", "true", ",", "impaired", ":", "false", ",",
@@ -1749,7 +1839,9 @@ do {
                                 "bleedingEnemyDamageTaken", ",", "bleeding", ":", "bossStatus", ".", "bleed", ".", "isBleeding", ")",
                                 ",", "overcharge", ":", "projectileNode", ".", "overchargeFactor", ",", "vulnerability", ":", "bossNode",
                                 ".", "vulnerabilityMultiplier", ",", "rounding", ":", "projectileNode", ".", "hitRounding", ")"],
-                prefixCount: 342, prefixDigest: "cc3d754994b1e797d319a1a0967cd83a8f58e03dcca62fab1f0d3cd32d3951e2"),
+                // v2.2 N3: +13 tokens — the one-hit-per-body guard and `onHitEnemy(bossNode)`; the chain itself is untouched.
+                // v2.2 N3 corrective: +15 tokens — the dial-then-share helper (18) + the new entry (10) replace the 13-token entry (355 → 370).
+                prefixCount: 370, prefixDigest: "aa5c264d9d4ad33111c55180e7dd762ba422f8edf1e9b9b137c3d786a9dc7d92"),
         S7Chain(name: "sweep → enemy", signature: "private func redSmileHit(",
                 routineEnd: "rounding: DirectHitRounding())",
                 consumption: "let killed = enemy.takeDirectHit(hit)",
@@ -1807,16 +1899,27 @@ do {
         let flow = b.tokens(from: routineStop, to: take[0] + c.consumption.count)
         let writes = flow.indices.filter { $0 + 1 < flow.count && flow[$0] == "damage" && flow[$0 + 1] == "=" }
         let shields = flow.indices.filter { $0 + shieldTokens.count <= flow.count && Array(flow[$0..<($0 + shieldTokens.count)]) == shieldTokens }
-        let hitMutations = flow.indices.filter { $0 + 2 < flow.count && flow[$0] == "hit" && flow[$0 + 1] == "." && flow[$0 + 2] != "basis" }
+        // CONTRACT CHANGE, v2.2 Whiteout W1 (Oct 14): the final entry READS `hit.targetEntry`; mutations are
+        // looked for in the flow BEFORE that entry (the entry statement itself is pinned exactly by `consumption`).
+        let flowBeforeEntry = b.tokens(from: routineStop, to: take[0])
+        let hitMutations = flowBeforeEntry.indices.filter { $0 + 2 < flowBeforeEntry.count && flowBeforeEntry[$0] == "hit" && flowBeforeEntry[$0 + 1] == "." && flowBeforeEntry[$0 + 2] != "basis" }
         if c.shielded {
+            // v2.2 N3 corrective: after the shield, exactly ONE more hit step — the
+            // Fracture share (`hit = fractureBranch(hit, projectile: projectileNode)`),
+            // the chain's last step — then the basis write.
+            let shareTokens = ["hit", "=", "fractureBranch", "(", "hit", ",", "projectile", ":", "projectileNode", ")"]
+            let shares = flow.indices.filter { $0 + shareTokens.count <= flow.count && Array(flow[$0..<($0 + shareTokens.count)]) == shareTokens }
+            // Only the GUN chain carries a Fracture share (a projectile); the sweep never does.
+            let wantsShare = c.name.hasPrefix("gun")
             guard writes.count == 1, writes[0] + basisWrite.count <= flow.count, Array(flow[writes[0]..<(writes[0] + basisWrite.count)]) == basisWrite,
-                  shields.count == 1, hitMutations == shields, shields[0] < writes[0] else {
-                return "\(c.name): after the block, exactly Braceguard's hit.shield(by:) then damage = hit.basis (\(writes.count) writes, \(shields.count) shields)"
+                  shields.count == 1, hitMutations == shields, shields[0] < writes[0],
+                  wantsShare ? (shares.count == 1 && shields[0] < shares[0] && shares[0] < writes[0]) : shares.isEmpty else {
+                return "\(c.name): after the block, exactly Braceguard's hit.shield(by:), \(wantsShare ? "then the Fracture share step, " : "")then damage = hit.basis (\(writes.count) writes, \(shields.count) shields, \(shares.count) share steps)"
             }
         } else if !writes.isEmpty || !hitMutations.isEmpty { return "\(c.name): \(writes.count) writes / \(hitMutations.count) hit mutations after the block" }
         let prefix = b.tokens(from: b.open, to: take[0] + c.consumption.count)
         let digest = SwiftSource.digest(prefix)
-        return prefix.count == c.prefixCount && digest == c.prefixDigest ? nil : "\(c.name): prefix \(prefix.count) tokens \(digest.prefix(16))"
+        return prefix.count == c.prefixCount && digest == c.prefixDigest ? nil : "\(c.name): prefix \(prefix.count) tokens \(digest)"
     }
     // Corrective 8: each declaration must be the WHOLE executable line (a substring
     // match let `let hitRounding = DirectHitRounding().unit >= 0 ? … : …` through).
@@ -1865,8 +1968,31 @@ do {
         return n(body, "let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: GameConfig.RedSmile.damageFraction))") == 1
             && n(body, "var damage = overcharge.base") == 1 && !body.contains("shotFractionDamage")
     }
-    let census = n(sceneFlat, "overchargeFactor =") == 2 && n(sceneFlat, "overchargeParts(scale:") == 4
-        && n(sceneFlat, "damageMultiplier: playerStats.effectiveDamageMultiplier") == 5 && n(sceneFlat, "takeDirectHit(") == 4
+    // CONTRACT CHANGE, v2.2 N4: outside the chaos beam's section the A7b census
+    // stands exactly; the beam adds ONE split (overchargeParts(scale: 1) at its
+    // tick), ONE carrier factor (its virtual shot) and the two direct entries of
+    // its rider copies — and never the excluded shots' plain multiplier.
+    let s8Split = beamSplit(sceneS8)
+    let gunFlat = flatExec(s8Split.gun), beamFlat = flatExec(s8Split.beam)
+    // (N5-R1, Oct 14: the burst delivers through `ChainReaction.entry(hit)` — the melt-basis contract; same one entry.)
+    // CONTRACT CHANGE, v2.2 N5 (R6, D2): Chain Reaction's burst is a fifth direct-entry caller — its
+    // one rounding already folds the vulnerability in (`ChainReaction.hit`), so the node must not apply
+    // it again. Outside `chainReactionBurst` the A7b census stands exactly; inside it: one direct entry,
+    // no Overcharge split, no ATK multiplier.
+    let n5BurstFlat = flatBody(sceneS8, "private func chainReactionBurst(")
+    let gunRest = !n5BurstFlat.isEmpty && n(gunFlat, n5BurstFlat) == 1 ? gunFlat.replacingOccurrences(of: n5BurstFlat, with: "") : ""
+    let census = n(gunRest, "overchargeFactor =") == 2 && n(gunRest, "overchargeParts(scale:") == 4
+        && n(gunRest, "damageMultiplier: playerStats.effectiveDamageMultiplier") == 5 && n(gunRest, "takeDirectHit(") == 4
+        && n(n5BurstFlat, "takeDirectHit(") == 1 && n(n5BurstFlat, "if enemy.takeDirectHit(ChainReaction.entry(hit)) { lethal.append(enemy) }") == 1
+        && !n5BurstFlat.contains("overcharge") && !n5BurstFlat.contains("damageMultiplier") && !n5BurstFlat.contains("takeDamage(")
+        && n(beamFlat, "let split = OverchargeSplit(playerStats.overchargeParts(scale: 1))") == 1 && n(beamFlat, "overchargeParts(scale:") == 1
+        && n(beamFlat, "shot.overchargeFactor = split.factor") == 1 && n(beamFlat, "overchargeFactor =") == 1
+        && n(beamFlat, "damageMultiplier: playerStats.effectiveDamageMultiplier") == 0
+        // CONTRACT CHANGE, v2.2 Whiteout W1: the copy's enemy entry, still token-equal to the gun's (NB1).
+        // (WB-R1, Oct 14: this comment once sat at the END of the line below and commented out the boss predicate —
+        // both predicates are executable again; tools/catalog-harness/wr14-guard-probe.py proves WR14 itself sees the boss entry.)
+        && n(beamFlat, "let killed = enemyNode.takeDirectHit(hit.targetEntry)") == 1 && n(beamFlat, "bossNode.takeDirectHit(bossHit, ignoresChallengeDEF: ignoresDEF)") == 1
+        && n(beamFlat, "takeDirectHit(") == 2
     let enemyFlat = flatExec(raw("Sparkforge/Nodes/EnemyNode.swift")), bossProto = flatExec(raw("Sparkforge/Nodes/ArenaBossNode.swift"))
     let entries = enemyFlat.contains("func takeDamage(_ amount: Int) -> Bool { takeDamage(amount, resolved: nil) }")
         && enemyFlat.contains("func takeDirectHit(_ hit: DirectHit) -> Bool { takeDamage(hit.basis, resolved: hit.dealt) }")
@@ -1911,7 +2037,9 @@ do {
     let shatterShards = flatBody(sceneS8, "private func iceShatter("), iceburstShards = flatBody(sceneS8, "private func iceburst(")
     let s9Shards = n(shatterShards, "allowModifiers: false, rollsCrit: false,") == 1
         && !iceburstShards.isEmpty && !iceburstShards.contains("rollsCrit")
-        && n(sceneFlat, "rollsCrit: false") == 1 && n(sceneFlat, "rollShotCrit(") == 3
+        && n(sceneFlat, "rollsCrit: false") == 1 && n(gunFlat, "rollShotCrit(") == 3
+        // CONTRACT CHANGE, v2.2 N4: the beam rolls ONE direct-attack crit per parent lane per tick.
+        && n(beamFlat, "rollShotCrit(") == 1 && n(beamFlat, "let isCrit = rollShotCrit(directAttack: true)") == 1
     let s9Roll = flatBody(sceneS8, "private func rollShotCrit(directAttack: Bool) -> Bool")
         == "{ var isCrit = CGFloat.random(in: 0...1) < playerStats.critChance if playerStats.forgeCalculatedStrike && directAttack { forgeCalcStrikeCount += 1 if forgeCalcStrikeCount % 5 == 0 { isCrit = true } } return isCrit }"
         && n(sceneFlat, "forgeCalcStrikeCount += 1") == 2
@@ -1935,9 +2063,14 @@ do {
         && n(gunHit, gunExit) == 1 && n(sweepHit, sweepExit) == 1
         && n(gunHit, "onEnemyKilled(at: enemyNode.position, xpValue: enemyNode.xpValue, enemy: enemyNode, source: projectileNode.killSource, iceburstGeneration: projectileNode.iceburstGeneration) }") == 1
         && n(sweepHit, "onEnemyKilled(at: enemy.position, xpValue: enemy.xpValue, enemy: enemy, source: .melee) }") == 2
-    let s10Census = n(sceneFlat, "ShatterRule.") == 2 && n(sceneFlat, "playerStats.shatterChance") == 2
-        && n(sceneFlat, "playerStats.shatterSlowThreshold") == 2 && n(sceneFlat, "shatter.endsHit") == 2
-    let statsFlatS10 = flatExec(statsRaw), umFlatS10 = flatExec(raw("Sparkforge/Systems/UpgradeManager.swift"))
+    // CONTRACT CHANGE, v2.2 N4: the beam's rider copy (landBeamHit, pinned token-equal
+    // to the gun's by NB1) is the third site; the gun's two stand exactly.
+    let beamHitFlat = flatBody(sceneS8, "private func landBeamHit(")
+    let s10Census = n(gunFlat, "ShatterRule.") == 2 && n(gunFlat, "playerStats.shatterChance") == 2
+        && n(gunFlat, "playerStats.shatterSlowThreshold") == 2 && n(gunFlat, "shatter.endsHit") == 2
+        && n(beamFlat, "ShatterRule.") == 1 && n(beamHitFlat, shatterAsk("enemyNode")) == 1 && n(beamHitFlat, gunExit) == 1
+        && n(beamFlat, "playerStats.shatterChance") == 1 && n(beamFlat, "shatter.endsHit") == 1
+    let statsFlatS10 = flatExec(statsRaw), umFlatS10 = flatExec(raw("Sparkforge/Systems/AbilityBehaviors.swift"))   // v2.2 J2: the synergy effects live here now
     let s10Tuning = n(statsFlatS10, "var shatterSlowThreshold: CGFloat = GameConfig.Chill.shatterSlowThreshold") == 1
         && n(statsFlatS10, "shatterSlowThreshold = GameConfig.Chill.shatterSlowThreshold") == 1
         && n(statsFlatS10, "shatterSlowThreshold") == 4 && n(statsFlatS10, "shatterChance = 0.0") == 1   // 2 sites + their 2 config reads
@@ -2299,6 +2432,941 @@ do {
             && heights.first { $0.0 == "cap_void_erasure" }?.1 == 665 && heights.first { $0.0 == "cap_fire_everglow" }?.1 == 652,
           "\(aboveTarget.sorted())")
 }
+
+// MARK: - J (v2.2 J1): the authored JSON catalog — fixtures, loader, parity
+//
+// The game still runs on the legacy pool. These checks prove the JSON catalog
+// and its native behaviour registry would give the same game:
+//   JF  the parity fixtures are sound (recorded from legacy, reproducible, and
+//       the snapshot they rest on is complete and strict)
+//   JL  the loader accepts the authored file and rejects every broken one,
+//       atomically, with the diagnostic that names the problem
+//   JP  the loaded catalog equals legacy: ordered metadata, the dump's bytes,
+//       every effect delta, the targeted scenarios, and the recorded runs
+do {
+    let catalogURL = root.appendingPathComponent("Sparkforge/Catalog/ability-catalog.json")
+    let parityDir = root.appendingPathComponent("tools/v2.2-catalog/parity")
+    func read(_ url: URL) -> Data { (try? Data(contentsOf: url)) ?? Data() }
+    func json(_ data: Data) -> [String: Any] { (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:] }
+    let effectsFixture = read(parityDir.appendingPathComponent("legacy-effect-deltas.json"))
+    let runsFixture = read(parityDir.appendingPathComponent("legacy-run-transcripts.json"))
+    let manifest = json(read(parityDir.appendingPathComponent("parity-manifest.json")))
+    let runtime = EffectSource.runtime()
+
+    // v2.2 Neutral rework (N1; corrected Oct 12 after the independent review):
+    // the reviewed overlay names the cards the unit changes. ParityAttribution
+    // builds the EXPECTED current documents from the frozen legacy record and
+    // the overlay — per card, per tier, from the fixture's own record of what
+    // each retired/rewritten card did — and the comparisons require the actual
+    // documents to equal them: exact everywhere, numeric within 1e-12 on the
+    // attributed fields. No field is ever masked. Without an overlay the
+    // comparisons are exact, as in J2.
+    let overlayURL = root.appendingPathComponent("tools/v2.2-catalog/parity/v22-neutral/n5-overlay.json")   // v2.2 N5 (supersedes n4-overlay.json)
+    let overlay = ParityOverlay(json: json(read(overlayURL)))
+    let skipIDs = overlay?.retired ?? []
+    let j0ExportObject = json(read(root.appendingPathComponent("tools/v2.2-catalog/baseline/compiled-catalog-export.json")))
+    let legacyCards = (j0ExportObject["cards"] as? [[String: Any]]) ?? []
+    let legacyOrder: (ids: [String], tiers: [String: Int])? = legacyCards.isEmpty ? nil
+        : (legacyCards.compactMap { $0["id"] as? String }, Dictionary(uniqueKeysWithValues: legacyCards.compactMap { c in (c["id"] as? String).map { ($0, c["maxTier"] as? Int ?? 1) } }))
+    func nsEqual(_ a: Any, _ b: Any) -> Bool { (a as? NSObject) == (b as? NSObject) }
+    let effectsLegacyObject = json(effectsFixture)
+    let ground: ParityAttribution.Ground? = overlay.map { ParityAttribution.Ground(legacy: effectsLegacyObject, overlay: $0) }
+    let tolerant: Set<String> = ground?.attributedFields ?? []
+    let expectedEffectsObject: [String: Any] = ground.map { ParityAttribution.expectedEffects(legacy: effectsLegacyObject, ground: $0) } ?? effectsLegacyObject
+    func attributed(_ expected: Any?, _ actual: Any?, path: String = "") -> String {
+        ParityAttribution.firstDifference(expected: expected, actual: actual, tolerant: tolerant, path: path)
+    }
+
+    // ── JF: the fixtures ────────────────────────────────────────────────────
+    let recordedDigests = manifest["fixtures"] as? [String: String] ?? [:]
+    check("JF1 the parity fixtures are the files recorded from the legacy pool in J1 (their SHA-256 is the manifest's)",
+          !effectsFixture.isEmpty && !runsFixture.isEmpty
+            && recordedDigests["legacy-effect-deltas.json"] == ParityDigest.sha256(effectsFixture)
+            && recordedDigests["legacy-run-transcripts.json"] == ParityDigest.sha256(runsFixture))
+
+    // J2 — THE runtime parity check. The real, catalog-backed UpgradeManager
+    // plays the same 22 seeded runs the legacy pool played in J1 (drafts,
+    // rerolls, bonus cards, acquisitions, synergy tiers with their once-per-run
+    // bookkeeping and Codex writes, reset) and must write the same bytes.
+    let runtimeEffectsNow = (try? ParityJSON.data(ParityEffects.document(runtime, legacy: legacyOrder, skip: skipIDs))) ?? Data()
+    let runtimeRunsNow = (try? ParityJSON.data(ParityRuns.document(), compact: true)) ?? Data()
+    if overlay == nil {
+        check("JF2 the catalog-backed game reproduces both legacy fixtures byte for byte: every effect delta, and the 22 recorded runs through the REAL manager (draft, bonus, reroll, acquire, synergy bookkeeping, Codex writes, reset)",
+              runtimeEffectsNow == effectsFixture && runtimeRunsNow == runsFixture,
+              "effects: \(ParityCompare.firstDifference(json(runtimeEffectsNow), json(effectsFixture))) runs: \(ParityCompare.firstDifference(json(runtimeRunsNow), json(runsFixture)))")
+    } else {
+        // v2.2 Neutral (N1): the effect document must equal the ATTRIBUTED
+        // expectation (nothing masked); the run replay must equal the ACCEPTED
+        // ENGINE's transcript with only the reviewed pool edits (nothing inferred).
+        let unitName = overlay?.unit ?? "?"
+        let effNow = json(runtimeEffectsNow)
+        check("JF2a the current effect document equals the EXPECTED document built from the frozen legacy record + the \(unitName) overlay: every other card and synergy on EVERY field, every start state and scenario step — exact, numeric within 1e-12 only on the \(tolerant.count) attributed fields \(tolerant.sorted()); the overlay's own cards are its reviewed ladders (JP4b checks them tier by tier)",
+              !runtimeEffectsNow.isEmpty && ground?.problem == nil && attributed(expectedEffectsObject, effNow).isEmpty,
+              ground?.problem ?? attributed(expectedEffectsObject, effNow))
+        // JF2b — the accepted engine as the comparator (run.sh built HEAD's
+        // UpgradeManager, pinned by hash, twice: unedited and with the reviewed
+        // N1 pool edits; each recorded the 22 runs with this kit's recorder).
+        let env = ProcessInfo.processInfo.environment
+        let comparatorLegacy = env["SPARKFORGE_COMPARATOR_LEGACY"].map { read(URL(fileURLWithPath: $0)) } ?? Data()
+        let comparatorN1 = env["SPARKFORGE_COMPARATOR_N1"].map { read(URL(fileURLWithPath: $0)) } ?? Data()
+        check("JF2b-0 the accepted draw engine (HEAD's UpgradeManager.swift at the pinned commit, built with the harness's own support sources) reproduces the frozen legacy run fixture byte for byte when unedited — the comparator is grounded",
+              !comparatorLegacy.isEmpty && comparatorLegacy == runsFixture,
+              comparatorLegacy.isEmpty ? "no comparator transcript (run.sh builds it unless SPARKFORGE_SKIP_COMPARATOR is set)" : ParityCompare.firstDifference(json(comparatorLegacy), json(runsFixture)))
+        check("JF2b the current catalog-backed manager's COMPLETE replay of the 22 legacy runs equals, byte for byte, the accepted engine's transcript with ONLY the reviewed \(unitName) pool edits applied (every spread, reroll, bonus seat, pick, acquisition, synergy tier, final state, manager and Codex state, through reset) — any draw-engine drift, early or late, fails here",
+              !comparatorN1.isEmpty && !runtimeRunsNow.isEmpty && runtimeRunsNow == comparatorN1,
+              comparatorN1.isEmpty ? "no comparator transcript" : ParityCompare.firstDifference(json(runtimeRunsNow), json(comparatorN1)))
+        let legacyRuns = (json(runsFixture)["runs"] as? [[String: Any]]) ?? []
+        let currentRuns = (json(runtimeRunsNow)["runs"] as? [[String: Any]]) ?? []
+        let comparatorRuns = (json(comparatorN1)["runs"] as? [[String: Any]]) ?? []
+        var firstDivergence: [Int] = []
+        for (a, b) in zip(legacyRuns, comparatorRuns) {
+            let la = ((a["play"] as? [String: Any])?["levels"] as? [[String: Any]]) ?? []
+            let lb = ((b["play"] as? [String: Any])?["levels"] as? [[String: Any]]) ?? []
+            let level = zip(la, lb).first { !nsEqual($0.0["spread"] ?? [], $0.1["spread"] ?? []) }.map { $0.0["level"] as? Int ?? -1 } ?? (la.count == lb.count ? 0 : -1)
+            firstDivergence.append(level)
+        }
+        print("NOTE  JF2b-attribution (\(unitName)): the accepted engine with only the reviewed pool edits differs from the frozen legacy run record in \(firstDivergence.filter { $0 != 0 }.count) of \(legacyRuns.count) runs, first differing spread at level \(Set(firstDivergence).sorted()); the two comparator builds differ by nothing but those edits (retired \(skipIDs.sorted()), rewritten \(overlay?.rewritten.sorted() ?? [])), so that is the whole cause — measured, not inferred; the legacy run fixture stays frozen until the N6 recording under a ruling")
+        check("JF2c the replay ran to completion on every recorded run (\(currentRuns.count) of \(legacyRuns.count))",
+              !currentRuns.isEmpty && currentRuns.count == legacyRuns.count && !firstDivergence.contains(-1), "\(firstDivergence)")
+        // JF2d — the attribution is grounded and complete: the fields it can
+        // touch are DERIVED from the legacy record's own deltas of the
+        // retired/rewritten cards and the overlay's expectations, and must be
+        // exactly the overlay's declared fields; each rewritten card's overlay
+        // ladder differs from its legacy ladder; each retired id was a legacy
+        // card whose legacy effect was the same from every recorded state.
+        let legacyCardDeltas = (effectsLegacyObject["cards"] as? [String: [String: [[String: [String]]]]]) ?? [:]
+        let unneededCards = (overlay?.rewritten ?? []).filter { id in
+            guard let legacyDefault = legacyCardDeltas[id]?["default"], let expected = overlay?.expectedDeltas[id] else { return true }
+            return nsEqual(legacyDefault, expected)
+        }
+        check("JF2d the attribution is grounded and complete: its derived fields \(tolerant.sorted()) are exactly the overlay's declared fields; each rewritten card's ladder differs from the legacy one and has an expectation; each retired id was a legacy card with a state-independent legacy effect",
+              ground?.problem == nil && tolerant == (overlay?.fields ?? []) && unneededCards.isEmpty,
+              "\(ground?.problem ?? "") declared \(overlay?.fields.sorted() ?? []) derived \(tolerant.sorted()) unneeded cards \(unneededCards.sorted())")
+    }
+
+    struct HoldsClosure { var count = 1; var action: () -> Void = {} }
+    final class Shared { var value = 1 }
+    struct HoldsObject { var count = 1; var shared = Shared() }
+    enum Payload { case some(Int) }
+    struct HoldsPayload { var kind = Payload.some(1) }
+    enum Bare { case plain }
+    struct HoldsBare { var kind = Bare.plain }
+    func refused(_ value: Any, at path: String) -> Bool {
+        do { _ = try ParitySnapshot.take(value); return false }
+        catch let error as ParitySnapshot.Unsupported { return error.path == path }
+        catch { return false }
+    }
+    check("JF3 the snapshot refuses what it has no rule for, naming the field: a closure, a nested object, an enum with a payload, an enum with no raw value",
+          refused(HoldsClosure(), at: "action") && refused(HoldsObject(), at: "shared")
+            && refused(HoldsPayload(), at: "kind") && refused(HoldsBare(), at: "kind"))
+
+    let defaultFields = (try? ParitySnapshot.take(PlayerStats())) ?? [:]
+    let topLevel = Set(Mirror(reflecting: PlayerStats()).children.compactMap { $0.label })
+    let coveredTop = Set(defaultFields.keys.map { String($0.split(whereSeparator: { $0 == "." || $0 == "[" })[0]) })
+    let nestedPaths = ["bloodBarrier.amount", "bloodBarrier.expiry.remaining", "projectileShield.isOwned", "projectileShield.cooldown.remaining",
+                       "unbrokenWindow.timer.remaining", "groundedCore.tuning.cap", "fortifyClock.stillSeconds", "frenzyTimer.remaining"]
+    check("JF4 the snapshot covers every stored property of PlayerStats (\(topLevel.count)), nested state included, and every value has an explicit type",
+          !topLevel.isEmpty && coveredTop == topLevel && nestedPaths.allSatisfy { defaultFields[$0] != nil }
+            && defaultFields.values.allSatisfy { v in ["int:", "num:", "bool:", "str:", "uint:", "set:", "enum:"].contains { v.hasPrefix($0) } || v == "nil" || v == "struct:empty" },
+          "missing \(topLevel.subtracting(coveredTop).sorted()) extra \(coveredTop.subtracting(topLevel).sorted())")
+
+    let shielded = PlayerStats()
+    shielded.projectileShield.grant()
+    shielded.fireRateMultiplier = 0.1 + 0.2
+    let shieldDiff = ParitySnapshot.diff(defaultFields, (try? ParitySnapshot.take(shielded)) ?? [:])
+    struct Floats { var a = 0.1 + 0.2; var b = 0.3; var negativeZero = -0.0; var zero = 0.0; var huge = Double.infinity }
+    let floats = (try? ParitySnapshot.take(Floats())) ?? [:]
+    check("JF5 the snapshot sees a change in nested state and tells nearby numbers apart (0.1 + 0.2 is not 0.3; −0 is not 0)",
+          shieldDiff["projectileShield.isOwned"] == ["bool:false", "bool:true"] && shieldDiff["fireRateMultiplier"]?[1] == "num:0.30000000000000004"
+            && Set(shieldDiff.keys).isSubset(of: ["projectileShield.isOwned", "fireRateMultiplier"])
+            && floats["a"] != floats["b"] && floats["negativeZero"] == "num:-0.0" && floats["zero"] == "num:0.0" && floats["huge"] == "num:inf",
+          "\(shieldDiff) \(floats)")
+
+    // ── JL: the loader ──────────────────────────────────────────────────────
+    let authored = read(catalogURL)
+    let registry = AbilityBehaviors.registry
+    var loaded: AbilityCatalog? = nil
+    var loadReport = ""
+    switch AbilityCatalog.load(authored) {
+    case .success(let catalog): loaded = catalog
+    case .failure(let failure): loadReport = failure.report
+    }
+    check("JL1 the authored catalog loads: \(pool.count) cards, 21 synergy tiers, \(UpgradeManager.retiredCardIDs.count) retired ids",
+          loaded?.cards.count == pool.count && loaded?.synergyEffects.count == 21 && loaded?.retiredCardIDs.count == UpgradeManager.retiredCardIDs.count
+            && registry.duplicateKeys.isEmpty,
+          loadReport)
+
+    var wrongCases: [String] = []
+    var producedCodes: Set<CatalogDiagnostic.Code> = []
+    let cases = CatalogRejections.all(valid: authored, registry: registry)
+    for one in cases {
+        let outcome = one.source.map { AbilityCatalog.load(source: $0, behaviors: one.registry) } ?? AbilityCatalog.load(one.data, behaviors: one.registry)
+        switch outcome {
+        case .success:
+            wrongCases.append("\(one.name): LOADED")
+        case .failure(let failure):
+            let codes = failure.diagnostics.map { $0.code }
+            if !codes.contains(one.expected) { wrongCases.append("\(one.name): wanted \(one.expected.rawValue), got \(codes.map { $0.rawValue })") }
+            if failure.diagnostics.contains(where: { $0.path.isEmpty || $0.message.count < 20 }) { wrongCases.append("\(one.name): a diagnostic without a place or a sentence") }
+            if codes.contains(one.expected) { producedCodes.insert(one.expected) }
+        }
+    }
+    check("JL2 every broken catalog is rejected whole, with the diagnostic that names its problem (\(cases.count) cases)",
+          cases.count >= 80 && wrongCases.isEmpty, "\(wrongCases)")
+    let unproduced = CatalogDiagnostic.Code.allCases.filter { !producedCodes.contains($0) }
+    check("JL3 every diagnostic code the loader defines (\(CatalogDiagnostic.Code.allCases.count)) is produced by at least one rejection case",
+          unproduced.isEmpty, "\(unproduced.map { $0.rawValue })")
+
+    var together: [CatalogDiagnostic] = []
+    var togetherSummary = "", togetherReport = ""
+    if case .failure(let failure) = AbilityCatalog.load(CatalogRejections.threeProblems(valid: authored)) {
+        together = failure.diagnostics
+        togetherSummary = failure.summary
+        togetherReport = failure.report
+    }
+    check("JL4 independent problems are reported together, each with its card: an empty face, a duplicate id and a wrong synergy threshold in one file",
+          Set(together.map { $0.code }) == [.emptyText, .duplicateID, .synergyLadderMismatch]
+            && together.contains { $0.code == .emptyText && $0.path.contains("\"neutral_1\"") && $0.path.hasSuffix(".face") }
+            && together.contains { $0.code == .duplicateID && $0.path.contains("\"neutral_3\"") }
+            && together.contains { $0.code == .synergyLadderMismatch && $0.path.contains("fire") },
+          "\(together)")
+    check("JL5 a failure has a one-line summary (the count and the first problem) and a full report (every diagnostic on its own line)",
+          !togetherSummary.contains("\n") && togetherSummary.contains("3 problems") && togetherSummary.contains("emptyText")
+            && togetherReport.split(separator: "\n").count == 4 && together.allSatisfy { togetherReport.contains($0.description) },
+          togetherSummary)
+
+    // ── JP: parity with legacy ──────────────────────────────────────────────
+    let jsonCards = loaded?.cards ?? []
+    func sameCard(_ a: Card, _ b: Card) -> Bool {
+        a.id == b.id && a.name == b.name && a.tag == b.tag && a.secondaryTag == b.secondaryTag
+            && a.description == b.description && a.maxTier == b.maxTier
+            && (a.tierDescriptions ?? ["<nil>"]) == (b.tierDescriptions ?? ["<nil>"]) && a.detail == b.detail
+            && a.isCapstone == b.isCapstone && a.isSignature == b.isSignature && a.isSecret == b.isSecret
+            && a.provides == b.provides && a.requires == b.requires && a.blockedBy == b.blockedBy
+            && a.tierRequires == b.tierRequires && a.tierProvides == b.tierProvides && a.tierBlockedBy == b.tierBlockedBy
+            && (a.tierNames ?? ["<nil>"]) == (b.tierNames ?? ["<nil>"])
+    }
+    let cardDiffs = zip(jsonCards, pool).filter { !sameCard($0, $1) }.map { "\($0.id)/\($1.id)" }
+    check("JP1 the game's pool (UpgradeManager.allCards) is the authored file's cards, field for field and in order (\(pool.count) cards, \(pool.reduce(0) { $0 + $1.maxTier }) tiers)",
+          jsonCards.count == pool.count && jsonCards.map { $0.id } == pool.map { $0.id } && cardDiffs.isEmpty, "\(cardDiffs)")
+
+    let runtimeDump = (try? catalogDump(cards: pool, synergyTiers: UpgradeManager.synergyTiers(for:), retired: UpgradeManager.retiredCardIDs)) ?? Data()
+    let jsonDump = loaded.flatMap { c in try? catalogDump(cards: c.cards, synergyTiers: { c.synergyTiers[$0] ?? [] }, retired: c.retiredCardIDs) } ?? Data()
+    let j0Export = read(root.appendingPathComponent("tools/v2.2-catalog/baseline/compiled-catalog-export.json"))
+    // v2.2 Neutral: with an overlay, the expected dump is the J0 export with the
+    // overlay applied (retired ids out, rewritten cards in place, retired notes
+    // added) — serialised by the same code, so the comparison stays byte-exact.
+    let expectedDump: Data = {
+        guard let overlay else { return j0Export }
+        let expected = ParityAttribution.expectedDump(legacy: j0ExportObject, overlay: overlay)
+        return (try? JSONSerialization.data(withJSONObject: expected, options: [.prettyPrinted, .sortedKeys])) ?? Data()
+    }()
+    check("JP2 the catalog dump is the same bytes from the game's pool, from the file loaded afresh, and \(overlay == nil ? "in the J0 baseline export of the legacy pool" : "in the J0 export with the \(overlay?.unit ?? "") overlay applied (retired: \(skipIDs.sorted()); rewritten: \(overlay?.cards.keys.sorted() ?? []))")",
+          !runtimeDump.isEmpty && runtimeDump == jsonDump && runtimeDump == expectedDump,
+          "runtime \(ParityDigest.sha256(runtimeDump).prefix(12)) json \(ParityDigest.sha256(jsonDump).prefix(12)) expected \(ParityDigest.sha256(expectedDump).prefix(12))")
+
+    let synergyCopyDiffs = Tag.allCases.filter { tag in
+        let a = loaded?.synergyTiers[tag] ?? [], b = UpgradeManager.synergyTiers(for: tag)
+        return a.count != b.count || zip(a, b).contains { $0.threshold != $1.threshold || $0.title != $1.title || $0.effect != $1.effect }
+    }
+    let codexKeys = Set(parityColours.flatMap { tag in [3, 5, 7].map { CodexManager.shared.synergyID(tag: tag, tier: $0) } })
+    check("JP3 synergy copy, retired ids and the synergy keys reach UpgradeManager from the catalog unchanged (the keys are the Codex's persistence ids); the tree keys cover Tag.allCases in order",
+          synergyCopyDiffs.isEmpty && loaded?.retiredCardIDs == UpgradeManager.retiredCardIDs
+            && Set(loaded?.synergyEffects.keys.map { $0 } ?? []) == codexKeys && codexKeys == Set(paritySynergyKeys)
+            && AbilityCatalog.treeKeys.map { $0.tag } == Tag.allCases && AbilityCatalog.synergyThresholds == [3, 5, 7],
+          "\(synergyCopyDiffs)")
+
+    if let loaded {
+        let source = EffectSource.catalog(loaded)
+        let fixtureEffects = json(effectsFixture)
+        let jsonEffects = (try? ParityEffects.document(source, legacy: legacyOrder, skip: skipIDs)).map { json((try? ParityJSON.data($0)) ?? Data()) } ?? [:]
+        func part(_ key: String) -> String { attributed(expectedEffectsObject[key], jsonEffects[key], path: key) }
+        let tiersNow = pool.reduce(0) { $0 + $1.maxTier }
+        check("JP4 every card tier (\(tiersNow)) and synergy tier (21) changes PlayerStats exactly as recorded from legacy, from the default state and two mid-run states\(overlay == nil ? "" : " — against the attributed expectation (the \(overlay?.unit ?? "") overlay's cards and retired picks accounted for per tier; every other card on every field exact)")",
+                !jsonEffects.isEmpty && part("cards").isEmpty && part("synergies").isEmpty && part("startStates").isEmpty
+                && part("defaultState").isEmpty && part("fieldPaths").isEmpty,
+              [part("cards"), part("synergies"), part("startStates")].joined(separator: " | "))
+        if let overlay {
+            // The masked-out cards, unmasked: every tier from every state must be
+            // exactly the overlay's expectation (authored from the spec).
+            // The overlay's pairs are the DEFAULT state's, byte for byte. A mid-run
+            // state starts from its own value, so there each tier's CHANGE must be
+            // the overlay's change (the ladders add their rung; the burst strength
+            // is set, and no start state sets it).
+            var wrong: [String] = []
+            let cardsNow = (jsonEffects["cards"] as? [String: [String: [[String: [String]]]]]) ?? [:]
+            func number(_ leaf: String) -> Double? { ParityAttribution.number(leaf) }   // num: and int: leaves
+            func sameChange(_ got: [[String: [String]]], _ want: [[String: [String]]]) -> Bool {
+                guard got.count == want.count else { return false }
+                for (g, w) in zip(got, want) {
+                    guard Set(g.keys) == Set(w.keys) else { return false }
+                    for (field, pair) in w {
+                        // CONTRACT CHANGE, v2.2 N5: a NON-numeric expected pair (a Bool the card SETS,
+                        // Chain Reaction's explode flag) is exact from every state — byte for byte.
+                        if pair.count == 2, number(pair[0]) == nil, number(pair[1]) == nil {
+                            guard g[field] == pair else { return false }
+                            continue
+                        }
+                        guard let gp = g[field], gp.count == 2, pair.count == 2,
+                              let g0 = number(gp[0]), let g1 = number(gp[1]), let w0 = number(pair[0]), let w1 = number(pair[1]) else { return false }
+                        // v2.2 N4: a multiplicative field's change is its RATIO (rate ratios compose by product).
+                        if overlay.multiplicativeFields.contains(field) {
+                            guard g0 != 0, w0 != 0, abs(g1 / g0 - w1 / w0) < 1e-9 else { return false }
+                        } else if abs((g1 - g0) - (w1 - w0)) >= 1e-9 { return false }
+                    }
+                }
+                return true
+            }
+            var statesSeen = 0
+            for (id, expected) in overlay.expectedDeltas {
+                guard let perState = cardsNow[id], !perState.isEmpty else { wrong.append("\(id): absent"); continue }
+                for (state, tiers) in perState {
+                    statesSeen += 1
+                    if state == "default" { if !nsEqual(tiers, expected) { wrong.append("\(id) from default: \(tiers) ≠ expected \(expected)") } }
+                    else if !sameChange(tiers, expected) { wrong.append("\(id) from \(state): per-tier change \(tiers) ≠ expected \(expected)") }
+                }
+            }
+            if statesSeen < overlay.expectedDeltas.count * 3 { wrong.append("only \(statesSeen) (card, state) pairs seen") }
+            let retiredGone = overlay.retired.allSatisfy { rid in cardsNow[rid] == nil && !pool.contains(where: { $0.id == rid }) }
+            check("JP4b the \(overlay.unit) overlay's cards change PlayerStats exactly as the reviewed expectations say: the default state's pairs byte for byte, and the same per-tier change from each mid-run state (\(overlay.expectedDeltas.keys.sorted())); its retired ids are absent (\(overlay.retired.sorted()))",
+                  wrong.isEmpty && retiredGone, "\(wrong.prefix(3))")
+        }
+        check("JP5 the targeted scenarios match the record step for step: state-dependent effects, whole ladders, and interacting effects in both orders (\(ParityScenarios.targeted.count))\(overlay == nil ? "" : ", against the attributed expectation as JP4")",
+              ParityScenarios.targeted.count >= 50 && part("targeted").isEmpty, part("targeted"))
+
+        var replayProblems: [String] = []
+        var segments = 0, picksReplayed = 0
+        for case let run as [String: Any] in json(runsFixture)["runs"] as? [Any] ?? [] {
+            for name in ["play", "afterReset"] {
+                guard let segment = run[name] as? [String: Any] else { continue }
+                segments += 1
+                picksReplayed += (segment["levels"] as? [[String: Any]] ?? []).reduce(0) { $0 + (($1["picks"] as? [Any])?.count ?? 0) }
+                let label = "seed \(run["seed"] ?? "?") \(name)"
+                var final: [String: [String]] = [:]
+                let problems = (try? ParityRuns.replay(segment, with: source, base: defaultFields, skip: skipIDs, finalDiff: &final)) ?? ["threw"]
+                replayProblems += problems.map { "\(label): \($0)" }
+                let recorded = (segment["finalStatsChangedFromDefault"] as? [String: [String]]) ?? [:]
+                let expectedFinal = ground.map { ParityAttribution.expectedFinal(segment: segment, ground: $0) } ?? recorded
+                let d = attributed(expectedFinal, final, path: label)
+                if !d.isEmpty { replayProblems.append("final stats ≠ the attributed expectation: \(d)") }
+            }
+        }
+        check("JP6 the recorded runs' picks replay through the catalog's effects to the recorded final state (\(overlay == nil ? "exactly" : "the \(overlay?.unit ?? "") overlay's retired picks skipped; the final state = the legacy record shifted by exactly the attributed deltas of the overlay's picks, every other field exact")), the same synergy tiers due at the same picks (\(segments) segments, \(picksReplayed) picks)",
+              segments >= 26 && picksReplayed > 2_000 && replayProblems.isEmpty,
+              "\(replayProblems.prefix(3))")
+    } else {
+        check("JP4–JP6 need the catalog to load", false, loadReport)
+    }
+
+    // The ids native code names outside the catalog are exactly the registry's list.
+    let sceneSource = SwiftSource.code((try? String(contentsOf: root.appendingPathComponent("Sparkforge/Scenes/GameScene.swift"), encoding: .utf8)) ?? "")
+    let managerSource = SwiftSource.code((try? String(contentsOf: root.appendingPathComponent("Sparkforge/Systems/UpgradeManager.swift"), encoding: .utf8)) ?? "")
+    func idLiterals(_ text: String, _ pattern: String) -> Set<String> {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = text as NSString
+        return Set(regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) })
+    }
+    let liveIDs = Set(pool.map { $0.id })
+    let sceneIDs = idLiterals(sceneSource, "card\\.id == \"([a-z0-9_]+)\"")
+    let hintIDs = idLiterals(managerSource, "pickedCardIDs\\.contains\\(\"([a-z0-9_]+)\"\\)")
+    check("JP7 the registry's list of card ids that native code names (the scene's on-pick Growth structures, the build hints) is exactly what the source names, and the scheduled secret card is Panda",
+          !sceneIDs.isEmpty && !hintIDs.isEmpty && sceneIDs.union(hintIDs) == Set(registry.nativeCardIDs)
+            && sceneIDs.union(hintIDs).isSubset(of: liveIDs) && registry.scheduledSecretCardID == GameConfig.Panda.cardID,
+          "scene \(sceneIDs.sorted()) hints \(hintIDs.sorted()) registry \(registry.nativeCardIDs.sorted())")
+
+    // MARK: - NE · v2.2 Neutral rework, Unit N1 (Swift, Magnetic Core, Keen Eye retired)
+    //
+    // The spec (docs/v2.2-neutral-design-spec.md) and the N0 rulings: Swift is a
+    // 3-tier ladder of TOTALS 8/20/35%; Magnetic Core a 3-tier ladder of radius
+    // TOTALS 15/30/50% with a speed burst of 10/20/30% for 1.5 s on every XP pickup
+    // that refreshes and never stacks; Keen Eye retires into it, no discovery
+    // transfer, no renamed keys; every total is reached THROUGH the real acquire
+    // path with Forge Path / Tree / temporary bonuses already in the stats, which
+    // the rungs must leave alone.
+    do {
+        func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1e-9 }
+        typealias NeutralConfig = GameConfig.Neutral
+        check("NE0 GameConfig.Neutral holds the spec's totals (Swift 8/20/35%; radius 15/30/50%; burst 10/20/30% for 1.5 s), strictly rising, hoisted from the old literals",
+              NeutralConfig.swiftMoveTotals == [0.08, 0.20, 0.35] && NeutralConfig.magneticRadiusTotals == [0.15, 0.30, 0.50]
+                && NeutralConfig.magneticBurstTotals == [0.10, 0.20, 0.30] && NeutralConfig.magneticBurstDuration == 1.5)
+
+        // NE1 — Swift through the real manager, with every external movement
+        // bonus present: a Forge Path node (+0.01 to the multiplier, as Light Step
+        // does), a temporary Forge buff (forgeMoveBonus) and the Tree's ground
+        // bonus. Each rung lands on the spec's TOTAL on top of them.
+        do {
+            let um = fullSave(seed: 7)
+            let stats = PlayerStats()
+            stats.moveSpeedMultiplier += 0.01          // Light Step
+            stats.forgeMoveBonus = 0.10                // Slipstream, mid-buff
+            stats.treeGroundMoveBonus = 0.15           // Rootreach, on cultivated ground
+            var totals: [CGFloat] = [], speeds: [CGFloat] = [], tiers: [Int] = []
+            for level in 1...3 {
+                um.pickCard(card("neutral_1"), stats: stats, level: level)
+                totals.append(stats.moveSpeedMultiplier); speeds.append(stats.effectiveMoveSpeed); tiers.append(um.tier(of: "neutral_1"))
+            }
+            let expectedTotals = NeutralConfig.swiftMoveTotals.map { 1.01 + $0 }
+            let expectedSpeeds = expectedTotals.map { GameConfig.Player.speed * ($0 + 0.10 + 0.15) }
+            check("NE1 Swift T1→T3 through the real acquire path lands on the totals 8/20/35% ON TOP of a Forge Path node, a Forge buff and the Tree's ground bonus (multiplier \(totals)), and effectiveMoveSpeed carries all of them",
+                  tiers == [1, 2, 3] && zip(totals, expectedTotals).allSatisfy { near($0, $1) } && zip(speeds, expectedSpeeds).allSatisfy { near($0, $1) },
+                  "tiers \(tiers) totals \(totals) speeds \(speeds)")
+            let fourth = um.acquire(card("neutral_1"), stats: stats, level: 4)
+            check("NE1b a fourth Swift pick is refused (maxTier 3) and leaves the total alone", !fourth && near(stats.moveSpeedMultiplier, expectedTotals[2]))
+        }
+
+        // NE2 — Magnetic Core through the real manager, with Forge Path's pickup
+        // nodes present (+0.05 Long Reach, +0.15 Magnetized): the radius rungs add
+        // their difference; the burst STRENGTH is the tier's total, never a sum.
+        do {
+            let um = fullSave(seed: 8)
+            let stats = PlayerStats()
+            stats.pickupRadiusMultiplier += 0.05 + 0.15
+            var radii: [CGFloat] = [], bursts: [CGFloat] = [], tiers: [Int] = []
+            for level in 1...3 {
+                um.pickCard(card("v13_magnetic_core"), stats: stats, level: level)
+                radii.append(stats.pickupRadiusMultiplier); bursts.append(stats.magneticCoreSpeedBoost); tiers.append(um.tier(of: "v13_magnetic_core"))
+            }
+            let expectedRadii = NeutralConfig.magneticRadiusTotals.map { 1.20 + $0 }
+            check("NE2 Magnetic Core T1→T3 through the real acquire path: pickup radius totals 15/30/50% on top of Forge Path's two pickup nodes, burst strength exactly 10/20/30% (set, not summed), effectivePickupRadius = 80 × the total",
+                  tiers == [1, 2, 3] && zip(radii, expectedRadii).allSatisfy { near($0, $1) }
+                    && zip(bursts, NeutralConfig.magneticBurstTotals).allSatisfy { near($0, $1) }
+                    && near(stats.effectivePickupRadius, 80 * expectedRadii[2]),
+                  "radii \(radii) bursts \(bursts) tiers \(tiers)")
+            let fourth = um.acquire(card("v13_magnetic_core"), stats: stats, level: 4)
+            check("NE2b a fourth Magnetic Core pick is refused and the burst strength stays 30%", !fourth && near(stats.magneticCoreSpeedBoost, 0.30))
+        }
+
+        // NE3 — burst semantics on PlayerStats: a pickup starts a 1.5 s burst that
+        // multiplies the WHOLE movement sum by (1 + strength); another pickup
+        // refreshes the timer to 1.5 s (never longer, never stronger); it expires.
+        do {
+            let stats = PlayerStats()
+            stats.forgeMoveBonus = 0.10
+            let base = stats.effectiveMoveSpeed
+            stats.triggerMagneticCoreBoost()
+            let noCardNoBurst = stats.magneticCoreBoostTimer == 0 && near(stats.effectiveMoveSpeed, base)
+            card("v13_magnetic_core").apply(stats)                                   // T1 effect, directly
+            stats.triggerMagneticCoreBoost()
+            let started = stats.magneticCoreBoostTimer == NeutralConfig.magneticBurstDuration && near(stats.effectiveMoveSpeed, base * 1.10)
+            stats.updateMagneticCore(1.0)
+            let ticking = near(CGFloat(stats.magneticCoreBoostTimer), 0.5) && near(stats.effectiveMoveSpeed, base * 1.10)
+            stats.triggerMagneticCoreBoost()
+            let refreshed = stats.magneticCoreBoostTimer == NeutralConfig.magneticBurstDuration && near(stats.effectiveMoveSpeed, base * 1.10)
+            stats.updateMagneticCore(1.5)
+            let expired = stats.magneticCoreBoostTimer <= 0 && near(stats.effectiveMoveSpeed, base)
+            for rung in card("v13_magnetic_core").higherTiers { rung(stats) }               // T2, T3
+            stats.triggerMagneticCoreBoost()
+            let t3 = near(stats.effectiveMoveSpeed, base * 1.30)
+            check("NE3 the burst: no card → a pickup does nothing; T1 pickup → 1.5 s at ×1.10 on the whole movement sum; ticks down and still applies; a second pickup REFRESHES to 1.5 s (not 3 s, not ×1.21); expires to ×1.00; T3 = ×1.30 flat (not ×1.1×1.2×1.3)",
+                  noCardNoBurst && started && ticking && refreshed && expired && t3,
+                  "noCard \(noCardNoBurst) started \(started) ticking \(ticking) refreshed \(refreshed) expired \(expired) t3 \(t3)")
+        }
+
+        // NE4 — reset: PlayerStats.reset() clears every N1 field back to its
+        // default; UpgradeManager.reset() forgets the tiers so the ladder restarts.
+        do {
+            let um = fullSave(seed: 9)
+            let stats = PlayerStats()
+            for level in 1...3 { um.pickCard(card("neutral_1"), stats: stats, level: level); um.pickCard(card("v13_magnetic_core"), stats: stats, level: level + 3) }
+            stats.triggerMagneticCoreBoost()
+            stats.reset(); um.reset()
+            let cleared = near(stats.moveSpeedMultiplier, 1) && near(stats.pickupRadiusMultiplier, 1) && stats.magneticCoreSpeedBoost == 0
+                && stats.magneticCoreBoostTimer == 0 && stats.magneticCoreBoostDuration == NeutralConfig.magneticBurstDuration
+                && um.tier(of: "neutral_1") == 0 && um.tier(of: "v13_magnetic_core") == 0
+            um.pickCard(card("neutral_1"), stats: stats, level: 1); um.pickCard(card("v13_magnetic_core"), stats: stats, level: 2)
+            check("NE4 after PlayerStats.reset() + UpgradeManager.reset() every N1 field is at its default and both ladders start again at T1 (1.08 / 1.15 / burst 0.10)",
+                  cleared && near(stats.moveSpeedMultiplier, 1.08) && near(stats.pickupRadiusMultiplier, 1.15) && near(stats.magneticCoreSpeedBoost, 0.10) && um.tier(of: "neutral_1") == 1)
+        }
+
+        // NE5 — source pins on the scene and the orbs: the burst is ticked from one
+        // place (the passive-effects update, which only runs while playing) and
+        // triggered from one place (XP collection); health orbs are never magnetized
+        // (canon) — only XP orbs get the pull.
+        do {
+            let scene = code("Sparkforge/Scenes/GameScene.swift")
+            let health = code("Sparkforge/Nodes/HealthOrbNode.swift")
+            let passive = body(scene, "private func updatePassiveEffects(")
+            let update = body(scene, "override func update(")
+            let collect = body(scene, "private func handleXPCollection(")
+            let xpOrbs = body(scene, "private func updateXPOrbs(")
+            let ticks = scene.components(separatedBy: "updateMagneticCore(").count - 1
+            let triggers = scene.components(separatedBy: "triggerMagneticCoreBoost()").count - 1
+            check("NE5 GameScene ticks the burst exactly once (updatePassiveEffects, reached from update() under the .playing gate) and triggers it exactly once (handleXPCollection); only XP orbs are pulled (updateXPOrbs iterates xpOrbs) and HealthOrbNode has no magnet path",
+                  ticks == 1 && passive.contains("updateMagneticCore(dt)") && update.contains("updatePassiveEffects(") && update.contains(".playing")
+                    && triggers == 1 && collect.contains("triggerMagneticCoreBoost()")
+                    && xpOrbs.contains("for orb in xpOrbs") && !xpOrbs.contains("healthOrbs") && !health.contains("updateMagnet") && !health.contains("pickupRadiusMultiplier"),
+                  "ticks \(ticks) triggers \(triggers)")
+            let behaviors = code("Sparkforge/Systems/AbilityBehaviors.swift")
+            let swiftLadder = behaviors.components(separatedBy: "add(\"neutral_1\"").last?.components(separatedBy: "])").first ?? "?"
+            let coreLadder = behaviors.components(separatedBy: "add(\"v13_magnetic_core\"").last?.components(separatedBy: "])").first ?? "?"
+            let digitRun = try! NSRegularExpression(pattern: "[0-9]\\.[0-9]")
+            func literals(_ t: String) -> Int { digitRun.numberOfMatches(in: t, range: NSRange(location: 0, length: (t as NSString).length)) }
+            check("NE5b the two N1 ladders in AbilityBehaviors carry no tuning literal (every value comes from GameConfig.Neutral); Keen Eye has no registration",
+                  swiftLadder != "?" && coreLadder != "?" && literals(swiftLadder) == 0 && literals(coreLadder) == 0
+                    && swiftLadder.contains("swift[2] - swift[1]") && coreLadder.contains("magnetRadius[2] - magnetRadius[1]")
+                    && !behaviors.contains("add(\"neutral_2\""))
+        }
+
+        // NE6 — Keen Eye is retired: out of the pool and the registry, in the
+        // catalog's retired table under its own id (never reused), and an old save
+        // that had it offered counts it as RETIRED discovery (not unknown, not
+        // live), with the stored key untouched (`sf_cards_offered`).
+        do {
+            let codex = CodexManager.shared
+            codex.recordCardOffered("neutral_2")
+            codex.recordCardOffered("neutral_1")
+            let tally = UpgradeManager.codexTally(offered: ["neutral_2", "neutral_1", "v13_magnetic_core"], liveIDs: UpgradeManager.catalogIDs)
+            check("NE6 Keen Eye (neutral_2) is retired: not in the pool, not in the registry, in the catalog's retired table with the N1 note; an old save's offered Keen Eye tallies as retired (not unknown), its stored record untouched; the two live Neutral cards still count as discovered",
+                  !pool.contains { $0.id == "neutral_2" } && AbilityBehaviors.registry.cards["neutral_2"] == nil
+                    && (UpgradeManager.retiredCardIDs["neutral_2"] ?? "").contains("Magnetic Core")
+                    && tally.retired == ["neutral_2"] && tally.unknown.isEmpty && tally.discovered == 2 && tally.total == pool.count
+                    && codex.hasOfferedCard("neutral_2"),
+                  "\(tally)")
+            codex.resetAll()
+        }
+
+        // NE7 — nothing unbound, nothing missing: the registry's card keys are
+        // exactly the authored file's `behavior` keys (the loader refuses either
+        // kind of mismatch, so the game could not have started otherwise; pinned
+        // here so the harness says it in N1's own terms).
+        do {
+            let fileCards = (json(read(root.appendingPathComponent("Sparkforge/Catalog/ability-catalog.json")))["cards"] as? [[String: Any]]) ?? []
+            let fileKeys = Set(fileCards.compactMap { $0["behavior"] as? String })
+            let registryKeys = Set(AbilityBehaviors.registry.cards.keys)
+            check("NE7 the native registry binds exactly the authored file's behaviour keys (\(registryKeys.count)): no orphaned Keen Eye effect, no card without an effect",
+                  !fileKeys.isEmpty && fileKeys == registryKeys && fileKeys.count == pool.count,
+                  "only in registry \(registryKeys.subtracting(fileKeys).sorted()) only in file \(fileKeys.subtracting(registryKeys).sorted())")
+        }
+
+        // NE8 — the intermediate counts the kickoff fixes for N1's endpoint.
+        do {
+            let neutral = pool.filter { $0.tag == .neutral && !$0.isSecret }
+            let counts: [String: Int] = [
+                "total": pool.count, "draftable": draftable.count, "secret": pool.count - draftable.count,
+                "regularNeutral": neutral.count, "neutralTiers": neutral.reduce(0) { $0 + $1.maxTier },
+                "tiersTotal": pool.reduce(0) { $0 + $1.maxTier }, "retired": UpgradeManager.retiredCardIDs.count]
+            let kickoff: [String: Int] = ["total": 79, "draftable": 78, "secret": 1, "regularNeutral": 9, "neutralTiers": 30, "tiersTotal": 166, "retired": 9]
+            check("NE8 N5 endpoint counts — the whole rework's approved roster: 166 tiers / 79 cards / 78 draftable / 9 regular Neutral / 30 Neutral tiers / 9 retired (N4 was 164 / 28; only Chain Reaction grew, 1 → 3) — and the overlay's `counts` say the same",
+                  counts == kickoff && overlay?.counts == kickoff, "\(counts.sorted { $0.key < $1.key })")
+        }
+
+        // NE9 — the fitted copy, exactly, with the semantics the player must read.
+        do {
+            let swift = card("neutral_1"), core = card("v13_magnetic_core")
+            let swiftFaces = ["+8% movement speed", "+20% movement speed", "+35% movement speed"]
+            let coreFaces = ["+15% XP pull; +10% burst", "+30% XP pull; +20% burst", "+50% XP pull; +30% burst"]
+            let swiftOK = swift.description == "+8% movement speed" && swift.tierDescriptions ?? [] == swiftFaces
+                && (swift.detail ?? "").contains("totals") && (swift.detail ?? "").contains("Adds to your other movement bonuses")
+            let coreOK = core.description == "+15% XP pull; XP gives a speed burst" && core.tierDescriptions ?? [] == coreFaces
+                && (core.detail ?? "").contains("1.5") && (core.detail ?? "").lowercased().contains("health orbs")
+            let fit = (faces(swift) + faces(core)).allSatisfy { faceLines($0.1) <= 3 }
+            check("NE9 Swift and Magnetic Core carry the N1 copy exactly (faces, three tier lines each, details naming totals / the 1.5 s refresh / health orbs never magnetized) and every face fits beside a MORE detail (≤ 3 lines)",
+                  swiftOK && coreOK && fit, "swift \(swiftOK) core \(coreOK) fit \(fit)")
+        }
+
+        // NE10 — the consumers agree: the sidecar has no Keen Eye entry, the canon
+        // counts 79 cards, expect.json pins Neutral at 9, and the J0 legacy export
+        // STILL holds Keen Eye (the frozen record was not touched).
+        do {
+            let sidecar = json(read(root.appendingPathComponent("docs/v2.1-ability-canon-sidecar.json")))
+            let sidecarCards = (sidecar["entries"] as? [String: Any]) ?? [:]
+            let canon = raw("docs/v2.1-ability-canon.md")
+            let expect = json(read(root.appendingPathComponent("tools/catalog-expect.json")))
+            let expectNeutral = ((expect["byTree"] as? [String: Any])?["neutral"] as? Int) ?? -1
+            let legacyHasKeenEye = legacyCards.contains { $0["id"] as? String == "neutral_2" }
+            check("NE10 the consumers agree with the game: the sidecar has no Keen Eye entry and carries both live Neutral cards; the canon says 79 cards; expect.json pins Neutral at 9; the frozen J0 export still lists Keen Eye (untouched)",
+                  sidecarCards["neutral_2"] == nil && sidecarCards["neutral_1"] != nil && sidecarCards["v13_magnetic_core"] != nil
+                    && canon.contains("79 cards") && expectNeutral == 9 && legacyHasKeenEye,
+                  "sidecar n2 \(sidecarCards["neutral_2"] != nil) expectNeutral \(expectNeutral) legacyKeenEye \(legacyHasKeenEye)")
+        }
+
+        // ── NX · v2.2 Neutral rework, Unit N2 (XP Boost, the run level cap, the
+        // level queue, Overclock). The pure XP/level rules are proven in
+        // tools/neutral-harness (XPLedger, PlayerStats); here: the real acquire
+        // path, the counts, the copy, and the SCENE's wiring pinned by source —
+        // the serialized queue order, the single Overclock trigger at resume,
+        // and the opener handoffs (the queue itself is scene code; it has no
+        // scene-free seam, so its order is a source contract).
+        do {
+            typealias N = GameConfig.Neutral
+            check("NX0 GameConfig.Neutral holds N2's ruled numbers: XP Boost totals 25/50/50%, run cap 15, XP Boost cap 20 (not 22), 1 granted level; Overclock +35% move / +35% attack speed / +15% damage for 3 s",
+                  N.xpBoostTotals == [0.25, 0.50, 0.50] && N.runLevelCap == 15 && N.xpBoostLevelCap == 20 && N.xpBoostGrantedLevels == 1
+                    && N.overclockMoveBoost == 0.35 && N.overclockAttackSpeed == 0.35 && N.overclockDamageBonus == 0.15 && N.overclockDuration == 3.0)
+            // Real acquire path, with an external XP bonus already in the stats.
+            do {
+                let um = fullSave(seed: 21)
+                let stats = PlayerStats()
+                stats.xpMultiplier += 0.10                  // an external XP bonus
+                var mult: [CGFloat] = [], caps: [Int] = [], owed: [Int] = []
+                for level in 1...3 {
+                    um.pickCard(card("neutral_5"), stats: stats, level: level)
+                    mult.append(stats.xpMultiplier); caps.append(stats.runLevelCap); owed.append(stats.grantedLevelsPending)
+                }
+                let fourth = um.acquire(card("neutral_5"), stats: stats, level: 4)
+                check("NX1 XP Boost T1→T3 through the real acquire path: xpMultiplier totals 25/50/50% on top of an external +10% (1.35 / 1.60 / 1.60); the cap stays 15 until T3 raises it to 20; T3 owes exactly one level; a fourth pick is refused and changes nothing",
+                      mult.count == 3 && abs(mult[0] - 1.35) < 1e-9 && abs(mult[1] - 1.60) < 1e-9 && abs(mult[2] - 1.60) < 1e-9
+                        && caps == [15, 15, 20] && owed == [0, 0, 1] && !fourth && stats.runLevelCap == 20 && stats.grantedLevelsPending == 1 && um.tier(of: "neutral_5") == 3,
+                      "mult \(mult) caps \(caps) owed \(owed) fourth \(fourth)")
+                stats.reset(); um.reset()
+                check("NX1b after PlayerStats.reset() + UpgradeManager.reset(): cap 15, nothing owed, multiplier 1.0, XP Boost at T0",
+                      stats.runLevelCap == 15 && stats.grantedLevelsPending == 0 && stats.xpMultiplier == 1.0 && um.tier(of: "neutral_5") == 0)
+            }
+            do {
+                let um = fullSave(seed: 22)
+                let stats = PlayerStats()
+                um.pickCard(card("v17_overclock"), stats: stats, level: 1)
+                let second = um.acquire(card("v17_overclock"), stats: stats, level: 2)
+                stats.triggerOverclock()
+                check("NX2 Overclock stays one tier through the real acquire path (a second pick is refused); owning it makes a trigger start the 3 s window",
+                      um.tier(of: "v17_overclock") == 1 && !second && card("v17_overclock").maxTier == 1 && stats.overclockActive && stats.isOverclockRunning && stats.overclockTimer == N.overclockDuration)
+            }
+            // The scene's wiring, by source.
+            let scene = code("Sparkforge/Scenes/GameScene.swift")
+            let collect = body(scene, "private func handleXPCollection(")
+            let trigger = body(scene, "private func triggerLevelUp(")
+            let resume = body(scene, "private func resumeAfterLevelUp(")
+            let step = body(scene, "private func stepOpenerDraft(")
+            let random = body(scene, "private func runRandomOpener(")
+            func count(_ hay: String, _ needle: String) -> Int { hay.components(separatedBy: needle).count - 1 }
+            func index(_ hay: String, _ needle: String) -> Int { (hay.range(of: needle)?.lowerBound).map { hay.distance(from: hay.startIndex, to: $0) } ?? -1 }
+            check("NX3 [source-only] XP collection banks first and takes at most ONE level, only while playing (handleXPCollection: addXP → gameState == .playing → takeNextLevel); it never calls triggerLevelUp directly; Magnetic Core's burst still fires before the XP is added",
+                  collect.contains("player.addXP(orbNode.xpValue), gameState == .playing") && collect.contains("takeNextLevel()")
+                    && !collect.contains("triggerLevelUp()") && index(collect, "triggerMagneticCoreBoost()") < index(collect, "player.addXP("))
+            let grantAt = index(resume, "playerStats.grantedLevelsPending > 0"), takeAt = index(resume, "player.takeDueLevel()"), overclockAt = index(resume, "playerStats.triggerOverclock()"), openerAt = index(resume, "if openerDraftRunning"), playingAt = index(resume, "gameState = .playing")
+            check("NX4 [source-only; the EXECUTED contract is the neutral harness's QX group] the serialized level queue in resumeAfterLevelUp is in the APPROVED order: XP Boost's GRANTED level (grantLevel(keepingXP: true), one per owed level, returns) → one BANKED earned level (takeDueLevel, returns) → only then the draft opener's next round → Overclock's trigger → play resumes",
+                  grantAt >= 0 && takeAt > grantAt && openerAt > takeAt && overclockAt > openerAt && playingAt > overclockAt
+                    && resume.contains("playerStats.grantedLevelsPending -= 1") && resume.contains("player.grantLevel(keepingXP: true)")
+                    && count(resume, "triggerLevelUp()") == 2 && count(resume, "triggerOverclock()") == 1,
+                  "grant \(grantAt) take \(takeAt) opener \(openerAt) overclock \(overclockAt) playing \(playingAt)")
+            check("NX5 [source-only] Overclock is triggered exactly where play resumes — never in triggerLevelUp (so the acquisition level counts and a chain of screens leaves one fresh 3 s) — and once more when the RANDOM opener hands over with no screen; the scene has no other trigger site; the timer is ticked only by updateMagneticCore (NE5)",
+                  !trigger.contains("triggerOverclock()") && count(scene, "playerStats.triggerOverclock()") == 2 && count(random, "playerStats.triggerOverclock()") == 1)
+            check("NX6 [source-only] the gauntlet's DRAFT opener hands off THROUGH the queue (gauntletStageStartPending = true; resumeAfterLevelUp()) so a granted or banked level taken in the draft gets its real screen before stage 1; the RANDOM opener gives a pending grant / due level its real screen too (resumeAfterLevelUp) and otherwise starts Overclock with play; the opener's grantLevel() still clears XP (its own seam), the queue's keeps it",
+                  step.contains("gauntletStageStartPending = true") && step.contains("resumeAfterLevelUp()") && !step.contains("beginGauntletStage(isFirst: true)")
+                    && resume.contains("if gauntletStageStartPending") && resume.contains("beginGauntletStage(isFirst: true)")
+                    && random.contains("playerStats.grantedLevelsPending > 0 || player.isLevelDue") && random.contains("resumeAfterLevelUp()")
+                    && count(scene, "player.grantLevel()") == 2 && count(scene, "player.grantLevel(keepingXP: true)") == 1)
+            let swift = card("neutral_5"), oc = card("v17_overclock")
+            check("NX7 XP Boost and Overclock carry the N2 copy exactly (XP Boost's three tier lines name the +50% / cap 20 / +1 level; both details name the rules) and every face fits beside a MORE detail (≤ 3 lines)",
+                  swift.tierDescriptions ?? [] == ["+25% XP gain", "+50% XP gain", "+50% XP; cap 20; +1 level now"] && (swift.detail ?? "").contains("level cap is 15") && (swift.detail ?? "").contains("banked")
+                    && oc.description == "Level-ups: a 3s overdrive" && (oc.detail ?? "").contains("+35% attack speed") && (oc.detail ?? "").contains("never stacks")
+                    && (faces(swift) + faces(oc)).allSatisfy { faceLines($0.1) <= 3 })
+        }
+
+        // ── NP · v2.2 Neutral rework, Unit N3 (Scatter, Fracture Shot, Long Shot
+        // on projectiles). The pure pattern and the fire seam are EXECUTED in
+        // tools/neutral-harness (PX, FX); here: the real acquire path, the copy,
+        // and the scene's wiring by source (labeled source-only).
+        do {
+            typealias N = GameConfig.Neutral
+            check("NP0 GameConfig.Neutral holds N3's ruled numbers: Scatter lanes 1/2/3/5/9 at steps 0/0/15/15/14.75° (parallel 12 pt); Fracture 1/3/5/9/17 over 0/30/60/120/180°; forward bound 90°; Long Shot totals 25/50/50/50%; cleanup margin 48 pt",
+                  N.scatterLaneCounts == [1, 2, 3, 5, 9] && N.scatterStepDegrees == [0, 0, 15, 15, 14.75] && N.scatterParallelSpacing == 12
+                    && N.fractureBranchCounts == [1, 3, 5, 9, 17] && N.fractureCoverageDegrees == [0, 30, 60, 120, 180] && N.patternForwardBoundDegrees == 90
+                    && N.longShotRangeTotals == [0.25, 0.50, 0.50, 0.50] && N.projectileCleanupMargin == 48)
+            // Long Shot through the real acquire path with Riftline's +25% range and +2 pierces already in the stats.
+            do {
+                let um = fullSave(seed: 31)
+                let stats = PlayerStats()
+                stats.projectileRangeMultiplier += GameConfig.VoidTree.riftlineRange; stats.pierceCount += GameConfig.VoidTree.riftlinePierce; stats.riftlineActive = true
+                var mult: [CGFloat] = [], tiers: [Int] = [], ranges: [CGFloat] = [], flags: [[Bool]] = []
+                for level in 1...4 {
+                    um.pickCard(card("neutral_4"), stats: stats, level: level)
+                    mult.append(stats.projectileRangeMultiplier); tiers.append(stats.longShotTier); ranges.append(stats.effectiveProjectileRange)
+                    flags.append([stats.projectileUnlimitedRange, stats.projectilePiercesAll, stats.projectilePassesTerrain])
+                }
+                let fifth = um.acquire(card("neutral_4"), stats: stats, level: 5)
+                check("NP1 Long Shot T1→T4 through the real acquire path on top of Riftline's +25%: range multiplier 1.50 / 1.75 / 1.75 / 1.75 (totals 25/50/50/50% added), longShotTier 1–4; T1/T2 finite (400 × mult), T3+ unlimited (∞); only T4 pierces all and passes terrain; Riftline's pierces untouched; a fifth pick is refused",
+                      zip(mult, [1.5, 1.75, 1.75, 1.75]).allSatisfy { abs($0 - $1) < 1e-9 } && tiers == [1, 2, 3, 4]
+                        && abs(ranges[0] - 600) < 1e-9 && abs(ranges[1] - 700) < 1e-9 && ranges[2] == .infinity && ranges[3] == .infinity
+                        && flags == [[false, false, false], [false, false, false], [true, false, false], [true, true, true]]
+                        && stats.pierceCount == GameConfig.VoidTree.riftlinePierce && !fifth, "mult \(mult) tiers \(tiers) flags \(flags)")
+                stats.reset(); um.reset()
+                check("NP1b reset: multiplier 1, longShotTier 0, finite range, Long Shot at T0", stats.projectileRangeMultiplier == 1 && stats.longShotTier == 0 && stats.effectiveProjectileRange == 400 && um.tier(of: "neutral_4") == 0)
+            }
+            // Scatter and Fracture through the real acquire path.
+            do {
+                let um = fullSave(seed: 32)
+                let stats = PlayerStats()
+                var lanes: [Int] = [], extras: [Int] = [], spread: [CGFloat] = []
+                for level in 1...4 { um.pickCard(card("neutral_6"), stats: stats, level: level); lanes.append(stats.volleyPelletCount(isSpreadVolley: false)); extras.append(stats.extraProjectiles); spread.append(stats.spreadAngle) }
+                let storm = stats.volleyPelletCount(isSpreadVolley: true)
+                let fifth = um.acquire(card("neutral_6"), stats: stats, level: 5)
+                var fr: [Int] = []
+                for level in 5...8 { um.pickCard(card("v18_fracture_shot"), stats: stats, level: level); fr.append(stats.fractureTier) }
+                let fifthFr = um.acquire(card("v18_fracture_shot"), stats: stats, level: 9)
+                check("NP2 Scatter T1→T4 through the real acquire path: volley lanes 2 / 3 / 5 / 9 (extraProjectiles 1/2/4/8, scatterTier 1–4), a Storm volley 11; spreadAngle untouched (0.25); Fracture T1→T4 sets fractureTier 1–4; fifth picks refused; the retired split fields are never written",
+                      lanes == [2, 3, 5, 9] && extras == [1, 2, 4, 8] && stats.scatterTier == 4 && storm == 11 && spread.allSatisfy { $0 == 0.25 } && !fifth
+                        && fr == [1, 2, 3, 4] && !fifthFr && stats.splitCount == 0 && stats.splitDamageMultiplier == 0.5 && stats.splitAngle == 0.22,
+                      "lanes \(lanes) extras \(extras) storm \(storm) fr \(fr)")
+                stats.reset(); um.reset()
+                check("NP2b reset: scatterTier / fractureTier 0, one lane, extras 0", stats.scatterTier == 0 && stats.fractureTier == 0 && stats.volleyPelletCount(isSpreadVolley: false) == 1 && stats.extraProjectiles == 0)
+            }
+            // Gates unchanged: Fracture provides pelletEffect and is blocked by Glacial Condensation (CL-93), both ways.
+            check("NP3 Fracture Shot keeps its CL-93 gate (provides pelletEffect; blockedBy glacialCondensation) and Polar Vortex T4 keeps its symmetric gate — no new exclusion was added by N3",
+                  card("v18_fracture_shot").provides.contains(.pelletEffect) && card("v18_fracture_shot").blockedBy.contains(.glacialCondensation)
+                    && (card("cap_chill_polarvortex").tierProvides[4] ?? []).contains(.glacialCondensation) && (card("cap_chill_polarvortex").tierBlockedBy[4] ?? []).contains(.pelletEffect))
+            // The scene's wiring, by source (labeled; executed in the neutral harness FX group).
+            let scene = code("Sparkforge/Scenes/GameScene.swift")
+            let node = code("Sparkforge/Nodes/ProjectileNode.swift")
+            let spread = body(scene, "private func fireShotSpread(")
+            let fire = body(scene, "private func fireProjectile(")
+            let basis = body(scene, "private func shotBaseDamage(")
+            let update = body(scene, "private func updateProjectiles(")
+            let hitE = body(scene, "private func handleProjectileHit(")
+            let hitB = body(scene, "private func handleProjectileHitBoss(")
+            func count(_ hay: String, _ needle: String) -> Int { hay.components(separatedBy: needle).count - 1 }
+            check("NP4 [source-only; executed as FX1/FX2] fireShotSpread lays the volley out from AttackPattern.lanes + AttackPattern.compose (Scatter tier, Storm count, Fracture tier) and fires every branch through fireProjectile with allowModifiers: branch.isCenter and fractureShare: branch.share; the v1.8 split loop is gone",
+                  spread.contains("AttackPattern.lanes(count: count, scatterTier: playerStats.scatterTier") && spread.contains("AttackPattern.compose(lanes: lanes, fracture: AttackPattern.fractureOffsets(tier: playerStats.fractureTier))")
+                    && spread.contains("allowModifiers: branch.isCenter") && spread.contains("fractureShare: branch.share")
+                    && !fire.contains("splitCount") && !scene.contains("splitDamageMultiplier") && fire.contains("projectile.fractureShare = fractureShare"))
+            func index(_ hay: String, _ needle: String) -> Int { (hay.range(of: needle)?.lowerBound).map { hay.distance(from: hay.startIndex, to: $0) } ?? -1 }
+            let branchHelper = body(scene, "private func fractureBranch(")
+            let bossHelper = body(scene, "private func fractureBranchOnBoss(")
+            let hitFile = code("Sparkforge/Systems/DirectHitDamage.swift")
+            let bossFile = code("Sparkforge/Nodes/ArenaBossNode.swift")
+            check("NP5 [source-only; executed as DX1–DX7] the Fracture share is the chain's LAST step on its own threshold: shotBaseDamage is the whole-shot function again (no share); the enemy chain calls fractureBranch after the shield and before `damage = hit.basis`; the boss chain applies the dial to the parent then the share (fractureBranchOnBoss → takeDirectHit with the dial bypassed); DirectHit.scale chance-rounds with NO floor on `shareRounding`; the shield and the dial preserve zero",
+                  !basis.contains("fractureShare") && basis.contains("projectile.a6Rounding.damage(multiplier: projectile.damageMultiplier, fraction: fraction)") && basis.contains("max(1, Int(projectile.damageMultiplier))")
+                    && hitE.contains("hit = fractureBranch(hit, projectile: projectileNode)") && index(hitE, "hit.shield(by: BraceguardNode.shieldDamageMultiplier)") < index(hitE, "hit = fractureBranch(") && index(hitE, "hit = fractureBranch(") < index(hitE, "damage = hit.basis")
+                    && branchHelper.contains("branch.scale(by: projectile.fractureShare, rounding: projectile.shareRounding)")
+                    && bossHelper.contains("boss.challengedDamage(hit.dealt, raw: hit.basis, ignoresChallengeDEF: penetrates)") && bossHelper.contains("return (branch, true)")
+                    && hitB.contains("let (bossHit, ignoresDEF) = fractureBranchOnBoss(hit, projectile: projectileNode, boss: bossNode)") && hitB.contains("bossNode.takeDirectHit(bossHit, ignoresChallengeDEF: ignoresDEF)")
+                    && hitFile.contains("basis = DirectHitRounding.chanceRound(CGFloat(basis) * share, unit: rounding.unit)") && hitFile.contains("basis = basis == 0 ? 0 : max(1, Int(CGFloat(basis) * multiplier))")
+                    && bossFile.contains("guard scaled > 0 else { return 0 }") && node.contains("let shareRounding = DirectHitRounding()"))
+            check("NP6 [source-only] updateProjectiles: a shot is removed only outside the arena circle + margin (GameConfig.Arena.radius + Neutral.projectileCleanupMargin), the swept terrain test is skipped for a T4 shot (!projectile.passesTerrain), and a spent primary still leaves its Gravity Well where it stopped",
+                  update.contains("projectile.position.length > GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin") && update.contains("} else if solid, !projectile.passesTerrain, arenaGeometry.segmentBlocked(")
+                    && update.contains("if projectile.spawnsGravityWell {"))
+            check("NP7 [source-only; executed as FX5] one hit per body: both direct-hit handlers guard hasStruck before any damage and consume through onHitEnemy(body); the node records the body and a pierce-all shot is never consumed; the projectile carries unlimitedRange / piercesAll / passesTerrain from PlayerStats' Long Shot tier",
+                  hitE.contains("guard !projectileNode.hasStruck(enemyNode) else { return }") && hitE.contains("let consumed = projectileNode.onHitEnemy(enemyNode)")
+                    && hitB.contains("guard !projectileNode.hasStruck(bossNode) else { return }") && hitB.contains("let consumed = projectileNode.onHitEnemy(bossNode)")
+                    && node.contains("if piercesAll { return false }") && node.contains("return !unlimitedRange && distanceTraveled >= maxRange")
+                    && fire.contains("unlimitedRange: playerStats.projectileUnlimitedRange") && fire.contains("piercesAll: playerStats.projectilePiercesAll") && fire.contains("passesTerrain: playerStats.projectilePassesTerrain")
+                    && count(scene, "hasStruck(") == 2)
+            let ls = card("neutral_4"), sc = card("neutral_6"), fs = card("v18_fracture_shot")
+            check("NP8 Long Shot, Scatter and Fracture Shot carry the N3 copy (four tier lines each, details naming the rules) and every face fits beside a MORE detail (≤ 3 lines)",
+                  ls.tierDescriptions ?? [] == ["+25% shot range", "+50% shot range", "No range limit", "No limit; pierce all, pass walls"] && (ls.detail ?? "").contains("pierce every enemy")
+                    && sc.tierDescriptions ?? [] == ["2 parallel shots per volley", "3 shots: center + 2 angled", "5 shots: center + 4 angled", "9 shots in a wide fan"] && (sc.detail ?? "").contains("Storm Engine")
+                    && fs.tierDescriptions ?? [] == ["Each shot splits 3 ways", "Splits 5 ways, 60° fan", "Splits 9 ways, 120° fan", "Splits 17 ways, 180° fan"] && (fs.detail ?? "").contains("shared evenly")
+                    && (faces(ls) + faces(sc) + faces(fs)).allSatisfy { faceLines($0.1) <= 3 })
+        }
+
+        // ── NR · v2.2 Neutral rework, Unit N4 (Rapid Fire's ladder + the chaos
+        // beam). The pure beam (BeamTick, BeamClock) and the exact parent hits
+        // are EXECUTED in tools/neutral-harness (BX, BH); here: the real acquire
+        // path, both gate orders, the copy, the rider-copy equality and the
+        // scene's wiring by source (labeled source-only).
+        do {
+            typealias N = GameConfig.Neutral
+            func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1e-9 }
+            check("NR0 GameConfig.Neutral holds N4's ruled numbers: Rapid Fire totals 10/25/50/90%; the beam at T5, ticking every 0.5 s at 75% retention; the palette neon green / astral blue / orange; Lucky Break's mirror equals the gun's literals (10%, ×1.5)",
+                  N.rapidFireSpeedTotals == [0.10, 0.25, 0.50, 0.90] && N.chaosBeamTier == 5 && N.beamTickInterval == 0.5 && N.beamDamageRetention == 0.75
+                    && N.beamNeonGreenHex == 0x39FF14 && N.beamAstralBlueHex == 0x3D7BFF && N.beamOrangeHex == 0xFF8A1F
+                    && N.beamLuckyBreakChance == 0.10 && N.beamLuckyBreakFactor == 1.5
+                    && ["private func handleProjectileHit(", "private func handleProjectileHitBoss("].allSatisfy { sig in
+                        body(code("Sparkforge/Scenes/GameScene.swift"), sig).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+                            .contains("if playerStats.forgeLuckyBreak && CGFloat.random(in: 0...1) < 0.10 { damage = Int(CGFloat(damage) * 1.5) }") })
+            // Rapid Fire through the real manager with Static T3, Surge and Glass Engine already in fireRateMultiplier.
+            do {
+                let um = fullSave(seed: 41)
+                let stats = PlayerStats()
+                for _ in 0..<3 { um.pickCard(card("shock_1"), stats: stats, level: 0) }
+                um.pickCard(card("shock_3"), stats: stats, level: 0); um.pickCard(card("v13_glass_engine"), stats: stats, level: 0)
+                let external = stats.fireRateMultiplier, baseInterval = stats.effectiveFireInterval
+                var divisors: [CGFloat] = [], tiers: [Int] = [], beam: [Bool] = [], took: [Bool] = []
+                for level in 1...5 {
+                    took.append(um.acquire(card("neutral_3"), stats: stats, level: level))
+                    divisors.append(CGFloat(baseInterval / stats.effectiveFireInterval)); tiers.append(stats.rapidFireTier); beam.append(stats.chaosBeamActive)
+                }
+                let sixth = um.acquire(card("neutral_3"), stats: stats, level: 6)
+                check("NR1 Rapid Fire T1→T5 through the real acquire path ON TOP of Static T3, Surge and Glass Engine: the interval divides by 1.10 / 1.25 / 1.50 / 1.90 (totals, every external rate kept), T5 keeps the rate and turns the beam on (rapidFireTier 1–5); a sixth pick is refused",
+                      took == [true, true, true, true, true] && zip(divisors, [1.10, 1.25, 1.50, 1.90, 1.90]).allSatisfy { abs($0 - $1) < 1e-9 }
+                        && tiers == [1, 2, 3, 4, 5] && beam == [false, false, false, false, true] && !sixth && external < 1
+                        && near(stats.fireRateMultiplier, external / 1.90), "took \(took) divisors \(divisors) tiers \(tiers) beam \(beam) sixth \(sixth)")
+                stats.reset(); um.reset()
+                check("NR1b reset: rapidFireTier 0, the beam off, fireRateMultiplier 1, Rapid Fire at T0", stats.rapidFireTier == 0 && !stats.chaosBeamActive && stats.fireRateMultiplier == 1 && um.tier(of: "neutral_3") == 0)
+            }
+            // R4: the symmetric exclusion, both orders; T1–T4 and Fracture stay compatible.
+            do {
+                let rf = card("neutral_3"), pv = card("cap_chill_polarvortex"), fr = card("v18_fracture_shot")
+                // Polar Vortex T4 first: Rapid Fire T1–T4 still taken, T5 refused.
+                let a = fullSave(seed: 42), sa = PlayerStats()
+                for _ in 0..<4 { a.pickCard(pv, stats: sa, level: 0) }
+                let aT4 = (1...4).map { a.acquire(rf, stats: sa, level: $0) }
+                let aT5 = a.acquire(rf, stats: sa, level: 5)
+                // Rapid Fire T5 first: Polar Vortex's T4 tier is closed (T1–T3 untouched); Fracture still taken.
+                let b = fullSave(seed: 43), sb = PlayerStats()
+                for _ in 0..<5 { b.pickCard(rf, stats: sb, level: 0) }
+                for _ in 0..<3 { b.pickCard(pv, stats: sb, level: 0) }
+                let bPV4 = b.isSelectable(pv, atLevel: 6)
+                let bFr = b.acquire(fr, stats: sb, level: 7)
+                // Control: Rapid Fire at T4 leaves Polar Vortex's T4 open.
+                let c = fullSave(seed: 44), sc = PlayerStats()
+                for _ in 0..<4 { c.pickCard(rf, stats: sc, level: 0) }
+                for _ in 0..<3 { c.pickCard(pv, stats: sc, level: 0) }
+                let cPV4 = c.isSelectable(pv, atLevel: 6)
+                // Fracture first, then Rapid Fire T5 is still taken (both pellet cards).
+                let d = fullSave(seed: 45), sd = PlayerStats()
+                d.pickCard(fr, stats: sd, level: 0)
+                let dRF = (1...5).map { d.acquire(rf, stats: sd, level: $0) }
+                check("NR2 R4 the symmetric exclusion in BOTH orders through the real manager: Polar Vortex T4 owned → Rapid Fire T1–T4 taken, T5 refused; Rapid Fire T5 owned → Polar Vortex's T4 closed (control: at Rapid Fire T4 it is open); Fracture and Rapid Fire T5 combine either way",
+                      aT4 == [true, true, true, true] && !aT5 && sa.rapidFireTier == 4 && !sa.chaosBeamActive
+                        && !bPV4 && bFr && cPV4 && dRF == [true, true, true, true, true] && sd.chaosBeamActive,
+                      "aT4 \(aT4) aT5 \(aT5) bPV4 \(bPV4) bFr \(bFr) cPV4 \(cPV4) dRF \(dRF)")
+            }
+            let rfc = card("neutral_3"), warp = card("void_1"), mirror = card("v18_mirror_edge")
+            check("NR3 C2 the copy: Rapid Fire's five tier lines and its detail name the beam (75% every 0.5 s, pierces, stops at walls), say Warp Shot and Mirror Edge don't affect it and Erasure's Echo re-fires each beam lane as a normal shot (Echo ruling), and the icicle exclusion; Warp Shot's and Mirror Edge's details say it on their side, before their approved closing sentences; every face fits",
+                  rfc.tierDescriptions ?? [] == ["+10% attack speed", "+25% attack speed", "+50% attack speed", "+90% attack speed", "Shots become a chaos beam"]
+                    && (rfc.detail ?? "").contains("75% of your shot damage every 0.5s") && (rfc.detail ?? "").contains("Warp Shot and Mirror Edge don't affect the beam; Erasure's Echo re-fires each beam lane as a normal shot.")   // v2.2 N4 Echo ruling (Oct 13): ordinary Echo shots per parent lane
+                    && (rfc.detail ?? "").contains("stops at walls") && (rfc.detail ?? "").contains("Polar Vortex")
+                    && (warp.detail ?? "").hasSuffix("No effect on Rapid Fire's chaos beam. Damage between whole numbers rounds up by chance.")
+                    && (mirror.detail ?? "").hasSuffix("No effect on Rapid Fire's chaos beam. Echoes don't echo, split or leave pull zones, and aren't primary hits.")
+                    && (faces(rfc) + faces(warp) + faces(mirror)).allSatisfy { faceLines($0.1) <= 3 })
+
+            // NB1 — the beam's rider copies are TOKEN-EQUAL to the gun's sections
+            // (executable view: comments and whitespace ignored). A self-test
+            // proves the comparison sees a one-token drift.
+            let sceneText = raw("Sparkforge/Scenes/GameScene.swift")
+            func riderTokens(_ src: String) -> (gunE: [String], beamE: [String], gunB: [String], beamB: [String]) {
+                func section(_ sig: String, after anchor: String) -> [String] {
+                    guard let b = SwiftSource.block(in: src, after: sig),
+                          let at = b.executableOffsets(of: anchor).first(where: { b.depth(at: $0) == 1 }),
+                          let start = b.executableOffsets(of: "if playerStats.burnDPS > 0 {").first(where: { $0 > at && b.depth(at: $0) == 1 }) else { return [] }
+                    return b.tokens(from: start, to: b.close)
+                }
+                func whole(_ sig: String) -> [String] {
+                    guard let b = SwiftSource.block(in: src, after: sig) else { return [] }
+                    return b.tokens(from: b.open + 1, to: b.close)
+                }
+                return (section("private func handleProjectileHit(", after: "damage = hit.basis"), whole("private func landBeamHit("),
+                        section("private func handleProjectileHitBoss(", after: "let hit = DirectHitDamage.resolve("), whole("private func landBeamHitOnBoss("))
+            }
+            let rt = riderTokens(sceneText)
+            let drifted = riderTokens(sceneText.replacingOccurrences(of: "        erasureRegisterHit()   // T1 Erasure: hits on the boss charge the meter too\n        if consumed { openBlackholeIfSeeded(projectileNode) }   // v2.1 A6: it stopped here, last\n    }\n\n    // MARK: - v1.6: Projectile",
+                with: "        if consumed { openBlackholeIfSeeded(projectileNode) }   // v2.1 A6: it stopped here, last\n    }\n\n    // MARK: - v1.6: Projectile"))
+            check("NB1 the beam lands its hits through VERBATIM rider copies: landBeamHit's executable tokens equal handleProjectileHit's section after `damage = hit.basis` (\(rt.gunE.count) tokens) and landBeamHitOnBoss's equal handleProjectileHitBoss's after the block (\(rt.gunB.count)); a one-statement drift in a copy is seen",
+                  !rt.gunE.isEmpty && rt.gunE == rt.beamE && !rt.gunB.isEmpty && rt.gunB == rt.beamB
+                    && rt.gunE.count > 200 && rt.gunB.count > 50 && drifted.gunB == rt.gunB && drifted.beamB != rt.beamB,
+                  "enemy \(rt.gunE.count)/\(rt.beamE.count) boss \(rt.gunB.count)/\(rt.beamB.count)")
+
+            // NB2–NB5 — the wiring, by source.
+            let scene = code("Sparkforge/Scenes/GameScene.swift")
+            func flat(_ t: String) -> String { t.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+            func count(_ hay: String, _ needle: String) -> Int { hay.components(separatedBy: needle).count - 1 }
+            func index(_ hay: String, _ needle: String) -> Int { (hay.range(of: needle)?.lowerBound).map { hay.distance(from: hay.startIndex, to: $0) } ?? -1 }
+            // Every needle present (exactly once) and in this order — a missing needle never passes an ordering
+            // (first-run gap: N4-S3 survived an `index < index` test whose left side was absent, i.e. -1).
+            func ordered(_ hay: String, _ needles: [String]) -> Bool {
+                let at = needles.map { index(hay, $0) }
+                return needles.allSatisfy { count(hay, $0) == 1 } && !at.contains(-1) && zip(at, at.dropFirst()).allSatisfy { $0 < $1 }
+            }
+            let auto = flat(body(scene, "private func updateAutoAttack(")), beamFrame = flat(body(scene, "private func updateChaosBeam("))
+            let tickBody = flat(body(scene, "private func beamTick(")), effects = flat(body(scene, "private func beamVolleyEffects("))
+            let nearest = flat(body(scene, "private func findNearestTargetPosition(")), linesBody = flat(body(scene, "private func beamLines("))
+            check("NB2 [source-only; the clocks are executed as BX] the beam replaces the gun only at T5 and only AFTER the kaiju and Red Smile guards (their return freezes the beam's clocks too — no tick debt); it is hidden by default each frame, on death and on restart (clocks reset)",
+                  ordered(auto, ["beamNode.isHidden = true", "guard !kaijuActive else { return }", "guard !redSmile.formActive else { return }",
+                                 "if playerStats.chaosBeamActive { updateChaosBeam(dt) return }", "fireClock.advance("])
+                    && count(scene, "updateChaosBeam(") == 2 && count(scene, "beamClock.reset()") == 1 && count(scene, "beamClock.advance(") == 1
+                    && flat(body(scene, "private func restartGame(")).contains("beamClock.reset() beamSpreadWindow = false beamNode.isHidden = true")
+                    && flat(body(scene, "private func playerDied(")).contains("beamNode.isHidden = true"))
+            check("NB3 [source-only] C1: the frame resolves target → clocks (the live effectiveFireInterval, firing only with a target) → the virtual volley (recordShot = Storm's window; ONE volleyCounter.register) → lines → effects → draw → the tick; targeting is range AND line of sight, Long Shot T4's flag set only around the beam's own call",
+                  ordered(beamFrame, ["targetingIgnoresTerrain = playerStats.projectilePassesTerrain let target = findNearestTargetPosition() targetingIgnoresTerrain = false",
+                                      "beamClock.advance(dt, volleyInterval: playerStats.effectiveFireInterval, firing: target != nil)",
+                                      "if volley { beamSpreadWindow = playerStats.recordShot()", "volleyCounter.register(emitted: true,",
+                                      "let lines = beamLines(aim: aim)", "if volley { beamVolleyEffects(verdict, lines: lines, aim: aim) }",
+                                      "beamNode.draw(", "if tick { beamTick(lines) }"])
+                    && count(scene, "targetingIgnoresTerrain = ") == 3 && count(scene, "private var targetingIgnoresTerrain = false") == 1 && nearest.contains("let solid = arenaGeometry.hasBlockedGeometry && !targetingIgnoresTerrain")
+                    && count(scene, "volleyCounter.register(") == 2)
+            check("NB4 [source-only; geometry executed as BX] lines come from N3's AttackPattern (Storm's window count, Scatter tier, Fracture tier) and end at range / first terrain (skipped for Long Shot T4) / the arena boundary; Gravity Well once per PARENT lane (centre lines), the Blackhole at the LEAD lane's terminus, Shadow Edge on the 7th",
+                  linesBody.contains("AttackPattern.lanes(count: playerStats.volleyPelletCount(isSpreadVolley: beamSpreadWindow)") && linesBody.contains("AttackPattern.compose(lanes: lanes, fracture: AttackPattern.fractureOffsets(tier: playerStats.fractureTier))")
+                    && linesBody.contains("geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain") && linesBody.contains("maxLength: playerStats.effectiveProjectileRange")
+                    && effects.contains("let centres = lines.filter { $0.branch.isCenter }") && effects.contains("for line in centres { spawnVoidWell(.gravityWell, at: line.end) }")
+                    && effects.contains("if verdict.blackhole, let lead = centres.first { spawnVoidWell(.blackhole, at: lead.end) }") && effects.contains("if verdict.blade { fireShadowEdge(direction: aim) }"))
+            let beamNodeFile = code("Sparkforge/Nodes/BeamNode.swift")
+            check("NB5 [source-only; executed as BH] the tick: ONE direct-attack crit per parent lane (in lane order), one hit per (lane, target) with the summed share, the exact parent then N3's share step (fractureBranch / the boss's riders' fractureBranchOnBoss); sizzles are visual only (BeamNode touches no damage, stats or enemies)",
+                  tickBody.contains("for lane in Set(lines.map { $0.branch.lane }).sorted() { let isCrit = rollShotCrit(directAttack: true)")
+                    && tickBody.contains("BeamTick.group(branches: lines.map { $0.branch }, contacts: contacts)") && tickBody.contains("shot.fractureShare = hit.share")
+                    && tickBody.contains("let branchHit = fractureBranch(parent, projectile: shot)") && tickBody.contains("landBeamHitOnBoss(parent, projectileNode: shot, bossNode: bossNode)")
+                    && tickBody.contains("BeamTick.laneTick(basis: split.base, interval: playerStats.effectiveFireInterval)")
+                    && !tickBody.contains("takeDamage") && !tickBody.contains("takeDirectHit") && !tickBody.contains("dealDirectDamage")   // damage lands only through the parents + rider copies
+                    && !beamNodeFile.contains("takeDamage") && !beamNodeFile.contains("takeDirectHit") && !beamNodeFile.contains("playerStats") && !beamNodeFile.contains("EnemyNode"))
+            // NB6 — the Echo ruling (Brandon, Oct 13: "ordinary echo shot"): the gun and the beam schedule the SAME
+            // ordinary Echo; its body is the pre-ruling inline block, statement for statement.
+            let echoBody = flat(body(scene, "private func scheduleErasureEcho("))
+            let fireBody = flat(body(scene, "private func fireProjectile("))
+            check("NB6 [source-only; the scheduler is executed in the neutral harness as EX0–EX7, and its action-phase `.playing` guard by the separate frame-phase regression EXP1 (N4-R1)] Erasure T4's Echo: ONE shared scheduler holding the pre-ruling block verbatim (1.5 s wait, the `.playing` guard, an edge origin, damageScale = Erasure.echoFraction, allowModifiers: false); the gun calls it only AFTER `guard allowModifiers` (no echo of an echo); the beam calls it once per PARENT lane (centre lines) inside the virtual volley's effects — nowhere else",
+                  echoBody == "direction: CGPoint) { let echoDir = direction run(SKAction.sequence([ SKAction.wait(forDuration: GameConfig.Erasure.echoDelay), SKAction.run { [weak self] in guard let self = self, self.gameState == .playing else { return } let edge = PlacementSampler.randomPoint( in: self.arenaGeometry, minRadius: GameConfig.Arena.radius * 0.85, maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12) self.fireProjectile(direction: echoDir, originOffset: edge - self.player.position, damageScale: GameConfig.Erasure.echoFraction, allowModifiers: false) } ])) }"
+                    && ordered(fireBody, ["guard allowModifiers else { return }", "if playerStats.erasureEcho { scheduleErasureEcho(direction: direction) }"])
+                    && effects.contains("if playerStats.erasureEcho { for line in centres { scheduleErasureEcho(direction: line.direction) } }")
+                    && count(scene, "scheduleErasureEcho(") == 3 && count(scene, "GameConfig.Erasure.echoDelay") == 1 && count(scene, "GameConfig.Erasure.echoFraction") == 1,
+                  "body \(echoBody.prefix(120))…")
+        }
+
+        // ── NC · v2.2 Neutral rework, Unit N5 (Chain Reaction, R6). The pure rules and the
+        // kill/burst seam are EXECUTED in tools/neutral-harness (CX); here: the real acquire
+        // path, the credit tiers, the copy, and the scene's wiring by source (labeled).
+        do {
+            typealias N = GameConfig.Neutral
+            let cr = card("v13_chain_reaction")
+            do {
+                let um = fullSave(seed: 51)
+                let stats = PlayerStats()
+                var rows: [String] = [], took: [Bool] = []
+                for level in 1...3 {
+                    took.append(um.acquire(cr, stats: stats, level: level))
+                    rows.append("\(stats.chainReactionExplode)/\(stats.chainReactionTier)/\(stats.chainReactionDamage)/\(stats.chainReactionRadius)")
+                }
+                let fourth = um.acquire(cr, stats: stats, level: 4)
+                check("NC1 Chain Reaction T1→T3 through the real acquire path: explode on, tier 1/2/3, base 1/2/3, radius 35/50/70 (\(rows)); a fourth pick is refused (maxTier 3); an ordinary Neutral card (no signature, capstone or gate)",
+                      took == [true, true, true] && rows == ["true/1/1/35.0", "true/2/2/50.0", "true/3/3/70.0"] && !fourth && cr.maxTier == 3
+                        && !cr.isSignature && !cr.isCapstone && cr.provides.isEmpty && cr.requires.isEmpty && cr.blockedBy.isEmpty && cr.tierProvides.isEmpty && cr.tierBlockedBy.isEmpty,
+                      "took \(took) rows \(rows) fourth \(fourth)")
+                stats.reset(); um.reset()
+                check("NC1b reset: Chain Reaction off, tier 0, base 1, radius 35, at T0", !stats.chainReactionExplode && stats.chainReactionTier == 0 && stats.chainReactionDamage == 1 && stats.chainReactionRadius == 35 && um.tier(of: "v13_chain_reaction") == 0)
+            }
+            // (NC2 — the credit tiers — is executed in the neutral harness, CX8: this harness does not compile KillSource.)
+            check("NC3 the copy: three tier lines, the detail naming the radii, bases, the cascade, T3's +10% per link capped at +100%, the mini-boss half, the arena boss and the XP-only chain kills; every face fits beside a MORE detail",
+                  cr.description == "Enemies explode on death"
+                    && cr.tierDescriptions ?? [] == ["Deaths explode: 1 damage, small blast", "Blasts deal 2 in a wider radius", "Blasts deal 3; +10% per chain link"]
+                    && (cr.detail ?? "").contains("within 35 range, then 50, then 70, for 1, then 2, then 3 damage") && (cr.detail ?? "").contains("Enemies a blast kills explode too")
+                    && (cr.detail ?? "").contains("+10% blast damage, up to +100%") && (cr.detail ?? "").contains("Mini-bosses take half; the arena boss is unaffected")
+                    && (cr.detail ?? "").contains("Blast kills give XP but no other on-kill effects")
+                    && faces(cr).allSatisfy { faceLines($0.1) <= 3 })
+            let scene = code("Sparkforge/Scenes/GameScene.swift")
+            func flat(_ t: String) -> String { t.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+            func count(_ hay: String, _ needle: String) -> Int { hay.components(separatedBy: needle).count - 1 }
+            func index(_ hay: String, _ needle: String) -> Int { (hay.range(of: needle)?.lowerBound).map { hay.distance(from: hay.startIndex, to: $0) } ?? -1 }
+            func ordered(_ hay: String, _ needles: [String]) -> Bool {
+                let at = needles.map { index(hay, $0) }
+                return needles.allSatisfy { count(hay, $0) == 1 } && !at.contains(-1) && zip(at, at.dropFirst()).allSatisfy { $0 < $1 }
+            }
+            let killed = flat(body(scene, "private func onEnemyKilled(")), bursts = flat(body(scene, "private func resolveDeathBursts("))
+            let burstFn = flat(body(scene, "private func chainReactionBurst(")), drain = flat(body(scene, "private func drainChainReactions("))
+            check("NC4 [source-only; executed as CX2/CX3/CX8] Q1/C1: onEnemyKilled QUEUES the burst right after the killCredited guard and the removal from `enemies`, for EVERY credited source (before the credit split; a chain victim carries its generation, any other death is a root at 0), and pays a .rewardRecorded kill its Codex/bestiary record; resolveDeathBursts no longer bursts Chain Reaction; nothing else calls a burst",
+                  ordered(killed, ["guard !enemy.killCredited else {", "enemy.killCredited = true", "enemies.remove(at: index)",
+                                   "if playerStats.chainReactionExplode { chainReactions.enqueue(ChainReaction.Burst( origin: position, generation: source == .chainReaction ? chainGeneration : 0, emitter: ObjectIdentifier(enemy))) }",
+                                   "guard source.credit == .full else { spawnXPOrb(at: position, value: xpValue) if source.credit == .rewardRecorded, let enemy { CodexManager.shared.recordDefeat(bestiaryFamily(for: enemy)) } return }"])
+                    && !bursts.contains("chainReaction") && count(scene, "chainReactions.enqueue(") == 1 && count(scene, "chainReactionBurst(") == 2 && !scene.contains("chainReactionAt("))
+            check("NC5 [source-only; executed as CX2–CX7, CX10–CX11] Q2/Q4 (+ N5-R1: delivered through ChainReaction.entry): didFinishUpdate drains the FIFO queue in one while-loop; a burst hits only live, uncredited, non-emitter `enemies` strictly inside the owned radius, with ChainReaction's exact amount (owned base, tier, generation, mini-boss) and one hit carrying the vulnerability (takeDirectHit), skips zero, and credits its lethal victims AFTER its loop as .chainReaction at generation + 1",
+                  flat(body(scene, "override func didFinishUpdate(")).contains("drainChainReactions()")
+                    && drain.contains("while let burst = chainReactions.next() { chainReactionBurst(burst) }")
+                    && burstFn.contains("for enemy in enemies where !enemy.isDying && !enemy.killCredited && ObjectIdentifier(enemy) != burst.emitter && enemy.position.distance(to: burst.origin) < radius {")
+                    && burstFn.contains("ChainReaction.exactDamage(base: playerStats.chainReactionDamage, tier: playerStats.chainReactionTier, generation: burst.generation, bossClass: enemy.isMiniBoss)")
+                    && burstFn.contains("ChainReaction.hit(exact: exact, vulnerability: enemy.vulnerabilityMultiplier, rounding: DirectHitRounding())")
+                    && burstFn.contains("guard hit.basis > 0 || hit.dealt > 0 else { continue }")
+                    && ordered(burstFn, ["if enemy.takeDirectHit(ChainReaction.entry(hit)) { lethal.append(enemy) }", "for victim in lethal { onEnemyKilled(at: victim.position, xpValue: victim.xpValue, enemy: victim, source: .chainReaction, chainGeneration: burst.generation + 1) }"])
+                    && count(burstFn, "boss") == count(burstFn, "bossClass: enemy.isMiniBoss"))   // the arena boss is never read
+            check("NC6 [source-only] Q6 lifecycle: the queue is cleared on restart and at each of the three board wipes that empty `enemies` (Event Horizon's erase, the Unmade Star, the gauntlet stage end) — and nowhere else",
+                  count(scene, "chainReactions.reset()") == 4
+                    && flat(body(scene, "private func restartGame(")).contains("enemies.removeAll() chainReactions.reset()")
+                    && flat(body(scene, "private func eraseArena(")).contains("enemies.removeAll() chainReactions.reset()")
+                    && flat(body(scene, "private func spawnUnmadeStar(")).contains("enemies.removeAll() chainReactions.reset()"))
+            check("NC7 [source-only] the XP a chain kill pays is the ordinary orb (spawnXPOrb → collection → the N2 XPLedger and level queue, unchanged); a .chainReaction kill never reaches resolveKillRewards, the kill count, the gate counters or ProgressionManager (they sit after the credit guard)",
+                  ordered(killed, ["guard source.credit == .full else {", "killCount += 1", "resolveKillRewards(ctx)", "ProgressionManager.shared.quenchKills += 1"]))
+        }
+    }
+}
+
+// The real CodexManager wrote to this run's UserDefaults domain (run.sh gives
+// each run its own). Leave it empty for the next run that takes the slot.
+CodexManager.shared.resetAll()
 
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

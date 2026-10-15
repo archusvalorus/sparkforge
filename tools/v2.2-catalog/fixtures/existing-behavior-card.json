@@ -1,0 +1,12 @@
+{
+  "_about": "v2.2 J3-c demonstration: a card that binds an EXISTING native behaviour. Applied by demo-existing-behavior-card.py to a copy of the authored catalog, never to the live pool. The id is deliberately outside the live and retired id sets.",
+  "card": {
+    "id": "demo_swift_echo",
+    "name": "Swift Echo",
+    "tree": "neutral",
+    "face": "+12% movement speed (demonstration)",
+    "behavior": "neutral_1"
+  },
+  "insertAfter": "neutral_1",
+  "brokenBehavior": "neutral_swifter"
+}

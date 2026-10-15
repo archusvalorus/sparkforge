@@ -13,6 +13,26 @@ final class ProjectileNode: SKNode {
     
     /// Max range for this specific projectile
     let maxRange: CGFloat
+    /// v2.2 N3 Long Shot T3+: never expires by distance.
+    let unlimitedRange: Bool
+    /// v2.2 N3 Long Shot T4: never consumed by a body; passes solid terrain.
+    let piercesAll: Bool
+    let passesTerrain: Bool
+    /// v2.2 N3 Fracture: this branch's share of its parent's damage (1 = a
+    /// whole shot). Applied as the LAST step of the hit chain — after the
+    /// parent's whole-shot prefix, the direct-hit block, the Braceguard shield
+    /// and the Boss Mode DEF dial — by chance-rounding on `shareRounding`,
+    /// never floored to 1, so the parent's processed damage is conserved
+    /// across its branches (N3 corrective, Oct 13).
+    var fractureShare: CGFloat = 1
+    /// The share's OWN launch-time threshold: independent of CL-70's Warp /
+    /// Riftline one (`a6Rounding`) and of the block's (`hitRounding`), because
+    /// reusing a spent threshold for a second rounding is biased (CL-114(e)).
+    /// One per projectile: monotone across its hits, as the other two.
+    let shareRounding = DirectHitRounding()
+    /// v2.2 N3: one hit per body per projectile (a piercing shot never strikes
+    /// the same enemy twice, however the bodies move).
+    private var struckBodies = Set<ObjectIdentifier>()
     /// Speed for this projectile
     let projectileSpeed: CGFloat
     /// How many enemies this can still pierce through
@@ -97,8 +117,14 @@ final class ProjectileNode: SKNode {
          bloodStyle: Bool = false,
          bladeStyle: Bool = false,
          returnedStyle: Bool = false,
-         bodyRadius: CGFloat? = nil) {
+         bodyRadius: CGFloat? = nil,
+         unlimitedRange: Bool = false,
+         piercesAll: Bool = false,
+         passesTerrain: Bool = false) {
         self.isIcicle = isIcicle
+        self.unlimitedRange = unlimitedRange
+        self.piercesAll = piercesAll
+        self.passesTerrain = passesTerrain
 
         self.direction = direction.normalized
         self.projectileSpeed = speed
@@ -216,7 +242,7 @@ final class ProjectileNode: SKNode {
             trail.xScale = max(0.01, left)
             trail.alpha = 0.25 + 0.6 * left
         }
-        return distanceTraveled >= maxRange
+        return !unlimitedRange && distanceTraveled >= maxRange
     }
 
     /// v2.1 A6 (CL-14): make this a Warp shot, with its placeholder tell.
@@ -235,8 +261,14 @@ final class ProjectileNode: SKNode {
 
     /// Called when hitting an enemy. Returns true if projectile should be consumed.
     /// (v2.1 A6: also counts the bodies struck, for Riftline's falloff.)
-    func onHitEnemy() -> Bool {
+    /// Has this projectile already struck `body`? (v2.2 N3: a body is hit once.)
+    func hasStruck(_ body: SKNode) -> Bool { struckBodies.contains(ObjectIdentifier(body)) }
+
+    /// A hit on `body`: records it, then says whether the projectile is spent.
+    func onHitEnemy(_ body: SKNode? = nil) -> Bool {
+        if let body { struckBodies.insert(ObjectIdentifier(body)) }
         bodiesStruck += 1
+        if piercesAll { return false }        // v2.2 N3 Long Shot T4: never consumed
         if remainingPierces > 0 {
             remainingPierces -= 1
             // Brief flash to show pierce

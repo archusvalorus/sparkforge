@@ -1,0 +1,201 @@
+{
+ "_about": "v2.2 Neutral rework, unit N2 — the REVIEWED expectations for every card the rework has changed so far (N1's Swift / Magnetic Core / Keen Eye retirement carried over unchanged; N2 adds XP Boost's ladder and Overclock's copy), grounded in docs/v2.2-neutral-design-spec.md §2 and the R1/R5 rulings (N0 §9). The frozen legacy fixtures are never edited; ParityAttribution builds the expected current documents from them plus this overlay. `cards` = dump-shaped records of every card whose AUTHORED record changed (copy or ladder); `expectedDeltas` = the reviewed PlayerStats effects of the cards whose EFFECT changed (a card in `cards` with no entry here changed copy only and must keep its legacy effect exactly); `addedFields` = PlayerStats stored fields that did not exist in the legacy record, with their default leaves. Supersedes n1-overlay.json (kept as evidence).",
+ "unit": "N2",
+ "retired": [
+  "neutral_2"
+ ],
+ "fields": [
+  "moveSpeedMultiplier",
+  "pickupRadiusMultiplier",
+  "magneticCoreSpeedBoost",
+  "xpMultiplier",
+  "runLevelCap",
+  "grantedLevelsPending"
+ ],
+ "fieldsNote": "N1: Swift adds its rungs to moveSpeedMultiplier (0.08, 0.12, 0.15); Magnetic Core adds its rungs to pickupRadiusMultiplier (0.15, 0.15, 0.20) and SETS magneticCoreSpeedBoost (0.10, 0.20, 0.30); Keen Eye's +0.20 radius is gone. N2: XP Boost adds its rungs to xpMultiplier (0.25, 0.25, 0.00) and at T3 sets runLevelCap 15 → 20 and adds 1 to grantedLevelsPending. Overclock's effect (overclockActive) is unchanged; its +35% attack speed / +15% damage are computed properties read while its timer runs, not stored fields.",
+ "addedFields": {
+  "runLevelCap": "int:15",
+  "grantedLevelsPending": "int:0"
+ },
+ "addedFieldsNote": "PlayerStats stored fields introduced in N2 (the run level cap and XP Boost's owed level). They appear in fieldPaths/defaultState and change only through XP Boost T3.",
+ "cards": {
+  "neutral_1": {
+   "id": "neutral_1",
+   "name": "Swift",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+8% movement speed",
+   "detail": "Permanent movement speed: +8%, then +20%, then +35% (totals). Adds to your other movement bonuses.",
+   "tierDescriptions": [
+    "+8% movement speed",
+    "+20% movement speed",
+    "+35% movement speed"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "v13_magnetic_core": {
+   "id": "v13_magnetic_core",
+   "name": "Magnetic Core",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+15% XP pull; XP gives a speed burst",
+   "detail": "XP orbs are pulled from 15% / 30% / 50% farther (totals). Each XP orb collected grants +10% / +20% / +30% movement speed for 1.5s; another pickup refreshes the time, never the strength. Health orbs are never magnetized.",
+   "tierDescriptions": [
+    "+15% XP pull; +10% burst",
+    "+30% XP pull; +20% burst",
+    "+50% XP pull; +30% burst"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "neutral_5": {
+   "id": "neutral_5",
+   "name": "XP Boost",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 3,
+   "description": "+25% XP gain",
+   "detail": "Run XP gain: +25%, then +50% (totals). The run's level cap is 15; tier 3 raises it to 20 and grants one full level-up right away (card and stat), keeping the XP you have. XP collected at the cap is banked.",
+   "tierDescriptions": [
+    "+25% XP gain",
+    "+50% XP gain",
+    "+50% XP; cap 20; +1 level now"
+   ],
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  },
+  "v17_overclock": {
+   "id": "v17_overclock",
+   "name": "Overclock",
+   "tag": "Neutral",
+   "tagKey": "neutral",
+   "isSignature": false,
+   "isCapstone": false,
+   "isSecret": false,
+   "maxTier": 1,
+   "description": "Level-ups: a 3s overdrive",
+   "detail": "After each level-up, when play resumes: +35% movement speed, +35% attack speed and +15% damage for 3 seconds of play. Another level-up refreshes the time; it never stacks.",
+   "provides": [],
+   "requires": [],
+   "blockedBy": [],
+   "tierRequires": {},
+   "tierProvides": {},
+   "tierBlockedBy": {}
+  }
+ },
+ "expectedDeltas": {
+  "neutral_1": [
+   {
+    "moveSpeedMultiplier": [
+     "num:1.0",
+     "num:1.08"
+    ]
+   },
+   {
+    "moveSpeedMultiplier": [
+     "num:1.08",
+     "num:1.2000000000000002"
+    ]
+   },
+   {
+    "moveSpeedMultiplier": [
+     "num:1.2000000000000002",
+     "num:1.35"
+    ]
+   }
+  ],
+  "v13_magnetic_core": [
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.0",
+     "num:1.15"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.0",
+     "num:0.1"
+    ]
+   },
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.15",
+     "num:1.2999999999999998"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.1",
+     "num:0.2"
+    ]
+   },
+   {
+    "pickupRadiusMultiplier": [
+     "num:1.2999999999999998",
+     "num:1.4999999999999998"
+    ],
+    "magneticCoreSpeedBoost": [
+     "num:0.2",
+     "num:0.3"
+    ]
+   }
+  ],
+  "neutral_5": [
+   {
+    "xpMultiplier": [
+     "num:1.0",
+     "num:1.25"
+    ]
+   },
+   {
+    "xpMultiplier": [
+     "num:1.25",
+     "num:1.5"
+    ]
+   },
+   {
+    "runLevelCap": [
+     "int:15",
+     "int:20"
+    ],
+    "grantedLevelsPending": [
+     "int:0",
+     "int:1"
+    ]
+   }
+  ]
+ },
+ "expectedDeltasNote": "Pairs are from the DEFAULT state (byte for byte); from a mid-run state the same per-tier CHANGE is required. XP Boost T3's xpMultiplier rung is +0.00 (T3 keeps +50%), so it does not appear in T3's diff; T3's cap is a max() to 20 and the granted level is += 1.",
+ "retiredNotes": {
+  "neutral_2": "v2.2 N1 Neutral (Keen Eye, merged into Magnetic Core)"
+ },
+ "counts": {
+  "total": 79,
+  "draftable": 78,
+  "secret": 1,
+  "regularNeutral": 9,
+  "neutralTiers": 17,
+  "tiersTotal": 153,
+  "retired": 9
+ }
+}
