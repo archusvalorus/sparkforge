@@ -68,7 +68,7 @@ run_in_slot() {
 # manager's replay (JF2b). A moved engine or a non-matching edit stops the run.
 # `SPARKFORGE_SKIP_COMPARATOR=1` leaves the two paths unset (JF2b then fails).
 COMPARATOR="$ROOT/tools/v2.2-catalog/comparator"
-EDITS="$ROOT/tools/v2.2-catalog/parity/v22-neutral/n5-engine-edits.json"   # v2.2 N5 (supersedes the N4 file)
+EDITS="$ROOT/tools/v2.2-catalog/parity/v22-neutral/n6-engine-edits.json"   # v2.2 N5 (supersedes the N4 file)
 if [ "$1" != "--dump" ] && [ "$1" != "--record-parity" ] && [ -z "$SPARKFORGE_SKIP_COMPARATOR" ]; then
   mkdir -p "$BUILD/cmp"
   ENGINE_COMMIT="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['engineCommit'])" "$EDITS")"

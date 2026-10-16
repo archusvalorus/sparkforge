@@ -81,3 +81,11 @@ no reclamation, and no run can take or remove another live run's slot (v2.2
 J1; before it every run shared the one domain `harness`, which made parallel
 runs interfere, and a first repair that reclaimed slots by checking pids let
 two reclaimers take the same slot — independent review, Oct 6).
+
+## N6 final integration and recording
+
+N6 uses dedicated `chaosBeam` / `beamIncompatible` capabilities for the approved first-acquired-wins exclusion between Rapid Fire T5 and Warp Shot/Mirror Edge. NI0–NI8 execute the real manager gates, acquisition, stale tables, rerolls/bonus/random-opener surfaces and reset. RF T1–T4 and the other pellet effects remain compatible. These are manager seams, not real UI callback tests.
+
+Active attributed expectations and pinned-engine edits are `parity/v22-neutral/n6-*.json`; all historical files stay frozen. The separate final record is `tools/v2.2-catalog/parity/v22/` (`effect-deltas.json`, `run-transcripts.json`, `manifest.json`). NIF1–NIF4 verify its manifest/digests and compare current effect/run documents byte for byte; they supplement rather than replace JF1/JF2/JP. The current-record path omits retired-card steps from historical scenarios via the existing explicit retirement seam. Do not overwrite legacy fixtures or use `--force` for final recording.
+
+N6 adds 11 negative controls: six gate/grant directions, wrong broad gate, acquire bypass, and three final-record tampering controls. The inventory is767; a new candidate does not inherit the historical full756 PASS. Packet: `docs/v2.2-neutral-n6-return.md`.

@@ -1,0 +1,70 @@
+{
+ "_about": "N6 owner-approved eligibility edits atop the N5 pool edits. Frozen accepted engine and all historical edits remain untouched. Dedicated capabilities and both gate directions are the only new executable engine changes; no draw algorithm or combat math changes.",
+ "unit": "N6",
+ "engineCommit": "31505bd1f754c4fcdf76f581e33ddec2dfbe1415",
+ "enginePath": "Sparkforge/Systems/UpgradeManager.swift",
+ "frozenCopy": "tools/v2.2-catalog/parity/v22-neutral/accepted-engine-31505bd.swift",
+ "engineSHA256": "c48d936fbad8a61caf79cd98ab83fb213adcfdf6681fa9135dab74ca41daa7bd",
+ "edits": [
+  {
+   "name": "Swift: the overlay's three-tier ladder (totals 0.08 / 0.20 / 0.35)",
+   "find": "            id: \"neutral_1\", name: \"Swift\", tag: .neutral,\n            description: \"+12% movement speed\"\n        ) { stats in\n            stats.moveSpeedMultiplier += 0.12\n        })\n",
+   "replace": "            id: \"neutral_1\", name: \"Swift\", tag: .neutral,\n            description: \"+8% movement speed\",\n            apply: { stats in stats.moveSpeedMultiplier += 0.08 },\n            higherTiers: [\n                { stats in stats.moveSpeedMultiplier += 0.20 - 0.08 },\n                { stats in stats.moveSpeedMultiplier += 0.35 - 0.20 }\n            ]\n        ))\n"
+  },
+  {
+   "name": "Keen Eye: retired (leaves the pool in place)",
+   "find": "        cards.append(UpgradeCard(\n            id: \"neutral_2\", name: \"Keen Eye\", tag: .neutral,\n            description: \"+20% XP pickup radius\"\n        ) { stats in\n            stats.pickupRadiusMultiplier += 0.20\n        })\n        \n",
+   "replace": ""
+  },
+  {
+   "name": "Magnetic Core: the overlay's three-tier ladder (radius totals 0.15 / 0.30 / 0.50; burst set to 0.10 / 0.20 / 0.30)",
+   "find": "            id: \"v13_magnetic_core\", name: \"Magnetic Core\", tag: .neutral,\n            description: \"+50% pickup radius, XP gives speed burst\"\n        ) { stats in\n            stats.pickupRadiusMultiplier += 0.50\n            stats.magneticCoreSpeedBoost = 0.30  // +30% speed for 1.5s on pickup\n        })\n",
+   "replace": "            id: \"v13_magnetic_core\", name: \"Magnetic Core\", tag: .neutral,\n            description: \"+15% XP pull; XP gives a speed burst\",\n            apply: { stats in\n                stats.pickupRadiusMultiplier += 0.15\n                stats.magneticCoreSpeedBoost = 0.10\n            },\n            higherTiers: [\n                { stats in\n                    stats.pickupRadiusMultiplier += 0.30 - 0.15\n                    stats.magneticCoreSpeedBoost = 0.20\n                },\n                { stats in\n                    stats.pickupRadiusMultiplier += 0.50 - 0.30\n                    stats.magneticCoreSpeedBoost = 0.30\n                }\n            ]\n        ))\n"
+  },
+  {
+   "name": "XP Boost: the overlay's three-tier ladder (totals 0.25 / 0.50 / 0.50; T3 raises the run cap to 20 and owes one level)",
+   "find": "            id: \"neutral_5\", name: \"XP Boost\", tag: .neutral,\n            description: \"+25% XP gain\"\n        ) { stats in\n            stats.xpMultiplier += 0.25\n        })\n",
+   "replace": "            id: \"neutral_5\", name: \"XP Boost\", tag: .neutral,\n            description: \"+25% XP gain\",\n            apply: { stats in stats.xpMultiplier += 0.25 },\n            higherTiers: [\n                { stats in stats.xpMultiplier += 0.50 - 0.25 },\n                { stats in\n                    stats.xpMultiplier += 0.50 - 0.50\n                    stats.runLevelCap = max(stats.runLevelCap, 20)\n                    stats.grantedLevelsPending += 1\n                }\n            ]\n        ))\n"
+  },
+  {
+   "name": "Long Shot: the overlay's four-tier ladder (range totals 0.25 / 0.50 / 0.50 / 0.50; tiers 1–4)",
+   "find": "            id: \"neutral_4\", name: \"Long Shot\", tag: .neutral,\n            description: \"+20% projectile range\"\n        ) { stats in\n            stats.projectileRangeMultiplier += 0.20\n        })\n",
+   "replace": "            id: \"neutral_4\", name: \"Long Shot\", tag: .neutral,\n            description: \"+25% shot range\",\n            apply: { stats in stats.projectileRangeMultiplier += 0.25; stats.longShotTier = 1 },\n            higherTiers: [\n                { stats in stats.projectileRangeMultiplier += 0.50 - 0.25; stats.longShotTier = 2 },\n                { stats in stats.projectileRangeMultiplier += 0.50 - 0.50; stats.longShotTier = 3 },\n                { stats in stats.projectileRangeMultiplier += 0.50 - 0.50; stats.longShotTier = 4 }\n            ]\n        ))\n"
+  },
+  {
+   "name": "Scatter: the overlay's four-tier ladder (lanes 2 / 3 / 5 / 9; no spreadAngle write)",
+   "find": "            apply: { stats in\n                stats.extraProjectiles += 1\n                stats.spreadAngle += 0.15\n            },\n            higherTiers: [\n                { stats in stats.extraProjectiles += 1 },\n                { stats in stats.extraProjectiles += 1 }\n            ],\n",
+   "replace": "            apply: { stats in stats.extraProjectiles += 2 - 1; stats.scatterTier = 1 },\n            higherTiers: [\n                { stats in stats.extraProjectiles += 3 - 2; stats.scatterTier = 2 },\n                { stats in stats.extraProjectiles += 5 - 3; stats.scatterTier = 3 },\n                { stats in stats.extraProjectiles += 9 - 5; stats.scatterTier = 4 }\n            ],\n"
+  },
+  {
+   "name": "Fracture Shot: the overlay's four-tier ladder (fractureTier 1–4; the split fields are gone)",
+   "find": "            apply: { stats in stats.splitCount = 2 },\n            provides: [.pelletEffect],          // v2.1 A7a (CL-93, symmetric)\n",
+   "replace": "            apply: { stats in stats.fractureTier = 1 },\n            higherTiers: [\n                { stats in stats.fractureTier = 2 },\n                { stats in stats.fractureTier = 3 },\n                { stats in stats.fractureTier = 4 }\n            ],\n            provides: [.pelletEffect],          // v2.1 A7a (CL-93, symmetric)\n"
+  },
+  {
+   "name": "Rapid Fire: the overlay's five-tier ladder (rate ratios to +10/+25/+50/+90 %; T5 the beam) with the R4 tier gates (T5 provides pelletEffect, blocked by glacialCondensation)",
+   "find": "            id: \"neutral_3\", name: \"Rapid Fire\", tag: .neutral,\n            description: \"+11% attack speed\"\n        ) { stats in\n            stats.fireRateMultiplier *= 0.90\n        })\n",
+   "replace": "            id: \"neutral_3\", name: \"Rapid Fire\", tag: .neutral,\n            description: \"+10% attack speed\",\n            apply: { stats in stats.fireRateMultiplier /= (1 + 0.10); stats.rapidFireTier = 1 },\n            higherTiers: [\n                { stats in stats.fireRateMultiplier *= (1 + 0.10) / (1 + 0.25); stats.rapidFireTier = 2 },\n                { stats in stats.fireRateMultiplier *= (1 + 0.25) / (1 + 0.50); stats.rapidFireTier = 3 },\n                { stats in stats.fireRateMultiplier *= (1 + 0.50) / (1 + 0.90); stats.rapidFireTier = 4 },\n                { stats in stats.rapidFireTier = 5 }\n            ],\n            tierProvides: [5: [.pelletEffect, .chaosBeam]],\n            tierBlockedBy: [5: [.glacialCondensation, .beamIncompatible]]\n        ))\n"
+  },
+  {
+   "name": "N5 Chain Reaction: three tiers (R6) — T1 explode + tier 1; T2 base 2, radius 50; T3 base 3, radius 70 (the escalation reads the tier)",
+   "find": "            id: \"v13_chain_reaction\", name: \"Chain Reaction\", tag: .neutral,\n            description: \"Enemies explode on death\"\n        ) { stats in\n            stats.chainReactionExplode = true\n        })\n",
+   "replace": "            id: \"v13_chain_reaction\", name: \"Chain Reaction\", tag: .neutral,\n            description: \"Enemies explode on death\",\n            apply: { stats in stats.chainReactionExplode = true; stats.chainReactionTier = 1; stats.chainReactionDamage = 1; stats.chainReactionRadius = 35 },\n            higherTiers: [\n                { stats in stats.chainReactionTier = 2; stats.chainReactionDamage = 2; stats.chainReactionRadius = 50 },\n                { stats in stats.chainReactionTier = 3; stats.chainReactionDamage = 3; stats.chainReactionRadius = 70 }\n            ]\n        ))\n"
+  },
+  {
+   "name": "N6 dedicated capability cases",
+   "find": "        case pelletEffect\n",
+   "replace": "        case pelletEffect\n        case chaosBeam\n        case beamIncompatible\n"
+  },
+  {
+   "name": "N6 void_1 symmetric beam gate",
+   "find": "            id: \"void_1\", name: \"Warp Shot\", tag: .voidT,\n            description: \"Slow shots that speed up. Slower = more damage.\",\n            apply: { stats in stats.warpShotActive = true },\n            detail: \"Your primary shots launch at 40% speed and reach full speed after 0.6s. They deal 150% damage at launch, falling to 100% at full speed. Damage between whole numbers rounds up by chance.\",\n            provides: [.pelletEffect],          // v2.1 A7a (CL-93, symmetric)\n            requires: [.voidUnlocked],\n            blockedBy: [.glacialCondensation]   // v2.1 A7a (CL-93): pellets only\n        ))",
+   "replace": "            id: \"void_1\", name: \"Warp Shot\", tag: .voidT,\n            description: \"Slow shots that speed up. Slower = more damage.\",\n            apply: { stats in stats.warpShotActive = true },\n            detail: \"Your primary shots launch at 40% speed and reach full speed after 0.6s. They deal 150% damage at launch, falling to 100% at full speed. Damage between whole numbers rounds up by chance.\",\n            provides: [.pelletEffect, .beamIncompatible],          // v2.1 A7a (CL-93, symmetric)\n            requires: [.voidUnlocked],\n            blockedBy: [.glacialCondensation, .chaosBeam]   // v2.1 A7a (CL-93): pellets only\n        ))"
+  },
+  {
+   "name": "N6 v18_mirror_edge symmetric beam gate",
+   "find": "            id: \"v18_mirror_edge\", name: \"Mirror Edge\", tag: .voidT,\n            description: \"Shots have a 35% chance to echo for 50% damage.\",\n            apply: { stats in stats.echoChance = 0.35 },\n            detail: \"Each primary shot has a 35% chance to fire again 0.15s later for 50% damage. Echoes don't echo, split or leave pull zones, and aren't primary hits.\",\n            provides: [.pelletEffect],   // v2.1 A7a (CL-93, symmetric)\n            requires: [.voidUnlocked],   // v2.1 A6 (CL-82)\n            blockedBy: [.glacialCondensation]   // v2.1 A7a (CL-93): pellets only\n        ))",
+   "replace": "            id: \"v18_mirror_edge\", name: \"Mirror Edge\", tag: .voidT,\n            description: \"Shots have a 35% chance to echo for 50% damage.\",\n            apply: { stats in stats.echoChance = 0.35 },\n            detail: \"Each primary shot has a 35% chance to fire again 0.15s later for 50% damage. Echoes don't echo, split or leave pull zones, and aren't primary hits.\",\n            provides: [.pelletEffect, .beamIncompatible],   // v2.1 A7a (CL-93, symmetric)\n            requires: [.voidUnlocked],   // v2.1 A6 (CL-82)\n            blockedBy: [.glacialCondensation, .chaosBeam]   // v2.1 A7a (CL-93): pellets only\n        ))"
+  }
+ ]
+}

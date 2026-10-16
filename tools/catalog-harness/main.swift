@@ -113,7 +113,7 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--record-parit
             exit(2)
         }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let effects = try ParityJSON.data(ParityEffects.document(.runtime()))
+        let effects = try ParityJSON.data(ParityEffects.document(.runtime(), skip: Set(UpgradeManager.retiredCardIDs.keys)))
         let runs = try ParityJSON.data(ParityRuns.document(), compact: true)
         try effects.write(to: dir.appendingPathComponent("legacy-effect-deltas.json"))
         try runs.write(to: dir.appendingPathComponent("legacy-run-transcripts.json"))
@@ -310,7 +310,7 @@ do {
     // symmetric chaos beam ↔ Polar Vortex T4 exclusion); T1–T4 carry no gate.
     let rf = card("neutral_3")
     let rfGate = rf.provides.isEmpty && rf.blockedBy.isEmpty && rf.requires.isEmpty
-        && rf.tierProvides == [5: [.pelletEffect]] && rf.tierBlockedBy == [5: [.glacialCondensation]]
+        && rf.tierProvides == [5: [.pelletEffect, .chaosBeam]] && rf.tierBlockedBy == [5: [.glacialCondensation, .beamIncompatible]]
     check("CA14 CL-93 (symmetric) exactly Warp Shot, Gravity Well, Mirror Edge, Fracture Shot and Riftline are blocked by it AND grant pelletEffect (Erasure neither); v2.2 N4: Rapid Fire's T5 tier alone joins both sides",
           blocked == pellet && Set(providers(of: .pelletEffect).map { $0.id }) == pellet.union(["neutral_3"]) && rfGate
               && card("cap_void_erasure").blockedBy.isEmpty && !card("cap_void_erasure").provides.contains(.pelletEffect),
@@ -2461,7 +2461,7 @@ do {
     // documents to equal them: exact everywhere, numeric within 1e-12 on the
     // attributed fields. No field is ever masked. Without an overlay the
     // comparisons are exact, as in J2.
-    let overlayURL = root.appendingPathComponent("tools/v2.2-catalog/parity/v22-neutral/n5-overlay.json")   // v2.2 N5 (supersedes n4-overlay.json)
+    let overlayURL = root.appendingPathComponent("tools/v2.2-catalog/parity/v22-neutral/n6-overlay.json")   // v2.2 N5 (supersedes n4-overlay.json)
     let overlay = ParityOverlay(json: json(read(overlayURL)))
     let skipIDs = overlay?.retired ?? []
     let j0ExportObject = json(read(root.appendingPathComponent("tools/v2.2-catalog/baseline/compiled-catalog-export.json")))
@@ -3214,10 +3214,10 @@ do {
             let rfc = card("neutral_3"), warp = card("void_1"), mirror = card("v18_mirror_edge")
             check("NR3 C2 the copy: Rapid Fire's five tier lines and its detail name the beam (75% every 0.5 s, pierces, stops at walls), say Warp Shot and Mirror Edge don't affect it and Erasure's Echo re-fires each beam lane as a normal shot (Echo ruling), and the icicle exclusion; Warp Shot's and Mirror Edge's details say it on their side, before their approved closing sentences; every face fits",
                   rfc.tierDescriptions ?? [] == ["+10% attack speed", "+25% attack speed", "+50% attack speed", "+90% attack speed", "Shots become a chaos beam"]
-                    && (rfc.detail ?? "").contains("75% of your shot damage every 0.5s") && (rfc.detail ?? "").contains("Warp Shot and Mirror Edge don't affect the beam; Erasure's Echo re-fires each beam lane as a normal shot.")   // v2.2 N4 Echo ruling (Oct 13): ordinary Echo shots per parent lane
+                    && (rfc.detail ?? "").contains("75% of your shot damage every 0.5s") && (rfc.detail ?? "").contains("Tier 5 is mutually exclusive with Warp Shot and Mirror Edge: whichever you acquire first blocks the other. Tiers 1–4 stay compatible. Erasure's Echo re-fires each beam lane as a normal shot.")   // v2.2 N4 Echo ruling (Oct 13): ordinary Echo shots per parent lane
                     && (rfc.detail ?? "").contains("stops at walls") && (rfc.detail ?? "").contains("Polar Vortex")
-                    && (warp.detail ?? "").hasSuffix("No effect on Rapid Fire's chaos beam. Damage between whole numbers rounds up by chance.")
-                    && (mirror.detail ?? "").hasSuffix("No effect on Rapid Fire's chaos beam. Echoes don't echo, split or leave pull zones, and aren't primary hits.")
+                    && (warp.detail ?? "").hasSuffix("Mutually exclusive with Rapid Fire tier 5: whichever you acquire first blocks the other. Rapid Fire tiers 1–4 stay compatible. Damage between whole numbers rounds up by chance.")
+                    && (mirror.detail ?? "").hasSuffix("Mutually exclusive with Rapid Fire tier 5: whichever you acquire first blocks the other. Rapid Fire tiers 1–4 stay compatible. Echoes don't echo, split or leave pull zones, and aren't primary hits.")
                     && (faces(rfc) + faces(warp) + faces(mirror)).allSatisfy { faceLines($0.1) <= 3 })
 
             // NB1 — the beam's rider copies are TOKEN-EQUAL to the gun's sections
@@ -3362,6 +3362,115 @@ do {
                   ordered(killed, ["guard source.credit == .full else {", "killCount += 1", "resolveKillRewards(ctx)", "ProgressionManager.shared.quenchKills += 1"]))
         }
     }
+}
+
+// MARK: - NI · N6 integration (real manager; no scene/UI simulation)
+do {
+    func ready(_ seedValue: UInt64) -> (UpgradeManager, PlayerStats) {
+        var seed = seedValue
+        let um = run(&seed, arenas: 5, needs: [.voidT])
+        let stats = PlayerStats()
+        precondition(um.acquire(card("void_3"), stats: stats, level: 1))
+        return (um, stats)
+    }
+    let rf = card("neutral_3")
+    let incompatible = ["void_1", "v18_mirror_edge"]
+    check("NI0 dedicated symmetric gate census: only Warp/Mirror grant beamIncompatible and only RF T5 grants chaosBeam; no broad pellet gate",
+          Set(pool.filter { $0.provides.contains(.beamIncompatible) }.map { $0.id }) == Set(incompatible)
+            && providers(of: .chaosBeam).map { $0.id } == ["neutral_3"]
+            && rf.tierProvides == [5: [.pelletEffect, .chaosBeam]]
+            && rf.tierBlockedBy == [5: [.glacialCondensation, .beamIncompatible]]
+            && Set(pool.filter { $0.blockedBy.contains(.chaosBeam) }.map { $0.id }) == Set(incompatible))
+    var earlierOwned = true, beamFirst = true, stale = true, allDraws = true, resetOK = true
+    for (offset, id) in incompatible.enumerated() {
+        let item = card(id)
+        let (a, sa) = ready(UInt64(91_000 + offset))
+        earlierOwned = a.acquire(item, stats: sa, level: 2) && earlierOwned
+        for level in 3...6 { earlierOwned = a.acquire(rf, stats: sa, level: level) && earlierOwned }
+        let before = try? ParitySnapshot.take(sa)
+        earlierOwned = !a.acquire(rf, stats: sa, level: 7) && a.tier(of: rf.id) == 4
+            && a.tier(of: id) == 1 && before == (try? ParitySnapshot.take(sa)) && earlierOwned
+        earlierOwned = (id == "void_1" ? sa.warpShotActive : sa.echoChance == 0.35) && earlierOwned
+
+        let (b, sb) = ready(UInt64(92_000 + offset))
+        for level in 2...6 { beamFirst = b.acquire(rf, stats: sb, level: level) && beamFirst }
+        let beamBefore = try? ParitySnapshot.take(sb)
+        beamFirst = !b.isSelectable(item, atLevel: 7) && !b.acquire(item, stats: sb, level: 7)
+            && b.tier(of: id) == 0 && sb.chaosBeamActive && beamBefore == (try? ParitySnapshot.take(sb)) && beamFirst
+
+        // Both orders of a displayed table: this is the scene's manager seam,
+        // not proof of UIKit/SpriteKit tap handling.
+        for first in [rf, item] {
+            let (u, stats) = ready(UInt64(93_000 + offset))
+            for level in 2...5 { precondition(u.acquire(rf, stats: stats, level: level)) }
+            let second = first.id == rf.id ? item : rf
+            stale = u.stillSelectable([first, second], atLevel: 8).count == 2 && stale
+            stale = u.acquire(first, stats: stats, level: 8) && stale
+            stale = !u.stillSelectable([second], atLevel: 8).contains(where: { $0.id == second.id })
+                && !u.acquire(second, stats: stats, level: 8) && !u.acquire(second, stats: stats, level: 9) && stale
+            for level in 10...35 {
+                for _ in 0..<3 { // initial spread plus same-level rerolls
+                    let spread = u.drawCards(count: 3, level: level)
+                    allDraws = !spread.contains(where: { $0.id == second.id }) && allDraws
+                    allDraws = u.drawBonusCard(excluding: spread)?.id != second.id && allDraws
+                }
+                // Boss/random-opener grant surface and its acquisition gate.
+                let grants = u.drawCards(count: 1, level: level, allowSecret: false)
+                allDraws = !grants.contains(where: { $0.id == second.id }) && allDraws
+                // Do not acquire unrelated cards: isolate the winner's exclusion.
+            }
+        }
+        b.reset()
+        resetOK = !b.capabilities.contains(.chaosBeam) && !b.capabilities.contains(.beamIncompatible)
+            && b.tier(of: rf.id) == 0 && b.tier(of: id) == 0 && resetOK
+    }
+    check("NI1 Warp or Mirror first: RF T1–T4 work, T5 refused without changing the earlier effect or any stats", earlierOwned)
+    check("NI2 RF T5 first: Warp/Mirror refused; beam and all stats preserved", beamFirst)
+    check("NI3 Extra Pick/stale displayed cards and next granted level: acquire and stillSelectable reject the loser in BOTH orders", stale)
+    check("NI4 campaign/granted-level/Boss-draft spreads, same-level rerolls, bonus and random-opener draws exclude the loser", allDraws)
+    check("NI5 reset clears both gate capabilities and owned tiers", resetOK)
+    var compatible = true
+    for (i, id) in ["void_2", "v18_fracture_shot", "v18_riftline"].enumerated() {
+        for beamFirst in [false, true] {
+            let (u, stats) = ready(UInt64(94_000 + i))
+            if !beamFirst { compatible = u.acquire(card(id), stats: stats, level: 2) && compatible }
+            for level in 3...7 { compatible = u.acquire(rf, stats: stats, level: level) && compatible }
+            if beamFirst { compatible = u.acquire(card(id), stats: stats, level: 8) && compatible }
+            compatible = stats.chaosBeamActive && u.tier(of: id) == 1 && compatible
+        }
+    }
+    check("NI6 Gravity Well, Fracture and Riftline remain compatible with beam in both acquisition orders", compatible)
+    let (both, bothStats) = ready(95_000)
+    let bothOK = both.acquire(card("void_1"), stats: bothStats, level: 2)
+        && both.acquire(card("v18_mirror_edge"), stats: bothStats, level: 3)
+    let fourOK = (4...7).map { both.acquire(rf, stats: bothStats, level: $0) }.allSatisfy { $0 }
+    check("NI8 Warp and Mirror coexist; RF T1–T4 remain usable with BOTH owned, T5 alone closed",
+          bothOK && fourOK && !both.acquire(rf, stats: bothStats, level: 8)
+            && bothStats.warpShotActive && bothStats.echoChance == 0.35 && bothStats.rapidFireTier == 4)
+    check("NI7 intended endpoint: nine regular Neutral cards, 166 tiers, nine retired; each has a compatible real-draw maximum (RW1/RW2)",
+          pool.filter { $0.tag == .neutral && !$0.isSecret }.count == 9
+            && pool.reduce(0) { $0 + $1.maxTier } == 166 && UpgradeManager.retiredCardIDs.count == 9)
+}
+
+// N6's versioned golden documents supplement, never replace, JF1/JF2 and
+// the independently grounded legacy-engine + attributed-effects comparisons.
+do {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("tools/v2.2-catalog/parity/v22")
+    let manifestData = (try? Data(contentsOf: dir.appendingPathComponent("manifest.json"))) ?? Data()
+    let manifest = (try? JSONSerialization.jsonObject(with: manifestData)) as? [String: Any] ?? [:]
+    let digests = manifest["fixtures"] as? [String: String] ?? [:]
+    let effects = (try? Data(contentsOf: dir.appendingPathComponent("effect-deltas.json"))) ?? Data()
+    let runs = (try? Data(contentsOf: dir.appendingPathComponent("run-transcripts.json"))) ?? Data()
+    check("NIF1 separate final v2.2 recording has its own N6 manifest and independent-process repeat equality",
+          manifest["unit"] as? String == "N6" && manifest["repeatCaptureEqual"] as? Bool == true
+            && manifest["schemaVersion"] as? Int == 1 && !effects.isEmpty && !runs.isEmpty)
+    check("NIF2 both final fixture digests match the separate manifest",
+          digests["effect-deltas.json"] == ParityDigest.sha256(effects)
+            && digests["run-transcripts.json"] == ParityDigest.sha256(runs))
+    check("NIF3 final effects equal the CURRENT runtime document byte for byte (legacy attribution checks retained)",
+          !effects.isEmpty && effects == (try? ParityJSON.data(ParityEffects.document(.runtime(), skip: Set(UpgradeManager.retiredCardIDs.keys)))))
+    check("NIF4 final seeded draw/acquire/reset transcripts equal the CURRENT manager byte for byte (accepted-engine comparison retained)",
+          !runs.isEmpty && runs == (try? ParityJSON.data(ParityRuns.document(), compact: true)))
 }
 
 // The real CodexManager wrote to this run's UserDefaults domain (run.sh gives

@@ -91,6 +91,11 @@ final class UpgradeManager {
         /// owning one of them stops the capstone at T3 instead of a later pick
         /// silently switching the earlier one off.
         case pelletEffect
+        /// N6: Rapid Fire T5. Blocks only the two effects with no beam behavior.
+        case chaosBeam
+        /// N6: Warp Shot or Mirror Edge owned; closes only Rapid Fire T5.
+        /// Kept separate from pelletEffect: wells, Fracture and Riftline work on beams.
+        case beamIncompatible
     }
 
     // MARK: - Card Definition

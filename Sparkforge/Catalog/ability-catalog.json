@@ -49,7 +49,9 @@
     "critSource",
     "polarVortex",
     "glacialCondensation",
-    "pelletEffect"
+    "pelletEffect",
+    "chaosBeam",
+    "beamIncompatible"
   ],
   "cards": [
     {
@@ -373,15 +375,17 @@
       "name": "Warp Shot",
       "tree": "void",
       "face": "Slow shots that speed up. Slower = more damage.",
-      "detail": "Your primary shots launch at 40% speed and reach full speed after 0.6s. They deal 150% damage at launch, falling to 100% at full speed. No effect on Rapid Fire's chaos beam. Damage between whole numbers rounds up by chance.",
+      "detail": "Your primary shots launch at 40% speed and reach full speed after 0.6s. They deal 150% damage at launch, falling to 100% at full speed. Mutually exclusive with Rapid Fire tier 5: whichever you acquire first blocks the other. Rapid Fire tiers 1–4 stay compatible. Damage between whole numbers rounds up by chance.",
       "provides": [
-        "pelletEffect"
+        "pelletEffect",
+        "beamIncompatible"
       ],
       "requires": [
         "voidUnlocked"
       ],
       "blockedBy": [
-        "glacialCondensation"
+        "glacialCondensation",
+        "chaosBeam"
       ],
       "behavior": "void_1"
     },
@@ -574,7 +578,7 @@
       "name": "Rapid Fire",
       "tree": "neutral",
       "face": "+10% attack speed",
-      "detail": "Attack speed: +10%, then +25%, +50%, +90% (totals). Tier 5 turns your shots into a continuous chaos beam: it pierces enemies, stops at walls, and deals 75% of your shot damage every 0.5s, scaled up by all your attack speed. Scatter and Fracture split the beam. Warp Shot and Mirror Edge don't affect the beam; Erasure's Echo re-fires each beam lane as a normal shot. Can't be combined with Polar Vortex's icicle.",
+      "detail": "Attack speed: +10%, then +25%, +50%, +90% (totals). Tier 5 turns your shots into a continuous chaos beam: it pierces enemies, stops at walls, and deals 75% of your shot damage every 0.5s, scaled up by all your attack speed. Scatter and Fracture split the beam. Tier 5 is mutually exclusive with Warp Shot and Mirror Edge: whichever you acquire first blocks the other. Tiers 1–4 stay compatible. Erasure's Echo re-fires each beam lane as a normal shot. Can't be combined with Polar Vortex's icicle.",
       "tiers": [
         {
           "face": "+10% attack speed"
@@ -591,10 +595,12 @@
         {
           "face": "Shots become a chaos beam",
           "provides": [
-            "pelletEffect"
+            "pelletEffect",
+            "chaosBeam"
           ],
           "blockedBy": [
-            "glacialCondensation"
+            "glacialCondensation",
+            "beamIncompatible"
           ]
         }
       ],
@@ -1107,15 +1113,17 @@
       "name": "Mirror Edge",
       "tree": "void",
       "face": "Shots have a 35% chance to echo for 50% damage.",
-      "detail": "Each primary shot has a 35% chance to fire again 0.15s later for 50% damage. No effect on Rapid Fire's chaos beam. Echoes don't echo, split or leave pull zones, and aren't primary hits.",
+      "detail": "Each primary shot has a 35% chance to fire again 0.15s later for 50% damage. Mutually exclusive with Rapid Fire tier 5: whichever you acquire first blocks the other. Rapid Fire tiers 1–4 stay compatible. Echoes don't echo, split or leave pull zones, and aren't primary hits.",
       "provides": [
-        "pelletEffect"
+        "pelletEffect",
+        "beamIncompatible"
       ],
       "requires": [
         "voidUnlocked"
       ],
       "blockedBy": [
-        "glacialCondensation"
+        "glacialCondensation",
+        "chaosBeam"
       ],
       "behavior": "v18_mirror_edge"
     },

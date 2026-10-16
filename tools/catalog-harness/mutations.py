@@ -1611,6 +1611,181 @@ for _n in list(REPOINT) + sorted(MOVED_TO_CJ):
     assert _n in _ids, f'REPOINT names an unknown mutant: {_n!r}'
 M = [(n, *REPOINT[n.split(' ')[0]], c) if n.split(' ')[0] in REPOINT else ((n, CJ, o, w, c) if n.split(' ')[0] in MOVED_TO_CJ else (n, r, o, w, c)) for (n, r, o, w, c) in M]
 
+# N6 approved gate/copy changes: retain historical faults and IDs, re-anchor only the
+# ten affected card mutations. Move every active parity control to N6; old files remain history.
+_N6_OVERRIDES = {'E7': ('Sparkforge/Catalog/ability-catalog.json',
+        'nlocked"\n'
+        '      ],\n'
+        '      "blockedBy": [\n'
+        '        "glacialCondensation",\n'
+        '        "chaosBeam"\n'
+        '      ],\n'
+        '      "behavior": "void_1"\n'
+        ' ',
+        'nlocked"\n      ],\n      "blockedBy": [\n        "chaosBeam"\n      ],\n      "behavior": "void_1"\n '),
+ 'E10': ('Sparkforge/Catalog/ability-catalog.json',
+         'nlocked"\n'
+         '      ],\n'
+         '      "blockedBy": [\n'
+         '        "glacialCondensation",\n'
+         '        "chaosBeam"\n'
+         '      ],\n'
+         '      "behavior": "v18_mirro',
+         'nlocked"\n      ],\n      "blockedBy": [\n        "chaosBeam"\n      ],\n      "behavior": "v18_mirro'),
+ 'Y2': ('Sparkforge/Catalog/ability-catalog.json',
+        'ds up by chance.",\n'
+        '      "provides": [\n'
+        '        "pelletEffect",\n'
+        '        "beamIncompatible"\n'
+        '      ],\n'
+        '      "requires": [\n'
+        ' ',
+        'ds up by chance.",\n      "provides": [\n        "beamIncompatible"\n      ],\n      "requires": [\n '),
+ 'Y7': ('Sparkforge/Catalog/ability-catalog.json',
+        '\'t primary hits.",\n'
+        '      "provides": [\n'
+        '        "pelletEffect",\n'
+        '        "beamIncompatible"\n'
+        '      ],\n'
+        '      "requires": [\n'
+        ' ',
+        '\'t primary hits.",\n      "provides": [\n        "beamIncompatible"\n      ],\n      "requires": [\n '),
+ 'N4-G1': ('Sparkforge/Catalog/ability-catalog.json',
+           '       ],\n'
+           '          "blockedBy": [\n'
+           '            "glacialCondensation",\n'
+           '            "beamIncompatible"\n'
+           '          ]\n'
+           '        }\n'
+           '      ],',
+           '       ],\n          "blockedBy": [\n            "beamIncompatible"\n          ]\n        }\n      ],'),
+ 'N4-G2': ('Sparkforge/Catalog/ability-catalog.json',
+           'aos beam",\n'
+           '          "provides": [\n'
+           '            "pelletEffect",\n'
+           '            "chaosBeam"\n'
+           '          ],\n'
+           '          "blockedBy": [',
+           'aos beam",\n          "provides": [\n            "chaosBeam"\n          ],\n          "blockedBy": ['),
+ 'N4-Q1': ('Sparkforge/Catalog/ability-catalog.json',
+           'amage at launch, falling to 100% at full speed. Mutually exclusive with Rapid Fire tier 5: whichever you '
+           'acquire first blocks the other. Rapid Fire tiers 1–4 stay compatible. Damage between whole numbers rounds '
+           'up by chance',
+           'amage at launch, falling to 100% at full speed. Damage between whole numbers rounds up by chance'),
+ 'N4-Q2': ('Sparkforge/Catalog/ability-catalog.json',
+           'hance to fire again 0.15s later for 50% damage. Mutually exclusive with Rapid Fire tier 5: whichever you '
+           "acquire first blocks the other. Rapid Fire tiers 1–4 stay compatible. Echoes don't echo, split or leave "
+           'pull zones, an',
+           "hance to fire again 0.15s later for 50% damage. Echoes don't echo, split or leave pull zones, an"),
+ 'N4-Q3': ('Sparkforge/Catalog/ability-catalog.json',
+           'ack speed. Scatter and Fracture split the beam. Tier 5 is mutually exclusive with Warp Shot and Mirror '
+           "Edge: whichever you acquire first blocks the other. Tiers 1–4 stay compatible. Erasure's Echo re-f",
+           'ack speed. Scatter and Fracture split the beam. Mirror Edge echoes the chaos beam. Tiers 1–4 stay '
+           "compatible. Erasure's Echo re-f"),
+ 'N4-Q5': ('Sparkforge/Catalog/ability-catalog.json',
+           "ther. Tiers 1–4 stay compatible. Erasure's Echo re-fires each beam lane as a normal shot. Can't be "
+           'combined with Polar Vortex\'s icicle."',
+           "ther. Tiers 1–4 stay compatible. Erasure's Echo does not affect the beam. Can't be combined with Polar "
+           'Vortex\'s icicle."')}
+_N6_DEST = {'tools/v2.2-catalog/parity/v22-neutral/n5-overlay.json': 'tools/v2.2-catalog/parity/v22-neutral/n6-overlay.json',
+            'tools/v2.2-catalog/parity/v22-neutral/n5-engine-edits.json': 'tools/v2.2-catalog/parity/v22-neutral/n6-engine-edits.json'}
+M = [(n, *_N6_OVERRIDES[n.split(' ')[0]], c) if n.split(' ')[0] in _N6_OVERRIDES
+     else (n, _N6_DEST.get(rel, rel), old, new, c) for n, rel, old, new, c in M]
+M += [('N6-G1 Warp loses chaosBeam block',
+  'Sparkforge/Catalog/ability-catalog.json',
+  '    "blockedBy": [\n'
+  '        "glacialCondensation",\n'
+  '        "chaosBeam"\n'
+  '      ],\n'
+  '      "behavior": "void_1"\n'
+  '    }',
+  '    "blockedBy": [\n        "glacialCondensation"\n      ],\n      "behavior": "void_1"\n    }',
+  ['catalog']),
+ ('N6-G2 Mirror loses chaosBeam block',
+  'Sparkforge/Catalog/ability-catalog.json',
+  '    "blockedBy": [\n'
+  '        "glacialCondensation",\n'
+  '        "chaosBeam"\n'
+  '      ],\n'
+  '      "behavior": "v18_mirror_edge"\n'
+  '  ',
+  '    "blockedBy": [\n        "glacialCondensation"\n      ],\n      "behavior": "v18_mirror_edge"\n  ',
+  ['catalog']),
+ ('N6-G3 RF T5 loses beamIncompatible block',
+  'Sparkforge/Catalog/ability-catalog.json',
+  '"blockedBy": [\n'
+  '            "glacialCondensation",\n'
+  '            "beamIncompatible"\n'
+  '          ]\n'
+  '        }\n'
+  '      ],\n'
+  '      "behavior"',
+  '"blockedBy": [\n            "glacialCondensation"\n          ]\n        }\n      ],\n      "behavior"',
+  ['catalog']),
+ ('N6-G4 RF T5 loses chaosBeam grant',
+  'Sparkforge/Catalog/ability-catalog.json',
+  '        "provides": [\n'
+  '            "pelletEffect",\n'
+  '            "chaosBeam"\n'
+  '          ],\n'
+  '          "blockedBy": [\n'
+  '         ',
+  '        "provides": [\n            "pelletEffect"\n          ],\n          "blockedBy": [\n         ',
+  ['catalog']),
+ ('N6-G5 Warp loses beamIncompatible grant',
+  'Sparkforge/Catalog/ability-catalog.json',
+  'ce.",\n'
+  '      "provides": [\n'
+  '        "pelletEffect",\n'
+  '        "beamIncompatible"\n'
+  '      ],\n'
+  '      "requires": [\n'
+  '        "voidUnloc',
+  'ce.",\n      "provides": [\n        "pelletEffect"\n      ],\n      "requires": [\n        "voidUnloc',
+  ['catalog']),
+ ('N6-G6 Mirror loses beamIncompatible grant',
+  'Sparkforge/Catalog/ability-catalog.json',
+  'ts.",\n'
+  '      "provides": [\n'
+  '        "pelletEffect",\n'
+  '        "beamIncompatible"\n'
+  '      ],\n'
+  '      "requires": [\n'
+  '        "voidUnloc',
+  'ts.",\n      "provides": [\n        "pelletEffect"\n      ],\n      "requires": [\n        "voidUnloc',
+  ['catalog']),
+ ('N6-G7 RF T5 wrongly closes on broad pelletEffect',
+  'Sparkforge/Catalog/ability-catalog.json',
+  'ialCondensation",\n            "beamIncompatible"\n          ]\n        }\n      ],\n      "behavior"',
+  'ialCondensation",\n'
+  '            "beamIncompatible",\n'
+  '            "pelletEffect"\n'
+  '          ]\n'
+  '        }\n'
+  '      ],\n'
+  '      "behavior"',
+  ['catalog']),
+ ('N6-A1 acquire bypasses current eligibility',
+  'Sparkforge/Systems/UpgradeManager.swift',
+  '        guard isSelectable(card, atLevel: level) else { return false }',
+  '        // N6 negative control: accept a stale card',
+  ['catalog']),
+ ('N6-F1 final effects fixture drift',
+  'tools/v2.2-catalog/parity/v22/effect-deltas.json',
+  '"cards" : {',
+  '"cards" : {"n6_fault" : {},',
+  ['catalog']),
+ ('N6-F2 final run fixture drift',
+  'tools/v2.2-catalog/parity/v22/run-transcripts.json',
+  '{"runs":[',
+  '{"runs":[{"n6_fault":true},',
+  ['catalog']),
+ ('N6-F3 final manifest wrong version',
+  'tools/v2.2-catalog/parity/v22/manifest.json',
+  '"schemaVersion": 1',
+  '"schemaVersion": 2',
+  ['catalog'])]
+
 COPY_DIRS = ['Sparkforge/Systems', 'Sparkforge/Config', 'Sparkforge/Scenes', 'Sparkforge/Nodes', 'Sparkforge/Utils',
              'Sparkforge/Catalog',   # v2.2 J1: the authored ability catalog
              'tools', 'docs']

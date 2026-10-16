@@ -491,7 +491,7 @@
     "R2",
     "R4"
    ],
-   "sensitivities": "A virtual volley at the live interval I (C1) is a primary volley: Storm's every 3rd, ONE volley counter (Blackhole every 5th at the lead lane's terminus, Shadow Edge every 7th) and a Gravity Well once per parent lane at its terminus. Warp Shot and Mirror Edge are inert on the beam (C2). Erasure T4's Echo (Brandon's ruling, Oct 13: ordinary Echo shots) fires one ordinary delayed Echo shot per PARENT lane per virtual volley — Storm's +2 lanes once each, Fracture's branches none — 1.5 s later at the existing 50% secondary-shot basis, fragment credit, never echoing again; the same scheduler as the gun's. Red Smile's form and the kaiju freeze the beam's clocks (no tick debt). T5 provides pelletEffect and is blocked by glacialCondensation: symmetric with Polar Vortex T4; T1–T4 stay compatible. Beam feel, device timing and performance are deferred to the combined playtest."
+   "sensitivities": "A virtual volley at the live interval I (C1) is a primary volley: Storm's every 3rd, ONE volley counter (Blackhole every 5th at the lead lane's terminus, Shadow Edge every 7th) and a Gravity Well once per parent lane at its terminus. N6: Warp Shot/Mirror Edge and Rapid Fire T5 are symmetrically exclusive, first acquired wins; T1–T4 compatible. No owned effect is disabled or refunded. Erasure T4's Echo (Brandon's ruling, Oct 13: ordinary Echo shots) fires one ordinary delayed Echo shot per PARENT lane per virtual volley — Storm's +2 lanes once each, Fracture's branches none — 1.5 s later at the existing 50% secondary-shot basis, fragment credit, never echoing again; the same scheduler as the gun's. Red Smile's form and the kaiju freeze the beam's clocks (no tick debt). T5 provides pelletEffect and is blocked by glacialCondensation: symmetric with Polar Vortex T4; T1–T4 stay compatible. Beam feel, device timing and performance are deferred to the combined playtest."
   },
   "neutral_4": {
    "family": [
@@ -1028,7 +1028,7 @@
     "CL-93",
     "CL-101"
    ],
-   "sensitivities": "Silenced by Polar Vortex T4, and CL-93 (A7a) stops offering it once T4 is owned; CL-101 copy: state the 35% chance and 50% damage. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered. v2.2 N4: inert on Rapid Fire T5's chaos beam (no shot to echo); the copy says so on both cards."
+   "sensitivities": "Silenced by Polar Vortex T4, and CL-93 (A7a) stops offering it once T4 is owned; CL-101 copy: state the 35% chance and 50% damage. CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered. v2.2 N6: first-acquired-wins symmetric exclusion with Rapid Fire T5; Rapid Fire T1–T4 compatible. No retroactive disabling or refunds."
   },
   "v18_red_smile": {
    "family": [
@@ -1435,7 +1435,7 @@
     "A6-Q3",
     "CL-93"
    ],
-   "sensitivities": "Warp feel vs payoff and probabilistic rounding (A6 watch 1-2); silenced by Polar Vortex T4's icicle, and CL-93 (A7a) stops offering it once T4 is owned; A7b S7–S8 extended CL-70-style rounding to the direct-hit block on its own threshold: the amplifiers (94a), then Overcharge and the resolved vulnerability (94b/94c). CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered. v2.2 N4: inert on Rapid Fire T5's chaos beam (no travel to curve); the copy says so on both cards."
+   "sensitivities": "Warp feel vs payoff and probabilistic rounding (A6 watch 1-2); silenced by Polar Vortex T4's icicle, and CL-93 (A7a) stops offering it once T4 is owned; A7b S7–S8 extended CL-70-style rounding to the direct-hit block on its own threshold: the amplifiers (94a), then Overcharge and the resolved vulnerability (94b/94c). CL-93 symmetric: owning this card closes Polar Vortex T4 (T1–T3 unaffected); owning Polar Vortex T4 stops it being offered. v2.2 N6: first-acquired-wins symmetric exclusion with Rapid Fire T5; Rapid Fire T1–T4 compatible. No retroactive disabling or refunds."
   },
   "void_2": {
    "family": [

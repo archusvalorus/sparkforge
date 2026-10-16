@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "unit": "N6",
+  "baselineCommit": "274bf5a8e6db0a230f47b2dc46b935d824c17ad1",
+  "authorization": "Owner approved separate final v2.2 record, Oct16 2026; no legacy overwrite/force. Supplements retained JF1/JF2 comparator and attribution.",
+  "repeatCaptureEqual": true,
+  "repeatCapture": "Two fresh CLI processes/directories n6-record-a2 and n6-record-b, both actual exit0. First failed attempt retained separately.",
+  "fixtures": {
+    "effect-deltas.json": "e38f709c7e217c58960a66f69b719e034f14c0437b8eb722812a36ba6bf15580",
+    "run-transcripts.json": "7eec1fe3fecfb05ce8e1206040fb26ef68f22332ddc793bd74a4ca6625499f96"
+  },
+  "counts": {
+    "cards": 79,
+    "draftable": 78,
+    "secret": 1,
+    "regularNeutral": 9,
+    "tiers": 166,
+    "retired": 9
+  },
+  "sourcesAtCapture": {
+    "Sparkforge/Catalog/ability-catalog.json": "00cb17e850861111e12c91e01b06378f76de744f40f1e3b8aee1a5b892e8ea90",
+    "Sparkforge/Systems/UpgradeManager.swift": "c5736b935fedc262754ecf908a56722d37409ef34a32498aec754a1f171ec55c",
+    "Sparkforge/Systems/PlayerStats.swift": "41c57fa6da5f97696a90af1596d0900185e958e46115ad150e8cbd3046f6d3d7",
+    "Sparkforge/Systems/AbilityBehaviors.swift": "b4e39d25af918814987acecf4b9c5cd734e596aee5980fa8935e4bee269b4c05",
+    "tools/catalog-harness/main.swift": "eece673597214b8e8952269b086b4bd255e93e42e307b79d4dc4ceca475b0efc",
+    "tools/catalog-harness/run.sh": "e83426037284da2b6729ba26c78fec8b1c28d09b176842d5e4dc9c2db374c8c1",
+    "tools/v2.2-catalog/harness/ParitySnapshot.swift": "05a4b156991d84a0c19b006f671bbea913a2acd07742bf13c71ead65aa46aeb1",
+    "tools/v2.2-catalog/harness/ParityAttribution.swift": "a4395d04b3faf13ff1daf7fd1c54858b8c0da370d609c7a91dd3ccd68d4c7ed4",
+    "tools/v2.2-catalog/harness/ParityCatalog.swift": "88b32f2e4f2600ec03bcca2e8860500a53743636f246e591d2b7a260ffe0d87a",
+    "tools/v2.2-catalog/harness/ParityFixtures.swift": "f0b54187a87f7048b0659c4eee18e5ca22371032424d90fe08cd148670ff129b",
+    "tools/v2.2-catalog/parity/v22-neutral/n6-overlay.json": "4e7429d9f4d904fa91a1b41858b634a856fc479dcf17e5442fcbc78918abf115",
+    "tools/v2.2-catalog/parity/v22-neutral/n6-engine-edits.json": "8c1d11430f3f9ed32c1fd1cb7a35f85c0cd30f8d4b4c270acf8674f35d3b250b"
+  },
+  "legacyAndHistoricalSHA256": {
+    "tools/v2.2-catalog/baseline/baseline-manifest.json": "0b40177067d9cb6a8292c493bb4bbe874f2d1c2c79a17649d447f5159769196e",
+    "tools/v2.2-catalog/baseline/compiled-catalog-export.json": "97c3a62124dc542d51faf9a4e7662539d71a70efec6e90a2bf09c65ec048233d",
+    "tools/v2.2-catalog/baseline/inventory.py": "7e69ad1368df6d70be48c82fbace4a7b1437fbce788251cdb6705ddb6509cee8",
+    "tools/v2.2-catalog/baseline/tuning-ownership-inventory.json": "343e203e42f33a7b9c44c0808e89d35bdf30abe9b45e0fe94639029604b139fb",
+    "tools/v2.2-catalog/parity/legacy-effect-deltas.json": "a27c76f2456b16911b8b2c65e2803442c47ad23b7c3189ef551d0df38260795b",
+    "tools/v2.2-catalog/parity/legacy-run-transcripts.json": "975813573f724a1e8d8520ff84b88f9871310d1117b28b7afdb44f4bb07ca59b",
+    "tools/v2.2-catalog/parity/parity-manifest.json": "6fdcb2929d7898a2295e8b8f2789ab4c7f917873fbc16f070cbed251aed87501",
+    "tools/v2.2-catalog/parity/v22-neutral/accepted-engine-31505bd.swift": "c48d936fbad8a61caf79cd98ab83fb213adcfdf6681fa9135dab74ca41daa7bd",
+    "tools/v2.2-catalog/parity/v22-neutral/n1-engine-edits.json": "bb20b752e5b768955ecd8640fc28a876c78c18ec1b8dd49a61268595ea5e3836",
+    "tools/v2.2-catalog/parity/v22-neutral/n1-overlay.json": "5941f11be974752211a3400749876b1e8bc1c7669b3206fa01da944a3ea3c723",
+    "tools/v2.2-catalog/parity/v22-neutral/n2-engine-edits.json": "2ff667285bd23c6215ab9870005f3dc69755ac91a4a53539dc778b8d068dcab2",
+    "tools/v2.2-catalog/parity/v22-neutral/n2-overlay.json": "f294b4804d49fffc54c533093ed61edfe1ef0925fa8f5064e64c256dcb2db0b2",
+    "tools/v2.2-catalog/parity/v22-neutral/n3-engine-edits.json": "0cccee840941e737a03e807b0c205b00081658f32287c0d5e975a2b68aad985e",
+    "tools/v2.2-catalog/parity/v22-neutral/n3-overlay.json": "bd9e1c563c3fe42703cf5819b6257bcb1e9b149f99abf8569f83d4b984e531c0",
+    "tools/v2.2-catalog/parity/v22-neutral/n4-engine-edits.json": "bfb84882d883192283df1f31b569a7fa19b6e848e2cf46cb7db8acb717fed270",
+    "tools/v2.2-catalog/parity/v22-neutral/n4-overlay.json": "142c5063a690009e6f9bc3845b85afa1b799b88a550cb0fceb21025dc6f1eb61",
+    "tools/v2.2-catalog/parity/v22-neutral/n5-engine-edits.json": "309c81acfe7de20bf3b18c53c2bf494109ff16f15b20ac9e7363fdaab16c15df",
+    "tools/v2.2-catalog/parity/v22-neutral/n5-overlay.json": "b61686a8f7125dfe1834e60185a57f8c83dfc6b525946b3352b6860a7789fcf5"
+  }
+}
