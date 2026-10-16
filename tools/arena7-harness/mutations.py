@@ -10,7 +10,7 @@ files = [
  "Sparkforge/Config/ArenaConfig.swift", "Sparkforge/Config/ArenaGeometry.swift",
  "Sparkforge/Config/GameConfig.swift", "Sparkforge/Scenes/GameScene.swift",
  "Sparkforge/Utils/GeometryDebug.swift", "Sparkforge/Systems/MeleeSector.swift",
- "Sparkforge/Utils/VectorMath.swift", "Sparkforge/Utils/DeviceScale.swift", "Sparkforge/Nodes/EnemyNode.swift"]
+ "Sparkforge/Systems/TollkeeperState.swift", "Sparkforge/Utils/VectorMath.swift", "Sparkforge/Utils/DeviceScale.swift", "Sparkforge/Nodes/EnemyNode.swift"]
 controls = [
  ("M1 scene bypasses graph", "Sparkforge/Scenes/GameScene.swift", "if geo.usesRouteGraph {", "if false {"),
  ("M2 graph ignores actor clearance", "Sparkforge/Config/ArenaGeometry.swift", "current.position, next.position, travelRadius: travelRadius", "current.position, next.position, travelRadius: 0"),

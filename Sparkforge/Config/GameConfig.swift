@@ -412,6 +412,21 @@ enum GameConfig {
         static let spawnRimFraction: CGFloat = 0.95
     }
 
+    enum Tollkeeper {
+        static let windup: TimeInterval = 0.9
+        static let pulse: TimeInterval = 0.35
+        static let recovery: TimeInterval = 1.2
+        static let cycle: TimeInterval = 3.5
+        static let firstSpawn: TimeInterval = 15
+        static let spawnInterval: TimeInterval = 12
+        static let arriveRadius: CGFloat = 12
+        static let engageFraction: CGFloat = 0.65
+        static let halfLengthFraction: CGFloat = 0.15
+        static let halfDepthFraction: CGFloat = 0.05
+        static let centerFraction: CGFloat = 0.20
+        static let anchorFraction: CGFloat = 0.43
+    }
+
     // MARK: - v2.1 (Geometry 2b): Spurhound — "go around"
     /// The Splitworks' fast flanker (design lock §5.1). Selects a route at a
     /// decision point (1B), prefers the route that creates a flank, sprints

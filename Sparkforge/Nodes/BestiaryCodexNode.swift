@@ -208,6 +208,7 @@ final class BestiaryCodexNode: SKNode, CodexPage {
         case .unmadeStar:   node = UnmadeStarNode(arenaRadius: 200)
         case .spurhound:    node = SpurhoundNode(health: 1, xpValue: 0)
         case .linekeeper:   node = LinekeeperNode(health: 1, xpValue: 0)
+        case .tollkeeper:   node = TollkeeperNode()
         case .ramplate:     node = RamplateNode(health: 1, xpValue: 0)
         case .marchwarden:  node = MarchwardenNode()
         case .mote:         return nil

@@ -16,7 +16,7 @@ final class GeometryDebug {
     var routeDecisions = 0
     var routeFallbacks = 0
 }
-final class EnemyNode {
+class EnemyNode {
     var position = CGPoint.zero
     var geometryFootprintRadius: CGFloat = 14
     var routeNodeID: Int?
@@ -31,4 +31,5 @@ final class EnemyNode {
     init(health: Int, moveSpeed: CGFloat, xpValue: Int) { self.moveSpeed = moveSpeed }
     func routeNodeBias(_ node: RouteNode, goal: CGPoint, occupancy: Int) -> CGFloat { 0 }
 }
+final class TollkeeperNode: EnemyNode { var attackRect: CGRect? { nil } }
 final class WorldNode { func addChild(_ node: EnemyNode) {} }

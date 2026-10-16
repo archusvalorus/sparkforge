@@ -1470,5 +1470,24 @@ do {
     }
 }
 
+// A7-2: execute the new handoffs through the real kill/frame seams. These are
+// recorders; attack timing, collision and cancellation policy run in tollkeeper-harness.
+do {
+    let scene = ChainScene()
+    for effect in (AbilityBehaviors.registry.cards["v13_chain_reaction"]?.tiers ?? []).prefix(1) {
+        effect(scene.playerStats)
+    }
+    let keeper = TollkeeperNode(health: 1)
+    scene.enemies.append(keeper)
+    _ = keeper.takeDamage(1)
+    scene.kill(keeper, source: .primary)
+    scene.kill(keeper, source: .primary)
+    check("TX1 real kill chokepoint cancels Tollkeeper once before removal/duplicate credit",
+          keeper.cancellations == 1 && keeper.killCredited && scene.enemies.isEmpty && scene.pendingBursts == 1)
+    scene.didFinishUpdate()
+    check("TX2 real end-of-frame drains cascades before hostile-pulse dispatch",
+          scene.pendingBursts == 0 && scene.tollkeeperDispatchPending == [0])
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

@@ -184,6 +184,7 @@ enum BestiaryFamily: String, CaseIterable {
     // from the design lock §8 — never rename.
     case spurhound    = "spurhound"
     case linekeeper   = "linekeeper"
+    case tollkeeper   = "tollkeeper"   // A7-2; hidden until arena integration
     case ramplate     = "ramplate"
     case marchwarden  = "marchwarden"   // Arena 6 boss
     /// Reserved v2.0 slot — the hidden nemesis. Present in the schema NOW so it
@@ -218,6 +219,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .unmadeStar:   return "The Unmade Star"
         case .spurhound:    return "Spurhound"
         case .linekeeper:   return "Linekeeper"
+        case .tollkeeper:   return "Tollkeeper"
         case .ramplate:     return "Ramplate"
         case .marchwarden:  return "The Marchwarden"
         case .mote:         return "????"
@@ -233,7 +235,7 @@ enum BestiaryFamily: String, CaseIterable {
 
     /// The bestiary page must not render this entry until its version ships
     /// (Mote = v2.0). Keeps the schema stable across the version boundary.
-    var hiddenUntilFutureVersion: Bool { self == .mote }
+    var hiddenUntilFutureVersion: Bool { self == .mote || self == .tollkeeper }
 
     /// Lyra's bestiary voice (v1.8 Ask 4b). Mote has no entry — empty chair.
     var flavor: String {
@@ -267,6 +269,7 @@ enum BestiaryFamily: String, CaseIterable {
         // provisional lines (Lyra), fitted to the live wrapper in Unit 5.
         case .spurhound:    return "It learned the shortest distance between two points. Then it learned to hunt around corners."
         case .linekeeper:   return "A firing line given legs. It mistakes patience for permission."
+        case .tollkeeper:   return "It guards a toll nobody pays. Wait for the pulse. Take the crossing."
         case .ramplate:     return "A barricade with forward momentum. The forge forgot that walls should stay put."
         case .marchwarden:  return "The march ended long ago. Its warden still clears the road for an army that will never come."
         case .mote:         return ""
@@ -298,6 +301,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .anvilborn:    return 0xC98A4B   // struck bronze
         case .unmadeStar:   return 0xFFD98A   // star gold (entrance banner color)
         case .spurhound:    return 0xD9D2C4   // pale ceramic route markings
+        case .tollkeeper:   return 0xBB44FF
         case .linekeeper:   return 0xBB44FF   // its firing-line purple (danger)
         case .ramplate:     return 0xFF7722   // kiln orange (the charge)
         case .marchwarden:  return 0x3F8F8A   // oxidized teal (entrance banner color)

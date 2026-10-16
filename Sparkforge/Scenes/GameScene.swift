@@ -78,6 +78,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     #if DEBUG
     private var channelSpawnWestNext = true
+    private var channelTollkeeperLastSpawn: TimeInterval = -.infinity
     #endif
 
     // MARK: - Boss Mechanics
@@ -5170,8 +5171,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // (Ranged mobs inherit routing too — their LoS-aware FIRING
             // behavior is Unit 2 scope, per Ruling 4.) A fleeing enemy routes
             // toward its escape point instead, so fear respects the Carrier.
+            let keeperGoal = (enemy as? TollkeeperNode)?.approachGoal(player: player.position,
+                geometry: arenaGeometry, radius: GameConfig.Arena.radius,
+                disabled: airborne || trapped || fleeing)
             let steerTarget = routeSteerTarget(for: enemy,
-                                               toward: fleeing ? (fleeTo ?? enemy.position) : player.position, dt: dt)
+                toward: fleeing ? (fleeTo ?? enemy.position) : (keeperGoal ?? player.position), dt: dt)
             if airborne {
                 // v2.1 A5 (CL-63): a launched enemy is in the air — no chase,
                 // no attack, until it lands.
@@ -9483,7 +9487,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func spawnEnemy() {
         #if DEBUG
-        if isTwinChannelsPreview { spawnTwinChannelsBody(); return }
+        if isTwinChannelsPreview { spawnTwinChannelsEnemy(); return }
         #endif
         // v1.6: The Quench runs its own spawn table
         if arenaConfig.id == 1 {
@@ -9532,7 +9536,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     #if DEBUG
     /// Existing melee class only, alternating lane preference. Failed draws defer.
-    private func spawnTwinChannelsBody() {
+    private func twinChannelsSpawnPoint() -> CGPoint? {
         let r = GameConfig.Arena.radius
         let C = GameConfig.TwinChannels.self
         let zones = arenaGeometry.spawnZones.filter {
@@ -9544,10 +9548,33 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 return CGPoint(x: cos(angle), y: sin(angle)) * (r * C.spawnRimFraction)
             }
         }
-        guard let point = arenaGeometry.channelSpawnPoint(candidates: candidates,
+        let hostileRects = enemies.compactMap { ($0 as? TollkeeperNode)?.attackRect }
+        let clearCandidates = candidates.filter { point in
+            !hostileRects.contains { TollkeeperState.overlaps(rect: $0, circle: point,
+                radius: GameConfig.Enemy.visualRadius) }
+        }
+        return arenaGeometry.channelSpawnPoint(candidates: clearCandidates,
             player: player.position, actorRadius: GameConfig.Enemy.visualRadius,
             arenaRadius: r, playerClearance: r * C.spawnPlayerClearance,
-            crossingClearance: r * C.spawnCrossingClearance) else { return }
+            crossingClearance: r * C.spawnCrossingClearance)
+    }
+
+    private func spawnTwinChannelsEnemy() {
+        let living = enemies.filter { $0 is TollkeeperNode && !$0.isDying }.count
+        if TollkeeperState.shouldSpawn(elapsed: waveManager.elapsedTime,
+            lastSpawn: channelTollkeeperLastSpawn, living: living) {
+            guard let point = twinChannelsSpawnPoint() else { return }
+            let controller = TollkeeperNode()
+            controller.position = point
+            controller.onAimStart = { AudioManager.shared.play(.linekeeperAim) }
+            enemies.append(controller); worldNode.addChild(controller)
+            channelSpawnWestNext.toggle()
+            channelTollkeeperLastSpawn = waveManager.elapsedTime
+        } else { spawnTwinChannelsBody() }
+    }
+
+    private func spawnTwinChannelsBody() {
+        guard let point = twinChannelsSpawnPoint() else { return }
         let body = EnemyNode(health: 1, moveSpeed: GameConfig.Enemy.baseSpeed, xpValue: 2)
         body.position = point
         enemies.append(body)
@@ -11502,6 +11529,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 return
             }
             enemy.killCredited = true
+            (enemy as? TollkeeperNode)?.cancelAttack()
             if let index = enemies.firstIndex(where: { $0 === enemy }) {
                 enemies.remove(at: index)
             }
@@ -11739,6 +11767,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case is SpurhoundNode:   return .spurhound
         case is LinekeeperNode:  return .linekeeper
         case is RamplateNode:    return .ramplate
+        case is TollkeeperNode:  return .tollkeeper
         default:                 return .melee
         }
     }
@@ -11751,6 +11780,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// same queue, so a whole cascade resolves here, iteratively (Q2).
     override func didFinishUpdate() {
         drainChainReactions()
+        processTollkeeperPulses()
+    }
+
+    /// End-of-frame death/status resolution wins over a pending hostile pulse.
+    private func processTollkeeperPulses() {
+        guard isTwinChannelsPreview, gameState == .playing else { return }
+        for keeper in worldNode.children.compactMap({ $0 as? TollkeeperNode }) {
+            let pinned = repulseFlights[ObjectIdentifier(keeper)] != nil
+            if pinned { keeper.cancelAttack() }
+            if !pinned, keeper.consumePulse(player: player.position, radius: playerStats.effectiveCollisionRadius) {
+                let ticks = Int(waveManager.elapsedTime / 30)
+                let damage = GameConfig.Enemy.baseRangedDamage + ticks * GameConfig.Enemy.rangedDamageScaling
+                applyBossHazardDamage(damage, shakeIntensity: 4, fromBossClass: false)
+            }
+            keeper.syncAttackVisual()
+        }
     }
 
     private func drainChainReactions() {
@@ -14308,6 +14353,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         forgeCalcStrikeCount = 0; forgeMoveBuffTimer = 0; forgeSlipstreamReady = true
         invulnerableTimer = 0
         killCount = 0
+        #if DEBUG
+        channelTollkeeperLastSpawn = -.infinity
+        channelSpawnWestNext = true
+        #endif
         rerollsUsedThisRun = 0
         extraCardUsedThisRun = false
         extraPickUsedThisRun = false

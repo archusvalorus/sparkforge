@@ -453,6 +453,11 @@ def chain_shell(scene):
 class ChainSceneBase {{ func didFinishUpdate() {{}} }}
 final class AshlingNode: EnemyNode {{ var isShard = false }}
 final class RangedEnemyNode: EnemyNode {{}}
+// A7-2: record the chokepoint's new handoff; real attack policy runs in tollkeeper-harness.
+final class TollkeeperNode: EnemyNode {{
+    private(set) var cancellations = 0
+    func cancelAttack() {{ cancellations += 1 }}
+}}
 enum BestiaryFamily: Equatable {{ case melee, miniBoss }}
 extension GameConfig {{ enum Ashling {{ static let shardSpawnDelay: TimeInterval = 0.15 }} }}   // mirrors GameConfig.swift (pinned by CX0)
 /// Recorders for the singletons the chokepoint writes (the stubs carry no such state).
@@ -494,6 +499,9 @@ final class ChainScene: ChainSceneBase {{
     private(set) var orbs: [Orb] = []
     private(set) var rewards: [KillContext] = [], deathBursts: [KillContext] = []
     private(set) var iceburstCalls = 0, seedCalls = 0, wellFeeds = 0, ashlingSplits = 0, delayed = 0
+    private(set) var tollkeeperDispatchPending: [Int] = []
+    // Recorder only: proves the real didFinishUpdate hands off AFTER the cascade drain.
+    func processTollkeeperPulses() {{ tollkeeperDispatchPending.append(chainReactions.count) }}
 
     func spawnXPOrb(at position: CGPoint, value: Int) {{ orbs.append(Orb(position: position, value: value)) }}
     func resolveKillRewards(_ ctx: KillContext) {{ rewards.append(ctx) }}
