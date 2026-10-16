@@ -172,6 +172,8 @@ struct ArenaGeometry {
     var routeEdges: [RouteEdge] = []
     var spawnZones: [SpawnZone] = []
     var safeAnchors: [SafeAnchor] = []
+    /// Opt-in only: multi-island layouts need graph distance, not a greedy chord.
+    var usesRouteGraph = false
 
     static let open = ArenaGeometry()
 
@@ -375,5 +377,99 @@ extension ArenaGeometry {
     /// kept for the overlay and for 1C+ congestion weighting.
     func neighbors(of id: Int) -> [Int] {
         routeEdges.compactMap { $0.from == id ? $0.to : ($0.to == id ? $0.from : nil) }
+    }
+}
+
+
+// MARK: - v2.2 A7-1: development shell and bounded graph routing
+extension ArenaGeometry {
+    /// Fixed geometry only; deliberately absent from ArenaConfig.all.
+    static var twinChannels: ArenaGeometry {
+        let r = GameConfig.Arena.radius
+        let islands = [-1.0, 1.0].map { sign in
+            Footprint(center: CGPoint(x: 0, y: sign * r * 0.43),
+                      halfExtents: CGSize(width: r * 0.085, height: r * 0.215),
+                      cornerRadius: r * 0.035,
+                      label: sign < 0 ? "channel_s" : "channel_n")
+        }
+        let rows: [CGFloat] = [-0.78, -0.43, 0, 0.43, 0.78]
+        var nodes: [RouteNode] = []
+        var edges: [RouteEdge] = []
+        for side in 0..<2 {
+            for (row, y) in rows.enumerated() {
+                let id = side * rows.count + row
+                nodes.append(RouteNode(id: id,
+                    position: CGPoint(x: (side == 0 ? -0.43 : 0.43) * r, y: y * r),
+                    label: "\(side == 0 ? "west" : "east")_\(row)"))
+                if row > 0 { edges.append(RouteEdge(from: id - 1, to: id)) }
+            }
+        }
+        for row in [0, 2, 4] { edges.append(RouteEdge(from: row, to: row + 5)) }
+        let zones = [60.0, 120.0, 240.0, 300.0].enumerated().map { i, degrees in
+            SpawnZone(startAngle: CGFloat(degrees - 10) * .pi / 180,
+                      endAngle: CGFloat(degrees + 10) * .pi / 180, label: "channel_gate_\(i)")
+        }
+        return ArenaGeometry(blockedFootprints: islands, routeNodes: nodes,
+            routeEdges: edges, spawnZones: zones,
+            safeAnchors: [SafeAnchor(position: CGPoint(x: -0.43 * r, y: -0.78 * r), label: "player_spawn"),
+                          SafeAnchor(position: CGPoint(x: 0, y: 0.79 * r), label: "boss_anchor")],
+            usesRouteGraph: true)
+    }
+
+    /// Shortest authored route including the visible approach and exit.
+    /// Real clearance is checked per actor; graph edges alone are not proof.
+    /// Splitworks/open arenas retain their existing scene steering unchanged.
+    func graphWaypoint(from start: CGPoint, toward goal: CGPoint,
+                       travelRadius: CGFloat, arriveRadius: CGFloat) -> RouteNode? {
+        var costs: [Int: CGFloat] = [:]
+        var previous: [Int: Int] = [:]
+        var visited: Set<Int> = []
+        for n in routeNodes where !segmentBlockedExact(start, n.position, travelRadius: travelRadius) {
+            costs[n.id] = start.distance(to: n.position)
+        }
+        while let current = routeNodes.filter({ !visited.contains($0.id) && costs[$0.id] != nil })
+            .min(by: { (costs[$0.id] ?? .infinity) < (costs[$1.id] ?? .infinity) }) {
+            visited.insert(current.id)
+            for id in neighbors(of: current.id) where !visited.contains(id) {
+                guard let next = node(id),
+                      !segmentBlockedExact(current.position, next.position, travelRadius: travelRadius),
+                      let currentCost = costs[current.id] else { continue }
+                let candidate = currentCost + current.position.distance(to: next.position)
+                if candidate < (costs[id] ?? .infinity) {
+                    costs[id] = candidate
+                    previous[id] = current.id
+                }
+            }
+        }
+        let exits = routeNodes.filter {
+            costs[$0.id] != nil && !segmentBlockedExact($0.position, goal, travelRadius: travelRadius)
+        }
+        guard let exit = exits.min(by: {
+            (costs[$0.id] ?? .infinity) + $0.position.distance(to: goal)
+            < (costs[$1.id] ?? .infinity) + $1.position.distance(to: goal)
+        }) else { return nil }
+        var path = [exit.id]
+        while let parent = previous[path[0]] { path.insert(parent, at: 0) }
+        // Skip an arrived approach point only if its successor is actually visible.
+        while path.count > 1, let first = node(path[0]), let next = node(path[1]),
+              start.distance(to: first.position) < arriveRadius,
+              !segmentBlockedExact(start, next.position, travelRadius: travelRadius) {
+            path.removeFirst()
+        }
+        return node(path[0])
+    }
+
+    /// No nearby-anchor fallback: an unsafe draw defers this spawn tick.
+    /// Candidates are supplied by the caller so rejection is deterministically testable.
+    func channelSpawnPoint(candidates: [CGPoint], player: CGPoint, actorRadius: CGFloat,
+                           arenaRadius: CGFloat, playerClearance: CGFloat,
+                           crossingClearance: CGFloat) -> CGPoint? {
+        let mouths = routeNodes.filter { [0, 2, 4, 5, 7, 9].contains($0.id) }
+        return candidates.first { p in
+            p.length + actorRadius <= arenaRadius
+            && !isBlocked(p, margin: actorRadius)
+            && p.distance(to: player) >= playerClearance + actorRadius
+            && mouths.allSatisfy { p.distance(to: $0.position) >= crossingClearance + actorRadius }
+        }
     }
 }

@@ -57,6 +57,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Boss-Mode override so that GameConfig.Arena.radius (which reads
         // ArenaConfig.current.radiusScale) agrees with the arena actually
         // played — never persisted, cleared with the run like the gauntlet's.
+        if DevSeams.arenaOverrideIndex == ArenaConfig.all.count, ArenaConfig.overrideID == nil {
+            ArenaConfig.overrideID = ArenaConfig.twinChannelsPreview.id
+            return ArenaConfig.twinChannelsPreview
+        }
         if let i = DevSeams.arenaOverrideIndex, ArenaConfig.all.indices.contains(i) {
             ArenaConfig.overrideID = i
             return ArenaConfig.all[i]
@@ -65,6 +69,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return ArenaConfig.current
     }
     
+    private var isTwinChannelsPreview: Bool {
+        #if DEBUG
+        return arenaConfig.id == ArenaConfig.twinChannelsPreview.id
+        #else
+        return false
+        #endif
+    }
+    #if DEBUG
+    private var channelSpawnWestNext = true
+    #endif
+
     // MARK: - Boss Mechanics
 
     // v1.6: any arena's boss lives here (Slag Titan or Quench Warden)
@@ -598,8 +613,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         arenaFloor.zPosition = -10
         arenaLayer.addChild(arenaFloor)
 
-        // Per-arena floor motif
-        switch arenaConfig.id {
+        // The preview is absent from the production arena switch/registry.
+        if isTwinChannelsPreview { buildTwinChannelsMotif(radius: radius) }
+        else { switch arenaConfig.id {
         case 1:
             buildQuenchMotif(radius: radius)
         case 2:
@@ -612,7 +628,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             buildSplitworksMotif(radius: radius)   // v2.1 geometry Unit 4
         default:
             buildCrucibleMotif(radius: radius)
-        }
+        } }
 
         // Outer boundary ring — main edge
         arenaBoundary.path = floorPath
@@ -799,6 +815,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let top = base + CGPoint(x: 0, y: radius * 0.07)
             line(base, top, teal, 0.30, 1.5)
             line(top, top + CGPoint(x: radius * 0.035, y: -radius * 0.012), teal, 0.30, 1.5)
+        }
+    }
+
+    /// Quiet lane rails and crossing marks; solids draw from their exact footprints.
+    private func buildTwinChannelsMotif(radius: CGFloat) {
+        for edge in arenaGeometry.routeEdges {
+            guard let a = arenaGeometry.node(edge.from), let b = arenaGeometry.node(edge.to) else { continue }
+            let path = CGMutablePath()
+            path.move(to: a.position); path.addLine(to: b.position)
+            let rail = SKShapeNode(path: path)
+            rail.strokeColor = SKColor(hex: arenaConfig.detailLineHex, alpha: 0.16)
+            rail.lineWidth = 2
+            rail.zPosition = -9.5
+            arenaLayer.addChild(rail)
         }
     }
 
@@ -4995,7 +5025,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let miniBossAlive = enemies.contains { $0.isMiniBoss && !$0.isDying }
         let timeFloor = GameConfig.Wave.bossTimeFloor(
             for: BossRegistry.shared.grammar(forArena: arenaConfig.id))
-        if !arenaBossSpawnedThisRun, boss == nil, !miniBossAlive,
+        if !isTwinChannelsPreview, !arenaBossSpawnedThisRun, boss == nil, !miniBossAlive,
            killCount >= GameConfig.Wave.bossSpawnKills,
            waveManager.elapsedTime >= timeFloor {
             spawnCurrentArenaBoss()
@@ -5005,9 +5035,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // The 90s bell is now a pre-boss ESCALATION: a mini-boss, but only if you
         // haven't already earned the real boss this run (no doubling up).
-        if spawnEvent.shouldSpawnMiniBoss, boss == nil, !arenaBossSpawnedThisRun {
-            spawnMiniBoss()
-            if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
+        if !isTwinChannelsPreview {
+            if spawnEvent.shouldSpawnMiniBoss, boss == nil, !arenaBossSpawnedThisRun {
+                spawnMiniBoss()
+                if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
+            }
         }
         }  // end Event Horizon spawn guard
 
@@ -5348,8 +5380,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if enemy.routeRedecideCooldown > 0 { enemy.routeRedecideCooldown -= dt }
         let travel = r * 0.8   // slight forgiveness so brushing a corner isn't "blocked"
 
+        func blocked(_ a: CGPoint, _ b: CGPoint) -> Bool {
+            geo.usesRouteGraph ? geo.segmentBlockedExact(a, b, travelRadius: travel)
+                : geo.segmentBlocked(a, b, travelRadius: travel)
+        }
+
         // 1. Direct pursuit resumes the moment the line is clear.
-        let occluded = geo.segmentBlocked(enemy.position, goal, travelRadius: travel)
+        let occluded = blocked(enemy.position, goal)
         enemy.isOccludedFromGoal = occluded   // v2.1 (2b): published for subclasses
         if !occluded {
             if enemy.routeNodeID != nil {
@@ -5365,7 +5402,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if enemy.position.distance(to: n.position) < GameConfig.Routing.arriveRadius {
                 enemy.routePrevNodeID = id
                 enemy.routeNodeID = nil        // fall through to re-decide
-            } else if geo.segmentBlocked(enemy.position, n.position, travelRadius: travel) {
+            } else if blocked(enemy.position, n.position) {
                 enemy.routeNodeID = nil        // displaced behind cover — recover
                 geometryDebug.routeRecoveries += 1
             } else {
@@ -5377,9 +5414,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if enemy.routeRedecideCooldown > 0 { return goal }
         enemy.routeRedecideCooldown = GameConfig.Routing.redecideCooldown
 
+        if geo.usesRouteGraph {
+            if let choice = geo.graphWaypoint(from: enemy.position, toward: goal,
+                travelRadius: travel, arriveRadius: GameConfig.Routing.arriveRadius) {
+                enemy.routeNodeID = choice.id
+                geometryDebug.routeDecisions += 1
+                return choice.position
+            }
+            geometryDebug.routeFallbacks += 1
+            return goal
+        }
+
         var best: (id: Int, score: CGFloat)? = nil
         for n in geo.routeNodes {
-            guard !geo.segmentBlocked(enemy.position, n.position, travelRadius: travel) else { continue }
+            guard !blocked(enemy.position, n.position) else { continue }
             var score = enemy.position.distance(to: n.position) + n.position.distance(to: goal)
             if n.id == enemy.routePrevNodeID { score += GameConfig.Routing.backtrackPenalty }
             // v2.1 (2b): subclass opinion (flank preference, crowding). Zero
@@ -9434,6 +9482,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Spawning
     
     private func spawnEnemy() {
+        #if DEBUG
+        if isTwinChannelsPreview { spawnTwinChannelsBody(); return }
+        #endif
         // v1.6: The Quench runs its own spawn table
         if arenaConfig.id == 1 {
             spawnQuenchEnemy()
@@ -9478,6 +9529,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         spawnBasicMelee(elapsed: elapsed)
     }
+
+    #if DEBUG
+    /// Existing melee class only, alternating lane preference. Failed draws defer.
+    private func spawnTwinChannelsBody() {
+        let r = GameConfig.Arena.radius
+        let C = GameConfig.TwinChannels.self
+        let zones = arenaGeometry.spawnZones.filter {
+            (cos(($0.startAngle + $0.endAngle) / 2) < 0) == channelSpawnWestNext
+        }
+        let candidates = zones.flatMap { zone in
+            (0..<C.spawnSamplesPerZone).map { _ -> CGPoint in
+                let angle = CGFloat.random(in: zone.startAngle...zone.endAngle)
+                return CGPoint(x: cos(angle), y: sin(angle)) * (r * C.spawnRimFraction)
+            }
+        }
+        guard let point = arenaGeometry.channelSpawnPoint(candidates: candidates,
+            player: player.position, actorRadius: GameConfig.Enemy.visualRadius,
+            arenaRadius: r, playerClearance: r * C.spawnPlayerClearance,
+            crossingClearance: r * C.spawnCrossingClearance) else { return }
+        let body = EnemyNode(health: 1, moveSpeed: GameConfig.Enemy.baseSpeed, xpValue: 2)
+        body.position = point
+        enemies.append(body)
+        worldNode.addChild(body)
+        channelSpawnWestNext.toggle()
+    }
+    #endif
 
     private func spawnBasicMelee(elapsed: TimeInterval) {
         // HP scales with time — enemies get beefier (v1.4: softened curve)

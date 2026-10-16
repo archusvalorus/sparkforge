@@ -404,6 +404,14 @@ enum GameConfig {
         static let backtrackPenalty: CGFloat = 10_000
     }
 
+    // MARK: - v2.2 A7-1: development geometry shell
+    enum TwinChannels {
+        static let spawnSamplesPerZone = 8
+        static let spawnPlayerClearance: CGFloat = 0.35
+        static let spawnCrossingClearance: CGFloat = 0.10
+        static let spawnRimFraction: CGFloat = 0.95
+    }
+
     // MARK: - v2.1 (Geometry 2b): Spurhound — "go around"
     /// The Splitworks' fast flanker (design lock §5.1). Selects a route at a
     /// decision point (1B), prefers the route that creates a flank, sprints
