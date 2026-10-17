@@ -1489,5 +1489,18 @@ do {
           scene.pendingBursts == 0 && scene.tollkeeperDispatchPending == [0])
 }
 
+// A7-3: actual kill/frame seams cancel the queued launcher before dispatch.
+do {
+    let scene = ChainScene()
+    let rail = RailspikeNode(health: 1)
+    scene.enemies.append(rail)
+    _ = rail.takeDamage(1)
+    scene.kill(rail, source: .primary)
+    scene.kill(rail, source: .primary)
+    scene.didFinishUpdate()
+    check("RX1 real Railspike kill cancels once", rail.cancellations == 1 && rail.killCredited)
+    check("RX2 real frame dispatch follows the cascade drain", scene.railspikeDispatchPending == [0])
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

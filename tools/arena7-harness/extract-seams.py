@@ -28,6 +28,7 @@ final class GameScene {
  var geometryDebug = GeometryDebug()
  var routeOccupancy: [Int: Int] = [:]
  var channelSpawnWestNext = true
+ var channelRailBolts: [EnemyProjectileNode] = []
  var player = EnemyNode(health: 1, moveSpeed: 250, xpValue: 0)
  var enemies: [EnemyNode] = []
  var worldNode = WorldNode()

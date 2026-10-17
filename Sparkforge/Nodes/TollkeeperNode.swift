@@ -6,6 +6,7 @@ final class TollkeeperNode: EnemyNode {
     private var pendingPlan: TollkeeperPlan?
     private let attackVisual = SKShapeNode()
     var onAimStart: (() -> Void)?
+    var schedule: ChannelAttackSchedule?
     var attackRect: CGRect? { attack.attackRect }
 
     init() {
@@ -31,6 +32,7 @@ final class TollkeeperNode: EnemyNode {
 
     func cancelAttack() {
         attack.cancel(); pendingPlan = nil; attackVisual.isHidden = true
+        schedule?.finish(.tollkeeper)
     }
 
     func approachGoal(player: CGPoint, geometry: ArenaGeometry, radius: CGFloat, disabled: Bool) -> CGPoint {
@@ -52,7 +54,14 @@ final class TollkeeperNode: EnemyNode {
         let plan = attack.plan ?? pendingPlan
         let atAnchor = plan.map { position.distance(to: $0.anchor) <= GameConfig.Tollkeeper.arriveRadius } ?? false
         let before = attack.phase
-        attack.step(dt, disabled: disabled, atAnchor: atAnchor, candidate: pendingPlan)
+        var candidate = pendingPlan
+        if attack.phase == .seek, let schedule = schedule {
+            if !atAnchor || attack.cooldown > 0 || !schedule.request(.tollkeeper) { candidate = nil }
+        }
+        attack.step(dt, disabled: disabled, atAnchor: atAnchor, candidate: candidate)
+        if disabled || ((before == .windup || before == .pulse) && attack.phase == .recovery) {
+            schedule?.finish(.tollkeeper)
+        }
         if attack.phase == .windup && before != .windup { onAimStart?() }
         if attack.phase == .seek && !disabled {
             super.chase(target: target, deltaTime: dt, globalSlow: globalSlow)

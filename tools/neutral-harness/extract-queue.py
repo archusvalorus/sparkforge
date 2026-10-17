@@ -458,6 +458,10 @@ final class TollkeeperNode: EnemyNode {{
     private(set) var cancellations = 0
     func cancelAttack() {{ cancellations += 1 }}
 }}
+final class RailspikeNode: EnemyNode {{
+    private(set) var cancellations = 0
+    func cancelAttack() {{ cancellations += 1 }}
+}}
 enum BestiaryFamily: Equatable {{ case melee, miniBoss }}
 extension GameConfig {{ enum Ashling {{ static let shardSpawnDelay: TimeInterval = 0.15 }} }}   // mirrors GameConfig.swift (pinned by CX0)
 /// Recorders for the singletons the chokepoint writes (the stubs carry no such state).
@@ -500,6 +504,8 @@ final class ChainScene: ChainSceneBase {{
     private(set) var rewards: [KillContext] = [], deathBursts: [KillContext] = []
     private(set) var iceburstCalls = 0, seedCalls = 0, wellFeeds = 0, ashlingSplits = 0, delayed = 0
     private(set) var tollkeeperDispatchPending: [Int] = []
+    private(set) var railspikeDispatchPending: [Int] = []
+    func processRailspikeLaunches() {{ railspikeDispatchPending.append(chainReactions.count) }}
     // Recorder only: proves the real didFinishUpdate hands off AFTER the cascade drain.
     func processTollkeeperPulses() {{ tollkeeperDispatchPending.append(chainReactions.count) }}
 

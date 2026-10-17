@@ -1,7 +1,7 @@
 from pathlib import Path
 import tempfile,shutil,subprocess,json
 root=Path(__file__).resolve().parents[2]
-files=['tools/tollkeeper-harness/run.py','tools/tollkeeper-harness/run.sh','tools/tollkeeper-harness/Stubs.swift','tools/tollkeeper-harness/main.swift','tools/signature-draw-harness/extract-config.sh','Sparkforge/Nodes/TollkeeperNode.swift','Sparkforge/Nodes/EnemyNode.swift','Sparkforge/Systems/TollkeeperState.swift','Sparkforge/Config/GameConfig.swift','Sparkforge/Config/ArenaGeometry.swift','Sparkforge/Scenes/GameScene.swift','Sparkforge/Systems/MeleeSector.swift','Sparkforge/Utils/VectorMath.swift']
+files=['tools/tollkeeper-harness/run.py','tools/tollkeeper-harness/run.sh','tools/tollkeeper-harness/Stubs.swift','tools/tollkeeper-harness/main.swift','tools/signature-draw-harness/extract-config.sh','Sparkforge/Nodes/TollkeeperNode.swift','Sparkforge/Nodes/RailspikeNode.swift','Sparkforge/Systems/RailspikeState.swift','Sparkforge/Systems/ChannelAttackSchedule.swift','Sparkforge/Nodes/EnemyNode.swift','Sparkforge/Systems/TollkeeperState.swift','Sparkforge/Config/GameConfig.swift','Sparkforge/Config/ArenaGeometry.swift','Sparkforge/Scenes/GameScene.swift','Sparkforge/Systems/MeleeSector.swift','Sparkforge/Utils/VectorMath.swift']
 controls=[
 ('TC1 damage during tell','Sparkforge/Systems/TollkeeperState.swift','guard phase == .pulse, !hitSpent','guard phase == .windup || phase == .pulse, !hitSpent'),
 ('TC2 repeated pulse hit','Sparkforge/Systems/TollkeeperState.swift','hitSpent = true\n        return true','hitSpent = false\n        return true'),

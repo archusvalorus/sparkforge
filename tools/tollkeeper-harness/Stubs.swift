@@ -10,7 +10,12 @@ class EnemyStorage {
  init(health:Int,moveSpeed:CGFloat,xpValue:Int){self.health=health;self.moveSpeed=moveSpeed;self.xpValue=xpValue}
 }
 final class FakeVisual { var isHidden=false }
-final class WorldNode { var children:[EnemyNode]=[];func addChild(_ e:EnemyNode){children.append(e)} }
+final class EnemyProjectileNode {
+ var channelRailRect:CGRect?;var position=CGPoint.zero;var zPosition:CGFloat=0
+ let direction:CGPoint;let damage:Int;let speed:CGFloat;let range:CGFloat
+ init(direction:CGPoint,damage:Int,speed:CGFloat,range:CGFloat,colorHex:UInt32,elongated:Bool){self.direction=direction;self.damage=damage;self.speed=speed;self.range=range}
+}
+final class WorldNode { var children:[EnemyNode]=[];var bolts:[EnemyProjectileNode]=[];func addChild(_ e:EnemyNode){children.append(e)};func addChild(_ b:EnemyProjectileNode){bolts.append(b)} }
 final class AudioManager { enum SFX{case linekeeperAim};static let shared=AudioManager();func play(_ sfx:SFX){} }
 final class Stats { var effectiveCollisionRadius:CGFloat=10 }
 final class Wave { var elapsedTime:TimeInterval=0 }
@@ -21,6 +26,8 @@ final class GameScene {
  var player=EnemyNode(health:100,moveSpeed:250,xpValue:0);var playerStats=Stats();var waveManager=Wave()
  var enemies:[EnemyNode]=[];var worldNode=WorldNode();var repulseFlights:[ObjectIdentifier:Bool]=[:]
  var channelTollkeeperLastSpawn:TimeInterval = -.infinity;var channelSpawnWestNext=true
+ var channelRailspikeLastSpawn: TimeInterval = -.infinity
+ let channelAttacks=ChannelAttackSchedule();var channelRailBolts:[EnemyProjectileNode]=[];var enemyProjectiles:[EnemyProjectileNode]=[]
  var damages:[(Int,Bool)]=[]
  func applyBossHazardDamage(_ amount:Int,shakeIntensity:CGFloat,fromBossClass:Bool){damages.append((amount,fromBossClass))}
 }

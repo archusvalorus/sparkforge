@@ -79,6 +79,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     #if DEBUG
     private var channelSpawnWestNext = true
     private var channelTollkeeperLastSpawn: TimeInterval = -.infinity
+    private var channelRailspikeLastSpawn: TimeInterval = -.infinity
     #endif
 
     // MARK: - Boss Mechanics
@@ -355,6 +356,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var enemies: [EnemyNode] = []
     private var projectiles: [ProjectileNode] = []
     private var enemyProjectiles: [EnemyProjectileNode] = []
+    private let channelAttacks = ChannelAttackSchedule()
+    private var channelRailBolts: [EnemyProjectileNode] = []
     private var xpOrbs: [XPOrbNode] = []
     
     // MARK: - Card Selection
@@ -5146,6 +5149,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Enemy Updates
     
     private func updateEnemies(_ dt: TimeInterval) {
+        updateChannelAttacks(dt)
         var diedFromDOT: [EnemyNode] = []
         // v2.1 A5 (CL-52) Ironhide: qualifying hostiles within 150pt of Spark.
         let ironhideOn = playerStats.ironhideActive
@@ -5174,8 +5178,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let keeperGoal = (enemy as? TollkeeperNode)?.approachGoal(player: player.position,
                 geometry: arenaGeometry, radius: GameConfig.Arena.radius,
                 disabled: airborne || trapped || fleeing)
+            let railGoal = (enemy as? RailspikeNode)?.approachGoal(player: player.position,
+                geometry: arenaGeometry, radius: GameConfig.Arena.radius,
+                disabled: airborne || trapped || fleeing)
+            if let rail = enemy as? RailspikeNode {
+                let margin = 32 * DeviceScale.gameplay
+                rail.canBeginTell = abs(rail.position.x-player.position.x) < max(0, size.width/2-margin)
+                    && abs(rail.position.y-player.position.y) < max(0, size.height/2-margin)
+            }
             let steerTarget = routeSteerTarget(for: enemy,
-                toward: fleeing ? (fleeTo ?? enemy.position) : (keeperGoal ?? player.position), dt: dt)
+                toward: fleeing ? (fleeTo ?? enemy.position) : (keeperGoal ?? railGoal ?? player.position), dt: dt)
             if airborne {
                 // v2.1 A5 (CL-63): a launched enemy is in the air — no chase,
                 // no attack, until it lands.
@@ -9549,6 +9561,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         let hostileRects = enemies.compactMap { ($0 as? TollkeeperNode)?.attackRect }
+            + enemies.compactMap { ($0 as? RailspikeNode)?.attackRect }
+            + channelRailBolts.map { $0.channelRailRect }.compactMap { $0 }
         let clearCandidates = candidates.filter { point in
             !hostileRects.contains { TollkeeperState.overlaps(rect: $0, circle: point,
                 radius: GameConfig.Enemy.visualRadius) }
@@ -9566,10 +9580,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             guard let point = twinChannelsSpawnPoint() else { return }
             let controller = TollkeeperNode()
             controller.position = point
+            controller.schedule = channelAttacks
             controller.onAimStart = { AudioManager.shared.play(.linekeeperAim) }
             enemies.append(controller); worldNode.addChild(controller)
             channelSpawnWestNext.toggle()
             channelTollkeeperLastSpawn = waveManager.elapsedTime
+        } else if waveManager.elapsedTime >= GameConfig.Railspike.firstSpawn,
+            waveManager.elapsedTime-channelRailspikeLastSpawn >= GameConfig.Railspike.spawnInterval,
+            !enemies.contains(where: { $0 is RailspikeNode && !$0.isDying }) {
+            guard let point = twinChannelsSpawnPoint() else { return }
+            let rail = RailspikeNode(); rail.position = point; rail.schedule = channelAttacks
+            rail.onAimStart = { AudioManager.shared.play(.linekeeperAim) }
+            enemies.append(rail); worldNode.addChild(rail)
+            channelRailspikeLastSpawn = waveManager.elapsedTime; channelSpawnWestNext.toggle()
         } else { spawnTwinChannelsBody() }
     }
 
@@ -11530,6 +11553,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             enemy.killCredited = true
             (enemy as? TollkeeperNode)?.cancelAttack()
+            (enemy as? RailspikeNode)?.cancelAttack()
             if let index = enemies.firstIndex(where: { $0 === enemy }) {
                 enemies.remove(at: index)
             }
@@ -11768,6 +11792,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case is LinekeeperNode:  return .linekeeper
         case is RamplateNode:    return .ramplate
         case is TollkeeperNode:  return .tollkeeper
+        case is RailspikeNode:   return .railspike
         default:                 return .melee
         }
     }
@@ -11781,6 +11806,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     override func didFinishUpdate() {
         drainChainReactions()
         processTollkeeperPulses()
+        processRailspikeLaunches()
     }
 
     /// End-of-frame death/status resolution wins over a pending hostile pulse.
@@ -11795,6 +11821,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 applyBossHazardDamage(damage, shakeIntensity: 4, fromBossClass: false)
             }
             keeper.syncAttackVisual()
+        }
+    }
+
+    private func updateChannelAttacks(_ dt: TimeInterval) {
+        guard isTwinChannelsPreview else { return }
+        channelRailBolts.removeAll { bolt in !enemyProjectiles.contains { $0 === bolt } }
+        channelAttacks.beginFrame(dt, railBolts: channelRailBolts.count)
+    }
+
+    private func processRailspikeLaunches() {
+        guard isTwinChannelsPreview, gameState == .playing else { return }
+        for rail in worldNode.children.compactMap({ $0 as? RailspikeNode }) {
+            if repulseFlights[ObjectIdentifier(rail)] != nil { rail.cancelAttack() }
+            if let plan = rail.consumeLaunch() {
+                let ticks = Int(waveManager.elapsedTime/30)
+                let bolt = EnemyProjectileNode(direction: plan.direction,
+                    damage: GameConfig.Enemy.baseRangedDamage + ticks*GameConfig.Enemy.rangedDamageScaling,
+                    speed: GameConfig.Railspike.boltSpeed, range: plan.range,
+                    colorHex: 0xC58BFF, elongated: true)
+                bolt.position = plan.anchor; bolt.zPosition = 7; bolt.channelRailRect = plan.rect
+                enemyProjectiles.append(bolt); channelRailBolts.append(bolt); worldNode.addChild(bolt)
+            }
+            rail.syncAttackVisual()
         }
     }
 
@@ -14353,8 +14402,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         forgeCalcStrikeCount = 0; forgeMoveBuffTimer = 0; forgeSlipstreamReady = true
         invulnerableTimer = 0
         killCount = 0
+        channelAttacks.reset(); channelRailBolts.removeAll()
         #if DEBUG
         channelTollkeeperLastSpawn = -.infinity
+        channelRailspikeLastSpawn = -.infinity
         channelSpawnWestNext = true
         #endif
         rerollsUsedThisRun = 0

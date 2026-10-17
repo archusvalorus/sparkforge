@@ -32,4 +32,6 @@ class EnemyNode {
     func routeNodeBias(_ node: RouteNode, goal: CGPoint, occupancy: Int) -> CGFloat { 0 }
 }
 final class TollkeeperNode: EnemyNode { var attackRect: CGRect? { nil } }
+final class RailspikeNode: EnemyNode { var attackRect: CGRect? { nil } }
+final class EnemyProjectileNode { var channelRailRect: CGRect? }
 final class WorldNode { func addChild(_ node: EnemyNode) {} }

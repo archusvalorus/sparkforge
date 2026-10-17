@@ -412,6 +412,19 @@ enum GameConfig {
         static let spawnRimFraction: CGFloat = 0.95
     }
 
+    enum Railspike {
+        static let tell: TimeInterval = 1.0
+        static let interval: TimeInterval = 0.45
+        static let recovery: TimeInterval = 1.3
+        static let cycle: TimeInterval = 5
+        static let firstSpawn: TimeInterval = 45
+        static let spawnInterval: TimeInterval = 16
+        static let arriveRadius: CGFloat = 6
+        static let rangeFraction: CGFloat = 1.2
+        static var boltSpeed: CGFloat { 300 * DeviceScale.gameplay }
+        static var boltRadius: CGFloat { GameConfig.RangedEnemy.projectileRadius }
+    }
+
     enum Tollkeeper {
         static let windup: TimeInterval = 0.9
         static let pulse: TimeInterval = 0.35

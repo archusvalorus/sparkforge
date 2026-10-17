@@ -12,6 +12,8 @@ final class EnemyProjectileNode: SKNode {
     
     /// v1.4: Damage this projectile deals to the player
     let damage: Int
+    /// A7-3: reservation footprint for this ordinary projectile; nil for every other shooter.
+    var channelRailRect: CGRect?
     
     private let bulletNode: SKShapeNode
     private let direction: CGPoint
