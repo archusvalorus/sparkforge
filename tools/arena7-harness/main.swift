@@ -5,21 +5,21 @@ func check(_ label: String, _ ok: Bool) {
     if ok { passed += 1; print("PASS \(label)") }
     else { failed += 1; print("FAIL \(label)") }
 }
-// The real registry must remain six arenas. The dev cycle adds a non-persisted shell.
-check("A1 production registry remains six arenas with real bosses", ArenaConfig.all.count == 6 && ArenaConfig.all.allSatisfy { !$0.bossID.isEmpty })
+// The production registry now includes Arena 7; the dev picker has no extra shell.
+check("A1 production registry has seven arenas with real bosses", ArenaConfig.all.count == 7 && ArenaConfig.all.allSatisfy { !$0.bossID.isEmpty })
 DevSeams.arenaOverrideIndex = nil
-for _ in 0...ArenaConfig.all.count { DevSeams.cycleArena() }
-check("A2 dev picker reaches the extra shell", DevSeams.arenaOverrideIndex == 6)
+for _ in 0..<ArenaConfig.all.count { DevSeams.cycleArena() }
+check("A2 dev picker reaches registered Arena 7", DevSeams.arenaOverrideIndex == 6)
 ArenaConfig.overrideID = nil
 let scene = GameScene()
 let geo = scene.arenaGeometry
 let r = GameConfig.Arena.radius
-check("A3 live config and radius agree", scene.isTwinChannelsPreview && abs(r - 402.5) < 1e-6 && geo.blockedFootprints.count == 2)
-check("A4 overlay banner announces development boss prototype", DevSeams.bannerText.contains("shell (Switchwarden prototype)"))
+check("A3 live config and radius agree", scene.isTwinChannels && abs(r - 402.5) < 1e-6 && geo.blockedFootprints.count == 2)
+check("A4 overlay banner announces Arena 7", DevSeams.bannerText.contains("arena 7"))
 ArenaConfig.overrideID = 2
 check("A5 explicit Boss Mode home wins over preview picker", GameScene.resolveArenaConfig().id == 2)
 ArenaConfig.overrideID = 6
-check("A6 registry boss lookup cannot discover a preview boss", ArenaConfig.arena(forBossID: "") == nil)
+check("A6 registry resolves Switchwarden to Arena 7", ArenaConfig.arena(forBossID: "switchwarden")?.id == 6 && ArenaConfig.arena(forBossID: "") == nil)
 check("A7 dimensions and graph", geo.routeNodes.count == 10 && geo.routeEdges.count == 11 && geo.spawnZones.count == 4 && geo.usesRouteGraph)
 check("A8 central gap is 0.36R", abs((geo.blockedFootprints[1].center.y - geo.blockedFootprints[1].halfExtents.height - geo.blockedFootprints[1].cornerRadius) - 0.18*r) < 1e-6)
 check("A8b both island outer sizes and centers", zip(geo.blockedFootprints, [-1.0, 1.0]).allSatisfy { f, sign in
@@ -108,9 +108,9 @@ check("A15 all emitted bodies satisfy real spawn guard", scene.enemies.allSatisf
 })
 check("A16 safe spawns alternate preferred lane", zip(scene.enemies, scene.enemies.dropFirst()).allSatisfy { ($0.position.x < 0) != ($1.position.x < 0) })
 // Existing arenas must continue using their original steering branch.
-check("A17 old arenas do not opt into graph routing", ArenaConfig.all.allSatisfy { !$0.geometry.usesRouteGraph })
+check("A17 old arenas do not opt into graph routing", ArenaConfig.all.prefix(6).allSatisfy { !$0.geometry.usesRouteGraph })
 var oldEqual = true
-for config in ArenaConfig.all {
+for config in ArenaConfig.all.prefix(6) {
     let current = GameScene(), reference = GameScene()
     current.arenaConfig = config; reference.arenaConfig = config
     ArenaConfig.overrideID = config.id

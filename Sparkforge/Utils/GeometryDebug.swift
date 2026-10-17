@@ -179,7 +179,7 @@ enum DevSeams {
     static func cycleArena() {
         switch arenaOverrideIndex {
         case nil: arenaOverrideIndex = 0
-        case let i? where i + 1 <= ArenaConfig.all.count: arenaOverrideIndex = i + 1
+        case let i? where i + 1 < ArenaConfig.all.count: arenaOverrideIndex = i + 1
         default: arenaOverrideIndex = nil
         }
     }
@@ -189,7 +189,7 @@ enum DevSeams {
     static var bannerText: String {
         var parts: [String] = []
         if let i = arenaOverrideIndex {
-            parts.append(i == ArenaConfig.all.count ? "Twin Channels shell (Switchwarden prototype)" : "arena \(i + 1)")
+            parts.append("arena \(i + 1)")
         }
         if overlayEnabled || GeometryDebug.showOverlay { parts.append("geometry overlay") }
         return "⚠︎ DEV — " + parts.joined(separator: " · ")

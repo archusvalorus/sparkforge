@@ -15,9 +15,9 @@ def block(source, marker):
     return source[start:end]
 parts = [block(scene, marker).replace('private ', '') for marker in [
     '    private static func resolveArenaConfig()',
-    '    private var isTwinChannelsPreview:',
+    '    private var isTwinChannels:',
     '    private func routeSteerTarget(',
-    '    private func twinChannelsSpawnPoint()',
+    '    private func twinChannelsSpawnPoint(',
     '    private func spawnTwinChannelsBody()']]
 dev = block((root/'Sparkforge/Utils/GeometryDebug.swift').read_text(), 'enum DevSeams {')
 head = """import Foundation

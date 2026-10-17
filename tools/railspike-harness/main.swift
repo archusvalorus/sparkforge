@@ -59,6 +59,6 @@ for phase:GameScene.State in [.paused,.levelUp,.dead]{let hold=GameScene();hold.
 let pin=GameScene();let c=armed();c.chase(target:spark,deltaTime:1.01);pin.worldNode.children=[c];pin.repulseFlights[ObjectIdentifier(c)]=true;pin.processRailspikeLaunches();check("R50 airborne",pin.enemyProjectiles.isEmpty && c.attack.plan==nil)
 sc.enemyProjectiles.removeAll();sc.updateChannelAttacks(0);check("R51 actual cleanup",sc.channelRailBolts.isEmpty)
 let sp=GameScene();sp.waveManager.elapsedTime=45;for _ in 0..<80{sp.spawnTwinChannelsEnemy()};check("R52 spawn cap",sp.enemies.filter{$0 is RailspikeNode}.count==1 && sp.enemies.filter{$0 is TollkeeperNode}.count==1);check("R53 spawn timestamps",sp.channelRailspikeLastSpawn==45 && sp.channelTollkeeperLastSpawn==45)
-let old=GameScene();old.isTwinChannelsPreview=false;old.worldNode.children=[armed()];old.processRailspikeLaunches();check("R54 preview isolation",old.enemyProjectiles.isEmpty)
+let old=GameScene();old.isTwinChannels=false;old.worldNode.children=[armed()];old.processRailspikeLaunches();check("R54 preview isolation",old.enemyProjectiles.isEmpty)
 check("R55 actual shared scheduler wiring",sp.enemies.compactMap{$0 as? RailspikeNode}.first?.schedule === sp.channelAttacks && sp.enemies.compactMap{$0 as? TollkeeperNode}.first?.schedule === sp.channelAttacks)
 print("Railspike: \(passed) passed / \(failed) failed");exit(failed==0 ? 0 : 1)

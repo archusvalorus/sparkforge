@@ -404,7 +404,7 @@ enum GameConfig {
         static let backtrackPenalty: CGFloat = 10_000
     }
 
-    // MARK: - v2.2 A7-1: development geometry shell
+    // MARK: - v2.2 Arena 7: Twin Channels placement
     enum TwinChannels {
         static let spawnSamplesPerZone = 8
         static let spawnPlayerClearance: CGFloat = 0.35
@@ -413,12 +413,12 @@ enum GameConfig {
     }
 
     enum Switchwarden {
-        // A7-4 prototype values; final balance and encounter arrival are not locked.
+        // Reviewed A7-4 attack tuning, carried into A7-5. Arrival uses Wave's
+        // ordinary kill/time gates followed by a clear-board wait in GameScene.
         static let warning: TimeInterval = 1.5
         static let surge: TimeInterval = 0.35
         static let recovery: TimeInterval = 1.5
         static let cycle: TimeInterval = 4.5
-        static let previewArrival: TimeInterval = 75
         static let bodyFraction: CGFloat = 0.08
         static let arriveRadius: CGFloat = 6
     }

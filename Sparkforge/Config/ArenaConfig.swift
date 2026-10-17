@@ -202,19 +202,18 @@ struct ArenaConfig {
         geometryBuilder: { ArenaGeometry.splitworks }
     )
 
-    #if DEBUG
-    /// A7-1 preview only. Never register a placeholder boss in `all`.
-    static let twinChannelsPreview = ArenaConfig(
-        id: 6, name: "The Twin Channels (DEV)", displayName: "DEV: THE TWIN CHANNELS",
+    /// A7-5: registered production arena; stable id and boss defeat key.
+    static let twinChannels = ArenaConfig(
+        id: 6, name: "The Twin Channels", displayName: "ARENA 7: THE TWIN CHANNELS",
         flavorLine: "choose the crossing", floorColorHex: 0x171615,
         boundaryColorHex: 0x82796D, dangerGlowHex: 0x33251D,
         detailLineHex: 0xB6AC98, accentColorHex: 0x82796D,
         radiusScale: 1.15, bellTime: GameConfig.Wave.miniBossSpawnTime,
-        bossID: "", bossName: "", bossFelledAccentHex: 0xB6AC98,
+        bossID: "switchwarden", bossName: "The Switchwarden", bossFelledAccentHex: 0xB6AC98,
+        finalFelledLine: "★ THE CROSSING IS YOURS ★",
         geometryBuilder: { ArenaGeometry.twinChannels })
-    #endif
 
-    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks]
+    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks, twinChannels]
 
     /// v2.0 (B2a): a TRANSIENT arena override for Boss Mode.
     ///
@@ -232,9 +231,6 @@ struct ArenaConfig {
 
     /// The currently selected arena, clamped to what's unlocked.
     static var current: ArenaConfig {
-        #if DEBUG
-        if overrideID == twinChannelsPreview.id { return twinChannelsPreview }
-        #endif
         if let id = overrideID, id >= 0, id < all.count { return all[id] }
         let pm = ProgressionManager.shared
         let maxIndex = min(pm.arenasUnlocked, all.count) - 1

@@ -127,7 +127,6 @@ final class SettingsMenuNode: SKNode {
     #if DEBUG
     private var devArenaText: String {
         guard let i = DevSeams.arenaOverrideIndex else { return "DEV ARENA: OFF" }
-        if i == ArenaConfig.all.count { return "DEV ARENA: TWIN CHANNELS SHELL" }
         guard ArenaConfig.all.indices.contains(i) else { return "DEV ARENA: OFF" }
         return "DEV ARENA: \(i + 1) · \(ArenaConfig.all[i].marqueeName)"
     }

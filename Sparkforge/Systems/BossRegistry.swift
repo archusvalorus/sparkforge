@@ -75,6 +75,13 @@ final class BossRegistry {
         BossEntry(id: "marchwarden", name: "The Marchwarden", arenaID: 5,
                   grammar: .arena, accentHex: 0x3F8F8A,
                   make: { _, hp in MarchwardenNode(hpScaling: hp) }),
+        BossEntry(id: "switchwarden", name: "The Switchwarden", arenaID: 6,
+                  grammar: .arena, accentHex: 0xB6AC98,
+                  make: { _, hp in
+                      let boss = SwitchwardenNode()
+                      boss.applyHealthBonus(hp)
+                      return boss
+                  }),
     ]
 
     // MARK: - Queries

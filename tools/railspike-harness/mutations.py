@@ -16,7 +16,7 @@ controls=[
 ('RC11 crosslane plan','Sparkforge/Systems/RailspikeState.swift','from.x*player.x > 0','true'),
 ('RC12 offscreen tell','Sparkforge/Nodes/RailspikeNode.swift','if !canBeginTell || !atAnchor || attack.cooldown > 0','if !atAnchor || attack.cooldown > 0'),
 ('RC13 lease cooldown boundary','Sparkforge/Nodes/TollkeeperNode.swift','if !atAnchor || attack.cooldown > 0 || !schedule.request(.tollkeeper) { candidate = nil }','if atAnchor && attack.cooldown <= 0 && !schedule.request(.tollkeeper) { candidate = nil }'),
-('RC14 no launch pause gate','Sparkforge/Scenes/GameScene.swift','    private func processRailspikeLaunches() {\n        guard isTwinChannelsPreview, gameState == .playing else { return }','    private func processRailspikeLaunches() {\n        guard isTwinChannelsPreview else { return }'),
+('RC14 no launch pause gate','Sparkforge/Scenes/GameScene.swift','    private func processRailspikeLaunches() {\n        guard isTwinChannels, gameState == .playing else { return }','    private func processRailspikeLaunches() {\n        guard isTwinChannels else { return }'),
 ]
 results=[]
 for name,path,before,after in controls:

@@ -2259,7 +2259,8 @@ do {
     func flatCode(_ text: String) -> String { SwiftSource.code(text).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
     let sceneCode = flatCode(sceneS8)
     let arenaFlat = flatCode(raw("Sparkforge/Config/ArenaConfig.swift"))
-    let u4Arena = arenaFlat.contains("static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks]")
+    // A7-5 strictly appends Arena 7; retain every existing Arena 6 predicate.
+    let u4Arena = arenaFlat.contains("static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks, twinChannels]")
         && arenaFlat.contains("static let splitworks = ArenaConfig( id: 5,") && arenaFlat.contains("bossID: \"marchwarden\",")
         && !appText.contains("splitworksShell") && !appText.contains("shellIndex") && !appText.contains("forceSplitworksShell")
     let u4Boss = flatCode(raw("Sparkforge/Systems/BossRegistry.swift")).contains("BossEntry(id: \"marchwarden\", name: \"The Marchwarden\", arenaID: 5, grammar: .arena, accentHex: 0x3F8F8A, make: { _, hp in MarchwardenNode(hpScaling: hp) }),")

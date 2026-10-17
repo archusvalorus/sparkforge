@@ -57,11 +57,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Boss-Mode override so that GameConfig.Arena.radius (which reads
         // ArenaConfig.current.radiusScale) agrees with the arena actually
         // played — never persisted, cleared with the run like the gauntlet's.
-        if DevSeams.arenaOverrideIndex == ArenaConfig.all.count, ArenaConfig.overrideID == nil {
-            ArenaConfig.overrideID = ArenaConfig.twinChannelsPreview.id
-            return ArenaConfig.twinChannelsPreview
-        }
-        if let i = DevSeams.arenaOverrideIndex, ArenaConfig.all.indices.contains(i) {
+        if ArenaConfig.overrideID == nil, let i = DevSeams.arenaOverrideIndex, ArenaConfig.all.indices.contains(i) {
             ArenaConfig.overrideID = i
             return ArenaConfig.all[i]
         }
@@ -69,19 +65,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return ArenaConfig.current
     }
     
-    private var isTwinChannelsPreview: Bool {
-        #if DEBUG
-        return arenaConfig.id == ArenaConfig.twinChannelsPreview.id
-        #else
-        return false
-        #endif
-    }
-    #if DEBUG
+    private var isTwinChannels: Bool { arenaConfig.id == ArenaConfig.twinChannels.id }
     private var channelSpawnWestNext = true
     private var channelTollkeeperLastSpawn: TimeInterval = -.infinity
     private var channelRailspikeLastSpawn: TimeInterval = -.infinity
     private var channelSwitchwardenSpawned = false
-    #endif
+    private var channelArrivalPending = false
 
     // MARK: - Boss Mechanics
 
@@ -618,8 +607,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         arenaFloor.zPosition = -10
         arenaLayer.addChild(arenaFloor)
 
-        // The preview is absent from the production arena switch/registry.
-        if isTwinChannelsPreview { buildTwinChannelsMotif(radius: radius) }
+        // Arena 7 uses its reviewed two-island motif in campaign and Boss Mode.
+        if isTwinChannels { buildTwinChannelsMotif(radius: radius) }
         else { switch arenaConfig.id {
         case 1:
             buildQuenchMotif(radius: radius)
@@ -5014,10 +5003,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // entirely. (Boss-summoned minions still arrive; those come from the
         // boss, not the wave manager, and are part of the fight.)
         if !eventHorizonVoided && !falseEndingActive && !isGauntlet {
+        updateSwitchwardenArrival()
         if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
-        #if DEBUG
-        spawnSwitchwardenPreviewIfReady()
-        #endif
 
         // v2.0 (Brandon): the real arena boss is now KILL-DRIVEN and PER-RUN —
         // it answers once you've cleared `bossSpawnKills` enemies in THIS run,
@@ -5033,7 +5020,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let miniBossAlive = enemies.contains { $0.isMiniBoss && !$0.isDying }
         let timeFloor = GameConfig.Wave.bossTimeFloor(
             for: BossRegistry.shared.grammar(forArena: arenaConfig.id))
-        if !isTwinChannelsPreview, !arenaBossSpawnedThisRun, boss == nil, !miniBossAlive,
+        if !isTwinChannels, !arenaBossSpawnedThisRun, boss == nil, !miniBossAlive,
            killCount >= GameConfig.Wave.bossSpawnKills,
            waveManager.elapsedTime >= timeFloor {
             spawnCurrentArenaBoss()
@@ -5043,7 +5030,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // The 90s bell is now a pre-boss ESCALATION: a mini-boss, but only if you
         // haven't already earned the real boss this run (no doubling up).
-        if !isTwinChannelsPreview {
+        if !channelArrivalPending {
             if spawnEvent.shouldSpawnMiniBoss, boss == nil, !arenaBossSpawnedThisRun {
                 spawnMiniBoss()
                 if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
@@ -9503,10 +9490,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Spawning
     
     private func spawnEnemy() {
-        if channelPrototypeArrivalDue { return }
-        #if DEBUG
-        if isTwinChannelsPreview { spawnTwinChannelsEnemy(); return }
-        #endif
+        if channelArrivalPending { return }
+        if isTwinChannels { spawnTwinChannelsEnemy(); return }
         // v1.6: The Quench runs its own spawn table
         if arenaConfig.id == 1 {
             spawnQuenchEnemy()
@@ -9552,18 +9537,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         spawnBasicMelee(elapsed: elapsed)
     }
 
-    #if DEBUG
     /// Existing melee class only, alternating lane preference. Failed draws defer.
-    private func twinChannelsSpawnPoint() -> CGPoint? {
+    private func twinChannelsSpawnPoint(actorRadius: CGFloat = GameConfig.Enemy.visualRadius) -> CGPoint? {
         let r = GameConfig.Arena.radius
         let C = GameConfig.TwinChannels.self
+        let rim = min(r * C.spawnRimFraction, r - actorRadius - 4)
         let zones = arenaGeometry.spawnZones.filter {
             (cos(($0.startAngle + $0.endAngle) / 2) < 0) == channelSpawnWestNext
         }
+        // Large minibosses need an inner rim too: the outer ring can put every
+        // draw within a crossing mouth's body-clear exclusion. Both rings still
+        // pass the same exact geometry/player/tell checks below.
+        let rings = actorRadius > GameConfig.Enemy.visualRadius ? [rim, rim * 0.8] : [rim]
         let candidates = zones.flatMap { zone in
-            (0..<C.spawnSamplesPerZone).map { _ -> CGPoint in
-                let angle = CGFloat.random(in: zone.startAngle...zone.endAngle)
-                return CGPoint(x: cos(angle), y: sin(angle)) * (r * C.spawnRimFraction)
+            rings.flatMap { distance in
+                (0..<C.spawnSamplesPerZone).map { index -> CGPoint in
+                    let angle = rings.count > 1
+                        ? zone.startAngle + (zone.endAngle-zone.startAngle) * CGFloat(index) / CGFloat(C.spawnSamplesPerZone-1)
+                        : CGFloat.random(in: zone.startAngle...zone.endAngle)
+                    return CGPoint(x: cos(angle), y: sin(angle)) * distance
+                }
             }
         }
         let hostileRects = enemies.compactMap { ($0 as? TollkeeperNode)?.attackRect }
@@ -9571,10 +9564,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             + channelRailBolts.map { $0.channelRailRect }.compactMap { $0 }
         let clearCandidates = candidates.filter { point in
             !hostileRects.contains { TollkeeperState.overlaps(rect: $0, circle: point,
-                radius: GameConfig.Enemy.visualRadius) }
+                radius: actorRadius) }
         }
         return arenaGeometry.channelSpawnPoint(candidates: clearCandidates,
-            player: player.position, actorRadius: GameConfig.Enemy.visualRadius,
+            player: player.position, actorRadius: actorRadius,
             arenaRadius: r, playerClearance: r * C.spawnPlayerClearance,
             crossingClearance: r * C.spawnCrossingClearance)
     }
@@ -9610,7 +9603,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(body)
         channelSpawnWestNext.toggle()
     }
-    #endif
 
     private func spawnBasicMelee(elapsed: TimeInterval) {
         // HP scales with time — enemies get beefier (v1.4: softened curve)
@@ -9797,6 +9789,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case "faceted_lie":    spawnFacetedLie()
         case "unmade_star":    spawnUnmadeStar()
         case "marchwarden":    spawnMarchwarden()   // v2.1 geometry Unit 4
+        case "switchwarden":   spawnSwitchwarden()
         default:
             // An entry the scene has no wired spawner for. Skipping is the only
             // safe move — a stage that can never end would soft-lock the run.
@@ -9989,6 +9982,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Tear the current arena down and build another in its place, then put the
     /// player back at a legal position for the new field.
     private func swapArena(to arenaID: Int) {
+        resetChannelEncounter()
         ArenaConfig.overrideID = arenaID
         arenaConfig = GameScene.resolveArenaConfig()
 
@@ -10042,6 +10036,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let g = gauntlet, !gauntletTransitioning else { return }
         gauntletTransitioning = true
         gauntletBossOnField = false
+        resetChannelEncounter()
 
         // A boss's summoned minions outlive it — the Slag Titan's spawn pattern
         // in particular. They belong to THAT fight, so the stage ends with them.
@@ -10835,8 +10830,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             xpValue: bossXP
         )
         boss.isMiniBoss = true
-        boss.position = EnemyNode.spawnPosition()
         boss.setScale(2.2)
+        if isTwinChannels {
+            guard let point = twinChannelsSpawnPoint(actorRadius: boss.geometryFootprintRadius) else { return }
+            boss.position = point
+            channelSpawnWestNext.toggle()
+        } else {
+            boss.position = EnemyNode.spawnPosition()
+        }
         enemies.append(boss)
         worldNode.addChild(boss)
     }
@@ -10854,6 +10855,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case 3: spawnFacetedLie()
         case 4: spawnUnmadeStar()
         case 5: spawnMarchwarden()   // v2.1 Unit 3
+        case 6: spawnSwitchwarden()
         default: spawnMiniBoss()   // arenas with no authored boss yet
         }
     }
@@ -11818,7 +11820,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// End-of-frame death/status resolution wins over a pending hostile pulse.
     private func processTollkeeperPulses() {
-        guard isTwinChannelsPreview, gameState == .playing else { return }
+        guard isTwinChannels, gameState == .playing else { return }
         for keeper in worldNode.children.compactMap({ $0 as? TollkeeperNode }) {
             let pinned = repulseFlights[ObjectIdentifier(keeper)] != nil
             if pinned { keeper.cancelAttack() }
@@ -11832,47 +11834,87 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func updateChannelAttacks(_ dt: TimeInterval) {
-        guard isTwinChannelsPreview else { return }
+        guard isTwinChannels else { return }
         channelRailBolts.removeAll { bolt in !enemyProjectiles.contains { $0 === bolt } }
         channelAttacks.beginFrame(dt, railBolts: channelRailBolts.count, hostileBolts: enemyProjectiles.count)
     }
 
-    private var channelPrototypeArrivalDue: Bool {
-        #if DEBUG
-        return isTwinChannelsPreview && waveManager.elapsedTime >= GameConfig.Switchwarden.previewArrival
-        #else
-        return false
-        #endif
+    /// Once eligible, stop waves and let the finite board drain naturally.
+    /// A pending arrival survives subsequent frames; only lifecycle reset clears it.
+    private func updateSwitchwardenArrival() {
+        guard isTwinChannels, !isGauntlet, gameState == .playing,
+              !channelSwitchwardenSpawned, boss == nil else { return }
+        if !channelArrivalPending, killCount >= GameConfig.Wave.bossSpawnKills,
+           waveManager.elapsedTime >= GameConfig.Wave.bossTimeFloor(for: .arena),
+           !enemies.contains(where: { $0.isMiniBoss && !$0.isDying }) {
+            channelArrivalPending = true
+        }
+        guard channelArrivalPending, enemies.isEmpty, enemyProjectiles.isEmpty,
+              channelAttacks.owner == nil else { return }
+        spawnCurrentArenaBoss()
+        arenaBossSpawnedThisRun = true
+        if playerStats.forgeReadRoom { forgeGrantMoveBuff(4.0) }
     }
 
-    #if DEBUG
-    private func spawnSwitchwardenPreviewIfReady() {
-        guard channelPrototypeArrivalDue, gameState == .playing, !channelSwitchwardenSpawned, boss == nil,
-              enemies.isEmpty, enemyProjectiles.isEmpty, channelAttacks.owner == nil else { return }
-        let radius=GameConfig.Arena.radius
-        let start=CGPoint(x: -0.65*radius, y: 0)
-        guard let plan=SwitchwardenState.choosePlan(from:start,player:player.position,
-            playerRadius:playerStats.effectiveCollisionRadius,moveSpeed:playerStats.effectiveMoveSpeed,
-            geometry:arenaGeometry,radius:radius) else { return }
-        let overseer=SwitchwardenNode();overseer.position=plan.anchor;overseer.schedule=channelAttacks
-        overseer.geometry=arenaGeometry
-        overseer.planProvider={ [weak self] position in
-            guard let self=self else{return nil}
-            return SwitchwardenState.choosePlan(from:position,player:self.player.position,
-                playerRadius:self.playerStats.effectiveCollisionRadius,moveSpeed:self.playerStats.effectiveMoveSpeed,
-                geometry:self.arenaGeometry,radius:GameConfig.Arena.radius)
+    /// Campaign and Boss Mode share geometry, damage, credit and cleanup.
+    private func spawnSwitchwarden() {
+        guard boss == nil else { return }
+        let radius = GameConfig.Arena.radius
+        let overseer = SwitchwardenNode()
+        overseer.applyHealthBonus(bossHPScaling(elapsed: waveManager.elapsedTime, step: 6))
+        // Spawn independently of an attack plan: a distant Spark may be behind
+        // an island. The boss can wait for a fair declaration without blocking entry.
+        let body = overseer.geometryFootprintRadius
+        let anchors = [-0.65, 0.65].map { CGPoint(x: CGFloat($0)*radius, y: 0) }
+        guard let start = anchors.filter({ $0.length+body < radius && !arenaGeometry.isBlocked($0, margin: body) })
+            .max(by: { $0.distance(to: player.position) < $1.distance(to: player.position) }) else { return }
+        overseer.position = start
+        overseer.zPosition = 6
+        overseer.schedule = channelAttacks
+        overseer.geometry = arenaGeometry
+        overseer.planProvider = { [weak self] position in
+            guard let self = self else { return nil }
+            return SwitchwardenState.choosePlan(from: position, player: self.player.position,
+                playerRadius: self.playerStats.effectiveCollisionRadius, moveSpeed: self.playerStats.effectiveMoveSpeed,
+                geometry: self.arenaGeometry, radius: GameConfig.Arena.radius)
         }
-        overseer.onDeath={ [weak self] in
-            guard let self=self else{return}
-            self.checkBossCredited();self.boss=nil
+        overseer.onDeath = { [weak self, weak overseer] in
+            guard let self = self, let overseer = overseer else { return }
+            self.bossDefeatedThisRun = true
+            ProgressionManager.shared.recordKill(.boss)
+            CodexManager.shared.recordDefeat(.switchwarden)
+            ProgressionManager.shared.registerArenaBossDefeat("switchwarden")
+            // Owner direction: Arena 7 grants no skin or cosmetic unlock.
+            for _ in 0..<10 {
+                let offset = CGPoint(x: CGFloat.random(in: -40...40), y: CGFloat.random(in: -40...40))
+                self.spawnXPOrb(at: overseer.position + offset, value: GameConfig.Marchwarden.xpReward / 10)
+            }
+            self.spawnForgeCoins(at: overseer.position)
+            self.checkBossCredited()
+            self.boss = nil
+            self.worldNode.shake(intensity: 15, duration: 0.5)
         }
-        channelSwitchwardenSpawned=true;boss=overseer;worldNode.addChild(overseer)
-        // Prototype: no Codex/progression registration, boss coins, arena unlock or reward.
+        channelSwitchwardenSpawned = true
+        channelArrivalPending = false
+        boss = overseer
+        worldNode.addChild(overseer)
+        showBossEntrance(name: "THE SWITCHWARDEN", colorHex: 0xB6AC98)
     }
-    #endif
+
+    /// Reset at run restart and every gauntlet handoff, including the final one.
+    private func resetChannelEncounter() {
+        (boss as? SwitchwardenNode)?.cancelAttack()
+        channelAttacks.reset()
+        channelRailBolts.removeAll()
+        channelArrivalPending = false
+        channelSwitchwardenSpawned = false
+        channelTollkeeperLastSpawn = -.infinity
+        channelRailspikeLastSpawn = -.infinity
+        channelSpawnWestNext = true
+    }
 
     private func processSwitchwardenSurge() {
-        guard isTwinChannelsPreview, gameState == .playing,
+        guard isTwinChannels, gameState == .playing,
               let overseer=boss as? SwitchwardenNode, !overseer.isDead else{return}
         overseer.playerHitRadius=playerStats.effectiveCollisionRadius
         overseer.playerMoveSpeed=playerStats.effectiveMoveSpeed
@@ -11883,7 +11925,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func processRailspikeLaunches() {
-        guard isTwinChannelsPreview, gameState == .playing else { return }
+        guard isTwinChannels, gameState == .playing else { return }
         for rail in worldNode.children.compactMap({ $0 as? RailspikeNode }) {
             if repulseFlights[ObjectIdentifier(rail)] != nil { rail.cancelAttack() }
             if let plan = rail.consumeLaunch() {
@@ -14455,13 +14497,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         forgeCalcStrikeCount = 0; forgeMoveBuffTimer = 0; forgeSlipstreamReady = true
         invulnerableTimer = 0
         killCount = 0
-        channelAttacks.reset(); channelRailBolts.removeAll()
-        #if DEBUG
-        channelTollkeeperLastSpawn = -.infinity
-        channelRailspikeLastSpawn = -.infinity
-        channelSwitchwardenSpawned = false
-        channelSpawnWestNext = true
-        #endif
+        resetChannelEncounter()
         rerollsUsedThisRun = 0
         extraCardUsedThisRun = false
         extraPickUsedThisRun = false

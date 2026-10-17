@@ -212,6 +212,7 @@ final class BestiaryCodexNode: SKNode, CodexPage {
         case .railspike:    node = RailspikeNode()
         case .ramplate:     node = RamplateNode(health: 1, xpValue: 0)
         case .marchwarden:  node = MarchwardenNode()
+        case .switchwarden: node = SwitchwardenNode()
         case .mote:         return nil
         }
         stripPhysics(node)

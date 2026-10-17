@@ -16,7 +16,7 @@ controls = [
  ("M2 graph ignores actor clearance", "Sparkforge/Config/ArenaGeometry.swift", "current.position, next.position, travelRadius: travelRadius", "current.position, next.position, travelRadius: 0"),
  ("M3 near-player rejection removed", "Sparkforge/Config/ArenaGeometry.swift", "&& p.distance(to: player) >= playerClearance + actorRadius", "&& true"),
  ("M4 unsafe anchor fallback", "Sparkforge/Config/ArenaGeometry.swift", "return candidates.first { p in", "return candidates.first(where: { p in"),
- ("M5 preview steals Boss Mode home", "Sparkforge/Scenes/GameScene.swift", "ArenaConfig.all.count, ArenaConfig.overrideID == nil", "ArenaConfig.all.count"),
+ ("M5 preview steals Boss Mode home", "Sparkforge/Scenes/GameScene.swift", "if ArenaConfig.overrideID == nil, let i = DevSeams.arenaOverrideIndex", "if let i = DevSeams.arenaOverrideIndex"),
  ("M6 ignore island dimensions", "Sparkforge/Config/ArenaGeometry.swift", "width: r * 0.085, height: r * 0.215", "width: r * 0.005, height: r * 0.215"),
  ("M7 never resume direct pursuit", "Sparkforge/Scenes/GameScene.swift", "enemy.routePrevNodeID = enemy.routeNodeID\n                enemy.routeNodeID = nil", "enemy.routePrevNodeID = enemy.routeNodeID\n                enemy.routeNodeID = 4"),
 ]

@@ -1,4 +1,4 @@
-// A7-4: expressive procedural DEBUG boss; no registry/unlock/reward integration.
+// Expressive procedural Arena 7 boss; campaign and Boss Mode share this body.
 import SpriteKit
 
 final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
@@ -57,7 +57,7 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
         mouth.path=CGPath(rect:CGRect(x:-r*0.18,y:-r*0.22,width:r*0.36,height:r*0.16),transform:nil)
         mouth.fillColor=SKColor(hex:0x28231F);mouth.strokeColor = .clear;mouth.zPosition=3;addChild(mouth)
         hp.position=CGPoint(x:0,y:r+20);hp.fillColor=SKColor(hex:0xB6AC98);hp.strokeColor = .clear;addChild(hp)
-        let label=SKLabelNode(fontNamed:"Menlo-Bold");label.text="THE SWITCHWARDEN · DEV";label.fontSize=9;label.position=CGPoint(x:0,y:r+30);addChild(label)
+        let label=SKLabelNode(fontNamed:"Menlo-Bold");label.text="THE SWITCHWARDEN";label.fontSize=9;label.position=CGPoint(x:0,y:r+30);addChild(label)
         floor.zPosition = -2;floor.lineWidth=2;floor.strokeColor=SKColor(hex:0xC58BFF);floor.addChild(hatching);hatching.strokeColor=SKColor(hex:0xC58BFF,alpha:0.45);hatching.lineWidth=1;addChild(floor)
         let physics=SKPhysicsBody(circleOfRadius:hitBodyRadius);physics.isDynamic=true;physics.affectedByGravity=false;physics.allowsRotation=false
         physics.categoryBitMask=GameConfig.Physics.enemy;physics.contactTestBitMask=GameConfig.Physics.player|GameConfig.Physics.projectile;physics.collisionBitMask=0;physicsBody=physics
@@ -105,6 +105,12 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
               plan.supports(playerRadius:playerHitRadius,moveSpeed:playerMoveSpeed),
               position.distance(to:plan.anchor)<=GameConfig.Switchwarden.arriveRadius else{cancelAttack();return false}
         return true
+    }
+    /// Add the normal campaign/stage ramp before challenge multipliers.
+    func applyHealthBonus(_ bonus: Int) {
+        maxHealth = max(1, GameConfig.Marchwarden.baseHealth + bonus)
+        health = maxHealth
+        syncVisual()
     }
     func applyChallengeHealthScale(_ factor:CGFloat){guard factor.isFinite,factor>0 else{return};maxHealth=max(1,Int((CGFloat(maxHealth)*factor).rounded()));health=maxHealth}
     @discardableResult

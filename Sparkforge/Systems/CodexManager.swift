@@ -184,8 +184,9 @@ enum BestiaryFamily: String, CaseIterable {
     // from the design lock §8 — never rename.
     case spurhound    = "spurhound"
     case linekeeper   = "linekeeper"
-    case tollkeeper   = "tollkeeper"   // A7-2; hidden until arena integration
-    case railspike    = "railspike"    // A7-3; hidden until arena integration
+    case tollkeeper   = "tollkeeper"   // Arena 7 persistence key
+    case railspike    = "railspike"    // Arena 7 persistence key
+    case switchwarden = "switchwarden"
     case ramplate     = "ramplate"
     case marchwarden  = "marchwarden"   // Arena 6 boss
     /// Reserved v2.0 slot — the hidden nemesis. Present in the schema NOW so it
@@ -224,20 +225,21 @@ enum BestiaryFamily: String, CaseIterable {
         case .railspike:    return "Railspike"
         case .ramplate:     return "Ramplate"
         case .marchwarden:  return "The Marchwarden"
+        case .switchwarden: return "The Switchwarden"
         case .mote:         return "????"
         }
     }
 
     var isBoss: Bool {
         switch self {
-        case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie, .unmadeStar, .marchwarden: return true
+        case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie, .unmadeStar, .marchwarden, .switchwarden: return true
         default: return false
         }
     }
 
     /// The bestiary page must not render this entry until its version ships
     /// (Mote = v2.0). Keeps the schema stable across the version boundary.
-    var hiddenUntilFutureVersion: Bool { self == .mote || self == .tollkeeper || self == .railspike }
+    var hiddenUntilFutureVersion: Bool { self == .mote }
 
     /// Lyra's bestiary voice (v1.8 Ask 4b). Mote has no entry — empty chair.
     var flavor: String {
@@ -275,6 +277,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .railspike:    return "Two signals. One rail. Step aside and let its orders pass."
         case .ramplate:     return "A barricade with forward momentum. The forge forgot that walls should stay put."
         case .marchwarden:  return "The march ended long ago. Its warden still clears the road for an army that will never come."
+        case .switchwarden: return "It gives orders to an empty railway. Let the signal pass. Then cross."
         case .mote:         return ""
         }
     }
@@ -309,6 +312,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .linekeeper:   return 0xBB44FF   // its firing-line purple (danger)
         case .ramplate:     return 0xFF7722   // kiln orange (the charge)
         case .marchwarden:  return 0x3F8F8A   // oxidized teal (entrance banner color)
+        case .switchwarden: return 0xB6AC98
         case .mote:         return 0x8E44FF
         }
     }
