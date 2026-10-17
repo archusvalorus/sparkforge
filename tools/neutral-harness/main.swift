@@ -1500,6 +1500,7 @@ do {
     scene.didFinishUpdate()
     check("RX1 real Railspike kill cancels once", rail.cancellations == 1 && rail.killCredited)
     check("RX2 real frame dispatch follows the cascade drain", scene.railspikeDispatchPending == [0])
+    check("SX0 real Switchwarden dispatch follows the cascade drain", scene.switchwardenDispatchPending == [0])
 }
 
 print("\n\(passed) passed, \(failed) failed")

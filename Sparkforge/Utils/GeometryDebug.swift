@@ -189,7 +189,7 @@ enum DevSeams {
     static var bannerText: String {
         var parts: [String] = []
         if let i = arenaOverrideIndex {
-            parts.append(i == ArenaConfig.all.count ? "Twin Channels shell (no boss)" : "arena \(i + 1)")
+            parts.append(i == ArenaConfig.all.count ? "Twin Channels shell (Switchwarden prototype)" : "arena \(i + 1)")
         }
         if overlayEnabled || GeometryDebug.showOverlay { parts.append("geometry overlay") }
         return "⚠︎ DEV — " + parts.joined(separator: " · ")

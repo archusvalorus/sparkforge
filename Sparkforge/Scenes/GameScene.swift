@@ -80,6 +80,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var channelSpawnWestNext = true
     private var channelTollkeeperLastSpawn: TimeInterval = -.infinity
     private var channelRailspikeLastSpawn: TimeInterval = -.infinity
+    private var channelSwitchwardenSpawned = false
     #endif
 
     // MARK: - Boss Mechanics
@@ -5014,6 +5015,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // boss, not the wave manager, and are part of the fight.)
         if !eventHorizonVoided && !falseEndingActive && !isGauntlet {
         if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
+        #if DEBUG
+        spawnSwitchwardenPreviewIfReady()
+        #endif
 
         // v2.0 (Brandon): the real arena boss is now KILL-DRIVEN and PER-RUN —
         // it answers once you've cleared `bossSpawnKills` enemies in THIS run,
@@ -5049,6 +5053,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v1.4: Update boss AI
         // v2.1 A7b S15 (CL-127d): its hazards reach Spark's LIVE body.
+        (boss as? SwitchwardenNode)?.playerMoveSpeed = playerStats.effectiveMoveSpeed
         (boss as? PlayerReachHazards)?.playerHitRadius = playerStats.effectiveCollisionRadius
         boss?.update(deltaTime: dt, playerPosition: player.position)
         // v2.1 A4a: …then its Burn and Bleed — before the gauntlet hand-off
@@ -9498,6 +9503,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Spawning
     
     private func spawnEnemy() {
+        if channelPrototypeArrivalDue { return }
         #if DEBUG
         if isTwinChannelsPreview { spawnTwinChannelsEnemy(); return }
         #endif
@@ -11807,6 +11813,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         drainChainReactions()
         processTollkeeperPulses()
         processRailspikeLaunches()
+        processSwitchwardenSurge()
     }
 
     /// End-of-frame death/status resolution wins over a pending hostile pulse.
@@ -11827,7 +11834,52 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func updateChannelAttacks(_ dt: TimeInterval) {
         guard isTwinChannelsPreview else { return }
         channelRailBolts.removeAll { bolt in !enemyProjectiles.contains { $0 === bolt } }
-        channelAttacks.beginFrame(dt, railBolts: channelRailBolts.count)
+        channelAttacks.beginFrame(dt, railBolts: channelRailBolts.count, hostileBolts: enemyProjectiles.count)
+    }
+
+    private var channelPrototypeArrivalDue: Bool {
+        #if DEBUG
+        return isTwinChannelsPreview && waveManager.elapsedTime >= GameConfig.Switchwarden.previewArrival
+        #else
+        return false
+        #endif
+    }
+
+    #if DEBUG
+    private func spawnSwitchwardenPreviewIfReady() {
+        guard channelPrototypeArrivalDue, gameState == .playing, !channelSwitchwardenSpawned, boss == nil,
+              enemies.isEmpty, enemyProjectiles.isEmpty, channelAttacks.owner == nil else { return }
+        let radius=GameConfig.Arena.radius
+        let start=CGPoint(x: -0.65*radius, y: 0)
+        guard let plan=SwitchwardenState.choosePlan(from:start,player:player.position,
+            playerRadius:playerStats.effectiveCollisionRadius,moveSpeed:playerStats.effectiveMoveSpeed,
+            geometry:arenaGeometry,radius:radius) else { return }
+        let overseer=SwitchwardenNode();overseer.position=plan.anchor;overseer.schedule=channelAttacks
+        overseer.geometry=arenaGeometry
+        overseer.planProvider={ [weak self] position in
+            guard let self=self else{return nil}
+            return SwitchwardenState.choosePlan(from:position,player:self.player.position,
+                playerRadius:self.playerStats.effectiveCollisionRadius,moveSpeed:self.playerStats.effectiveMoveSpeed,
+                geometry:self.arenaGeometry,radius:GameConfig.Arena.radius)
+        }
+        overseer.onDeath={ [weak self] in
+            guard let self=self else{return}
+            self.checkBossCredited();self.boss=nil
+        }
+        channelSwitchwardenSpawned=true;boss=overseer;worldNode.addChild(overseer)
+        // Prototype: no Codex/progression registration, boss coins, arena unlock or reward.
+    }
+    #endif
+
+    private func processSwitchwardenSurge() {
+        guard isTwinChannelsPreview, gameState == .playing,
+              let overseer=boss as? SwitchwardenNode, !overseer.isDead else{return}
+        overseer.playerHitRadius=playerStats.effectiveCollisionRadius
+        overseer.playerMoveSpeed=playerStats.effectiveMoveSpeed
+        if overseer.consumeSurge(player:player.position) {
+            applyBossHazardDamage(GameConfig.Marchwarden.contactDamage,shakeIntensity:4)
+        }
+        overseer.syncVisual()
     }
 
     private func processRailspikeLaunches() {
@@ -14264,6 +14316,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         (boss as? QuenchWardenNode)?.cleanupWorldEffects()
         (boss as? DynamoChoirNode)?.cleanupWorldEffects()
         (boss as? FacetedLieNode)?.cleanupWorldEffects()
+        (boss as? SwitchwardenNode)?.cancelAttack()
         boss?.removeFromParent()
         boss = nil
         fieldImpulseStrength = 0
@@ -14406,6 +14459,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #if DEBUG
         channelTollkeeperLastSpawn = -.infinity
         channelRailspikeLastSpawn = -.infinity
+        channelSwitchwardenSpawned = false
         channelSpawnWestNext = true
         #endif
         rerollsUsedThisRun = 0

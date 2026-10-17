@@ -412,6 +412,17 @@ enum GameConfig {
         static let spawnRimFraction: CGFloat = 0.95
     }
 
+    enum Switchwarden {
+        // A7-4 prototype values; final balance and encounter arrival are not locked.
+        static let warning: TimeInterval = 1.5
+        static let surge: TimeInterval = 0.35
+        static let recovery: TimeInterval = 1.5
+        static let cycle: TimeInterval = 4.5
+        static let previewArrival: TimeInterval = 75
+        static let bodyFraction: CGFloat = 0.08
+        static let arriveRadius: CGFloat = 6
+    }
+
     enum Railspike {
         static let tell: TimeInterval = 1.0
         static let interval: TimeInterval = 0.45

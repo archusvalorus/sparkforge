@@ -15,7 +15,7 @@ let scene = GameScene()
 let geo = scene.arenaGeometry
 let r = GameConfig.Arena.radius
 check("A3 live config and radius agree", scene.isTwinChannelsPreview && abs(r - 402.5) < 1e-6 && geo.blockedFootprints.count == 2)
-check("A4 overlay banner announces shell/no boss", DevSeams.bannerText.contains("shell (no boss)"))
+check("A4 overlay banner announces development boss prototype", DevSeams.bannerText.contains("shell (Switchwarden prototype)"))
 ArenaConfig.overrideID = 2
 check("A5 explicit Boss Mode home wins over preview picker", GameScene.resolveArenaConfig().id == 2)
 ArenaConfig.overrideID = 6

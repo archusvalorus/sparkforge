@@ -1711,8 +1711,10 @@ do {
         flatApp.compactMapValues { text in let n = text.components(separatedBy: needle).count - 1; return n > 0 ? n : nil }
     }
     let channelsFile = "Systems/VulnerabilityChannels.swift"
+    // A7-4: extend the exact body census for the DEBUG Switchwarden. Every
+    // existing body, consumer count and channel-write predicate stays required.
     let bodies = ["Nodes/EnemyNode.swift", "Nodes/BossNode.swift", "Nodes/QuenchWardenNode.swift", "Nodes/DynamoChoirNode.swift",
-                  "Nodes/FacetedLieNode.swift", "Nodes/MonumentBossNode.swift", "Nodes/MarchwardenNode.swift"]
+                  "Nodes/FacetedLieNode.swift", "Nodes/MonumentBossNode.swift", "Nodes/MarchwardenNode.swift", "Nodes/SwitchwardenNode.swift"]
     // CONTRACT CHANGE, A7b S8 (CL-114c; authorized): each body takes a DIRECT hit's
     // post-vulnerability amount as is (`resolved`), else applies the in-node rounding.
     let consume = "let scaled = resolved ?? (vulnerabilityMultiplier == 1.0 ? amount : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))"
@@ -1769,7 +1771,7 @@ do {
     let missing = writes.flatMap { file, statements in
         statements.filter { (flatApp[file] ?? "").components(separatedBy: $0).count != 2 }.map { "\(file): \($0)" } }
     let censusOK = writeCensus == writes.mapValues { $0.count } && missing.isEmpty
-    check("WR12 A7b S6 four independent vulnerability channels (CL-107/116): one shared resolution, the same model on EnemyNode and all six bosses, each takeDamage applies it once, and exactly the twelve accepted channel writes (ten, plus Erasure's boss Fracture since A7b S11)",
+    check("WR12 A7b S6 four independent vulnerability channels (CL-107/116): one shared resolution, the same model on EnemyNode and all seven bosses including the DEBUG Switchwarden, each takeDamage applies it once, and exactly the twelve accepted channel writes (ten, plus Erasure's boss Fracture since A7b S11)",
           oneModel && consumedOnce && censusOK,
           "oneModel=\(oneModel) rawReads=\(rawReads) consumers=\(consumers) census=\(writeCensus) missing=\(missing)")
     // v2.1 A7b S7 (G1.9 94a; CL-94 / CL-114 / CL-115): all four direct-hit chains

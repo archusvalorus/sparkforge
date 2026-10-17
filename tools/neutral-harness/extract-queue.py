@@ -505,6 +505,8 @@ final class ChainScene: ChainSceneBase {{
     private(set) var iceburstCalls = 0, seedCalls = 0, wellFeeds = 0, ashlingSplits = 0, delayed = 0
     private(set) var tollkeeperDispatchPending: [Int] = []
     private(set) var railspikeDispatchPending: [Int] = []
+    private(set) var switchwardenDispatchPending: [Int] = []
+    func processSwitchwardenSurge() {{ switchwardenDispatchPending.append(chainReactions.count) }}
     func processRailspikeLaunches() {{ railspikeDispatchPending.append(chainReactions.count) }}
     // Recorder only: proves the real didFinishUpdate hands off AFTER the cascade drain.
     func processTollkeeperPulses() {{ tollkeeperDispatchPending.append(chainReactions.count) }}
