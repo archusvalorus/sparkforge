@@ -158,11 +158,11 @@ final class TitleScene: SKScene {
         setupEmberParticles()
         setupForgeGlow()
         setupTitle()
+        setupTapPrompt()   // Primary action comes before progression and secondary navigation.
         setupForgeLevel()
         setupStats()
         setupArenaProgress()
         setupDailyForge()
-        setupTapPrompt()
         setupSettings()
         setupSettingsGear(topInset: view.safeAreaInsets.top)
 
@@ -739,45 +739,59 @@ final class TitleScene: SKScene {
         }
     }
     
-    private func setupTapPrompt() {
-        layoutY -= 34  // v1.8: extra room above the taller "tap to ignite" CTA
+    /// Responsive primary action size; inset it inside the live safe width.
+    private var playButtonSize: CGSize {
+        let insets = view?.safeAreaInsets ?? .zero
+        let width = max(0, min(360, size.width - insets.left - insets.right - 24))
+        return CGSize(width: width, height: DeviceScale.isIPad ? 88 : 72)
+    }
 
-        // v1.8: "tap to ignite" is the CTA — restyled as a blue button
-        // (Restart style) for a splash of color + contrast. Font stays Menlo
-        // (that courier vibe) but italic and larger; 312-wide to match the home
-        // column. v2.0 Unit 1.5: this box is now the ONLY start-a-run hit target
-        // (named "ignitePromptBox") — empty-space taps no longer ignite.
-        let igniteBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
-        igniteBox.fillColor = SKColor(hex: 0x18345C)
-        igniteBox.strokeColor = SKColor(hex: 0x5AA0F0, alpha: 0.85)
-        igniteBox.lineWidth = 1.5
-        igniteBox.position = CGPoint(x: 0, y: layoutY)
+    private func setupTapPrompt() {
+        layoutY -= 26
+        let buttonSize = playButtonSize
+        let insets = view?.safeAreaInsets ?? .zero
+        let centerX = (insets.left - insets.right) / 2
+        let igniteBox = SKShapeNode(rectOf: buttonSize, cornerRadius: 10)
+        igniteBox.fillColor = SKColor(hex: 0x0753A5)
+        igniteBox.strokeColor = SKColor(hex: 0xEFF7FF)
+        igniteBox.lineWidth = 2
+        igniteBox.position = CGPoint(x: centerX, y: layoutY)
         igniteBox.zPosition = 9
+        // Keep the existing start-action identity and tap dispatch.
         igniteBox.name = "ignitePromptBox"
         addChild(igniteBox)
 
-        tapPrompt.fontName = "Menlo-BoldItalic"  // v1.8: bold + italic, courier vibe kept
-        tapPrompt.text = "tap to ignite"
-        tapPrompt.fontSize = 22
-        tapPrompt.fontColor = SKColor(hex: 0xF2FBFF)  // v1.8: neon-white (crisp, cool-white)
+        tapPrompt.fontName = "Menlo-Bold"
+        tapPrompt.text = "PLAY NOW!"
+        tapPrompt.fontSize = DeviceScale.isIPad ? 40 : 30
+        tapPrompt.fontColor = .white
         tapPrompt.verticalAlignmentMode = .center
-        tapPrompt.position = CGPoint(x: 0, y: layoutY)
+        tapPrompt.position = CGPoint(x: centerX, y: layoutY)
         tapPrompt.zPosition = 10
+        // A thin gold edge behind opaque white glyphs, not a gold text fill.
+        // Children move with the label when the existing home stack scrolls.
+        let edge: CGFloat = DeviceScale.isIPad ? 1.0 : 0.75
+        for i in 0..<8 {
+            let outline = SKLabelNode(fontNamed: tapPrompt.fontName)
+            outline.text = tapPrompt.text
+            outline.fontSize = tapPrompt.fontSize
+            outline.fontColor = SKColor(hex: 0xE8BF64)
+            outline.verticalAlignmentMode = .center
+            let angle = CGFloat(i) * .pi / 4
+            outline.position = CGPoint(x: cos(angle) * edge, y: sin(angle) * edge)
+            outline.zPosition = -0.1
+            outline.name = "playGoldEdge"
+            tapPrompt.addChild(outline)
+        }
         addChild(tapPrompt)
-
-        // Gentle breathing pulse on the whole CTA (box + text together).
-        let breathe = SKAction.sequence([
-            SKAction.fadeAlpha(to: 0.65, duration: 1.2),
-            SKAction.fadeAlpha(to: 1.0, duration: 1.2)
-        ])
-        igniteBox.run(SKAction.repeatForever(breathe))
-        // Text stays solid (no dim) so the neon-white reads bright and constant.
+        // Static opaque treatment keeps the primary label and blue crisp.
+        layoutY -= buttonSize.height / 2 + 34
     }
-    
+
     private func setupSettings() {
         let s = DeviceScale.ui
 
-        layoutY -= 54  // v1.8: 54 to match the DF→ignite gap (buttons equidistant)
+        layoutY -= 54  // Keep secondary navigation spacing unchanged.
 
         // v1.8 Unit 10: the CODEX hub entry — a distinct violet-bordered pill,
         // deliberately a different color from the amber Remove Ads box below so
@@ -1209,8 +1223,7 @@ final class TitleScene: SKScene {
         // tap → startGame()" catch-all caused accidental launches during the
         // playtest loop — empty-space taps now do nothing.
         if let ignite = childNode(withName: "ignitePromptBox") {
-            let frame = CGRect(x: ignite.position.x - 160, y: ignite.position.y - 26,
-                               width: 320, height: 52)
+            let frame = ignite.frame.insetBy(dx: -4, dy: -5)
             if frame.contains(location) {
                 startGame()
             }
