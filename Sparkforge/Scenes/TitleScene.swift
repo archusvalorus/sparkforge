@@ -251,56 +251,97 @@ final class TitleScene: SKScene {
         glow.run(SKAction.repeatForever(pulse))
     }
     
+    /// One responsive column for every home action; the arena card keeps its own layout.
+    private var homeButtonWidth: CGFloat {
+        let insets = view?.safeAreaInsets ?? .zero
+        return max(0, min(312, size.width - insets.left - insets.right - 24))
+    }
+
+    private var homeCenterX: CGFloat {
+        let insets = view?.safeAreaInsets ?? .zero
+        return (insets.left - insets.right) / 2
+    }
+
+    private func fitHomeLabel(_ label: SKLabelNode, maxWidth: CGFloat? = nil, maxHeight: CGFloat = 30) {
+        let available = max(0, maxWidth ?? (homeButtonWidth - 32))
+        while (label.frame.width > available || label.frame.height > maxHeight) && label.fontSize > 12 {
+            label.fontSize -= 0.5
+        }
+    }
+
+    /// A restrained inner highlight gives the plates depth without extending their hit faces.
+    private func styleHomePlate(_ plate: SKShapeNode, accent: SKColor, prominent: Bool = false) {
+        guard let rect = plate.path?.boundingBoxOfPath else { return }
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: rect.minX + 14, y: rect.maxY - 6))
+        path.addLine(to: CGPoint(x: rect.maxX - 14, y: rect.maxY - 6))
+        let bevel = SKShapeNode(path: path)
+        bevel.strokeColor = accent.withAlphaComponent(prominent ? 0.30 : 0.18)
+        bevel.lineWidth = 1
+        bevel.zPosition = 0.1
+        bevel.name = "homePlateBevel"
+        plate.addChild(bevel)
+    }
+
     private func setupTitle() {
-        // Main title
+        // Reviewable forged-wordmark proposal: bright face, blue depth, sheer gold keyline.
         titleLabel.text = "SPARKFORGE"
-        titleLabel.fontSize = 36
-        titleLabel.fontColor = SKColor(hex: 0x1589C4)  // v1.8: ocean blue
-        titleLabel.position = CGPoint(x: 0, y: layoutY)
+        titleLabel.fontName = "AvenirNextCondensed-HeavyItalic"
+        titleLabel.fontSize = DeviceScale.isIPad ? 62 : 48
+        titleLabel.fontColor = SKColor(hex: 0xEAF6FF)
+        titleLabel.verticalAlignmentMode = .center
+        titleLabel.position = CGPoint(x: homeCenterX, y: layoutY + 10)
         titleLabel.zPosition = 10
+        fitHomeLabel(titleLabel, maxWidth: homeButtonWidth - 44, maxHeight: 72)
+
+        let depth = SKLabelNode(fontNamed: titleLabel.fontName)
+        depth.text = titleLabel.text
+        depth.fontSize = titleLabel.fontSize
+        depth.fontColor = SKColor(hex: 0x0753A5)
+        depth.verticalAlignmentMode = .center
+        depth.position = CGPoint(x: 1.5, y: -3)
+        depth.zPosition = -0.3
+        depth.name = "titleBlueDepth"
+        titleLabel.addChild(depth)
+        for i in 0..<8 {
+            let edge = SKLabelNode(fontNamed: titleLabel.fontName)
+            edge.text = titleLabel.text
+            edge.fontSize = titleLabel.fontSize
+            edge.fontColor = SKColor(hex: 0xE8BF64, alpha: 0.55)
+            edge.verticalAlignmentMode = .center
+            let angle = CGFloat(i) * .pi / 4
+            edge.position = CGPoint(x: cos(angle) * 0.6, y: sin(angle) * 0.6)
+            edge.zPosition = -0.1
+            edge.name = "titleGoldKeyline"
+            titleLabel.addChild(edge)
+        }
+        let half = titleLabel.frame.width / 2
+        for sign: CGFloat in [-1, 1] {
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: 0, y: 7))
+            for point in [CGPoint(x: 2, y: 2), CGPoint(x: 7, y: 0), CGPoint(x: 2, y: -2),
+                          CGPoint(x: 0, y: -7), CGPoint(x: -2, y: -2), CGPoint(x: -7, y: 0), CGPoint(x: -2, y: 2)] {
+                path.addLine(to: point)
+            }
+            path.closeSubpath()
+            let spark = SKShapeNode(path: path)
+            spark.fillColor = SKColor(hex: 0xEAF6FF)
+            spark.strokeColor = SKColor(hex: 0xE8BF64, alpha: 0.6)
+            spark.lineWidth = 1
+            spark.position = CGPoint(x: sign * (half + 12), y: 0)
+            spark.name = "titleForgeSpark"
+            titleLabel.addChild(spark)
+        }
         addChild(titleLabel)
 
-        // Glow effect on title
-        let titleGlow = SKLabelNode(fontNamed: "Menlo-Bold")
-        titleGlow.text = "SPARKFORGE"
-        titleGlow.fontSize = 36
-        titleGlow.fontColor = SKColor(hex: 0x0E6BA6, alpha: 0.5)  // v1.8: deep ocean glow
-        titleGlow.position = CGPoint(x: 0, y: layoutY)
-        titleGlow.zPosition = 9
-        addChild(titleGlow)
-
-        // v1.8: star-spark glints at BOTH ends of the title (four-point spark,
-        // echoing the forge-coin motif). Offset in phase so they alternate.
-        let glintX = titleLabel.frame.width / 2 + 8
-        for sign: CGFloat in [-1, 1] {
-            let glint = SKLabelNode(text: "✦")
-            glint.fontSize = 18
-            glint.fontColor = SKColor(hex: 0xEAF6FF)
-            glint.verticalAlignmentMode = .center
-            glint.position = CGPoint(x: sign * glintX, y: layoutY + 13)
-            glint.zPosition = 11
-            glint.alpha = 0.6
-            addChild(glint)
-            let twinkle = SKAction.repeatForever(SKAction.sequence([
-                SKAction.group([SKAction.scale(to: 1.5, duration: 0.3),
-                                SKAction.fadeAlpha(to: 1.0, duration: 0.3)]),
-                SKAction.group([SKAction.scale(to: 0.85, duration: 0.4),
-                                SKAction.fadeAlpha(to: 0.55, duration: 0.4)]),
-                SKAction.wait(forDuration: 2.0)
-            ]))
-            glint.run(SKAction.sequence([SKAction.wait(forDuration: sign < 0 ? 0 : 1.35), twinkle]))
-        }
-
-        layoutY -= 34
-
-        // Subtitle
+        layoutY -= 40
         subtitleLabel.text = "arena survival roguelite"
         subtitleLabel.fontSize = 14
         subtitleLabel.fontColor = SKColor(hex: 0xCCCCCC)
-        subtitleLabel.position = CGPoint(x: 0, y: layoutY)
+        subtitleLabel.position = CGPoint(x: homeCenterX, y: layoutY)
         subtitleLabel.zPosition = 10
+        fitHomeLabel(subtitleLabel, maxWidth: homeButtonWidth - 16)
         addChild(subtitleLabel)
-
         layoutY -= 44
     }
     
@@ -375,19 +416,20 @@ final class TitleScene: SKScene {
         // v1.9 Unit 7: ALWAYS a tappable button (312×42, standard footprint)
         // that opens the management screen — prominent + pulsing when there are
         // mastery points to spend, a quiet branch summary otherwise.
-        let bg = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
+        let bg = SKShapeNode(rectOf: CGSize(width: homeButtonWidth, height: 42), cornerRadius: 9)
         bg.fillColor = SKColor(hex: 0x2A1A00)
         bg.strokeColor = SKColor(hex: 0xFFCC66, alpha: n > 0 ? 0.7 : 0.4)
         bg.lineWidth = 1.5
-        bg.position = CGPoint(x: 0, y: forgePathRowY)
+        styleHomePlate(bg, accent: SKColor(hex: 0xFFCC66))
+        bg.position = CGPoint(x: homeCenterX, y: forgePathRowY)
         bg.zPosition = 10
         bg.name = "forgePathButton"
         addChild(bg)
 
-        let label = SKLabelNode(fontNamed: "Menlo-Bold")
-        label.fontSize = 15
+        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        label.fontSize = 17
         label.verticalAlignmentMode = .center
-        label.position = CGPoint(x: 0, y: forgePathRowY)
+        label.position = CGPoint(x: homeCenterX, y: forgePathRowY)
         label.zPosition = 11
         label.name = "forgePathRowLabel"
         if n > 0 {
@@ -406,6 +448,7 @@ final class TitleScene: SKScene {
             label.text = "⚒ FORGE PATH"
             label.fontColor = SKColor(hex: 0xCCAA66)
         }
+        fitHomeLabel(label)
         addChild(label)
     }
     
@@ -689,29 +732,31 @@ final class TitleScene: SKScene {
     private func setupDailyForge() {
         let dfm = DailyForgeManager.shared
 
-        // v1.8 (Unit 4a): 22 → 46 — Daily Forge sat ~5px under the arena box's
-        // bottom edge; give it real clearance so the two buttons don't crowd.
+        // Keep the established section clearance; lower options remain scrollable.
         layoutY -= 46
         dailyForgeRowY = layoutY  // v1.6: remembered so the post-claim indicator lands here
 
         if !dfm.hasClaimedToday {
             // Show claimable button
-            let bg = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 10)  // v1.8: match arena box width
+            let bg = SKShapeNode(rectOf: CGSize(width: homeButtonWidth, height: 42), cornerRadius: 10)  // v1.8: match arena box width
             bg.fillColor = SKColor(hex: 0x332200)
             bg.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.6)
-            bg.lineWidth = 1.5
-            bg.position = CGPoint(x: 0, y: layoutY)
+            bg.lineWidth = 2
+            styleHomePlate(bg, accent: SKColor(hex: 0xFFAA33))
+            bg.position = CGPoint(x: homeCenterX, y: layoutY)
             bg.zPosition = 10
             bg.name = "dailyForgeBG"
             dailyForgeButton.addChild(bg)
 
+            dailyForgeLabel.fontName = "AvenirNext-Heavy"
             dailyForgeLabel.text = "🔥 DAILY FORGE"
-            dailyForgeLabel.fontSize = 16
+            dailyForgeLabel.fontSize = 17
             dailyForgeLabel.fontColor = SKColor(hex: 0xFFAA33)
             dailyForgeLabel.verticalAlignmentMode = .center
-            dailyForgeLabel.position = CGPoint(x: 0, y: layoutY)
+            dailyForgeLabel.position = CGPoint(x: homeCenterX, y: layoutY)
             dailyForgeLabel.zPosition = 11
             dailyForgeLabel.name = "dailyForgeLabel"
+            fitHomeLabel(dailyForgeLabel)
             dailyForgeButton.addChild(dailyForgeLabel)
 
             dailyForgeButton.name = "dailyForgeButton"
@@ -724,14 +769,14 @@ final class TitleScene: SKScene {
             ])
             bg.run(SKAction.repeatForever(pulse))
 
-            layoutY -= 20  // v1.8: + tap-prompt's -34 = 54 to the ignite button (equidistant)
+            layoutY -= 20  // Together with the next 54: 74pt reference stride to Codex.
 
         } else if let blessing = dfm.activeBlessing {
             // Show active blessing indicator
             blessingActiveLabel.text = "\(blessing.icon) \(blessing.name) ready"
             blessingActiveLabel.fontSize = 14
             blessingActiveLabel.fontColor = SKColor(hex: 0x66AA66)
-            blessingActiveLabel.position = CGPoint(x: 0, y: layoutY)
+            blessingActiveLabel.position = CGPoint(x: homeCenterX, y: layoutY)
             blessingActiveLabel.zPosition = 10
             addChild(blessingActiveLabel)
 
@@ -741,20 +786,19 @@ final class TitleScene: SKScene {
     
     /// Responsive primary action size; inset it inside the live safe width.
     private var playButtonSize: CGSize {
-        let insets = view?.safeAreaInsets ?? .zero
-        let width = max(0, min(360, size.width - insets.left - insets.right - 24))
+        let width = homeButtonWidth
         return CGSize(width: width, height: DeviceScale.isIPad ? 88 : 72)
     }
 
     private func setupTapPrompt() {
         layoutY -= 26
         let buttonSize = playButtonSize
-        let insets = view?.safeAreaInsets ?? .zero
-        let centerX = (insets.left - insets.right) / 2
+        let centerX = homeCenterX
         let igniteBox = SKShapeNode(rectOf: buttonSize, cornerRadius: 10)
         igniteBox.fillColor = SKColor(hex: 0x0753A5)
-        igniteBox.strokeColor = SKColor(hex: 0xEFF7FF)
+        igniteBox.strokeColor = SKColor(hex: 0xE8BF64, alpha: 0.58)
         igniteBox.lineWidth = 2
+        styleHomePlate(igniteBox, accent: SKColor(hex: 0xE8BF64), prominent: true)
         igniteBox.position = CGPoint(x: centerX, y: layoutY)
         igniteBox.zPosition = 9
         // Keep the existing start-action identity and tap dispatch.
@@ -791,67 +835,73 @@ final class TitleScene: SKScene {
     private func setupSettings() {
         let s = DeviceScale.ui
 
-        layoutY -= 54  // Keep secondary navigation spacing unchanged.
+        layoutY -= 54  // Preserve the Daily Forge→Codex reference gap.
 
         // v1.8 Unit 10: the CODEX hub entry — a distinct violet-bordered pill,
         // deliberately a different color from the amber Remove Ads box below so
         // the two never get confused (and Remove Ads keeps its clear gap).
         let codexBtn = SKNode()
-        codexBtn.position = CGPoint(x: 0, y: layoutY)
+        codexBtn.position = CGPoint(x: homeCenterX, y: layoutY)
         codexBtn.zPosition = 10
         codexBtn.name = "codexHubButton"
-        let codexBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
-        codexBox.fillColor = SKColor(hex: 0x1A1420)
-        codexBox.strokeColor = SKColor(hex: 0xB98AE0, alpha: 0.55)
-        codexBox.lineWidth = 1.5
+        let codexBox = SKShapeNode(rectOf: CGSize(width: homeButtonWidth, height: 42), cornerRadius: 9)
+        codexBox.fillColor = SKColor(hex: 0x211A2D)
+        codexBox.strokeColor = SKColor(hex: 0xB98AE0, alpha: 0.75)
+        codexBox.lineWidth = 2
+        styleHomePlate(codexBox, accent: SKColor(hex: 0xB98AE0))
         codexBtn.addChild(codexBox)
-        let codexLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        let codexLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
         codexLabel.text = "📖  CODEX"
-        codexLabel.fontSize = 15 * s
+        codexLabel.fontSize = min(17 * s, 20)
         codexLabel.fontColor = UITheme.Color.info
         codexLabel.verticalAlignmentMode = .center
+        fitHomeLabel(codexLabel)
         codexBtn.addChild(codexLabel)
         addChild(codexBtn)
 
-        layoutY -= 54
+        layoutY -= 74
 
         // v2.0 Unit 1: SKINS entry — a warm-gold pill (cosmetic wardrobe), its
         // own color lane so it never confuses with CODEX (violet) or Remove Ads.
         let skinsBtn = SKNode()
-        skinsBtn.position = CGPoint(x: 0, y: layoutY)
+        skinsBtn.position = CGPoint(x: homeCenterX, y: layoutY)
         skinsBtn.zPosition = 10
         skinsBtn.name = "skinsButton"
-        let skinsBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
-        skinsBox.fillColor = SKColor(hex: 0x1E1815)
-        skinsBox.strokeColor = SKColor(hex: 0xE8B04C, alpha: 0.55)
-        skinsBox.lineWidth = 1.5
+        let skinsBox = SKShapeNode(rectOf: CGSize(width: homeButtonWidth, height: 42), cornerRadius: 9)
+        skinsBox.fillColor = SKColor(hex: 0x2A211A)
+        skinsBox.strokeColor = SKColor(hex: 0xE8B04C, alpha: 0.70)
+        skinsBox.lineWidth = 2
+        styleHomePlate(skinsBox, accent: SKColor(hex: 0xE8B04C))
         skinsBtn.addChild(skinsBox)
-        let skinsLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+        let skinsLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
         skinsLabel.text = "✦  SKINS"
-        skinsLabel.fontSize = 15 * s
+        skinsLabel.fontSize = min(17 * s, 20)
         skinsLabel.fontColor = SKColor(hex: 0xF0C070)
         skinsLabel.verticalAlignmentMode = .center
+        fitHomeLabel(skinsLabel)
         skinsBtn.addChild(skinsLabel)
         addChild(skinsBtn)
 
         // v2.0 (B1): BOSS MODE — a permanent slot, shown once the player has
         // actually felled something. Crimson lane, distinct from CODEX/SKINS.
         if BossRegistry.shared.isAvailable {
-            layoutY -= 54
+            layoutY -= 74
             let bossBtn = SKNode()
-            bossBtn.position = CGPoint(x: 0, y: layoutY)
+            bossBtn.position = CGPoint(x: homeCenterX, y: layoutY)
             bossBtn.zPosition = 10
             bossBtn.name = "bossModeButton"
-            let bossBox = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)
-            bossBox.fillColor = SKColor(hex: 0x1F1214)
-            bossBox.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.55)
-            bossBox.lineWidth = 1.5
+            let bossBox = SKShapeNode(rectOf: CGSize(width: homeButtonWidth, height: 42), cornerRadius: 9)
+            bossBox.fillColor = SKColor(hex: 0x2A171B)
+            bossBox.strokeColor = SKColor(hex: 0xE0554C, alpha: 0.75)
+            bossBox.lineWidth = 2
+            styleHomePlate(bossBox, accent: SKColor(hex: 0xE0554C))
             bossBtn.addChild(bossBox)
-            let bossLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+            let bossLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
             bossLabel.text = "☠  BOSS MODE"
-            bossLabel.fontSize = 15 * s
+            bossLabel.fontSize = min(17 * s, 20)
             bossLabel.fontColor = SKColor(hex: 0xF08078)
             bossLabel.verticalAlignmentMode = .center
+            fitHomeLabel(bossLabel)
             bossBtn.addChild(bossLabel)
             addChild(bossBtn)
         }
@@ -864,22 +914,23 @@ final class TitleScene: SKScene {
         // inside (named for price/purchase text updates).
         if !IAPManager.shared.hasRemovedAds {
             let removeAdsBtn = SKNode()
-            removeAdsBtn.position = CGPoint(x: 0, y: layoutY)
+            removeAdsBtn.position = CGPoint(x: homeCenterX, y: layoutY)
             removeAdsBtn.zPosition = 10
             removeAdsBtn.name = "removeAdsButton"
 
-            let box = SKShapeNode(rectOf: CGSize(width: 312, height: 42), cornerRadius: 9)  // v1.8: match arena box width
+            let box = SKShapeNode(rectOf: CGSize(width: homeButtonWidth, height: 42), cornerRadius: 9)  // v1.8: match arena box width
             box.fillColor = SKColor(hex: 0x1E1710)
             box.strokeColor = SKColor(hex: 0xFFAA33, alpha: 0.4)
             box.lineWidth = 1.5
             removeAdsBtn.addChild(box)
 
-            let removeAdsLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+            let removeAdsLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
             removeAdsLabel.text = removeAdsButtonText()
-            removeAdsLabel.fontSize = 15 * s
+            removeAdsLabel.fontSize = min(17 * s, 20)
             removeAdsLabel.fontColor = SKColor(hex: 0xFFAA33)
             removeAdsLabel.verticalAlignmentMode = .center
             removeAdsLabel.name = "removeAdsLabel"
+            fitHomeLabel(removeAdsLabel)
             removeAdsBtn.addChild(removeAdsLabel)
 
             addChild(removeAdsBtn)
@@ -889,6 +940,7 @@ final class TitleScene: SKScene {
         }
 
         // Restore purchases link
+        restoreLabel.fontName = "AvenirNext-Bold"
         restoreLabel.text = "Restore Purchases"
         restoreLabel.fontSize = 13 * s
         restoreLabel.fontColor = SKColor(hex: 0x999999)
@@ -1101,9 +1153,9 @@ final class TitleScene: SKScene {
            let bg = dailyForgeButton.childNode(withName: "dailyForgeBG") {
             let bgScene = convert(bg.position, from: dailyForgeButton)
             let forgeFrame = CGRect(
-                x: bgScene.x - 156,
+                x: bgScene.x - homeButtonWidth / 2,
                 y: bgScene.y - 25,
-                width: 312, height: 50
+                width: homeButtonWidth, height: 50
             )
             if forgeFrame.contains(location) {
                 handleDailyForge()
@@ -1113,8 +1165,8 @@ final class TitleScene: SKScene {
         
         // v1.7: Forge Path picks button
         if let pathBtn = childNode(withName: "forgePathButton") {
-            let frame = CGRect(x: pathBtn.position.x - 156, y: pathBtn.position.y - 21,
-                               width: 312, height: 42)
+            let frame = CGRect(x: pathBtn.position.x - homeButtonWidth / 2, y: pathBtn.position.y - 21,
+                               width: homeButtonWidth, height: 42)
             if frame.contains(location) {
                 showForgePathModal()
                 return
@@ -1124,9 +1176,9 @@ final class TitleScene: SKScene {
         // Check Remove Ads tap
         if let removeBtn = childNode(withName: "removeAdsButton") {
             let btnFrame = CGRect(
-                x: removeBtn.position.x - 156,
+                x: removeBtn.position.x - homeButtonWidth / 2,
                 y: removeBtn.position.y - 21,
-                width: 312, height: 42
+                width: homeButtonWidth, height: 42
             )
             if btnFrame.contains(location) {
                 showRemoveAdsValueModal()  // v1.8 (E3): value prop before the sheet
@@ -1136,8 +1188,8 @@ final class TitleScene: SKScene {
 
         // v1.8 Unit 10: CODEX hub entry
         if let codexBtn = childNode(withName: "codexHubButton") {
-            let frame = CGRect(x: codexBtn.position.x - 156, y: codexBtn.position.y - 21,
-                               width: 312, height: 42)
+            let frame = CGRect(x: codexBtn.position.x - homeButtonWidth / 2, y: codexBtn.position.y - 21,
+                               width: homeButtonWidth, height: 42)
             if frame.contains(location) {
                 presentCodexHub()
                 return
@@ -1146,8 +1198,8 @@ final class TitleScene: SKScene {
 
         // v2.0 B1: BOSS MODE entry
         if let bossBtn = childNode(withName: "bossModeButton") {
-            let frame = CGRect(x: bossBtn.position.x - 156, y: bossBtn.position.y - 21,
-                               width: 312, height: 42)
+            let frame = CGRect(x: bossBtn.position.x - homeButtonWidth / 2, y: bossBtn.position.y - 21,
+                               width: homeButtonWidth, height: 42)
             if frame.contains(location) {
                 showBossModeModal()
                 return
@@ -1156,8 +1208,8 @@ final class TitleScene: SKScene {
 
         // v2.0 Unit 1: SKINS entry
         if let skinsBtn = childNode(withName: "skinsButton") {
-            let frame = CGRect(x: skinsBtn.position.x - 156, y: skinsBtn.position.y - 21,
-                               width: 312, height: 42)
+            let frame = CGRect(x: skinsBtn.position.x - homeButtonWidth / 2, y: skinsBtn.position.y - 21,
+                               width: homeButtonWidth, height: 42)
             if frame.contains(location) {
                 showSkinPickerModal()
                 return
@@ -3480,6 +3532,7 @@ final class TitleScene: SKScene {
             if let label = childNode(withName: "removeAdsButton")?
                 .childNode(withName: "removeAdsLabel") as? SKLabelNode {
                 label.text = removeAdsButtonText()
+                fitHomeLabel(label)
             }
         }
     }
@@ -3531,6 +3584,7 @@ final class TitleScene: SKScene {
                 }
             } else {
                 label.text = removeAdsButtonText()
+                fitHomeLabel(label)
                 label.fontColor = SKColor(hex: 0xFFAA33)
             }
         }

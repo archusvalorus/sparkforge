@@ -10,6 +10,8 @@ def member(s,marker):
  return s[a:i].replace('private ','',1)
 scene=(root/'Sparkforge/Scenes/TitleScene.swift').read_text()
 methods=[member(scene,m) for m in ['    private func setupTitle()', '    private var playButtonSize:', '    private func setupTapPrompt()', '    private func buildMenuScrollSet(', '    private func clampedMenuOffset(', '    private func applyMenuScroll()']]
+for optional in ['    private var homeButtonWidth:', '    private var homeCenterX:', '    private func fitHomeLabel(', '    private func styleHomePlate(']:
+ if optional in scene:methods.append(member(scene,optional))
 a=scene.index('        if let ignite = childNode(withName: "ignitePromptBox") {');hit=member(scene,'        if let ignite = childNode(withName: "ignitePromptBox") {')
 methods.append('func tapPlay(at location:CGPoint) {\n'+hit+'\n}')
 # The actual lifecycle entry supplies this cursor and ordering.
