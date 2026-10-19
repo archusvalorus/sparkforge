@@ -1750,19 +1750,11 @@ enum GameConfig {
     }
 
     enum LevelUp {
-        // v2.0 tuning (Brandon, Jul 24): ATK 2→5, DEF 1→5. The old values were
-        // undertuned out of caution — clears leaned on revives once the arena
-        // filled. HP held at 10 for now (its late-run scaling is still open).
-        //
-        // DEF 5→3 (Brandon, Jul 26, from a feel pass). +5 worked — arguably too
-        // well: past ~15 DEF, hits were landing for almost nothing, and that
-        // didn't make turtling a viable CHOICE so much as the state you drifted
-        // into whether you meant to or not. A choice you can't opt out of isn't
-        // one. +3 keeps flat reduction genuinely strong while leaving damage on
-        // the table, so committing to defence stays a decision with a cost.
-        static let hpBonus: Int = 10        // +max HP (also heals for the same)
-        static let attackBonus: Int = 5     // +base projectile damage
-        static let defenseBonus: Int = 3    // +flat damage reduction
+        // Oct 19 integrated-playtest experiment: the same award values apply
+        // to chosen stats, random level-ups and Boss Mode opening levels.
+        static let hpBonus: Int = 5         // +max HP and matching immediate heal
+        static let attackBonus: Int = 3     // +base ATK
+        static let defenseBonus: Int = 1    // +flat damage reduction
     }
     
     // MARK: - Enemy
