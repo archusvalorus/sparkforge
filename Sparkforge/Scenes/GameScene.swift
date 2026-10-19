@@ -11872,11 +11872,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         overseer.zPosition = 6
         overseer.schedule = channelAttacks
         overseer.geometry = arenaGeometry
-        overseer.planProvider = { [weak self] position in
-            guard let self = self else { return nil }
+        overseer.planProvider = { [weak self, weak overseer] position in
+            guard let self = self, let overseer = overseer else { return nil }
             return SwitchwardenState.choosePlan(from: position, player: self.player.position,
                 playerRadius: self.playerStats.effectiveCollisionRadius, moveSpeed: self.playerStats.effectiveMoveSpeed,
-                geometry: self.arenaGeometry, radius: GameConfig.Arena.radius)
+                geometry: self.arenaGeometry, radius: GameConfig.Arena.radius,
+                crossing: overseer.nextCrossing, plantAtCurrentPosition: true)
+                ?? SwitchwardenState.choosePlan(from: position, player: self.player.position,
+                    playerRadius: self.playerStats.effectiveCollisionRadius, moveSpeed: self.playerStats.effectiveMoveSpeed,
+                    geometry: self.arenaGeometry, radius: GameConfig.Arena.radius, crossing: overseer.nextCrossing)
         }
         overseer.onDeath = { [weak self, weak overseer] in
             guard let self = self, let overseer = overseer else { return }
@@ -11918,7 +11922,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
               let overseer=boss as? SwitchwardenNode, !overseer.isDead else{return}
         overseer.playerHitRadius=playerStats.effectiveCollisionRadius
         overseer.playerMoveSpeed=playerStats.effectiveMoveSpeed
-        if overseer.consumeSurge(player:player.position) {
+        if overseer.consumeSurge(player:player.position) || overseer.consumeRam(player:player.position) {
             applyBossHazardDamage(GameConfig.Marchwarden.contactDamage,shakeIntensity:4)
         }
         overseer.syncVisual()
@@ -12159,6 +12163,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 A5 (CL-58/59): Harden / Aegis bounce on every real touch-begin —
         // before the damage guards, and it never creates damage to Spark.
         guardContactBounce(enemyBody)
+        // One ram attempt across physics contact and the swept end-frame path,
+        // including an attempt absorbed by invulnerability or a shield.
+        if let overseer=enemyBody.node as? SwitchwardenNode {
+            overseer.playerHitRadius=playerStats.effectiveCollisionRadius
+            overseer.playerMoveSpeed=playerStats.effectiveMoveSpeed
+            if !overseer.consumeBodyContactAttempt() { return }
+        }
         guard !isInvulnerable else { return }
         guard damageCooldownTimer <= 0 else { return }
         if consumeSilverSkin() { return }

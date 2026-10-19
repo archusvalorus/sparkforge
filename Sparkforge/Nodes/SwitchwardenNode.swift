@@ -21,6 +21,9 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
     var planProvider: ((CGPoint)->SwitchwardenPlan?)?
     var geometry = ArenaGeometry.twinChannels
     private(set) var attack = SwitchwardenState()
+    private(set) var ram = SwitchwardenRamState()
+    private(set) var nextCrossing: SwitchwardenCrossing = .north
+    private(set) var nextAttackIsRam = false
     private var pendingPlan: SwitchwardenPlan?
     private let mask = SKShapeNode()
     private let eyes = [SKShapeNode(), SKShapeNode()]
@@ -29,6 +32,9 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
     private let arms = [SKShapeNode(), SKShapeNode()]
     private let mouth = SKShapeNode()
     private let floor = SKShapeNode()
+    private let ramFloor = SKShapeNode()
+    private let ramArrow = SKShapeNode()
+    private let ramLabel = SKLabelNode(fontNamed:"Menlo-Bold")
     private let hatching = SKShapeNode()
     private let hp = SKShapeNode()
 
@@ -59,6 +65,10 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
         hp.position=CGPoint(x:0,y:r+20);hp.fillColor=SKColor(hex:0xB6AC98);hp.strokeColor = .clear;addChild(hp)
         let label=SKLabelNode(fontNamed:"Menlo-Bold");label.text="THE SWITCHWARDEN";label.fontSize=9;label.position=CGPoint(x:0,y:r+30);addChild(label)
         floor.zPosition = -2;floor.lineWidth=2;floor.strokeColor=SKColor(hex:0xC58BFF);floor.addChild(hatching);hatching.strokeColor=SKColor(hex:0xC58BFF,alpha:0.45);hatching.lineWidth=1;addChild(floor)
+        ramFloor.zPosition = -2;ramFloor.strokeColor=SKColor(hex:0xF3B35C);ramFloor.lineWidth=3
+        ramFloor.addChild(ramArrow);ramArrow.strokeColor=SKColor(hex:0xFFF0C7);ramArrow.lineWidth=3
+        ramLabel.text="RAM";ramLabel.fontSize=12;ramLabel.fontColor=SKColor(hex:0xFFF0C7)
+        ramFloor.addChild(ramLabel);addChild(ramFloor)
         let physics=SKPhysicsBody(circleOfRadius:hitBodyRadius);physics.isDynamic=true;physics.affectedByGravity=false;physics.allowsRotation=false
         physics.categoryBitMask=GameConfig.Physics.enemy;physics.contactTestBitMask=GameConfig.Physics.player|GameConfig.Physics.projectile;physics.collisionBitMask=0;physicsBody=physics
         syncVisual()
@@ -66,32 +76,75 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
     required init?(coder:NSCoder){fatalError("init(coder:) not implemented")}
 
     func cancelAttack() {
-        attack.cancel();pendingPlan=nil;schedule?.finish(.switchwarden);floor.isHidden=true
+        attack.cancel();ram.cancel();pendingPlan=nil;schedule?.finish(.switchwarden)
+        floor.isHidden=true;ramFloor.isHidden=true
     }
     func update(deltaTime dt:TimeInterval,playerPosition:CGPoint) {
         guard !isDead, dt.isFinite, dt >= 0 else{return}
         guard declarationValid() else{return}
-        if attack.phase == .seek {pendingPlan=planProvider?(position)}
-        let plan=attack.plan ?? pendingPlan
-        let atAnchor=plan.map{position.distance(to:$0.anchor)<=GameConfig.Switchwarden.arriveRadius} ?? false
-        var candidate=pendingPlan
-        if attack.phase == .seek {
-            if !atAnchor || attack.cooldown>0 {candidate=nil}
-            else if let schedule=schedule,!schedule.request(.switchwarden){candidate=nil}
-        }
-        let wasArmed=attack.armed
-        attack.step(dt,disabled:false,atAnchor:atAnchor,candidate:candidate)
-        if wasArmed && !attack.armed {schedule?.finish(.switchwarden)}
-        if attack.phase == .seek,let plan=pendingPlan {
-            let goal:CGPoint
-            if geometry.segmentBlockedExact(position,plan.anchor,travelRadius:geometryFootprintRadius) {
-                goal=geometry.graphWaypoint(from:position,toward:plan.anchor,travelRadius:geometryFootprintRadius,
-                    arriveRadius:GameConfig.Switchwarden.arriveRadius)?.position ?? position
-            }else{goal=plan.anchor}
-            let delta=goal-position
-            position += delta.normalized*min(delta.length,GameConfig.Marchwarden.idleSpeed*CGFloat(dt))
+        if ram.phase != .ready {
+            attack.step(dt,disabled:false,atAnchor:false,candidate:nil)
+            let wasArmed=ram.armed
+            ram.step(dt,geometry:geometry,bodyRadius:geometryFootprintRadius,arenaRadius:GameConfig.Arena.radius)
+            if wasArmed { position=ram.position }
+            if wasArmed && !ram.armed { schedule?.finish(.switchwarden) }
+        } else if attack.phase != .seek {
+            let atAnchor=attack.plan.map{position.distance(to:$0.anchor)<=GameConfig.Switchwarden.arriveRadius} ?? false
+            let wasArmed=attack.armed
+            attack.step(dt,disabled:false,atAnchor:atAnchor,candidate:nil)
+            if wasArmed && !attack.armed { schedule?.finish(.switchwarden) }
+        } else {
+            attack.step(dt,disabled:false,atAnchor:false,candidate:nil)
+            if attack.cooldown > 0 {
+                pursue(playerPosition,dt:dt)
+            } else if nextAttackIsRam {
+                if let plan=SwitchwardenRamPlan.choose(from:position,player:playerPosition,
+                    playerRadius:playerHitRadius,moveSpeed:playerMoveSpeed,bodyRadius:geometryFootprintRadius,
+                    geometry:geometry,arenaRadius:GameConfig.Arena.radius),
+                   schedule?.request(.switchwarden) ?? true {
+                    ram.commit(plan);attack.reserveRamCycle();nextAttackIsRam=false;pendingPlan=nil
+                } else { pursue(playerPosition,dt:dt) }
+            } else {
+                pendingPlan=planProvider?(position)
+                if let plan=pendingPlan {
+                    if position.distance(to:plan.anchor)<=GameConfig.Switchwarden.arriveRadius {
+                        if schedule?.request(.switchwarden) ?? true {
+                            attack.step(0,disabled:false,atAnchor:true,candidate:plan)
+                            if attack.phase == .warning { nextCrossing=nextCrossing.next;nextAttackIsRam=true }
+                        } else { pursue(playerPosition,dt:dt) }
+                    } else { pursue(playerPosition,dt:dt,toward:plan.anchor) }
+                } else { pursue(playerPosition,dt:dt) }
+            }
         }
         syncVisual()
+    }
+    private func pursue(_ player:CGPoint,dt:TimeInterval,toward target:CGPoint? = nil) {
+        let standOff=geometryFootprintRadius+playerHitRadius+GameConfig.Switchwarden.standOff
+        let distance=position.distance(to:player)
+        let relocating=target != nil
+        guard relocating || distance > standOff else { return }
+        let target=target ?? player
+        let goal:CGPoint
+        if geometry.segmentBlockedExact(position,target,travelRadius:geometryFootprintRadius) {
+            goal=geometry.graphWaypoint(from:position,toward:target,travelRadius:geometryFootprintRadius,
+                arriveRadius:GameConfig.Switchwarden.arriveRadius)?.position ?? position
+        } else { goal=target }
+        let delta=goal-position
+        let move=SwitchwardenMotion.advance(from:position,
+            to:position+delta.normalized*min(delta.length,GameConfig.Switchwarden.pursuitSpeed*CGFloat(dt)),
+            bodyRadius:geometryFootprintRadius,arenaRadius:GameConfig.Arena.radius,geometry:geometry,
+            // A completed ram may end inside ordinary pursuit stand-off.
+            // Repositioning for a safe cast may withdraw, never move closer.
+            avoiding:player,standOff:relocating ? min(standOff,distance) : standOff)
+        position=move.position
+    }
+    func consumeBodyContactAttempt() -> Bool {
+        guard !isDead, declarationValid() else { return false }
+        return ram.consumeContactAttempt()
+    }
+    func consumeRam(player:CGPoint) -> Bool {
+        guard !isDead, declarationValid() else { return false }
+        return ram.consumeSweep(player:player,radius:playerHitRadius,bodyRadius:hitBodyRadius)
     }
     func consumeSurge(player:CGPoint) -> Bool {
         guard !isDead else{return false}
@@ -100,6 +153,12 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
         return attack.consumeHit(player:player,radius:playerHitRadius)
     }
     func declarationValid() -> Bool {
+        if ram.armed || ram.pendingSweep {
+            guard let plan=ram.plan,plan.supports(playerRadius:playerHitRadius,moveSpeed:playerMoveSpeed),
+                  position.distance(to:ram.position) <= 0.001,
+                  position.length+geometryFootprintRadius <= GameConfig.Arena.radius+0.000001,
+                  !geometry.isBlocked(position,margin:geometryFootprintRadius) else { cancelAttack();return false }
+        }
         guard attack.armed else{return true}
         guard let plan=attack.plan,
               plan.supports(playerRadius:playerHitRadius,moveSpeed:playerMoveSpeed),
@@ -126,8 +185,12 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
         syncVisual();return false
     }
     func syncVisual() {
-        let warning=attack.phase == .warning, surge=attack.phase == .surge, tired=attack.phase == .recovery
-        let charge:CGFloat=warning ? CGFloat(max(0,min(1,1-attack.remaining/(attack.plan?.warning ?? GameConfig.Switchwarden.warning)))) : 0
+        let warning=attack.phase == .warning || ram.phase == .warning
+        let surge=attack.phase == .surge || ram.phase == .rushing
+        let tired=attack.phase == .recovery || ram.phase == .recovery
+        let warningTime=ram.phase == .warning ? GameConfig.Switchwarden.ramWarning : (attack.plan?.warning ?? GameConfig.Switchwarden.warning)
+        let remaining=ram.phase == .warning ? ram.remaining : attack.remaining
+        let charge:CGFloat=warning ? CGFloat(max(0,min(1,1-remaining/warningTime))) : 0
         for i in 0..<2 {
             let sign:CGFloat=i==0 ? -1:1
             brows[i].zRotation=warning ? sign*0.25:(tired ? sign*0.1:0)
@@ -138,6 +201,21 @@ final class SwitchwardenNode: SKNode, ArenaBossNode, PlayerReachHazards {
         }
         mouth.yScale=tired ? 1.5:(surge ? 0.5:1)
         hp.path=CGPath(rect:CGRect(x:-geometryFootprintRadius,y:-2,width:max(1,2*geometryFootprintRadius*healthPercent),height:4),transform:nil)
+        ramFloor.isHidden=true
+        if !isDead,ram.armed,let plan=ram.plan {
+            let r=geometryFootprintRadius
+            var transform=CGAffineTransform(translationX:plan.origin.x,y:plan.origin.y)
+                .rotated(by:atan2(plan.direction.y,plan.direction.x))
+            ramFloor.path=CGPath(roundedRect:CGRect(x:-r,y:-r,width:plan.distance+2*r,height:2*r),
+                cornerWidth:r,cornerHeight:r,transform:&transform)
+            ramFloor.position = .zero-position;ramFloor.isHidden=false
+            ramFloor.fillColor=SKColor(hex:0xF3B35C,alpha:ram.phase == .rushing ? 0.40 : CGFloat(0.08+0.16*charge))
+            let tip=plan.origin+plan.direction*min(plan.distance,r+45)
+            let normal=CGPoint(x:-plan.direction.y,y:plan.direction.x)
+            let arrow=CGMutablePath();arrow.move(to:plan.origin);arrow.addLine(to:tip)
+            arrow.move(to:tip-plan.direction*12+normal*8);arrow.addLine(to:tip);arrow.addLine(to:tip-plan.direction*12-normal*8)
+            ramArrow.path=arrow;ramLabel.position=plan.origin+CGPoint(x:0,y:r+16)
+        }
         guard !isDead,attack.armed,let rect=attack.plan?.rect else{floor.isHidden=true;return}
         floor.path=CGPath(rect:rect,transform:nil);floor.position = .zero-position
         floor.fillColor=SKColor(hex:0xBB44FF,alpha:surge ? 0.50:CGFloat(0.08+0.14*charge));floor.isHidden=false

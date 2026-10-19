@@ -14,7 +14,7 @@ check("migration preserves menu selection and defeat record",shared.currentArena
 let again=ProgressionManager()
 check("launch reconciliation idempotent",again.arenasUnlocked==7 && again.currentArena==5)
 check("registry ids exact0through6",ArenaConfig.all.map{$0.id}==Array(0...6) && Set(ArenaConfig.all.map{$0.bossID}).count==7)
-check("Switchwarden stable identity and radius",ArenaConfig.arena(forBossID:"switchwarden")?.id==6 && ArenaConfig.twinChannels.radiusScale==1.15)
+check("Switchwarden stable identity and radius",ArenaConfig.arena(forBossID:"switchwarden")?.id==6 && ArenaConfig.twinChannels.radiusScale==1.30)
 shared.registerArenaBossDefeat("switchwarden")
 shared.registerArenaBossDefeat("switchwarden")
 check("boss defeat idempotent and no Arena8",shared.arenasUnlocked==7 && shared.defeatedBosses==Set(["marchwarden","switchwarden"]))

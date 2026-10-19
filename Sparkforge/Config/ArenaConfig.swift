@@ -208,7 +208,7 @@ struct ArenaConfig {
         flavorLine: "choose the crossing", floorColorHex: 0x171615,
         boundaryColorHex: 0x82796D, dangerGlowHex: 0x33251D,
         detailLineHex: 0xB6AC98, accentColorHex: 0x82796D,
-        radiusScale: 1.15, bellTime: GameConfig.Wave.miniBossSpawnTime,
+        radiusScale: 1.30, bellTime: GameConfig.Wave.miniBossSpawnTime,
         bossID: "switchwarden", bossName: "The Switchwarden", bossFelledAccentHex: 0xB6AC98,
         finalFelledLine: "★ THE CROSSING IS YOURS ★",
         geometryBuilder: { ArenaGeometry.twinChannels })

@@ -421,6 +421,13 @@ enum GameConfig {
         static let cycle: TimeInterval = 4.5
         static let bodyFraction: CGFloat = 0.08
         static let arriveRadius: CGFloat = 6
+        // Owner-approved rework uses literal world points on every device.
+        static let pursuitSpeed: CGFloat = 80
+        static let standOff: CGFloat = 24
+        static let ramWarning: TimeInterval = 1.2
+        static let ramSpeed: CGFloat = 300
+        static let ramDuration: TimeInterval = 0.8
+        static let ramRecovery: TimeInterval = 1.5
     }
 
     enum Railspike {
@@ -429,7 +436,7 @@ enum GameConfig {
         static let recovery: TimeInterval = 1.3
         static let cycle: TimeInterval = 5
         static let firstSpawn: TimeInterval = 45
-        static let spawnInterval: TimeInterval = 16
+        static let spawnInterval: TimeInterval = 10
         static let arriveRadius: CGFloat = 6
         static let rangeFraction: CGFloat = 1.2
         static var boltSpeed: CGFloat { 300 * DeviceScale.gameplay }
@@ -442,7 +449,7 @@ enum GameConfig {
         static let recovery: TimeInterval = 1.2
         static let cycle: TimeInterval = 3.5
         static let firstSpawn: TimeInterval = 15
-        static let spawnInterval: TimeInterval = 12
+        static let spawnInterval: TimeInterval = 8
         static let arriveRadius: CGFloat = 12
         static let engageFraction: CGFloat = 0.65
         static let halfLengthFraction: CGFloat = 0.15

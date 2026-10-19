@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 enum GameConfig {}
 enum DeviceScale { static var arenaRadius:CGFloat=350; static let gameplay:CGFloat=1 }
-struct ArenaConfig { let radiusScale:CGFloat;let id:Int;static var current=ArenaConfig(radiusScale:1.15,id:6);static var overrideID:Int? }
+struct ArenaConfig { let radiusScale:CGFloat;let id:Int;static var current=ArenaConfig(radiusScale:1.30,id:6);static var overrideID:Int? }
 enum BossGrammar {case arena,monument}
 final class BossRegistry {static let shared=BossRegistry();func grammar(forArena:Int)->BossGrammar{.arena}}
 struct BossEntry {let id:String;let arenaID:Int}
@@ -44,7 +44,7 @@ final class GameScene {
  var arenaConfig=ArenaConfig.current
  var eventHorizonVoided=false;var falseEndingActive=false;var isGauntlet=false;var killCount=0;var channelArrivalPending=false;var arenaBossSpawnedThisRun=false;var bossDefeatedThisRun=false;var bossHPScalingOverride:Int?
  var gauntlet:ProbeGauntlet?;var gauntletStagePending=false;var gauntletStagePendingIsFirst=false;var gauntletBossOnField=false;var gauntletTransitioning=false;var swappedTo:Int?;var advances=0
- func swapArena(to id:Int){swappedTo=id;arenaConfig=ArenaConfig(radiusScale:1.15,id:id)}
+ func swapArena(to id:Int){swappedTo=id;arenaConfig=ArenaConfig(radiusScale:1.30,id:id)}
  func spawnInterBossHeals(){};func advanceGauntlet(){advances+=1};func showGauntletStageBanner(entry:BossEntry,stage:Int,of:Int){}
  var otherBossSpawns=0
  func spawnQuenchEnemy(){};func spawnCoilworksEnemy(){};func spawnMirrorwoundEnemy(){};func spawnStarAnvilEnemy(){};func spawnSplitworksEnemy(){};func spawnRangedEnemy(){};func spawnBasicMelee(elapsed:TimeInterval){}
