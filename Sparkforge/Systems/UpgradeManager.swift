@@ -429,7 +429,8 @@ final class UpgradeManager {
     /// skip four rules and reroll the same-level one. Scheduled offers sit
     /// OUTSIDE it on purpose: an active capstone's every-other-level guarantee
     /// and the panda's slot.
-    private func isOfferable(_ card: UpgradeCard, capstoneInProgress: Bool, level: Int) -> Bool {
+    private func isOfferable(_ card: UpgradeCard, capstoneInProgress: Bool, level: Int,
+                             additionalTierGate: (UpgradeCard) -> Bool = { _ in true }) -> Bool {
         guard tier(of: card.id) < card.maxTier else { return false }
         // Corrective F2: a card taken during THIS level-up never comes back at
         // its next tier in the same level-up — spread, reroll or bonus alike.
@@ -440,7 +441,7 @@ final class UpgradeManager {
         // a 3-card spread is a wasted level-up.
         guard card.requires.isSubset(of: capabilities) else { return false }
         // v2.1 A2 / A7a: …and so is a card whose NEXT TIER is closed.
-        guard nextTierOpen(card) else { return false }
+        guard nextTierOpen(card, additionalTierGate: additionalTierGate) else { return false }
         // v2.1 A7a (CL-93): …and a card something the run owns has silenced.
         guard card.blockedBy.isDisjoint(with: capabilities) else { return false }
         // v2.0 (C2): a secret card is never in the random pool. It arrives
@@ -465,7 +466,9 @@ final class UpgradeManager {
     /// The next tier's own gates: its prerequisites are held (`tierRequires`,
     /// e.g. Frost Touch T3, Ice Rink) and nothing the run owns closes it
     /// (`tierBlockedBy`, e.g. Polar Vortex T4 after a pellet card).
-    private func nextTierOpen(_ card: UpgradeCard) -> Bool {
+    private func nextTierOpen(_ card: UpgradeCard,
+                              additionalTierGate: (UpgradeCard) -> Bool = { _ in true }) -> Bool {
+        guard additionalTierGate(card) else { return false }
         let next = tier(of: card.id) + 1
         if let need = card.tierRequires[next], !need.isSubset(of: capabilities) { return false }
         if let block = card.tierBlockedBy[next], !block.isDisjoint(with: capabilities) { return false }
@@ -484,8 +487,16 @@ final class UpgradeManager {
     /// force-offer a tier nobody may take — and no lockout, so the run can
     /// still finish a different capstone (Brandon, Sep 25).
     private var activeCapstones: [UpgradeCard] {
+        activeCapstones(additionalTierGate: { _ in true })
+    }
+
+    /// v2.3 R0: an opt-in proof seam. Existing runtime calls allow all extra
+    /// tiers. A later form gate must also affect focus, so a newly stalled
+    /// ladder cannot keep other capstones locked after its next tier closes.
+    private func activeCapstones(additionalTierGate: (UpgradeCard) -> Bool) -> [UpgradeCard] {
         allCards.filter {
-            $0.isCapstone && tier(of: $0.id) > 0 && tier(of: $0.id) < $0.maxTier && nextTierOpen($0)
+            $0.isCapstone && tier(of: $0.id) > 0 && tier(of: $0.id) < $0.maxTier
+                && nextTierOpen($0, additionalTierGate: additionalTierGate)
         }
     }
     private var capstoneInProgress: Bool { !activeCapstones.isEmpty }
@@ -786,6 +797,19 @@ final class UpgradeManager {
         return isOfferable(card, capstoneInProgress: capstoneInProgress, level: level)
     }
 
+    /// Off-live-path R0 admission proof. Shares ordinary prerequisites, taken
+    /// set, secret scheduling and focus rules; supplies only an additional tier
+    /// closure. No production draw or acquisition passes a Rainbow gate yet.
+    func isSelectable(_ card: UpgradeCard, atLevel level: Int,
+                      additionalTierGate: (UpgradeCard) -> Bool) -> Bool {
+        guard !takenAt(level).contains(card.id), additionalTierGate(card) else { return false }
+        if card.isSecret { return pandaOffer(atLevel: level)?.id == card.id }
+        let inProgress = activeCapstones(additionalTierGate: additionalTierGate)
+        if inProgress.contains(where: { $0.id == card.id }) { return true }
+        return isOfferable(card, capstoneInProgress: !inProgress.isEmpty, level: level,
+                           additionalTierGate: additionalTierGate)
+    }
+
     /// The part of a spread that is still selectable, in order. Newly invalid
     /// cards drop out; nothing is drawn to replace them.
     func stillSelectable(_ cards: [UpgradeCard], atLevel level: Int) -> [UpgradeCard] {
@@ -797,6 +821,16 @@ final class UpgradeManager {
     @discardableResult
     func acquire(_ card: UpgradeCard, stats: PlayerStats, level: Int) -> Bool {
         guard isSelectable(card, atLevel: level) else { return false }
+        pickCard(card, stats: stats, level: level)
+        return true
+    }
+
+    /// Same real apply seam, opt-in only. R0's host proof uses this overload;
+    /// live callers continue to use the unchanged three-argument acquisition.
+    @discardableResult
+    func acquire(_ card: UpgradeCard, stats: PlayerStats, level: Int,
+                 additionalTierGate: (UpgradeCard) -> Bool) -> Bool {
+        guard isSelectable(card, atLevel: level, additionalTierGate: additionalTierGate) else { return false }
         pickCard(card, stats: stats, level: level)
         return true
     }
