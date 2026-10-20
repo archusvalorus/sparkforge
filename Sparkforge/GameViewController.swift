@@ -55,6 +55,8 @@ class GameViewController: UIViewController {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--rainbow-p1") {
                 scene = RainbowP1Scene(size: skView.bounds.size)
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-p0") {
+                scene = Arena8P0Scene(size: skView.bounds.size)
             } else {
                 scene = TitleScene(size: skView.bounds.size)
             }
