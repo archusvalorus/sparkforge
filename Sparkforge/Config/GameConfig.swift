@@ -2295,4 +2295,25 @@ enum GameConfig {
         static let stampColorHex: UInt32 = 0xFFD27A
         static let shadowColorHex: UInt32 = 0x7A2F00
     }
+    #if DEBUG
+    /// Isolated P1 lab only. Never consulted by production combat/drafting.
+    enum RainbowPrototype {
+        static let cadence: TimeInterval = 20
+        static let warning: TimeInterval = 1
+        static let crossing: TimeInterval = 0.75
+        static let maximumActiveStep: TimeInterval = 0.1
+        static let sweepMultiplier: CGFloat = 3.5
+        static let primaryMultiplier: CGFloat = 2
+        static let luckyBreakChance: CGFloat = 0.10
+        static let luckyBreakMultiplier: CGFloat = 1.5
+        static let ordinaryBasis: CGFloat = 10
+        static let targetRadius: CGFloat = 13
+        static let playerRadius: CGFloat = 10
+        static let playerSpeed: CGFloat = 160
+        static let contactSearchSteps = 32
+        static let trailLength: CGFloat = 90
+        static let laneHeightFraction: CGFloat = 1.0 / 3.0
+    }
+    #endif
+
 }

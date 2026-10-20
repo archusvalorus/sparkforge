@@ -52,7 +52,15 @@ class GameViewController: UIViewController {
             NSLog("[CATALOG] loaded %d cards, %d synergy tiers, %d retired ids (schema %d)",
                   catalog.cards.count, catalog.synergyEffects.count, catalog.retiredCardIDs.count, AbilityCatalog.supportedSchemaVersion)
             #endif
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--rainbow-p1") {
+                scene = RainbowP1Scene(size: skView.bounds.size)
+            } else {
+                scene = TitleScene(size: skView.bounds.size)
+            }
+            #else
             scene = TitleScene(size: skView.bounds.size)
+            #endif
         case .failure(let failure):
             NSLog("[CATALOG] %@", failure.report)
             scene = CatalogErrorScene(size: skView.bounds.size, failure: failure)
