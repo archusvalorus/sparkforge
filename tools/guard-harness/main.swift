@@ -703,6 +703,8 @@ do {
         ("private func spawnDynamoChoir(", ["damage, shakeIntensity: 6"]),
         ("private func spawnFacetedLie(", ["damage, shakeIntensity: 6"]),
         ("private func spawnMarchwarden(", ["damage, shakeIntensity: 7"]),
+        ("private func processTollkeeperPulses(", ["damage, shakeIntensity: 4, fromBossClass: false"]),
+        ("private func processSwitchwardenSurge(", ["GameConfig.Marchwarden.contactDamage,shakeIntensity:4"]),
     ]
     /// Every `applyBossHazardDamage(` CALL in `text` (the declaration excluded),
     /// its argument list whitespace-normalised.
@@ -727,7 +729,7 @@ do {
     }.map { $0.function }
     let flatExec = exec.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     let hazard = body("applyBossHazardDamage")
-    check("WR19 Grounder's pulse and the Relay Imp arc are NOT boss-class (fromBossClass: false, as Anvilborn); the six boss hazards keep the true default (A5 carried, ruled two sites only)",
+    check("WR19 Grounder's pulse and the Relay Imp arc are NOT boss-class (fromBossClass: false, as Anvilborn); all existing boss hazards plus Switchwarden keep the true default; Tollkeeper remains non-boss-class",
           misplaced.isEmpty && hazardCalls(exec).sorted() == hazardCensus.flatMap { $0.args }.sorted()
             && flatExec.contains("private func applyBossHazardDamage(_ damage: Int, shakeIntensity: CGFloat, shakeDuration: TimeInterval = 0.2, fromBossClass: Bool = true) {")
             && hazard.components(separatedBy: "let outcome = applyPlayerDamage(damage, fromBossClass: fromBossClass)").count == 2,
