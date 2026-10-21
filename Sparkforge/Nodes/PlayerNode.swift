@@ -621,6 +621,11 @@ final class PlayerNode: SKNode {
 
     // MARK: - Movement
 
+    #if DEBUG
+    // Opt-in isolated Arena 8 bridge. Unset in every normal game and P0/P1 lab.
+    var debugMovementConstraint: ((CGPoint, CGPoint, CGFloat) -> CGPoint?)?
+    #endif
+
     func move(direction: CGPoint, deltaTime: TimeInterval) {
         updateTrail(direction: direction)
         updateEyes(direction: direction, deltaTime: deltaTime)
@@ -628,9 +633,20 @@ final class PlayerNode: SKNode {
 
         let speed = stats?.effectiveMoveSpeed ?? GameConfig.Player.speed
         let displacement = direction * speed * CGFloat(deltaTime)
+        #if DEBUG
+        let movementStart = position
+        #endif
         position += displacement
 
+        #if DEBUG
+        if let constraint = debugMovementConstraint {
+            position = constraint(movementStart, position, stats?.effectiveCollisionRadius ?? GameConfig.Player.collisionRadius) ?? movementStart
+        } else {
+            clampToArena()
+        }
+        #else
         clampToArena()
+        #endif
         updateKaijuGait(direction: direction, deltaTime: deltaTime)
     }
 
