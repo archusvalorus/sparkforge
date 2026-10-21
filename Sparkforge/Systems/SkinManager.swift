@@ -256,7 +256,7 @@ final class SkinManager {
     #endif
 
     private init() {
-        selectedID = UserDefaults.standard.string(forKey: selectedKey) ?? "spark_base"
+        selectedID = GameRunPreferences.shared.string(forKey: selectedKey) ?? "spark_base"
     }
 
     // MARK: - Lookup
@@ -297,7 +297,7 @@ final class SkinManager {
         if ReviewMode.isActive { return true }
         if !f.secret { return true }
         if ownedCount(in: f.id) > 0 { return true }
-        return UserDefaults.standard.bool(forKey: familyRevealKey(f.id))
+        return GameRunPreferences.shared.bool(forKey: familyRevealKey(f.id))
     }
 
     /// Reveal a secret family without granting anything in it. Idempotent.
@@ -306,8 +306,8 @@ final class SkinManager {
     func revealFamily(_ id: String) -> Bool {
         guard let f = family(id), f.secret else { return false }
         let key = familyRevealKey(id)
-        if UserDefaults.standard.bool(forKey: key) { return false }
-        UserDefaults.standard.set(true, forKey: key)
+        if GameRunPreferences.shared.bool(forKey: key) { return false }
+        GameRunPreferences.shared.set(true, forKey: key)
         return true
     }
 
@@ -328,7 +328,7 @@ final class SkinManager {
         case .base:
             return true
         case .earned:
-            return UserDefaults.standard.bool(forKey: unlockKey(def.id))
+            return GameRunPreferences.shared.bool(forKey: unlockKey(def.id))
         case .premium:
             guard let pid = def.iapProductID else { return false }
             return IAPManager.shared.isPurchased(pid)
@@ -353,8 +353,8 @@ final class SkinManager {
         #endif
         guard let def = definition(id), def.tier == .earned else { return false }
         let key = unlockKey(id)
-        if UserDefaults.standard.bool(forKey: key) { return false }
-        UserDefaults.standard.set(true, forKey: key)
+        if GameRunPreferences.shared.bool(forKey: key) { return false }
+        GameRunPreferences.shared.set(true, forKey: key)
         return true
     }
 
@@ -365,7 +365,7 @@ final class SkinManager {
     func select(_ id: String) -> Bool {
         guard let def = definition(id), isUnlocked(def) else { return false }
         selectedID = id
-        UserDefaults.standard.set(id, forKey: selectedKey)
+        GameRunPreferences.shared.set(id, forKey: selectedKey)
         return true
     }
 
@@ -375,15 +375,15 @@ final class SkinManager {
     /// StoreKit-owned and intentionally NOT cleared — they restore.)
     func resetEarnedProgress() {
         for def in catalog where def.tier == .earned {
-            UserDefaults.standard.removeObject(forKey: unlockKey(def.id))
+            GameRunPreferences.shared.removeObject(forKey: unlockKey(def.id))
         }
         // Secrets go back to being secrets — erasing progress that included
         // finding the Panda tree should re-mask it, or the reveal survives an
         // erase and the surprise is spent for good.
         for f in families where f.secret {
-            UserDefaults.standard.removeObject(forKey: familyRevealKey(f.id))
+            GameRunPreferences.shared.removeObject(forKey: familyRevealKey(f.id))
         }
         selectedID = "spark_base"
-        UserDefaults.standard.set(selectedID, forKey: selectedKey)
+        GameRunPreferences.shared.set(selectedID, forKey: selectedKey)
     }
 }

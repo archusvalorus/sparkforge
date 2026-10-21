@@ -32,6 +32,7 @@ cp "$ROOT/Sparkforge/Systems/UpgradeManager.swift" \
    "$ROOT/Sparkforge/Systems/VoidState.swift" \
    "$ROOT/Sparkforge/Systems/GameTimer.swift" \
    "$ROOT/Sparkforge/Systems/CodexManager.swift" \
+   "$ROOT/Sparkforge/Systems/GameRunPreferences.swift" \
    "$ROOT/tools/signature-draw-harness/SwiftSource.swift" \
    "$HERE/main.swift" "$BUILD/"
 # v2.2 J1: the parity kit (snapshot, fixtures) — test support, kept with the
@@ -50,7 +51,7 @@ sh "$ROOT/tools/signature-draw-harness/extract-config.sh" \
 swiftc -O -o "$BUILD/harness" "$BUILD/main.swift" "$BUILD/Stubs.swift" "$BUILD/SwiftSource.swift" \
        "$BUILD/UpgradeManager.swift" "$BUILD/PlayerStats.swift" \
        "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/GameTimer.swift" \
-       "$BUILD/CodexManager.swift" \
+       "$BUILD/CodexManager.swift" "$BUILD/GameRunPreferences.swift" \
        "$BUILD"/Parity*.swift "$BUILD/AbilityCatalog.swift" "$BUILD/AbilityBehaviors.swift"
 # v2.2 J2: a repeated key inside one JSON object is kept-last and silent in
 # every parser; the lint fails the run before anything compiles.
@@ -96,7 +97,7 @@ if [ "$1" != "--dump" ] && [ "$1" != "--record-parity" ] && [ -z "$SPARKFORGE_SK
     swiftc -O -o "$BUILD/cmp/comparator-$mode" "$COMPARATOR/main.swift" "$BUILD/Stubs.swift" \
            "$BUILD/cmp/UpgradeManager-$mode.swift" "$BUILD/PlayerStats.swift" \
            "$BUILD/PlayerDamagePipeline.swift" "$BUILD/GuardState.swift" "$BUILD/ExtractedConfig.swift" "$BUILD/VoidState.swift" "$BUILD/GameTimer.swift" \
-           "$BUILD/CodexManager.swift" "$BUILD/ParitySnapshot.swift" "$BUILD/ParityFixtures.swift" || { comparator_ok=0; break; }
+           "$BUILD/CodexManager.swift" "$BUILD/GameRunPreferences.swift" "$BUILD/ParitySnapshot.swift" "$BUILD/ParityFixtures.swift" || { comparator_ok=0; break; }
     python3 "$HERE/with-slot.py" -- sh -c 'src="$1"; dst="$2"; shift 2; cp "$src" "$dst" && exec "$dst" "$@"' sh \
       "$BUILD/cmp/comparator-$mode" "$BUILD/cmp/sparkforge-catalog-comparator-{slot}" "$BUILD/cmp/transcript-$mode.json" || { comparator_ok=0; break; }
   done

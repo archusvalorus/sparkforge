@@ -15,7 +15,7 @@ final class ProgressionManager {
     
     static let shared = ProgressionManager()
     
-    private let defaults = UserDefaults.standard
+    private let defaults = GameRunPreferences.shared
     
     // MARK: - Keys
     

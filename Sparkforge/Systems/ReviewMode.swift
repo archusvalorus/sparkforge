@@ -35,8 +35,8 @@ enum ReviewMode {
     static let tapsToToggle = 7
 
     static var isActive: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get { GameRunPreferences.shared.bool(forKey: key) }
+        set { GameRunPreferences.shared.set(newValue, forKey: key) }
     }
 
     /// Flip and report the new state (the caller shows the confirmation).

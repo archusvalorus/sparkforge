@@ -75,6 +75,7 @@ final class AdReviveManager: NSObject {
     // MARK: - Preload
     
     func preloadAd() {
+        guard !GameRunPreferences.isIsolated else { return }
         guard !adsRemoved else { return }
         preloadReviveAd()
         preloadRerollAd()
@@ -85,6 +86,7 @@ final class AdReviveManager: NSObject {
     }
     
     private func preloadReviveAd() {
+        guard !GameRunPreferences.isIsolated else { return }
         RewardedAd.load(
             with: AdReviveManager.reviveAdUnitID,
             request: Request()
@@ -100,6 +102,7 @@ final class AdReviveManager: NSObject {
     }
     
     private func preloadRerollAd() {
+        guard !GameRunPreferences.isIsolated else { return }
         RewardedAd.load(
             with: AdReviveManager.rerollAdUnitID,
             request: Request()
@@ -115,6 +118,7 @@ final class AdReviveManager: NSObject {
     }
     
     private func preloadXPBoostAd() {
+        guard !GameRunPreferences.isIsolated else { return }
         RewardedAd.load(
             with: AdReviveManager.xpBoostAdUnitID,
             request: Request()
@@ -130,6 +134,7 @@ final class AdReviveManager: NSObject {
     }
     
     private func preloadExtraCardAd() {
+        guard !GameRunPreferences.isIsolated else { return }
         RewardedAd.load(
             with: AdReviveManager.extraCardAdUnitID,
             request: Request()
@@ -146,6 +151,7 @@ final class AdReviveManager: NSObject {
 
     /// Internal so TitleScene can warm just this unit without loading the run ads
     func preloadBlessingChoiceAd() {
+        guard !GameRunPreferences.isIsolated else { return }
         RewardedAd.load(
             with: AdReviveManager.blessingChoiceAdUnitID,
             request: Request()
@@ -161,6 +167,7 @@ final class AdReviveManager: NSObject {
     }
 
     private func preloadExtraPickAd() {
+        guard !GameRunPreferences.isIsolated else { return }
         RewardedAd.load(
             with: AdReviveManager.extraPickAdUnitID,
             request: Request()
@@ -178,6 +185,7 @@ final class AdReviveManager: NSObject {
     // MARK: - v1.7: Extra Pick Flow
 
     func requestExtraPickAd(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        guard !GameRunPreferences.isIsolated else { completion(false); return }
         if adsRemoved {
             completion(true)
             return
@@ -204,6 +212,7 @@ final class AdReviveManager: NSObject {
 
     /// Remove Ads owners choose free — completion fires true immediately.
     func requestBlessingChoiceAd(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        guard !GameRunPreferences.isIsolated else { completion(false); return }
         if adsRemoved {
             completion(true)
             return
@@ -229,6 +238,7 @@ final class AdReviveManager: NSObject {
     // MARK: - Revive Flow
     
     func requestRevive(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        guard !GameRunPreferences.isIsolated else { completion(false); return }
         guard canRevive else {
             completion(false)
             return
@@ -261,6 +271,7 @@ final class AdReviveManager: NSObject {
     // MARK: - Reroll Flow
     
     func requestRerollAd(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        guard !GameRunPreferences.isIsolated else { completion(false); return }
         if adsRemoved {
             completion(true)
             return
@@ -286,6 +297,7 @@ final class AdReviveManager: NSObject {
     // MARK: - v1.6: Extra Card Flow
 
     func requestExtraCardAd(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        guard !GameRunPreferences.isIsolated else { completion(false); return }
         if adsRemoved {
             completion(true)
             return
@@ -311,6 +323,7 @@ final class AdReviveManager: NSObject {
     // MARK: - v1.5: XP Boost Flow
     
     func requestXPBoost(from viewController: UIViewController?, completion: @escaping (Bool) -> Void) {
+        guard !GameRunPreferences.isIsolated else { completion(false); return }
         guard canBoostXP else {
             completion(false)
             return

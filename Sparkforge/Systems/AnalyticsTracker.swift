@@ -32,7 +32,7 @@ final class AnalyticsTracker {
     }
 
     private init() {
-        runs = Self.loadFromDisk()
+        runs = GameRunPreferences.isIsolated ? [] : Self.loadFromDisk()
     }
 
     // MARK: - Recording
@@ -53,6 +53,7 @@ final class AnalyticsTracker {
     // MARK: - Persistence (v1.7)
 
     private func saveToDisk() {
+        guard !GameRunPreferences.isIsolated else { return }
         let snapshot = runs
         saveQueue.async {
             do {

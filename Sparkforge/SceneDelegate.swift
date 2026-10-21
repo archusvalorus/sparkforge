@@ -27,7 +27,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
-        guard !Self.hasRequestedTracking else { return }
+        guard !GameRunPreferences.isIsolated, !Self.hasRequestedTracking else { return }
         Self.hasRequestedTracking = true
 
         #if DEBUG

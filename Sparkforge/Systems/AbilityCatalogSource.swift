@@ -27,7 +27,7 @@ nonisolated enum AbilityCatalogSource {
         // Development seam: `-SparkforgeCatalogPath <file>` as a launch
         // argument reads that file instead, to exercise the failure screen.
         // Announced on that screen and in the log; never compiled into Release.
-        if let override = UserDefaults.standard.string(forKey: "SparkforgeCatalogPath"), !override.isEmpty {
+        if let override = GameRunPreferences.shared.string(forKey: "SparkforgeCatalogPath"), !override.isEmpty {
             NSLog("[CATALOG] DEBUG override: reading the ability catalog from %@", override)
             do { return try Data(contentsOf: URL(fileURLWithPath: override)) }
             catch { throw Unavailable(description: "the DEBUG override file \(override) could not be read: \(error.localizedDescription)") }

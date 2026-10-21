@@ -17,7 +17,7 @@ final class CodexManager {
 
     static let shared = CodexManager()
 
-    private let defaults = UserDefaults.standard
+    private let defaults = GameRunPreferences.shared
 
     // MARK: - Keys
 

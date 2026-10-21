@@ -11,7 +11,7 @@ final class HighScoreManager {
     
     static let shared = HighScoreManager()
     
-    private let defaults = UserDefaults.standard
+    private let defaults = GameRunPreferences.shared
     
     // MARK: - Keys
     

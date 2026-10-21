@@ -21,7 +21,7 @@ final class ForgePathManager {
 
     static let shared = ForgePathManager()
 
-    private let defaults = UserDefaults.standard
+    private let defaults = GameRunPreferences.shared
 
     private enum Keys {
         static let pathPicks = "sf_forge_path_picks"   // live data — never rename

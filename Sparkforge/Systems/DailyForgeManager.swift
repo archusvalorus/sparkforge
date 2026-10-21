@@ -12,7 +12,7 @@ final class DailyForgeManager {
     
     static let shared = DailyForgeManager()
     
-    private let defaults = UserDefaults.standard
+    private let defaults = GameRunPreferences.shared
     
     // MARK: - Keys
     

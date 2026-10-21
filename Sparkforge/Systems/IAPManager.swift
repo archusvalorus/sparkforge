@@ -33,8 +33,10 @@ final class IAPManager {
 
     private init() {
         // Load cached state
-        hasRemovedAds = UserDefaults.standard.bool(forKey: purchaseKey)
-        ownedProductIDs = Set(UserDefaults.standard.stringArray(forKey: ownedProductsKey) ?? [])
+        hasRemovedAds = GameRunPreferences.shared.bool(forKey: purchaseKey)
+        ownedProductIDs = Set(GameRunPreferences.shared.stringArray(forKey: ownedProductsKey) ?? [])
+
+        guard !GameRunPreferences.isIsolated else { return }
 
         // Verify with StoreKit on launch
         Task {
@@ -57,6 +59,7 @@ final class IAPManager {
 
     /// Purchase any non-consumable product id. Records the entitlement on success.
     func purchase(_ productID: String) async -> Bool {
+        guard !GameRunPreferences.isIsolated else { return false }
         do {
             let products = try await Product.products(for: [productID])
             guard let product = products.first else {
@@ -86,6 +89,7 @@ final class IAPManager {
     /// Localized display price for any product id, or nil if StoreKit hasn't
     /// returned it (e.g. no ASC/.storekit entry yet).
     func displayPrice(for productID: String) async -> String? {
+        guard !GameRunPreferences.isIsolated else { return nil }
         let products = try? await Product.products(for: [productID])
         return products?.first?.displayPrice
     }
@@ -97,7 +101,7 @@ final class IAPManager {
         }
         guard !ownedProductIDs.contains(productID) else { return }
         ownedProductIDs.insert(productID)
-        UserDefaults.standard.set(Array(ownedProductIDs), forKey: ownedProductsKey)
+        GameRunPreferences.shared.set(Array(ownedProductIDs), forKey: ownedProductsKey)
         #if DEBUG
         print("[IAP] Entitlement recorded: \(productID)")
         #endif
@@ -106,6 +110,7 @@ final class IAPManager {
     // MARK: - Purchase
     
     func purchaseRemoveAds() async -> Bool {
+        guard !GameRunPreferences.isIsolated else { return false }
         do {
             guard let product = try await fetchProduct() else {
                 print("[IAP] Product not found")
@@ -140,6 +145,7 @@ final class IAPManager {
     
     /// Restore purchases
     func restorePurchases() async {
+        guard !GameRunPreferences.isIsolated else { return  }
         await verifyPurchases()
     }
     
@@ -163,6 +169,7 @@ final class IAPManager {
     
     /// Get the product for UI display (price string, etc.)
     func getRemoveAdsProduct() async -> Product? {
+        guard !GameRunPreferences.isIsolated else { return nil }
         return try? await fetchProduct()
     }
 
@@ -188,7 +195,7 @@ final class IAPManager {
     
     private func setAdsRemoved(_ removed: Bool) {
         hasRemovedAds = removed
-        UserDefaults.standard.set(removed, forKey: purchaseKey)
+        GameRunPreferences.shared.set(removed, forKey: purchaseKey)
         
         #if DEBUG
         print("[IAP] Ads removed: \(removed)")

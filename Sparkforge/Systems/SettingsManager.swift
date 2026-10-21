@@ -10,7 +10,7 @@ final class SettingsManager {
 
     static let shared = SettingsManager()
 
-    private let defaults = UserDefaults.standard
+    private let defaults = GameRunPreferences.shared
 
     private enum Keys {
         static let sfxEnabled = "sf_sfxEnabled"

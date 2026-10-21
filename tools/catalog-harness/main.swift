@@ -1753,7 +1753,10 @@ do {
         && wr12Beam.components(separatedBy: "vulnerabilityMultiplier").count - 1 == 2
     let consumedOnce = bodies.allSatisfy { b in
         (flatApp[b] ?? "").components(separatedBy: consume).count == 2 && consumers[b] == (b == "Nodes/EnemyNode.swift" ? 3 : 2)
-    } && Set(consumers.keys) == Set(bodies + ["Scenes/GameScene.swift"]) && sceneReadsOK
+    } && Set(consumers.keys) == Set(bodies + ["Scenes/GameScene.swift", "Prototypes/Arena8CombatModel.swift"])
+        && consumers["Prototypes/Arena8CombatModel.swift"] == 1
+        && (flatApp["Prototypes/Arena8CombatModel.swift"] ?? "").contains("vulnerability: actor.vulnerabilityMultiplier, rounding: shot.hitRounding)")
+        && raw("Sparkforge/Prototypes/Arena8CombatModel.swift").contains("#if DEBUG") && sceneReadsOK
         && (flatApp["Nodes/EnemyNode.swift"] ?? "").contains("var isVulnerable: Bool { vulnerabilityMultiplier > 1.0 }")
     let writes: [String: [String]] = [
         "Nodes/EnemyNode.swift": ["vulnerability.set(.fracture, multiplier)", "vulnerability.clear(.fracture)",
@@ -2181,7 +2184,7 @@ do {
     //    fallback); Rich Soil widens within the garden cap.
     let appText = flatApp.values.joined(separator: "\n")
     let shoveBody = flatBody(sceneS8, "private func shove(_ enemy: EnemyNode, along direction: CGPoint, by distance: CGFloat)")
-    let s14Shove = shoveBody == "{ guard distance > 0 else { return } let from = enemy.position enemy.position = arenaGeometry.pathShove(from: from, to: from + direction.normalized * distance, radius: enemy.hitBodyRadius) }"
+    let s14Shove = shoveBody == "{ guard distance > 0 else { return } let from = enemy.position if let rooms = debugRoomIntegration { enemy.position = rooms.shove(from: from, toward: from + direction.normalized * distance, radius: enemy.geometryFootprintRadius) ?? from return } enemy.position = arenaGeometry.pathShove(from: from, to: from + direction.normalized * distance, radius: enemy.hitBodyRadius) }"
         && flatBody(sceneS8, "private func guardShove(") == "{ shove(enemy, along: enemy.position - player.position, by: distance) }"
         && n(sceneFlat, "shove(target, along: target.position - panda.node.position, by: GameConfig.Panda.bodyCheckKnockback)") == 1
         && n(sceneFlat, "shove(e, along: e.position - player.position, by: GameConfig.Panda.kaijuKnockback)") == 1

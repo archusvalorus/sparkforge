@@ -9,7 +9,7 @@ with tempfile.TemporaryDirectory(prefix='sf-a7-integration-') as directory:
  out=Path(directory)
  p=(root/'Sparkforge/Systems/ProgressionManager.swift').read_text()
  # Access-only constructor exposure; retain the complete real reconciliation.
- p=p.replace('private init()', 'init()').replace('private let defaults = UserDefaults.standard','private let defaults = TestDefaults.store')
+ p=p.replace('private init()', 'init()').replace('private let defaults = GameRunPreferences.shared','private let defaults = TestDefaults.store')
  (out/'Progression.swift').write_text(p)
  # This command-line probe is single-threaded; the real app still compiles the
  # original MainActor annotation in both Debug and Release.
