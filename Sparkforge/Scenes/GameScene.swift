@@ -549,6 +549,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         #if DEBUG
         if debugRoomIntegration != nil {
+            if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") {
+                _ = waveManager.update(deltaTime: 120) // explicit native late-pressure fixture
+            }
             camera?.position = player.position
             let label = SKLabelNode(fontNamed: "Menlo-Bold")
             label.name = "arena8RoomBadge"
@@ -557,7 +560,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.position = CGPoint(x: 0, y: -size.height / 2 + 32)
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
-            if ProcessInfo.processInfo.arguments.contains("--arena8-six-checks") {
+            if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
+            if ProcessInfo.processInfo.arguments.contains("--arena8-pressure-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runPressureChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-six-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runSixRoomChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-game-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runRoomIntegrationChecks() }
@@ -5067,7 +5073,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateActiveCombat(dt)   // v2.1 A4c (CL-33) — after this frame's DoT deaths
         updateGuardStance(dt)    // v2.1 A5 — Fortify + Grounded Core read THIS frame's combat
         updateRedSmile(dt)       // v2.1 A4c — before the gun, which it pauses
+        #if DEBUG
+        if !(debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting")) { updateAutoAttack(dt) }
+        #else
         updateAutoAttack(dt)
+        #endif
         updateProjectiles(dt)
         updateEnemyProjectiles(dt)
         updateXPOrbs(dt)
@@ -9660,12 +9670,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        let elapsed = waveManager.elapsedTime
+        spawnOrdinaryEnemy(elapsed: waveManager.elapsedTime)
+    }
 
+    /// Shared shipped ordinary composition. Room callers provide placement
+    /// only; short-circuit random draws and tuning stay in the same order.
+    private func spawnOrdinaryEnemy(elapsed: TimeInterval, placement: ((EnemyNode) -> CGPoint?)? = nil) {
         // After 45s, chance to spawn a ranged enemy instead
         if elapsed >= GameConfig.RangedEnemy.firstSpawnTime &&
            CGFloat.random(in: 0...1) < GameConfig.RangedEnemy.spawnChance {
-            spawnRangedEnemy()
+            spawnRangedEnemy(placement: placement)
             return
         }
 
@@ -9676,7 +9690,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        spawnBasicMelee(elapsed: elapsed)
+        spawnBasicMelee(elapsed: elapsed, placement: placement)
     }
 
     /// Existing melee class only, alternating lane preference. Failed draws defer.
@@ -9746,7 +9760,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         channelSpawnWestNext.toggle()
     }
 
-    private func spawnBasicMelee(elapsed: TimeInterval) {
+    private func spawnBasicMelee(elapsed: TimeInterval, placement: ((EnemyNode) -> CGPoint?)? = nil) {
         // HP scales with time — enemies get beefier (v1.4: softened curve)
         let baseHP: Int
         if elapsed < 30 {
@@ -9766,13 +9780,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let xpValue = max(1, baseHP + 1)  // v1.4: +1 XP per kill across the board
 
         let enemy = EnemyNode(health: baseHP, moveSpeed: enemySpeed, xpValue: xpValue)
-        enemy.position = EnemyNode.spawnPosition()
+        // Preserve the circle's position/RNG ordering. Room placement runs
+        // after scaling so safe clearance uses the actual final footprint.
+        if placement == nil { enemy.position = EnemyNode.spawnPosition() }
 
         if baseHP >= 3 {
             let sizeScale = 1.0 + CGFloat(baseHP - 2) * 0.08
             enemy.setScale(sizeScale)
         }
 
+        if let placement {
+            guard let point = placement(enemy) else { return }
+            enemy.position = point
+        }
         enemies.append(enemy)
         worldNode.addChild(enemy)
     }
@@ -10920,7 +10940,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.addChild(braceguard)
     }
     
-    private func spawnRangedEnemy(at position: CGPoint? = nil) {
+    private func spawnRangedEnemy(at position: CGPoint? = nil, placement: ((EnemyNode) -> CGPoint?)? = nil) {
         // v1.6 tuning: shooters are glass cannons — dangerous at range,
         // dead in one hit (Brandon playtest 7/9/26). Was 2–8 HP scaling.
         let ranged = RangedEnemyNode(
@@ -10928,7 +10948,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             moveSpeed: GameConfig.Enemy.baseSpeed * 0.75,
             xpValue: 2
         )
-        ranged.position = position ?? EnemyNode.spawnPosition()
+        if let placement {
+            guard let point = placement(ranged) else { return }
+            ranged.position = point
+        } else { ranged.position = position ?? EnemyNode.spawnPosition() }
 
         // Wire up the fire callback
         ranged.onFireProjectile = { [weak self] position, direction in
@@ -14789,18 +14812,38 @@ extension GameScene {
         guard let map = debugRoomIntegration else { return "" }
         if map.isSixRoom {
             let id = map.roomID(near: player.position) + 1
-            return "ARENA 8 • SIX ROOMS • ROOM \(id)/6 • MEMORY PROFILE"
+            let fixture = ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting") ? " • TEST GUN OFF" : ""
+            return "ARENA 8 • SIX ROOMS • ROOM \(id)/6 • MEMORY PROFILE" + fixture
         }
         return "ARENA 8 GAME • TWO ROOMS • MEMORY PROFILE"
     }
     private var roomSpawnCandidates: [CGPoint] {
         debugRoomIntegration?.spawnCandidates(near: player.position) ?? []
     }
+    /// Selection failure defers this attempt; never use the circle fallback.
+    /// Advance anchor rotation only after an actual safe spawn is selected.
+    private func roomEncounterSpawnPoint(for enemy: EnemyNode) -> CGPoint? {
+        guard let rooms = debugRoomIntegration else { return nil }
+        let points = roomSpawnCandidates
+        guard !points.isEmpty else { return nil }
+        let offset = roomSpawnIndex % points.count
+        let ordered = Array(points[offset...]) + Array(points[..<offset])
+        guard let safe = rooms.spawn(candidates: ordered, radius: enemy.geometryFootprintRadius,
+            avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { return nil }
+        roomSpawnIndex += 1
+        return safe
+    }
     private func spawnRoomFixtureEnemy() {
         guard let rooms = debugRoomIntegration else { return }
         // Explicit native geometry fixture only: no encounters during the
         // all-door joystick traversal. Ordinary six-room combat is unchanged.
         if rooms.isSixRoom && ProcessInfo.processInfo.arguments.contains("--arena8-six-traversal") { return }
+        if rooms.isSixRoom {
+            spawnOrdinaryEnemy(elapsed: waveManager.elapsedTime, placement: { [weak self] enemy in
+                self?.roomEncounterSpawnPoint(for: enemy)
+            })
+            return
+        }
         let isRanged = roomSpawnIndex % 3 == 2
         let enemy: EnemyNode
         if isRanged {
@@ -15040,7 +15083,7 @@ extension GameScene {
             guard let self else { return }
             check("old-run-deferred-xp-discarded", self.xpOrbs.isEmpty)
             self.returnToTitle()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.waitForRoomTitleCompletion {
                 check("actual-title-lifecycle", self.view == nil)
                 let finalProfile = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
                 check("title-also-keeps-standard-profile", NSDictionary(dictionary: saved).isEqual(to: finalProfile))
@@ -15069,7 +15112,10 @@ extension GameScene {
             "room": rooms.roomID(near: player.position), "safe": rooms.valid(player.position, radius: playerStats.effectiveCollisionRadius),
             "state": String(describing: gameState), "enemies": enemies.count, "kills": killCount,
             "xp": player.currentXP, "level": player.currentLevel, "hp": playerStats.currentHP,
-            "wave": waveManager.elapsedTime, "projectiles": projectiles.count]
+            "wave": waveManager.elapsedTime, "projectiles": projectiles.count,
+            "melee": enemies.filter { !($0 is RangedEnemyNode) && !$0.isDying }.count,
+            "ranged": enemies.filter { $0 is RangedEnemyNode && !$0.isDying }.count,
+            "largestBody": enemies.map(\.geometryFootprintRadius).max() ?? 0]
         if let data = try? JSONSerialization.data(withJSONObject: sample, options: [.sortedKeys]),
            let value = String(data: data, encoding: .utf8) {
             view?.isAccessibilityElement = true
@@ -15134,7 +15180,11 @@ extension GameScene {
         for room in rooms.rooms {
             player.position = room.center
             let prior = enemies.count
-            for _ in 0..<6 { spawnRoomFixtureEnemy() }
+            for index in 0..<6 {
+                let placement: (EnemyNode) -> CGPoint? = { self.roomEncounterSpawnPoint(for: $0) }
+                if index % 3 == 2 { spawnRangedEnemy(placement: placement) }
+                else { spawnBasicMelee(elapsed: 0, placement: placement) }
+            }
             let spawned = Array(enemies.dropFirst(prior))
             check("spawn-safe-local-neighbor-room-\(room.id)", spawned.count == 6 && spawned.allSatisfy { rooms.valid($0.position,radius:$0.geometryFootprintRadius) && rooms.neighborhood(near:room.center).contains(rooms.roomID(near:$0.position)) && $0.position.distance(to:room.center) >= GameConfig.Arena8Game.spawnClearance + $0.geometryFootprintRadius - 0.001 })
             let count = enemies.count, kills = killCount, xp = player.currentXP, wave = waveManager.elapsedTime
@@ -15253,7 +15303,7 @@ extension GameScene {
             guard let self else { return }
             check("old-run-deferred-xp-discarded", self.xpOrbs.isEmpty)
             self.returnToTitle()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.waitForRoomTitleCompletion {
                 check("actual-title-lifecycle", self.view == nil)
                 let finalProfile = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
                 check("title-also-keeps-standard-profile", NSDictionary(dictionary: saved).isEqual(to: finalProfile))
@@ -15267,6 +15317,81 @@ extension GameScene {
                 // The check run ends at title, matching the real exit path.
             }
         }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// Test-only wait for the actual transition, rather than assuming a
+    /// half-second wall-clock delay contains enough rendered frames under
+    /// concurrent compiler/Simulator load. A timeout still fails the check.
+    private func waitForRoomTitleCompletion(_ completion: @escaping () -> Void) {
+        let deadline = CACurrentMediaTime() + 5
+        func poll() {
+            if self.view == nil || CACurrentMediaTime() >= deadline { completion() }
+            else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { poll() } }
+        }
+        poll()
+    }
+
+    private func runPressureChecks() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom else { return }
+        var checks: [[String: Any]] = []
+        func check(_ name: String, _ pass: @autoclosure () -> Bool) { checks.append(["id":name,"pass":pass()]) }
+        let saved = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        func clear() { enemies.forEach { $0.removeFromParent() }; enemies.removeAll() }
+        for time: TimeInterval in [29.999,30,39.999,40,59.999,60,89.999,90,119.999,120,180] {
+            clear()
+            var radii: [CGFloat] = []
+            let place: (EnemyNode) -> CGPoint? = { enemy in
+                radii.append(enemy.geometryFootprintRadius)
+                return self.roomEncounterSpawnPoint(for: enemy)
+            }
+            for _ in 0..<30 { spawnOrdinaryEnemy(elapsed:time,placement:place) }
+            check("spawn-all-safe-\(time)",!enemies.isEmpty && enemies.allSatisfy { rooms.valid($0.position,radius:$0.geometryFootprintRadius) && $0.position.distance(to:player.position) >= GameConfig.Arena8Game.spawnClearance + $0.geometryFootprintRadius - 0.001 })
+            check("scaled-before-placement-\(time)",radii.count == enemies.count && zip(radii,enemies).allSatisfy { abs($0 - $1.geometryFootprintRadius) < 0.001 })
+            if time < 40 { check("no-ranged-before40-\(time)",!enemies.contains { $0 is RangedEnemyNode }) }
+
+            for enemy in enemies {
+                if enemy is RangedEnemyNode { check("ranged-stats-\(time)",enemy.maxHealth==GameConfig.Enemy.scaledHealth(1) && enemy.xpValue==2 && enemy.moveSpeed==GameConfig.Enemy.baseSpeed*0.75) }
+                else {
+                    let raw = enemy.xpValue-1
+                    let permitted = time < 60 ? (1...1) : (time < 90 ? (2...2) : (time < 120 ? (2...3):(3...5)))
+                    check("melee-stats-\(time)",permitted.contains(raw) && enemy.maxHealth==GameConfig.Enemy.scaledHealth(raw) && abs(enemy.moveSpeed-GameConfig.Enemy.baseSpeed*(1+CGFloat(time/180)*0.15))<0.001 && abs(enemy.xScale-(raw>=3 ? 1+CGFloat(raw-2)*0.08:1))<0.001)
+                }
+            }
+        }
+        clear();var finalRadius: CGFloat = 0
+        spawnBasicMelee(elapsed:120,placement:{ enemy in finalRadius=enemy.geometryFootprintRadius;return nil })
+        check("failed-placement-defers-no-circle-fallback",enemies.isEmpty && finalRadius>GameConfig.Enemy.visualRadius)
+        for (index,c) in rooms.connections.enumerated() {
+            clear();player.position=rooms.rooms[c.from].center
+            for _ in 0..<8 { spawnBasicMelee(elapsed:180,placement:{_ in rooms.rooms[c.to].center}) }
+            var safe=true
+            for _ in 0..<750 {
+                roomEnemyStarts=Dictionary(uniqueKeysWithValues:enemies.map{(ObjectIdentifier($0),$0.position)})
+                updateEnemies(1.0/60)
+                safe = safe && enemies.allSatisfy{rooms.valid($0.position,radius:$0.geometryFootprintRadius)}
+            }
+            check("scaled-crowd-door-\(index)",safe && enemies.allSatisfy{$0.position.distance(to:player.position)<80})
+        }
+        clear();player.position=rooms.player
+        var aliveCounts: [Int] = []
+        for time:TimeInterval in [0,30,40,60,90,120,180] {
+            for _ in 0..<20 {spawnOrdinaryEnemy(elapsed:time,placement:{self.roomEncounterSpawnPoint(for:$0)})}
+            aliveCounts.append(enemies.count)
+        }
+        check("waves-accumulate-existing-actors",zip(aliveCounts,aliveCounts.dropFirst()).allSatisfy{$1>$0})
+        check("no-boss-miniboss-registration",boss==nil && enemies.allSatisfy{!$0.isMiniBoss} && !isGauntlet)
+        let count=enemies.count, wave=waveManager.elapsedTime
+        pauseGame();update(500);update(510)
+        check("pause-freezes-pressure",enemies.count==count && waveManager.elapsedTime==wave)
+        resumeGame();restartGame()
+        check("restart-resets-time-and-rotation",waveManager.elapsedTime==0 && roomSpawnIndex==1 && player.position==rooms.player && enemies.count==1)
+        check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
+        let report:[String:Any] = ["passed":checks.filter{($0["pass"] as? Bool)==true}.count,"failed":checks.filter{($0["pass"] as? Bool)==false}.count,"checks":checks,"scope":"actual encounter constructors/update adapters; RNG endpoints and draw-order differential in host harness; native input separate"]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first {try? data.write(to:dir.appendingPathComponent("arena8-pressure-checks.json"))}
     }
 }
 #endif
