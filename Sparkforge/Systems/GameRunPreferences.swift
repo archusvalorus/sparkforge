@@ -9,7 +9,7 @@ import Foundation
 nonisolated final class GameRunPreferences: @unchecked Sendable {
     static var isIsolated: Bool {
         #if DEBUG
-        return ProcessInfo.processInfo.arguments.contains("--arena8-game")
+        return ProcessInfo.processInfo.arguments.contains("--arena8-game") || ProcessInfo.processInfo.arguments.contains("--arena8-six")
         #else
         return false
         #endif

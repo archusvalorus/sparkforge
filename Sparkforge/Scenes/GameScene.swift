@@ -32,11 +32,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Core Systems
 
     #if DEBUG
-    var debugRoomIntegration: Arena8P0Model?
+    var debugRoomIntegration: Arena8GameMap?
     private var roomEnemyStarts: [ObjectIdentifier: CGPoint] = [:]
     private static var roomChecksAlreadyRun = false
     private var roomSpawnIndex = 0
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
+    private var roomInputLastTime: TimeInterval = -1
+    private var roomInputSamples: [[String: Any]] = []
     #endif
 
     private let playerStats = PlayerStats()
@@ -547,13 +549,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         #if DEBUG
         if debugRoomIntegration != nil {
+            camera?.position = player.position
             let label = SKLabelNode(fontNamed: "Menlo-Bold")
-            label.text = "ARENA 8 GAME • TWO ROOMS • MEMORY PROFILE"
+            label.name = "arena8RoomBadge"
+            label.text = roomsBadgeText
             label.fontSize = 9; label.fontColor = .cyan
             label.position = CGPoint(x: 0, y: -size.height / 2 + 32)
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
-            if ProcessInfo.processInfo.arguments.contains("--arena8-game-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-six-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runSixRoomChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-game-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runRoomIntegrationChecks() }
             }
         }
@@ -617,7 +623,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #if DEBUG
         if let rooms = debugRoomIntegration {
             arenaGeometry = rooms.geometry
-            let rect = GameConfig.Arena8Prototype.world
+            let rect = rooms.world
             arenaFloor.path = CGPath(rect: rect, transform: nil)
             arenaFloor.fillColor = SKColor(hex: 0x161F2B)
             arenaFloor.strokeColor = SKColor(hex: 0x8399AA)
@@ -1307,7 +1313,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // geometry (the Fallen Carrier is near-centre). Enter at the authored
         // safe anchor when the arena has one; open arenas keep the origin.
         #if DEBUG
-        if let rooms = debugRoomIntegration { player.position = rooms.player }
+        if let rooms = debugRoomIntegration { player.position = rooms.player; roomPlayerLastSafe = rooms.player }
         else { player.position = arenaGeometry.anchor("player_spawn") ?? .zero }
         #else
         player.position = arenaGeometry.anchor("player_spawn") ?? .zero
@@ -4993,6 +4999,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // dt-driven timer at once (Event Horizon, spawns, the boss bell).
         let dt = min(currentTime - lastUpdateTime, 0.1)
         lastUpdateTime = currentTime
+        #if DEBUG
+        defer { recordSixRoomInput(currentTime) }
+        #endif
 
         guard gameState == .playing else { return }
 
@@ -5180,7 +5189,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             orb.position = HealthOrbNode.randomArenaPosition()
             #if DEBUG
             if let rooms = debugRoomIntegration {
-                guard let safe = rooms.spawn(candidates: roomSpawnCandidates, radius: 12, avoiding: player.position, clearance: 0) else { return }
+                guard let safe = rooms.spawn(candidates: rooms.pickupCandidates(near: player.position), radius: 12, avoiding: player.position, clearance: 0) else { return }
                 orb.position = safe
             }
             #endif
@@ -5202,7 +5211,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             orb.position = MagnetOrbNode.randomArenaPosition()
             #if DEBUG
             if let rooms = debugRoomIntegration {
-                guard let safe = rooms.spawn(candidates: roomSpawnCandidates, radius: 12, avoiding: player.position, clearance: 0) else { return }
+                guard let safe = rooms.spawn(candidates: rooms.pickupCandidates(near: player.position), radius: 12, avoiding: player.position, clearance: 0) else { return }
                 orb.position = safe
             }
             #endif
@@ -12171,6 +12180,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - HUD
     
     private func updateHUD() {
+        #if DEBUG
+        if debugRoomIntegration != nil { (camera?.childNode(withName: "arena8RoomBadge") as? SKLabelNode)?.text = roomsBadgeText }
+        #endif
+
         let elapsed = waveManager.elapsedTime
         let minutes = Int(elapsed) / 60
         let seconds = Int(elapsed) % 60
@@ -14746,8 +14759,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 extension GameScene {
     private func roomProjectileOutsideBounds(_ point: CGPoint) -> Bool {
         #if DEBUG
-        if debugRoomIntegration != nil {
-            return !Arena8P0Bounds.rectangle(GameConfig.Arena8Prototype.world.insetBy(
+        if let rooms = debugRoomIntegration {
+            return !Arena8P0Bounds.rectangle(rooms.world.insetBy(
                 dx: -GameConfig.Neutral.projectileCleanupMargin, dy: -GameConfig.Neutral.projectileCleanupMargin)).contains(point)
         }
         #endif
@@ -14772,13 +14785,22 @@ extension GameScene {
         return point.length > GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin
     }
     #if DEBUG
-    private var roomSpawnCandidates: [CGPoint] {
-        [-300.0, -200.0, 200.0, 300.0].flatMap { x in
-            [-160.0, 0, 160.0].map { y in CGPoint(x: x, y: y) }
+    private var roomsBadgeText: String {
+        guard let map = debugRoomIntegration else { return "" }
+        if map.isSixRoom {
+            let id = map.roomID(near: player.position) + 1
+            return "ARENA 8 • SIX ROOMS • ROOM \(id)/6 • MEMORY PROFILE"
         }
+        return "ARENA 8 GAME • TWO ROOMS • MEMORY PROFILE"
+    }
+    private var roomSpawnCandidates: [CGPoint] {
+        debugRoomIntegration?.spawnCandidates(near: player.position) ?? []
     }
     private func spawnRoomFixtureEnemy() {
         guard let rooms = debugRoomIntegration else { return }
+        // Explicit native geometry fixture only: no encounters during the
+        // all-door joystick traversal. Ordinary six-room combat is unchanged.
+        if rooms.isSixRoom && ProcessInfo.processInfo.arguments.contains("--arena8-six-traversal") { return }
         let isRanged = roomSpawnIndex % 3 == 2
         let enemy: EnemyNode
         if isRanged {
@@ -14789,6 +14811,7 @@ extension GameScene {
             enemy = EnemyNode(health: 1, moveSpeed: GameConfig.Enemy.baseSpeed, xpValue: 2)
         }
         let points = roomSpawnCandidates
+        guard !points.isEmpty else { return }
         let offset = roomSpawnIndex % points.count
         let ordered = Array(points[offset...]) + Array(points[..<offset])
         guard let safe = rooms.spawn(candidates: ordered, radius: enemy.geometryFootprintRadius,
@@ -15027,6 +15050,219 @@ extension GameScene {
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]),
            let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             try? data.write(to: url.appendingPathComponent("arena8-game-checks.json"))
+        }
+                // The check run ends at title, matching the real exit path.
+            }
+        }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// A device-bound XCTest reads this Debug-only observation seam while
+    /// sending real joystick/menu events. It never writes the player state.
+    private func recordSixRoomInput(_ time: TimeInterval) {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom,
+              ProcessInfo.processInfo.arguments.contains("--arena8-six-input") else { return }
+        let sample: [String: Any] = ["x": Double(player.position.x), "y": Double(player.position.y),
+            "room": rooms.roomID(near: player.position), "safe": rooms.valid(player.position, radius: playerStats.effectiveCollisionRadius),
+            "state": String(describing: gameState), "enemies": enemies.count, "kills": killCount,
+            "xp": player.currentXP, "level": player.currentLevel, "hp": playerStats.currentHP,
+            "wave": waveManager.elapsedTime, "projectiles": projectiles.count]
+        if let data = try? JSONSerialization.data(withJSONObject: sample, options: [.sortedKeys]),
+           let value = String(data: data, encoding: .utf8) {
+            view?.isAccessibilityElement = true
+            view?.accessibilityIdentifier = "arena8-six-probe"
+            view?.accessibilityValue = value
+        }
+        guard time - roomInputLastTime >= 0.2 || roomInputLastTime < 0 else { return }
+        roomInputLastTime = time
+        roomInputSamples.append(sample)
+        if let data = try? JSONSerialization.data(withJSONObject: roomInputSamples, options: [.sortedKeys]),
+           let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? data.write(to: url.appendingPathComponent("arena8-six-input.json"), options: .atomic)
+        }
+    }
+
+    private func runSixRoomChecks() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom, !Self.roomChecksAlreadyRun else { return }
+        Self.roomChecksAlreadyRun = true
+        var results: [[String: Any]] = []
+        func check(_ id: String, _ pass: @autoclosure () -> Bool) { results.append(["id": id, "pass": pass()]) }
+        let saved = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        let analyticsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("sparkforge_runs.json")
+        let analyticsBefore = try? Data(contentsOf: analyticsURL)
+        check("six-context-and-memory", GameRunPreferences.isIsolated && !isGauntlet && rooms.rooms.count == 6 && rooms.connections.count == 7 && player.debugMovementConstraint != nil)
+        check("isolated-profile-not-read", ProgressionManager.shared.currentArena == 0 && ProgressionManager.shared.arenasUnlocked == 1 && HighScoreManager.shared.totalRuns == 0 && !IAPManager.shared.hasRemovedAds && AnalyticsTracker.shared.totalRuns == 0)
+        check("six-start-camera", player.position == rooms.player && camera?.position == rooms.player)
+        for (index, c) in rooms.connections.enumerated() {
+            let a = rooms.rooms[c.from].center, b = rooms.rooms[c.to].center
+            let direction = (b-a).normalized
+            let across = CGPoint(x: -direction.y, y: direction.x)
+            player.position = a
+            var clear = true
+            let crossingSteps = Int(ceil(a.distance(to: b) / playerStats.effectiveMoveSpeed * 60))
+            for _ in 0..<crossingSteps { player.move(direction: direction, deltaTime: 1.0/60); clear = clear && rooms.valid(player.position, radius: playerStats.effectiveCollisionRadius) }
+            check("native-player-adapter-door-\(index)-forward", clear && rooms.roomID(near: player.position) == c.to)
+            player.position = b
+            for _ in 0..<crossingSteps { player.move(direction: direction * -1, deltaTime: 1.0/60); clear = clear && rooms.valid(player.position, radius: playerStats.effectiveCollisionRadius) }
+            check("native-player-adapter-door-\(index)-reverse", clear && rooms.roomID(near: player.position) == c.from)
+            player.position = a + across * 120
+            for _ in 0..<240 { player.move(direction: direction, deltaTime: 1.0/60) }
+            let stopped = player.position
+            check("player-divider-stop-\(index)", rooms.valid(stopped, radius: playerStats.effectiveCollisionRadius) && rooms.roomID(near: stopped) == c.from)
+            for _ in 0..<30 { player.move(direction: across * -1, deltaTime: 1.0/60) }
+            check("player-wall-slide-\(index)", rooms.valid(player.position, radius: playerStats.effectiveCollisionRadius) && player.position.distance(to: stopped) > 20)
+            enemies.forEach { $0.removeFromParent() }; enemies.removeAll()
+            let enemy = EnemyNode(health: 1, moveSpeed: GameConfig.Enemy.baseSpeed, xpValue: 2)
+            enemy.position = b; enemies.append(enemy); worldNode.addChild(enemy); player.position = a
+            var enemyClear = true
+            for _ in 0..<650 { roomEnemyStarts = [ObjectIdentifier(enemy): enemy.position]; updateEnemies(1.0/60); enemyClear = enemyClear && rooms.valid(enemy.position, radius: enemy.geometryFootprintRadius) }
+            check("real-chaser-door-\(index)", enemyClear && enemy.position.distance(to:a) < 40)
+            enemy.position = a + across * 120
+            shove(enemy, along: direction, by: a.distance(to:b))
+            check("actual-straight-force-wall-\(index)", rooms.valid(enemy.position, radius: enemy.geometryFootprintRadius) && rooms.roomID(near:enemy.position) == c.from)
+        }
+        // Actual long multi-door pursuit from opposite corners, not just graph symbols.
+        enemies.forEach { $0.removeFromParent() }; enemies.removeAll()
+        let pursuer = EnemyNode(health: 1, moveSpeed: GameConfig.Enemy.baseSpeed, xpValue: 2)
+        enemies.append(pursuer); worldNode.addChild(pursuer); pursuer.position = rooms.rooms[5].center; player.position = rooms.player
+        var pursuitSafe = true
+        for _ in 0..<1800 { roomEnemyStarts = [ObjectIdentifier(pursuer):pursuer.position]; updateEnemies(1.0/60); pursuitSafe = pursuitSafe && rooms.valid(pursuer.position,radius:pursuer.geometryFootprintRadius) }
+        check("real-chaser-opposite-corner", pursuitSafe && pursuer.position.distance(to:rooms.player)<40)
+        for room in rooms.rooms {
+            player.position = room.center
+            let prior = enemies.count
+            for _ in 0..<6 { spawnRoomFixtureEnemy() }
+            let spawned = Array(enemies.dropFirst(prior))
+            check("spawn-safe-local-neighbor-room-\(room.id)", spawned.count == 6 && spawned.allSatisfy { rooms.valid($0.position,radius:$0.geometryFootprintRadius) && rooms.neighborhood(near:room.center).contains(rooms.roomID(near:$0.position)) && $0.position.distance(to:room.center) >= GameConfig.Arena8Game.spawnClearance + $0.geometryFootprintRadius - 0.001 })
+            let count = enemies.count, kills = killCount, xp = player.currentXP, wave = waveManager.elapsedTime
+            player.position = rooms.rooms[(room.id+1)%6].center; updateHUD()
+            check("room-transition-keeps-actors-and-run-\(room.id)", enemies.count == count && killCount == kills && player.currentXP == xp && waveManager.elapsedTime == wave && (camera?.childNode(withName:"arena8RoomBadge") as? SKLabelNode)?.text == roomsBadgeText)
+        }
+        check("existing-basic-and-ranged-only", enemies.contains { $0 is RangedEnemyNode } && enemies.allSatisfy { !$0.isMiniBoss })
+        enemies.forEach { $0.removeFromParent() }; enemies.removeAll()
+        let ranged = RangedEnemyNode(health:1,moveSpeed:GameConfig.Enemy.baseSpeed*0.75,xpValue:2)
+        ranged.onFireProjectile = { [weak self] p,d in self?.spawnEnemyProjectile(at:p,direction:d) }
+        enemies.append(ranged); worldNode.addChild(ranged)
+        player.position = CGPoint(x:-380,y:400)
+        for _ in 0..<180 { ranged.position=CGPoint(x:-140,y:400);roomEnemyStarts=[ObjectIdentifier(ranged):ranged.position];updateEnemies(1.0/60) }
+        check("ranged-wall-occluded",enemyProjectiles.isEmpty)
+        player.position=CGPoint(x:-300,y:280);ranged.position=CGPoint(x:-220,y:280)
+        for _ in 0..<180 {roomEnemyStarts=[ObjectIdentifier(ranged):ranged.position];updateEnemies(1.0/60)}
+        check("ranged-open-corridor-fires",!enemyProjectiles.isEmpty)
+        enemyProjectiles.forEach{$0.removeFromParent()};enemyProjectiles.removeAll()
+        func shot(_ passes: Bool) -> ProjectileNode {
+            let p=ProjectileNode(direction:CGPoint(x:1,y:0),unlimitedRange:true,piercesAll:passes,passesTerrain:passes)
+            p.position=CGPoint(x:-360,y:400);projectiles.append(p);worldNode.addChild(p);return p
+        }
+        let ordinary=shot(false);updateProjectiles(0.1)
+        check("ordinary-shot-six-wall",!projectiles.contains{$0===ordinary})
+        let long=shot(true);updateProjectiles(0.1)
+        check("long-shot-six-wall-passage",projectiles.contains{$0===long} && long.position.x > -340)
+        long.position=CGPoint(x:760,y:0);updateProjectiles(0)
+        check("long-shot-six-outer-cleanup",!projectiles.contains{$0===long})
+        spawnEnemyProjectile(at:CGPoint(x:-360,y:400),direction:CGPoint(x:1,y:0));updateEnemyProjectiles(0.1)
+        check("hostile-six-wall-cleanup",enemyProjectiles.isEmpty)
+        spawnEnemyProjectile(at:CGPoint(x:760,y:0),direction:CGPoint(x:1,y:0));updateEnemyProjectiles(0)
+        check("hostile-six-outer-cleanup",enemyProjectiles.isEmpty)
+        restartGame();let victim=enemies[0];let primary=shot(true)
+        if let a=primary.physicsBody,let b=victim.physicsBody {
+            let kills=killCount;handleProjectileHit(projectileBody:a,enemyBody:b);handleProjectileHit(projectileBody:a,enemyBody:b)
+            check("actual-kill-one-credit",killCount==kills+1 && victim.killCredited)
+        } else {check("actual-contact-bodies",false)}
+        xpOrbs.forEach{$0.removeFromParent()};xpOrbs.removeAll()
+        player.position=CGPoint(x:-350,y:400)
+        let orb=XPOrbNode(xpValue:2);orb.position=CGPoint(x:-170,y:400);orb.startVacuum();xpOrbs.append(orb);worldNode.addChild(orb)
+        var orbSafe=true
+        for _ in 0..<600 {updateXPOrbs(1.0/60);orbSafe=orbSafe && rooms.valid(orb.position,radius:XPOrbNode.visualRadius)}
+        check("xp-six-routes-around-solid",orbSafe && orb.position.distance(to:player.position)<30)
+        // Actual XP -> level screen -> stat/card selection methods. Animation
+        // completion is advanced explicitly here; XCTest covers timed UI input.
+        restartGame(); spawnXPOrb(at: player.position, value: 30)
+        if let body = xpOrbs.last?.physicsBody { handleXPCollection(orbBody: body) }
+        check("actual-xp-opens-level", gameState == .levelUp && player.currentLevel == 2)
+        let before = playerStats.effectiveMoveSpeed
+        if let swift = upgradeManager.allCards.first(where: { $0.id == "neutral_1" }) {
+            showCardSelection([swift])
+            if let card = displayedCards.first {
+                selectLevelCard(card)
+                check("card-waits-for-even-stat", upgradeManager.tier(of: swift.id) == 0 && gameState == .levelUp)
+                selectStat(.hp)
+                check("real-card-applied", upgradeManager.tier(of: swift.id) == 1 && playerStats.effectiveMoveSpeed > before)
+            }
+        }
+        finishLevelUp(synergies: [])
+        check("banked-level-serialized", player.currentLevel == 3 && gameState == .levelUp)
+        let levelHeld = waveManager.elapsedTime; update(100); update(110)
+        check("level-screen-holds-wave-clock", waveManager.elapsedTime == levelHeld)
+        restartGame(); update(200); update(200.02)
+        let held = waveManager.elapsedTime, playerHeld = player.position
+        pauseGame(); update(300); update(310)
+        check("actual-pause-holds-simulation", gameState == .paused && waveManager.elapsedTime == held && player.position == playerHeld)
+        appDidEnterBackground(); appWillEnterForeground()
+        check("background-preserves-manual-pause", gameState == .paused)
+        resumeGame(); update(320)
+        check("actual-resume-clamps-clock", gameState == .playing && waveManager.elapsedTime - held <= 0.101)
+        appDidEnterBackground(); check("actual-background-pauses-scene", isPaused)
+        appWillEnterForeground(); check("actual-foreground-resumes-scene", !isPaused)
+        killCount = GameConfig.Wave.bossSpawnKills + 1
+        for step in 0..<1200 { update(321 + Double(step) * 0.1) }
+        check("fixture-no-boss-no-miniboss", boss == nil && !enemies.contains { $0.isMiniBoss } && !isGauntlet)
+        playerDied()
+        check("actual-death-recorded-isolated", gameState == .dead && HighScoreManager.shared.totalRuns > 0 && AnalyticsTracker.shared.totalRuns > 0)
+        // Real pending Mirror Edge + XP scene actions must be canceled on a
+        // room restart, without changing their behavior during in-run holds.
+        playerStats.echoChance = 1
+        fireProjectile(direction: CGPoint(x: 1, y: 0))
+        check("actual-delayed-shot-scheduled", hasActions())
+        restartGame()
+        check("restart-cancels-pending-scene-actions", !hasActions())
+        check("actual-reset-run-state", gameState == .playing && player.currentLevel == 1 && player.currentXP == 0 && killCount == 0 && projectiles.isEmpty && enemyProjectiles.isEmpty && xpOrbs.isEmpty)
+        check("actual-reset-safe-position", rooms.valid(player.position, radius: playerStats.effectiveCollisionRadius) && player.position == rooms.player && camera?.position == player.position)
+        check("actual-reset-clears-upgrades", upgradeManager.tier(of: "neutral_1") == 0)
+        // Every old arena retains its actual circular PlayerNode + scene
+        // cleanup path, including large-iPad Float storage tolerance.
+        let oldOverride = ArenaConfig.overrideID
+        for index in ArenaConfig.all.indices {
+            ArenaConfig.overrideID = index
+            let normal = GameScene(size: size); normal.setupArena(); normal.setupPlayer()
+            normal.player.position = CGPoint(x: 10000, y: 10000)
+            normal.player.move(direction: .zero, deltaTime: 0)
+            let edge = GameConfig.Arena.radius - normal.playerStats.effectiveCollisionRadius
+            check("circle-movement-arena-\(index+1)", normal.player.debugMovementConstraint == nil && abs(normal.player.position.length - edge) < 0.001)
+            check("circle-cleanup-arena-\(index+1)", normal.primaryOutsideRunBounds(CGPoint(x: GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin + 1, y: 0)) && !normal.roomProjectileOutsideBounds(CGPoint(x: 9999, y: 0)))
+        }
+        for entry in BossRegistry.shared.all { ProgressionManager.shared.recordBossDefeat(entry.id) }
+        let bossMode = GameScene(size: size)
+        check("boss-mode-configures-without-room-context", bossMode.configureAsGauntlet(order: .sequential) && bossMode.debugRoomIntegration == nil && bossMode.isGauntlet)
+        for index in ArenaConfig.all.indices {
+            bossMode.swapArena(to: index)
+            check("boss-mode-home-circle-" + String(index + 1), bossMode.arenaConfig.id == ArenaConfig.all[index].id && bossMode.roomPrimaryOutsideBounds(CGPoint(x: 500, y: 0)) == nil && bossMode.player.debugMovementConstraint == nil)
+        }
+        ArenaConfig.overrideID = oldOverride
+        let after = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        check("standard-profile-byte-values-unchanged", NSDictionary(dictionary: saved).isEqual(to: after))
+        check("analytics-file-unchanged", analyticsBefore == (try? Data(contentsOf: analyticsURL)))
+        check("codex-only-in-memory", !(GameRunPreferences.shared.stringArray(forKey: "sf_cards_offered") ?? []).isEmpty && GameRunPreferences.shared.data(forKey: "sf_bestiary_kills") != nil)
+        // Leave the scene clock running behind the normal pause menu so the
+        // old kill's 0.05s callback actually executes after restart.
+        pauseGame()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            check("old-run-deferred-xp-discarded", self.xpOrbs.isEmpty)
+            self.returnToTitle()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                check("actual-title-lifecycle", self.view == nil)
+                let finalProfile = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+                check("title-also-keeps-standard-profile", NSDictionary(dictionary: saved).isEqual(to: finalProfile))
+                let report: [String: Any] = ["passed": results.filter { ($0["pass"] as? Bool) == true }.count,
+            "failed": results.filter { ($0["pass"] as? Bool) == false }.count, "checks": results,
+            "scope": "actual GameScene handlers and update adapters; explicit contact invocations; native input separate"]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]),
+           let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? data.write(to: url.appendingPathComponent("arena8-six-checks.json"))
         }
                 // The check run ends at title, matching the real exit path.
             }

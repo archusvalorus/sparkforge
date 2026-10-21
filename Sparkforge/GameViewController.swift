@@ -61,7 +61,7 @@ class GameViewController: UIViewController {
                 scene = Arena8CombatScene(size: skView.bounds.size)
             } else if GameRunPreferences.isIsolated {
                 let rooms = GameScene(size: skView.bounds.size)
-                rooms.debugRoomIntegration = Arena8P0Model()
+                rooms.debugRoomIntegration = ProcessInfo.processInfo.arguments.contains("--arena8-six") ? .sixRoom : .twoRoom
                 scene = rooms
             } else {
                 scene = TitleScene(size: skView.bounds.size)
