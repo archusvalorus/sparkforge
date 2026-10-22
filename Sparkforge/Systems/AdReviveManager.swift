@@ -9,6 +9,7 @@
 import UIKit
 import GoogleMobileAds
 
+@MainActor
 final class AdReviveManager: NSObject {
     
     // MARK: - Ad Unit IDs
@@ -84,95 +85,81 @@ final class AdReviveManager: NSObject {
         preloadExtraPickAd()
     }
     
-    private func preloadReviveAd() {
-        RewardedAd.load(
-            with: AdReviveManager.reviveAdUnitID,
-            request: Request()
-        ) { [weak self] ad, error in
-            if let error = error {
-                print("[AdRevive] Failed to load revive ad: \(error.localizedDescription)")
-                return
-            }
-            self?.reviveAd = ad
-            self?.reviveAd?.fullScreenContentDelegate = self
-            print("[AdRevive] Revive ad loaded")
-        }
+    // A cache belongs to the consent generation that requested it. A changed
+    // consent/ATT state invalidates both completed and still-in-flight loads.
+    private var cacheGeneration = -1
+    private var loading: [String: UUID] = [:]
+
+    private func synchronizePrivacy() {
+        _ = AdConsentCoordinator.shared.ready
+        let current = AdConsentCoordinator.shared.generation
+        guard cacheGeneration != current else { return }
+        cacheGeneration = current
+        loading.removeAll()
+        reviveAd = nil
+        rerollAd = nil
+        xpBoostAd = nil
+        extraCardAd = nil
+        blessingChoiceAd = nil
+        extraPickAd = nil
     }
-    
-    private func preloadRerollAd() {
-        RewardedAd.load(
-            with: AdReviveManager.rerollAdUnitID,
-            request: Request()
-        ) { [weak self] ad, error in
-            if let error = error {
-                print("[AdRevive] Failed to load reroll ad: \(error.localizedDescription)")
-                return
+
+    private func load(_ placement: String, unitID: String,
+                      store: @escaping (AdReviveManager, RewardedAd) -> Void) {
+        guard !adsRemoved else { return }
+        #if DEBUG
+        guard !AdConsentPlatform.shared.systemATTTest else { return } // OS-permission proof never loads ads
+        #endif
+        AdConsentCoordinator.shared.whenReady(owner: self, placement: placement) { [weak self] generation in
+            guard let self, !self.adsRemoved else { return }
+            self.synchronizePrivacy()
+            guard AdConsentCoordinator.shared.isCurrent(generation), self.loading[placement] == nil else { return }
+            let token = UUID()
+            self.loading[placement] = token
+            RewardedAd.load(with: unitID, request: Request()) { [weak self] ad, error in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.synchronizePrivacy()
+                    guard self.loading[placement] == token else { return }
+                    self.loading[placement] = nil
+                    guard !self.adsRemoved, AdConsentCoordinator.shared.isCurrent(generation), let ad else {
+                        if let error { print("[AdRevive] \(placement) unavailable: \(error.localizedDescription)") }
+                        return
+                    }
+                    ad.fullScreenContentDelegate = self
+                    store(self, ad)
+                }
             }
-            self?.rerollAd = ad
-            self?.rerollAd?.fullScreenContentDelegate = self
-            print("[AdRevive] Reroll ad loaded")
-        }
-    }
-    
-    private func preloadXPBoostAd() {
-        RewardedAd.load(
-            with: AdReviveManager.xpBoostAdUnitID,
-            request: Request()
-        ) { [weak self] ad, error in
-            if let error = error {
-                print("[AdRevive] Failed to load XP boost ad: \(error.localizedDescription)")
-                return
-            }
-            self?.xpBoostAd = ad
-            self?.xpBoostAd?.fullScreenContentDelegate = self
-            print("[AdRevive] XP boost ad loaded")
-        }
-    }
-    
-    private func preloadExtraCardAd() {
-        RewardedAd.load(
-            with: AdReviveManager.extraCardAdUnitID,
-            request: Request()
-        ) { [weak self] ad, error in
-            if let error = error {
-                print("[AdRevive] Failed to load extra card ad: \(error.localizedDescription)")
-                return
-            }
-            self?.extraCardAd = ad
-            self?.extraCardAd?.fullScreenContentDelegate = self
-            print("[AdRevive] Extra card ad loaded")
         }
     }
 
-    /// Internal so TitleScene can warm just this unit without loading the run ads
+    private func mayPresent() -> Bool {
+        synchronizePrivacy()
+        return activeAd == nil && AdConsentCoordinator.shared.canPresentAd(generation: cacheGeneration)
+    }
+
+    private func preloadReviveAd() {
+        load("revive", unitID: Self.reviveAdUnitID) { owner, ad in owner.reviveAd = ad }
+    }
+
+    private func preloadRerollAd() {
+        load("reroll", unitID: Self.rerollAdUnitID) { owner, ad in owner.rerollAd = ad }
+    }
+
+    private func preloadXPBoostAd() {
+        load("xpBoost", unitID: Self.xpBoostAdUnitID) { owner, ad in owner.xpBoostAd = ad }
+    }
+
+    private func preloadExtraCardAd() {
+        load("extraCard", unitID: Self.extraCardAdUnitID) { owner, ad in owner.extraCardAd = ad }
+    }
+
     func preloadBlessingChoiceAd() {
-        RewardedAd.load(
-            with: AdReviveManager.blessingChoiceAdUnitID,
-            request: Request()
-        ) { [weak self] ad, error in
-            if let error = error {
-                print("[AdRevive] Failed to load blessing choice ad: \(error.localizedDescription)")
-                return
-            }
-            self?.blessingChoiceAd = ad
-            self?.blessingChoiceAd?.fullScreenContentDelegate = self
-            print("[AdRevive] Blessing choice ad loaded")
-        }
+        load("blessingChoice", unitID: Self.blessingChoiceAdUnitID) { owner, ad in owner.blessingChoiceAd = ad }
     }
 
     private func preloadExtraPickAd() {
-        RewardedAd.load(
-            with: AdReviveManager.extraPickAdUnitID,
-            request: Request()
-        ) { [weak self] ad, error in
-            if let error = error {
-                print("[AdRevive] Failed to load extra pick ad: \(error.localizedDescription)")
-                return
-            }
-            self?.extraPickAd = ad
-            self?.extraPickAd?.fullScreenContentDelegate = self
-            print("[AdRevive] Extra pick ad loaded")
-        }
+        load("extraPick", unitID: Self.extraPickAdUnitID) { owner, ad in owner.extraPickAd = ad }
     }
 
     // MARK: - v1.7: Extra Pick Flow
@@ -183,12 +170,15 @@ final class AdReviveManager: NSObject {
             return
         }
 
-        guard let ad = extraPickAd, let vc = viewController else {
+        guard mayPresent(), let ad = extraPickAd, let vc = viewController,
+              vc.viewIfLoaded?.window != nil, vc.presentedViewController == nil else {
+            preloadExtraPickAd()
             print("[AdRevive] Extra pick ad not ready")
             completion(false)
             return
         }
 
+        extraPickAd = nil
         extraPickCompletion = completion
         activeAd = .extraPick
 
@@ -209,12 +199,15 @@ final class AdReviveManager: NSObject {
             return
         }
 
-        guard let ad = blessingChoiceAd, let vc = viewController else {
+        guard mayPresent(), let ad = blessingChoiceAd, let vc = viewController,
+              vc.viewIfLoaded?.window != nil, vc.presentedViewController == nil else {
+            preloadBlessingChoiceAd()
             print("[AdRevive] Blessing choice ad not ready")
             completion(false)
             return
         }
 
+        blessingChoiceAd = nil
         blessingChoiceCompletion = completion
         activeAd = .blessingChoice
 
@@ -240,12 +233,15 @@ final class AdReviveManager: NSObject {
             return
         }
         
-        guard let ad = reviveAd, let vc = viewController else {
+        guard mayPresent(), let ad = reviveAd, let vc = viewController,
+              vc.viewIfLoaded?.window != nil, vc.presentedViewController == nil else {
+            preloadReviveAd()
             print("[AdRevive] Revive ad not ready")
             completion(false)
             return
         }
         
+        reviveAd = nil
         reviveCompletion = completion
         activeAd = .revive
         
@@ -266,12 +262,15 @@ final class AdReviveManager: NSObject {
             return
         }
         
-        guard let ad = rerollAd, let vc = viewController else {
+        guard mayPresent(), let ad = rerollAd, let vc = viewController,
+              vc.viewIfLoaded?.window != nil, vc.presentedViewController == nil else {
+            preloadRerollAd()
             print("[AdRevive] Reroll ad not ready")
             completion(false)
             return
         }
         
+        rerollAd = nil
         rerollCompletion = completion
         activeAd = .reroll
         
@@ -291,12 +290,15 @@ final class AdReviveManager: NSObject {
             return
         }
 
-        guard let ad = extraCardAd, let vc = viewController else {
+        guard mayPresent(), let ad = extraCardAd, let vc = viewController,
+              vc.viewIfLoaded?.window != nil, vc.presentedViewController == nil else {
+            preloadExtraCardAd()
             print("[AdRevive] Extra card ad not ready")
             completion(false)
             return
         }
 
+        extraCardAd = nil
         extraCardCompletion = completion
         activeAd = .extraCard
 
@@ -322,12 +324,15 @@ final class AdReviveManager: NSObject {
             return
         }
         
-        guard let ad = xpBoostAd, let vc = viewController else {
+        guard mayPresent(), let ad = xpBoostAd, let vc = viewController,
+              vc.viewIfLoaded?.window != nil, vc.presentedViewController == nil else {
+            preloadXPBoostAd()
             print("[AdRevive] XP boost ad not ready")
             completion(false)
             return
         }
         
+        xpBoostAd = nil
         xpBoostCompletion = completion
         activeAd = .xpBoost
         
@@ -387,6 +392,7 @@ extension AdReviveManager: FullScreenContentDelegate {
                 break
             }
             self.activeAd = nil
+            AdConsentCoordinator.shared.presenterBecameReady()
         }
     }
 
@@ -433,6 +439,7 @@ extension AdReviveManager: FullScreenContentDelegate {
                 break
             }
             self.activeAd = nil
+            AdConsentCoordinator.shared.presenterBecameReady()
         }
     }
 }
