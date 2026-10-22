@@ -40,6 +40,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomInputLastTime: TimeInterval = -1
     private var roomInputSamples: [[String: Any]] = []
     private var roomEchoChecksRunning = false
+    private var roomGrowthChecksRunning = false
     private var roomEchoObserver: ((ProjectileNode) -> Void)?
     #endif
 
@@ -563,7 +564,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-echo-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-growth-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runGrowthChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-growth-input") {
+                // Explicit native-input fixture only; ordinary six-room drafting
+                // and its controlled compatibility boundary stay unchanged.
+                DispatchQueue.main.async { [weak self] in self?.beginGrowthInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-echo-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runEchoChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-pressure-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPressureChecks() }
@@ -3903,6 +3910,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !cultivatedZones.isEmpty else { return }
         let cap = GameConfig.Arena.radius * GameConfig.Growth.maxZoneRadiusFactor
         for zone in cultivatedZones {
+            #if DEBUG
+            if let footprint = zone.roomGardenFootprint {
+                zone.setRadius(footprint.grownRadius(current: zone.radius, multiplier: 1 + GameConfig.Growth.expansionPerCard))
+                continue
+            }
+            #endif
             let grown = min(cap, zone.radius * (1 + GameConfig.Growth.expansionPerCard))
             zone.setRadius(grown)
         }
@@ -3942,6 +3955,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if grow > 0 {
             let cap = GameConfig.Arena.radius * GameConfig.Growth.maxZoneRadiusFactor
             for zone in cultivatedZones {
+                #if DEBUG
+                if let footprint = zone.roomGardenFootprint {
+                    zone.setRadius(footprint.grownRadius(current: zone.radius, multiplier: 1 + grow))
+                    continue
+                }
+                #endif
                 zone.setRadius(min(cap, zone.radius * (1 + grow)))
             }
         }
@@ -4771,6 +4790,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if playerStats.vineWallTier >= 3, GameConfig.Growth.vineBlocksProjectiles {
                 enemyProjectiles.removeAll { proj in
                     guard proj.position.distance(to: zone.position) < r else { return false }
+                    #if DEBUG
+                    if let footprint = zone.roomGardenFootprint, !footprint.visible(proj.position) { return false }
+                    #endif
                     proj.removeFromParent()
                     return true
                 }
@@ -4794,6 +4816,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             for e in enemies where !e.isDying && !e.isMiniBoss {
                 let d = e.position.distance(to: zone.position)
                 guard d > inner, d < r + band else { continue }   // in the edge band
+                #if DEBUG
+                if let footprint = zone.roomGardenFootprint, !footprint.visible(e.position) { continue }
+                #endif
                 e.applySlow(playerStats.effectiveSlow(GameConfig.Growth.vineSlow), duration: 0.3)
                 let out = (e.position - zone.position).normalized
                 e.position += out * repel * CGFloat(dt)            // shoved outward
@@ -4876,6 +4901,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Terra stood, is the always-valid fallback.
     private func randomPointOnCultivatedGround() -> CGPoint? {
         guard let zone = cultivatedZones.randomElement() else { return nil }
+        #if DEBUG
+        if let footprint = zone.roomGardenFootprint {
+            for _ in 0..<12 { // same bounded attempt count as the existing sampler
+                if let point = footprint.flowerPoint(radius: zone.radius * 0.85,
+                    radialUnit: CGFloat.random(in: 0...1), angularUnit: CGFloat.random(in: 0..<1),
+                    margin: GameConfig.Growth.flowerRootMargin) { return point }
+            }
+            return footprint.covers(zone.position, radius: zone.radius)
+                && arenaGeometry.isBlocked(zone.position, margin: GameConfig.Growth.flowerRootMargin) == false
+                ? zone.position : nil
+        }
+        #endif
         return PlacementSampler.randomPoint(inDiscAt: zone.position, radius: zone.radius * 0.85,
                                             in: arenaGeometry, arenaRadius: GameConfig.Arena.radius,
                                             margin: GameConfig.Growth.flowerRootMargin, fallback: zone.position)
@@ -4912,6 +4949,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let ghost = CultivatedZoneNode(radius: playerStats.terraZoneRadius)
         ghost.alpha = 0.55
         ghost.position = player.position     // start under Spark; drag to move
+        #if DEBUG
+        if let map = debugRoomIntegration, map.isSixRoom {
+            guard let root = Arena8GardenFootprint.placementRoot(in: map, toward: player.position,
+                        clearance: max(GameConfig.Growth.flowerRootMargin, ghost.radius * 0.5)),
+                  let footprint = Arena8GardenFootprint(map: map, root: root, startingRadius: ghost.radius) else {
+                showBuildHint("No safe ground here")
+                resumeAfterLevelUp()
+                return
+            }
+            ghost.setRoomGardenFootprint(footprint)
+        }
+        #endif
         worldNode.addChild(ghost)
         terraGhost = ghost
 
@@ -4944,6 +4993,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// can never be planted where the player can't stand.
     private func moveTerraGhost(to worldPoint: CGPoint) {
         guard let ghost = terraGhost else { return }
+        #if DEBUG
+        if let map = debugRoomIntegration, map.isSixRoom {
+            guard let root = Arena8GardenFootprint.placementRoot(in: map, toward: worldPoint,
+                        clearance: max(GameConfig.Growth.flowerRootMargin, ghost.radius * 0.5)),
+                  let footprint = Arena8GardenFootprint(map: map, root: root, startingRadius: ghost.radius) else { return }
+            ghost.setRoomGardenFootprint(footprint)
+            return
+        }
+        #endif
         let maxDist = GameConfig.Arena.radius - ghost.radius
         var p = worldPoint
         if p.length > maxDist { p = p.normalized * maxDist }
@@ -4964,6 +5022,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera?.childNode(withName: "placeHint")?.removeFromParent()
 
         plantCultivatedGround(at: center, radius: playerStats.terraZoneRadius)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-growth-input"),
+           cultivatedZones.count == 1, treeNode == nil {
+            // Explicit presentation/input fixture: exercise the actual growth
+            // adapters after the gesture; no extra live drafting eligibility.
+            expandGarden(); modifyAllCultivatedZones(radiusScale:1.22)
+            growTree(to:1); growTree(to:2); growTree(to:4)
+            _ = growFlower(); _ = growFlower(); _ = growFlower()
+        }
+        #endif
         showBuildHint("🌱 The ground is yours now")
         resumeAfterLevelUp()
     }
@@ -5004,7 +5073,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomEchoChecksRunning { return } // action-clock tests: suppress unrelated combat only
+        if roomEchoChecksRunning || roomGrowthChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -9483,6 +9552,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let zone = CultivatedZoneNode(radius: r)
         zone.position = position ?? player.position
+        #if DEBUG
+        if let map = debugRoomIntegration, map.isSixRoom {
+            guard let root = Arena8GardenFootprint.placementRoot(in: map, toward: zone.position,
+                        clearance: max(GameConfig.Growth.flowerRootMargin, r * 0.5)),
+                  let footprint = Arena8GardenFootprint(map: map, root: root, startingRadius: r) else { return nil }
+            zone.setRoomGardenFootprint(footprint)
+        }
+        #endif
         if playerStats.vineWallActive { zone.setVineWall(true) }   // C1.5: inherit the hedge
         worldNode.addChild(zone)
         cultivatedZones.append(zone)
@@ -9506,6 +9583,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func modifyAllCultivatedZones(radiusScale: CGFloat) {
         let cap = GameConfig.Arena.radius * GameConfig.Growth.maxZoneRadiusFactor
         for zone in cultivatedZones {
+            #if DEBUG
+            if let footprint = zone.roomGardenFootprint {
+                zone.setRadius(footprint.grownRadius(current: zone.radius, multiplier: radiusScale))
+                continue
+            }
+            #endif
             zone.setRadius(min(cap, zone.radius * radiusScale))
         }
     }
@@ -15127,7 +15210,7 @@ extension GameScene {
     private func recordSixRoomInput(_ time: TimeInterval) {
         guard let rooms = debugRoomIntegration, rooms.isSixRoom,
               ProcessInfo.processInfo.arguments.contains("--arena8-six-input") else { return }
-        let sample: [String: Any] = ["x": Double(player.position.x), "y": Double(player.position.y),
+        var sample: [String: Any] = ["x": Double(player.position.x), "y": Double(player.position.y),
             "room": rooms.roomID(near: player.position), "safe": rooms.valid(player.position, radius: playerStats.effectiveCollisionRadius),
             "state": String(describing: gameState), "enemies": enemies.count, "kills": killCount,
             "xp": player.currentXP, "level": player.currentLevel, "hp": playerStats.currentHP,
@@ -15135,6 +15218,13 @@ extension GameScene {
             "melee": enemies.filter { !($0 is RangedEnemyNode) && !$0.isDying }.count,
             "ranged": enemies.filter { $0 is RangedEnemyNode && !$0.isDying }.count,
             "largestBody": enemies.map(\.geometryFootprintRadius).max() ?? 0]
+        if ProcessInfo.processInfo.arguments.contains("--arena8-growth-input") {
+            sample["gardens"] = cultivatedZones.map { ["x":Double($0.position.x),"y":Double($0.position.y),"radius":Double($0.radius)] }
+            sample["flowers"] = flowers.count
+            sample["tree"] = treeNode != nil
+            if let ghost = terraGhost { sample["ghost"] = ["x":Double(ghost.position.x),"y":Double(ghost.position.y)] }
+            sample["nourished"] = player.isNourished
+        }
         if let data = try? JSONSerialization.data(withJSONObject: sample, options: [.sortedKeys]),
            let value = String(data: data, encoding: .utf8) {
             view?.isAccessibilityElement = true
@@ -15516,6 +15606,155 @@ extension GameScene {
             check("ordinary-half-basis-fragment-terrain",shots.first.map { abs($0.multiplier-0.5)<0.001 && $0.fragment && !$0.terrain } == true)
             beam()
         }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// Explicit test loadout, not a new card-availability policy. Native input
+    /// starts in the real drag/release Terra placement state.
+    private func beginGrowthInput() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom else { return }
+        player.position = rooms.connections[0].center
+        camera?.position = player.position
+        playerStats.terraZoneRadius = 110
+        playerStats.vineWallTier = 3
+        playerStats.thornsoilDPS = 2
+        playerStats.deeprootDEF = 2
+        if let badge = camera?.childNode(withName:"arena8RoomBadge") as? SKLabelNode {
+            badge.text = "GROWTH TEST LOADOUT · DRAG TO PLANT"
+        }
+        beginTerraPlacement()
+    }
+
+    /// Actual GameScene/Node adapters, with unrelated combat suppressed only
+    /// for this explicit fixture. Native gesture/render checks are separate.
+    private func runGrowthChecks() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom else { return }
+        roomGrowthChecksRunning = true
+        physicsWorld.speed = 0
+        var results: [[String:Any]] = []
+        func check(_ id:String,_ pass:Bool) { results.append(["id":id,"pass":pass]) }
+        let saved = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        func clearGround() {
+            cultivatedZones.forEach { $0.removeFromParent() }; cultivatedZones.removeAll()
+            flowers.forEach { $0.removeFromParent() }; flowers.removeAll()
+            treeNode?.removeFromParent(); treeNode = nil
+            enemies.forEach { $0.removeFromParent() }; enemies.removeAll()
+            enemyProjectiles.forEach { $0.removeFromParent() }; enemyProjectiles.removeAll()
+        }
+        check("memory-only-context",GameRunPreferences.isIsolated)
+        for room in rooms.rooms {
+            clearGround()
+            playerStats.terraZoneRadius = 110
+            player.position = room.center
+            beginTerraPlacement()
+            check("room\(room.id)-ghost-at-local-root",terraGhost?.position == room.center && terraGhost?.roomMaskPath != nil && gameState == .placingZone)
+            moveTerraGhost(to:room.center + CGPoint(x:5000,y:5000))
+            check("room\(room.id)-ghost-projects-safely",terraGhost.map { rooms.valid($0.position,radius:55) } == true)
+            moveTerraGhost(to:room.center)
+            commitTerraPlacement()
+            guard let zone = cultivatedZones.first else { check("room\(room.id)-commits",false);continue }
+            check("room\(room.id)-commit-cleans-placement",terraGhost == nil && camera?.childNode(withName:"placePrompt") == nil && camera?.childNode(withName:"placeHint") == nil && gameState == .playing)
+            let root = zone.position
+            player.position = rooms.rooms[(room.id+1)%6].center
+            expandGarden()
+            check("room\(room.id)-ordinary-growth",abs(zone.radius-110*(1+GameConfig.Growth.expansionPerCard))<0.001)
+            modifyAllCultivatedZones(radiusScale:1.22)
+            check("room\(room.id)-rich-soil-growth",abs(zone.radius-110*(1+GameConfig.Growth.expansionPerCard)*1.22)<0.001)
+            growTree(to:1); growTree(to:2); growTree(to:4)
+            check("room\(room.id)-tree-same-cap-root",zone.radius == 180 && zone.position == root && treeNode?.position == root && zone.roomGardenFootprint?.roomID == room.id)
+            check("room\(room.id)-rooted-flowers",growFlower() && growFlower() && growFlower() && !growFlower() && flowers.allSatisfy { zone.covers($0.position) && rooms.valid($0.position,radius:GameConfig.Growth.flowerRootMargin) })
+            zone.setRadius(220,animated:false)
+            expandGarden(); modifyAllCultivatedZones(radiusScale:1.22); growTree(to:4)
+            check("room\(room.id)-existing-growth-never-shrinks",zone.radius == 220 && zone.xScale == 1 && zone.yScale == 1)
+        }
+        // Raw actual local-space mask, with no gameplay-side validity/LoS
+        // filtering. Tests the path installed on SKCropNode and its transform.
+        let roots = rooms.rooms.map(\.center) + rooms.connections.map(\.center) + rooms.rooms.map { CGPoint(x:$0.rect.minX+55.01,y:$0.rect.minY+55.01) }
+        var samples = 0, maskErrors = 0
+        for root in roots {
+            guard let footprint = Arena8GardenFootprint(map:rooms,root:root,startingRadius:110) else { maskErrors += 1;continue }
+            let node = CultivatedZoneNode(radius:180)
+            node.setRoomGardenFootprint(footprint)
+            for x in stride(from:-690.0,through:690,by:37) { for y in stride(from:-450.0,through:450,by:31) {
+                let point = CGPoint(x:x+0.173,y:y+0.319)
+                let expected = point.distance(to:root)<180 && rooms.valid(point,radius:0) && !rooms.geometry.segmentBlockedExact(root,point)
+                let rendered = (node.roomMaskPath?.contains(point-node.position) == true) && point.distance(to:node.position)<node.radius
+                if rendered != expected { maskErrors += 1 }
+                samples += 1
+            }}
+        }
+        check("actual-local-mask-independent-oracle",samples > 20000 && maskErrors == 0)
+        for (index,connection) in rooms.connections.enumerated() {
+            clearGround()
+            let root = connection.center
+            let direction = (rooms.rooms[connection.to].center-rooms.rooms[connection.from].center).normalized
+            let across = CGPoint(x:-direction.y,y:direction.x)
+            let visible = root-direction*165
+            let hidden = root-direction*130+across*100
+            playerStats.vineWallTier = 3
+            playerStats.thornsoilDPS = 2
+            playerStats.deeprootDEF = 2
+            guard let zone = plantCultivatedGround(at:root,radius:110) else { check("corridor\(index)-plant",false);continue }
+            zone.setRadius(180,animated:false)
+            check("corridor\(index)-fixed-root-after-growth",zone.position == root)
+            let a = EnemyNode(health:100,moveSpeed:0,xpValue:1), b = EnemyNode(health:100,moveSpeed:0,xpValue:1)
+            a.position = visible; b.position = hidden
+            enemies = [a,b];worldNode.addChild(a);worldNode.addChild(b)
+            let healthA = a.health, healthB = b.health
+            player.position = visible
+            updateCultivatedGround(GameConfig.Growth.tickInterval)
+            check("corridor\(index)-ground-through-door-not-wall",a.isSlowed && a.health<healthA && !b.isSlowed && b.health==healthB && player.isNourished && playerStats.groundDefBonus==2)
+            player.position = hidden
+            updateCultivatedGround(0)
+            check("corridor\(index)-player-hidden-not-nourished",!player.isNourished && playerStats.groundDefBonus==0)
+            applyVineWallEdge(0.01)
+            check("corridor\(index)-vine-band-visible-only",a.position != visible && b.position == hidden)
+            let pa = EnemyProjectileNode(direction:direction), pb = EnemyProjectileNode(direction:direction)
+            pa.position = visible;pb.position = hidden
+            enemyProjectiles = [pa,pb];worldNode.addChild(pa);worldNode.addChild(pb)
+            updateVineWall(0.01)
+            check("corridor\(index)-vine-projectiles-visible-only",pa.parent == nil && pb.parent != nil && enemyProjectiles.count==1)
+            check("corridor\(index)-flower-rooted-on-mask",growFlower() && flowers.allSatisfy { zone.covers($0.position) && rooms.valid($0.position,radius:GameConfig.Growth.flowerRootMargin) })
+        }
+        // Legacy circle/two-room adapters retain their pre-G5 radius and mask.
+        let control = GameScene(size:size)
+        control.debugRoomIntegration = .twoRoom
+        control.playerStats.terraZoneRadius = 110
+        let legacy = control.plantCultivatedGround(at:.zero,radius:110)
+        check("two-room-legacy-mask",legacy?.roomGardenFootprint == nil && legacy?.roomMaskPath == nil && legacy?.covers(CGPoint(x:100,y:0)) == true)
+        control.expandGarden()
+        check("two-room-legacy-growth",legacy.map { abs($0.radius-min(GameConfig.Arena.radius*GameConfig.Growth.maxZoneRadiusFactor,110*(1+GameConfig.Growth.expansionPerCard)))<0.001 } == true)
+        control.debugRoomIntegration = nil
+        let circle = control.plantCultivatedGround(at:CGPoint(x:50,y:50),radius:110)
+        check("circle-legacy-radial",circle?.roomGardenFootprint == nil && circle?.covers(CGPoint(x:150,y:50)) == true && circle?.covers(CGPoint(x:161,y:50)) == false)
+        clearGround()
+        player.position = rooms.connections[0].center
+        _ = plantCultivatedGround(radius:180)
+        _ = growFlower();growTree(to:1)
+        gameState = .playing
+        pauseGame()
+        let frozen = cultivatedZones.map(\.radius)
+        let tickBefore = groundTickAccumulator
+        roomGrowthChecksRunning = false // exercise the real paused-state guard
+        update(500);update(550)
+        roomGrowthChecksRunning = true
+        check("pause-no-growth-or-ticks",gameState == .paused && cultivatedZones.map(\.radius)==frozen && groundTickAccumulator==tickBefore)
+        resumeGame()
+        playerStats.terraZoneRadius = 110
+        beginTerraPlacement()
+        let ghost = terraGhost
+        let retired = cultivatedZones
+        let retiredFlowers = flowers
+        let retiredTree = treeNode
+        restartGame()
+        check("restart-cleans-rooted-structures",cultivatedZones.isEmpty && flowers.isEmpty && treeNode == nil && retired.allSatisfy { $0.parent == nil } && retiredFlowers.allSatisfy { $0.parent == nil } && retiredTree?.parent == nil)
+        check("restart-cleans-placement-and-buffs",terraGhost == nil && ghost?.parent == nil && camera?.childNode(withName:"placePrompt") == nil && !player.isNourished && playerStats.groundDefBonus == 0)
+        check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }))
+        let report:[String:Any] = ["passed":results.filter { ($0["pass"] as? Bool)==true }.count,"failed":results.filter { ($0["pass"] as? Bool)==false }.count,"checks":results,"maskComparisons":samples,"maskMismatches":maskErrors,"scope":"actual GameScene handlers/nodes with unrelated combat suppressed; native gesture/render checks separate"]
+        if let data = try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]), let dir = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first { try? data.write(to:dir.appendingPathComponent("arena8-growth-checks.json")) }
     }
 }
 #endif

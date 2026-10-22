@@ -34,6 +34,57 @@ final class CultivatedZoneNode: SKNode {
     /// C1.5 Vine Wall: a thorny hedge drawn on the zone's edge when active.
     private var vineRing: SKShapeNode?
     private(set) var hasVineWall = false
+    #if DEBUG
+    private(set) var roomGardenFootprint: Arena8GardenFootprint?
+    private(set) var roomMaskPath: CGPath?
+    private var roomCrop: SKCropNode?
+    private var vineInfluenceBand: SKShapeNode?
+
+    /// One frozen world-space footprint supplies both occupancy and rendering.
+    func setRoomGardenFootprint(_ footprint: Arena8GardenFootprint) {
+        roomGardenFootprint = footprint
+        position = footprint.root
+        removeAction(forKey: "grow")
+        setScale(1)
+        if roomCrop == nil {
+            let crop = SKCropNode()
+            addChild(crop)
+            for node in [ground, rim] { node.removeFromParent(); crop.addChild(node) }
+            if let vineRing { vineRing.removeFromParent(); crop.addChild(vineRing) }
+            roomCrop = crop
+        }
+        let path = CGMutablePath()
+        if let first = footprint.visibilityPolygon.first {
+            path.move(to: first - footprint.root)
+            for point in footprint.visibilityPolygon.dropFirst() { path.addLine(to: point - footprint.root) }
+            path.closeSubpath()
+        }
+        roomMaskPath = path
+        let mask = SKShapeNode(path: path)
+        mask.fillColor = .white
+        mask.strokeColor = .clear
+        mask.isAntialiased = false
+        roomCrop?.maskNode = mask
+        updateVineInfluenceBand()
+    }
+
+    private func updateVineInfluenceBand() {
+        guard roomCrop != nil, hasVineWall else {
+            vineInfluenceBand?.removeFromParent(); vineInfluenceBand = nil
+            return
+        }
+        if vineInfluenceBand == nil {
+            let band = SKShapeNode()
+            band.fillColor = .clear
+            band.strokeColor = SKColor(hex: 0x2E6B3A, alpha: 0.18)
+            band.zPosition = 1
+            roomCrop?.addChild(band)
+            vineInfluenceBand = band
+        }
+        vineInfluenceBand?.path = ground.path
+        vineInfluenceBand?.lineWidth = 2 * radius * GameConfig.Growth.vineBandFraction
+    }
+    #endif
 
     // MARK: - Init
 
@@ -71,6 +122,9 @@ final class CultivatedZoneNode: SKNode {
         ground.path = path
         rim.path = path
         vineRing?.path = path
+        #if DEBUG
+        updateVineInfluenceBand()
+        #endif
     }
 
     /// C1.5: toggle the thorny hedge on this zone's perimeter.
@@ -84,7 +138,11 @@ final class CultivatedZoneNode: SKNode {
             ring.lineWidth = 5
             ring.glowWidth = 2
             ring.zPosition = 2   // above the ground fill, below actors
+            #if DEBUG
+            if let roomCrop { roomCrop.addChild(ring) } else { addChild(ring) }
+            #else
             addChild(ring)
+            #endif
             vineRing = ring
             applyRadiusToPaths()
             // A slow bristle so it reads as a living hedge, not a painted ring.
@@ -94,6 +152,9 @@ final class CultivatedZoneNode: SKNode {
             ])))
         } else {
             vineRing?.removeFromParent(); vineRing = nil
+            #if DEBUG
+            updateVineInfluenceBand()
+            #endif
         }
     }
 
@@ -105,6 +166,11 @@ final class CultivatedZoneNode: SKNode {
         guard target != radius else { return }
         radius = target
         applyRadiusToPaths()
+        #if DEBUG
+        // Scaling the node would move the mask relative to the authoritative
+        // world footprint. Room coverage therefore updates at its true size.
+        if roomGardenFootprint != nil { return }
+        #endif
         guard animated else { return }
         // A brief swell so growth is legible at a glance.
         removeAction(forKey: "grow")
@@ -123,6 +189,9 @@ final class CultivatedZoneNode: SKNode {
     /// `contains(_:)` for its own hit-testing, and silently overriding it would
     /// be a trap for whoever writes the next Growth card.
     func covers(_ point: CGPoint) -> Bool {
-        position.distance(to: point) < radius
+        #if DEBUG
+        if let roomGardenFootprint { return roomGardenFootprint.covers(point, radius: radius) }
+        #endif
+        return position.distance(to: point) < radius
     }
 }
