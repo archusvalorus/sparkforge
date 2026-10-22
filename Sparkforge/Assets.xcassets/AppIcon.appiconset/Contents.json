@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "App Store Icon.png",
+      "filename" : "Sparkforge New App Icon.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -13,7 +13,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "App Store Icon 1.png",
+      "filename" : "Sparkforge New App Icon 1.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -25,7 +25,7 @@
           "value" : "tinted"
         }
       ],
-      "filename" : "App Store Icon 2.png",
+      "filename" : "Sparkforge New App Icon 2.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
