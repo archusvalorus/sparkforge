@@ -8,11 +8,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // v1.7 ATT fix: the tracking prompt + ads start moved to
-        // SceneDelegate.sceneDidBecomeActive — the old launch-timer
-        // request raced scene activation, and iOS silently skips the
-        // prompt when the scene isn't active yet (App Review flag, v1.6).
+        // Consent startup is deferred until an active app and visible presenter.
         return true
+    }
+
+    // The submitted v2.2 app also supports UIKit's legacy (storyboard) lifecycle.
+    // Do not depend solely on scene callbacks: this build has no scene manifest.
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        guard !GameRunPreferences.isIsolated else { return }
+        DispatchQueue.main.async { AdConsentCoordinator.shared.becameActive() }
+    }
+
+    func applicationWillResignActive(_ application: UIApplication) {
+        guard !GameRunPreferences.isIsolated else { return }
+        AdConsentCoordinator.shared.becameInactive()
     }
 
     // MARK: - UISceneSession Lifecycle

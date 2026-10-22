@@ -17,7 +17,12 @@ final class IAPManager {
 
     // MARK: - State
 
-    private(set) var hasRemovedAds: Bool = false
+    private let adEntitlement: AdEntitlementState
+    var hasRemovedAds: Bool { adEntitlement.hasRemovedAds }
+    var adEntitlementStatus: AdEntitlementStatus { adEntitlement.status }
+    private var entitlementRefresh: Task<Void, Never>?
+    private var refreshID = 0
+    private var purchaseOrRestoreInProgress = false
 
     /// v2.0: generic non-consumable entitlements (premium skins, future IAPs).
     /// Every verified product id lands here; `isPurchased(_:)` reads it. Remove
@@ -33,15 +38,39 @@ final class IAPManager {
 
     private init() {
         // Load cached state
-        hasRemovedAds = GameRunPreferences.shared.bool(forKey: purchaseKey)
+        #if DEBUG
+        let testMode = ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--privacy-entitlement-test=") }
+        let cachedOwner = testMode == nil && GameRunPreferences.shared.bool(forKey: purchaseKey)
+        #else
+        let cachedOwner = GameRunPreferences.shared.bool(forKey: purchaseKey)
+        #endif
+        adEntitlement = AdEntitlementState(cachedOwner: cachedOwner)
+        adEntitlement.onChange = { [weak self] in
+            guard let self else { return }
+            GameRunPreferences.shared.set(self.hasRemovedAds, forKey: self.purchaseKey)
+            NotificationCenter.default.post(name: .adEntitlementDidChange, object: nil)
+        }
         ownedProductIDs = Set(GameRunPreferences.shared.stringArray(forKey: ownedProductsKey) ?? [])
 
+        // Room previews keep their memory-only profile and never start StoreKit.
         guard !GameRunPreferences.isIsolated else { return }
 
-        // Verify with StoreKit on launch
-        Task {
-            await verifyPurchases()
+        #if DEBUG
+        // Explicit native test transport: real reducer/bridge, no StoreKit billing.
+        // Not compiled into Release; the probe labels StoreKit as stubbed.
+        if let testMode {
+            if testMode == "--privacy-entitlement-test=owner" { adEntitlement.confirmedOwner() }
+            if testMode == "--privacy-entitlement-test=delayed-owner" {
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    self?.adEntitlement.confirmedOwner()
+                }
+            }
+            return
         }
+        #endif
+        // Verify with StoreKit on launch
+        refreshEntitlements()
 
         // Listen for transaction updates
         Task {
@@ -60,6 +89,7 @@ final class IAPManager {
     /// Purchase any non-consumable product id. Records the entitlement on success.
     func purchase(_ productID: String) async -> Bool {
         guard !GameRunPreferences.isIsolated else { return false }
+        if productID == Self.removeAdsProductID { return await purchaseRemoveAds() }
         do {
             let products = try await Product.products(for: [productID])
             guard let product = products.first else {
@@ -96,7 +126,9 @@ final class IAPManager {
 
     private func recordEntitlement(_ productID: String) {
         if productID == IAPManager.removeAdsProductID {
-            setAdsRemoved(true)
+            ownedProductIDs.insert(productID)
+            GameRunPreferences.shared.set(Array(ownedProductIDs), forKey: ownedProductsKey)
+            adEntitlement.confirmedOwner()
             return
         }
         guard !ownedProductIDs.contains(productID) else { return }
@@ -111,6 +143,11 @@ final class IAPManager {
     
     func purchaseRemoveAds() async -> Bool {
         guard !GameRunPreferences.isIsolated else { return false }
+        guard !purchaseOrRestoreInProgress else { return false }
+        purchaseOrRestoreInProgress = true
+        entitlementRefresh?.cancel()
+        _ = adEntitlement.beginResolution()
+        defer { purchaseOrRestoreInProgress = false }
         do {
             guard let product = try await fetchProduct() else {
                 print("[IAP] Product not found")
@@ -121,14 +158,15 @@ final class IAPManager {
             
             switch result {
             case .success(let verification):
-                if case .verified(let transaction) = verification {
+                if case .verified(let transaction) = verification, transaction.revocationDate == nil {
+                    recordEntitlement(Self.removeAdsProductID)
                     await transaction.finish()
-                    setAdsRemoved(true)
                     return true
                 }
                 return false
                 
             case .userCancelled:
+                refreshEntitlements(force: true)
                 return false
                 
             case .pending:
@@ -143,26 +181,96 @@ final class IAPManager {
         }
     }
     
-    /// Restore purchases
+    /// Only the explicit Restore button calls sync (it may ask for App Store authentication).
     func restorePurchases() async {
-        guard !GameRunPreferences.isIsolated else { return  }
-        await verifyPurchases()
+        guard !GameRunPreferences.isIsolated else { return }
+        guard !purchaseOrRestoreInProgress else { return }
+        purchaseOrRestoreInProgress = true
+        entitlementRefresh?.cancel()
+        let token = adEntitlement.beginResolution()
+        defer { purchaseOrRestoreInProgress = false }
+        do {
+            try await AppStore.sync()
+            let task = refreshEntitlements(force: true)
+            await task?.value
+        } catch {
+            adEntitlement.completeResolution(token, verified: false, owner: false)
+        }
     }
-    
+
+    /// Called on lifecycle readiness, not on a timer. Unknown/error never opens ads.
+    func ensureAdEntitlementResolved() {
+        guard !GameRunPreferences.isIsolated else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--privacy-entitlement-test=") }) { return }
+        #endif
+        guard adEntitlementStatus == .unknown, !purchaseOrRestoreInProgress else { return }
+        refreshEntitlements()
+    }
+
     // MARK: - Verification
-    
-    private func verifyPurchases() async {
-        for await result in Transaction.currentEntitlements {
-            if case .verified(let transaction) = result {
-                recordEntitlement(transaction.productID)   // handles Remove Ads + skins
+
+    @discardableResult
+    private func refreshEntitlements(force: Bool = false) -> Task<Void, Never>? {
+        guard !GameRunPreferences.isIsolated else { return nil }
+        if let entitlementRefresh, !force, !entitlementRefresh.isCancelled { return entitlementRefresh }
+        entitlementRefresh?.cancel()
+        refreshID += 1
+        let currentID = refreshID
+        let token = adEntitlement.beginResolution()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            var verified = true
+            var owner = false
+            for await result in Transaction.currentEntitlements {
+                guard !Task.isCancelled else { return }
+                switch result {
+                case .verified(let transaction):
+                    guard transaction.revocationDate == nil else { continue }
+                    if transaction.productID == Self.removeAdsProductID { owner = true }
+                    self.recordEntitlement(transaction.productID)
+                    await transaction.finish()
+                case .unverified:
+                    verified = false
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self.adEntitlement.completeResolution(token, verified: verified, owner: owner)
+            if verified && !owner && !self.hasRemovedAds {
+                self.ownedProductIDs.remove(Self.removeAdsProductID)
+                GameRunPreferences.shared.set(Array(self.ownedProductIDs), forKey: self.ownedProductsKey)
+            }
+            if self.refreshID == currentID { self.entitlementRefresh = nil }
+        }
+        entitlementRefresh = task
+        return task
+    }
+
+    private func listenForTransactions() async {
+        guard !GameRunPreferences.isIsolated else { return }
+        for await result in Transaction.updates {
+            switch result {
+            case .verified(let transaction):
+                if transaction.productID == Self.removeAdsProductID, transaction.revocationDate != nil {
+                    adEntitlement.revokedOwner()
+                    ownedProductIDs.remove(Self.removeAdsProductID)
+                    GameRunPreferences.shared.set(Array(ownedProductIDs), forKey: ownedProductsKey)
+                    refreshEntitlements(force: true)
+                } else if transaction.revocationDate == nil {
+                    recordEntitlement(transaction.productID)
+                }
                 await transaction.finish()
+            case .unverified:
+                // Do not grant access or permit ads using an unverified update.
+                refreshEntitlements(force: true)
             }
         }
     }
-    
+
     // MARK: - Product Fetch
     
     private func fetchProduct() async throws -> Product? {
+        guard !GameRunPreferences.isIsolated else { return nil }
         let products = try await Product.products(for: [IAPManager.removeAdsProductID])
         return products.first
     }
@@ -180,25 +288,4 @@ final class IAPManager {
         return await getRemoveAdsProduct()?.displayPrice
     }
     
-    // MARK: - Transaction Listener
-    
-    private func listenForTransactions() async {
-        for await result in Transaction.updates {
-            if case .verified(let transaction) = result {
-                recordEntitlement(transaction.productID)   // handles Remove Ads + skins
-                await transaction.finish()
-            }
-        }
-    }
-    
-    // MARK: - State Management
-    
-    private func setAdsRemoved(_ removed: Bool) {
-        hasRemovedAds = removed
-        GameRunPreferences.shared.set(removed, forKey: purchaseKey)
-        
-        #if DEBUG
-        print("[IAP] Ads removed: \(removed)")
-        #endif
-    }
 }

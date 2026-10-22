@@ -16,6 +16,11 @@ final class SettingsMenuNode: SKNode {
 
     private static let panelW: CGFloat = 280
     private let showErase: Bool
+    private static var privacyRowRequired: Bool {
+        !GameRunPreferences.isIsolated && AdConsentCoordinator.shared.privacyOptionsRequired
+    }
+    private var showsPrivacy = SettingsMenuNode.privacyRowRequired
+    private var privacyObserver: NSObjectProtocol?
 
     /// Button hit frames in this node's space (name → rect).
     private var buttons: [(name: String, frame: CGRect)] = []
@@ -24,6 +29,27 @@ final class SettingsMenuNode: SKNode {
         self.showErase = showErase
         super.init()
         zPosition = 480
+        buildContents()
+        privacyObserver = NotificationCenter.default.addObserver(forName: .adPrivacyDidChange,
+                                                                 object: nil, queue: .main) { [weak self] _ in
+            self?.refreshPrivacyRow()
+        }
+    }
+
+    deinit {
+        if let privacyObserver { NotificationCenter.default.removeObserver(privacyObserver) }
+    }
+
+    private func refreshPrivacyRow() {
+        // Never move destructive hit targets under a live/fading ban picker.
+        guard banPicker == nil, showsPrivacy != SettingsMenuNode.privacyRowRequired else { return }
+        showsPrivacy = SettingsMenuNode.privacyRowRequired
+        buildContents()
+    }
+
+    private func buildContents() {
+        removeAllChildren()
+        buttons.removeAll()
 
         let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
@@ -67,6 +93,12 @@ final class SettingsMenuNode: SKNode {
         banNote.position = CGPoint(x: 0, y: y - 24)
         addChild(banNote)
         y -= 76
+
+        if showsPrivacy {
+            addButton(name: "privacyOptions", text: "PRIVACY CHOICES", y: y,
+                      fill: 0x2A2A2A, stroke: 0x777777, textHex: 0xCCCCCC)
+            y -= 52
+        }
 
         #if DEBUG
         // v2.1 DEV SEAMS — runtime, session-only, ANNOUNCED (the run HUD paints
@@ -117,7 +149,7 @@ final class SettingsMenuNode: SKNode {
     /// same number the panel was drawn with, and two copies of that ternary
     /// were one edit away from disagreeing.
     private var panelHeight: CGFloat {
-        var h: CGFloat = showErase ? 396 : 326
+        var h: CGFloat = (showErase ? 396 : 326) + (showsPrivacy ? 52 : 0)
         #if DEBUG
         h += 104   // the two dev rows
         #endif
@@ -196,6 +228,10 @@ final class SettingsMenuNode: SKNode {
                 return nil
             }
         }
+        if showsPrivacy != SettingsMenuNode.privacyRowRequired {
+            refreshPrivacyRow()
+            return nil // consume the tap if a deferred layout change moved a button
+        }
         guard let hit = buttons.first(where: { $0.frame.contains(location) })?.name else {
             let panel = CGRect(x: -Self.panelW / 2, y: -panelHeight / 2,
                                width: Self.panelW, height: panelHeight)
@@ -212,6 +248,9 @@ final class SettingsMenuNode: SKNode {
             setText("bgmToggle", bgmText)
             MusicManager.shared.refresh()   // v2.1: the toggle is live now
             AudioManager.shared.play(.cardSelect)
+            return nil
+        case "privacyOptions":
+            AdConsentCoordinator.shared.presentPrivacyOptions()
             return nil
         case "banToggle":
             presentBanPicker()
