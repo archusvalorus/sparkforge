@@ -323,6 +323,7 @@ ECHO_SCENE_MEMBERS = [          # v2.2 N4 Echo ruling (Oct 13): the beam frame, 
     "    private func updateChaosBeam(_ dt: TimeInterval) {",
     "    private func beamLines(aim: CGPoint) -> [BeamLine] {",
     "    private func beamVolleyEffects(_ verdict: VolleyCounter.Result, lines: [BeamLine], aim: CGPoint) {",
+    "    private func erasureEchoOrigin() -> CGPoint? {",
     "    private func scheduleErasureEcho(direction: CGPoint) {",
 ]
 FIRE_TAIL_START = "        // Modifiers fire only from primary shots — fragments/echoes don't\n"

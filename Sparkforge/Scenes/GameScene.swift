@@ -39,6 +39,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
     private var roomInputLastTime: TimeInterval = -1
     private var roomInputSamples: [[String: Any]] = []
+    private var roomEchoChecksRunning = false
+    private var roomEchoObserver: ((ProjectileNode) -> Void)?
     #endif
 
     private let playerStats = PlayerStats()
@@ -561,7 +563,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-pressure-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-echo-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runEchoChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-pressure-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPressureChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-six-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runSixRoomChecks() }
@@ -4999,6 +5003,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Game Loop
     
     override func update(_ currentTime: TimeInterval) {
+        #if DEBUG
+        if roomEchoChecksRunning { return } // action-clock tests: suppress unrelated combat only
+        #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
         // game-clock forward in a single frame — that used to jump every
@@ -6059,6 +6066,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    private func erasureEchoOrigin() -> CGPoint? {
+        #if DEBUG
+        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+            return rooms.echoOrigin(near: player.position, perimeterUnit: CGFloat.random(in: 0...1))
+        }
+        #endif
+        return PlacementSampler.randomPoint(
+            in: arenaGeometry,
+            minRadius: GameConfig.Arena.radius * 0.85,
+            maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12)
+    }
+
     /// v1.9 Erasure Echo (T4): one ordinary delayed Echo shot — 1.5s later,
     /// from a random arena-edge position, on `direction`, at 50% damage
     /// (`damageScale`, the existing secondary-shot basis), without modifiers
@@ -6079,14 +6098,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 guard let self = self, self.gameState == .playing else { return }
                 // v2.1 (1A, Ruling 3): a Void origin must be valid; the
                 // beam/shot itself pierces reality afterwards.
-                let edge = PlacementSampler.randomPoint(
-                    in: self.arenaGeometry,
-                    minRadius: GameConfig.Arena.radius * 0.85,
-                    maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12)
+                guard let edge = self.erasureEchoOrigin() else { return }
                 self.fireProjectile(direction: echoDir,
                                     originOffset: edge - self.player.position,
                                     damageScale: GameConfig.Erasure.echoFraction,
                                     allowModifiers: false)
+                #if DEBUG
+                if let shot = self.projectiles.last { self.roomEchoObserver?(shot) }
+                #endif
             }
         ]))
     }
@@ -15392,6 +15411,111 @@ extension GameScene {
         check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
         let report:[String:Any] = ["passed":checks.filter{($0["pass"] as? Bool)==true}.count,"failed":checks.filter{($0["pass"] as? Bool)==false}.count,"checks":checks,"scope":"actual encounter constructors/update adapters; RNG endpoints and draw-order differential in host harness; native input separate"]
         if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first {try? data.write(to:dir.appendingPathComponent("arena8-pressure-checks.json"))}
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// Real SKAction timing and real ProjectileNodes. This is an automated
+    /// fixture, not joystick input or an unrestricted-card playthrough.
+    private func runEchoChecks() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom else { return }
+        roomEchoChecksRunning = true
+        physicsWorld.speed = 0
+        var results: [[String: Any]] = []
+        func check(_ id: String, _ value: Bool) { results.append(["id": id, "pass": value]) }
+        let standard = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        for room in rooms.rooms {
+            let inset = room.rect.insetBy(dx: 27, dy: 27)
+            for unit: CGFloat in [0,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1] {
+                let origin = rooms.echoOrigin(near: room.center, perimeterUnit: unit)
+                check("room-\(room.id)-edge-\(unit)", origin.map { p in
+                    rooms.valid(p, radius: 12) && abs(max(abs(p.x-room.center.x), abs(p.y-room.center.y))-153)<0.001 &&
+                    p.x >= inset.minX && p.x <= inset.maxX && p.y >= inset.minY && p.y <= inset.maxY
+                } == true)
+            }
+        }
+        for connection in rooms.connections {
+            let p = connection.center
+            check("corridor-tie-\(connection.from)-\(connection.to)", rooms.roomID(near:p)==min(connection.from,connection.to) && rooms.echoOrigin(near:p,perimeterUnit:0).map { rooms.rooms[min(connection.from,connection.to)].rect.contains($0) } == true)
+        }
+        let normal = GameScene(size: size)
+        let circle = normal.erasureEchoOrigin()
+        check("circle-origin-retains-annulus",circle.map { $0.length >= GameConfig.Arena.radius*0.85-0.001 && $0.length <= GameConfig.Arena.radius*0.85+1.001 } == true)
+        let old = Arena8GameMap.twoRoom
+        check("two-room-sampler-not-replaced",old.echoOrigin(near:old.player,perimeterUnit:0)==nil)
+        var shots: [(origin: CGPoint, direction: CGPoint, multiplier: CGFloat, fragment: Bool, terrain: Bool)] = []
+        roomEchoObserver = { shot in
+            let origin = shot.position
+            _ = shot.move(deltaTime: 0.001)
+            let direction = (shot.position-origin).normalized
+            shot.position = origin
+            shots.append((origin,direction,shot.damageMultiplier,shot.killSource == .fragment,shot.passesTerrain))
+        }
+        let wait = GameConfig.Erasure.echoDelay + 0.35
+        func later(_ body: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline:.now()+wait,execute:body) }
+        func finish() {
+            self.roomEchoObserver = nil
+            check("standard-profile-unchanged",NSDictionary(dictionary:standard).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }))
+            let report: [String: Any] = ["passed": results.filter { ($0["pass"] as? Bool)==true }.count, "failed": results.filter { ($0["pass"] as? Bool)==false }.count, "checks":results,"scope":"real SpriteKit scheduled actions and projectiles; unrelated combat update suppressed; lifecycle direct calls, not native joystick input"]
+            if let data = try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first { try? data.write(to:dir.appendingPathComponent("arena8-echo-checks.json")) }
+        }
+        func title() {
+            shots.removeAll();self.scheduleErasureEcho(direction:CGPoint(x:1,y:0));self.returnToTitle()
+            later { check("title-cancels-retired-echo",shots.isEmpty && !self.hasActions());finish() }
+        }
+        func reset() {
+            shots.removeAll();self.scheduleErasureEcho(direction:CGPoint(x:1,y:0));self.restartGame()
+            later { check("restart-cancels-old-echo",shots.isEmpty && self.waveManager.elapsedTime==0);title() }
+        }
+        func level() {
+            shots.removeAll();self.scheduleErasureEcho(direction:CGPoint(x:1,y:0));self.gameState = .levelUp
+            later { check("levelup-drops-due-echo",shots.isEmpty);self.gameState = .playing;reset() }
+        }
+        func death() {
+            shots.removeAll();self.scheduleErasureEcho(direction:CGPoint(x:1,y:0));self.gameState = .dead
+            later { check("death-drops-due-echo",shots.isEmpty);self.gameState = .playing;level() }
+        }
+        func background() {
+            shots.removeAll();self.scheduleErasureEcho(direction:CGPoint(x:0,y:-1));self.isPaused=true
+            later {
+                check("scene-pause-freezes-delay",shots.isEmpty);self.isPaused=false
+                later { check("scene-resume-fires-once",shots.count==1);death() }
+            }
+        }
+        func menu() {
+            shots.removeAll();self.scheduleErasureEcho(direction:CGPoint(x:1,y:0));self.pauseGame()
+            later { check("menu-consumes-and-drops-due-echo",shots.isEmpty);self.resumeGame();background() }
+        }
+        func beam() {
+            shots.removeAll();self.playerStats.longShotTier=4;self.playerStats.rapidFireTier=5;self.playerStats.fractureTier=2
+            if let scatter = AbilityBehaviors.registry.cards["neutral_6"] {
+                for tier in scatter.tiers.prefix(2) { tier(self.playerStats) }
+            }
+            let lines=self.beamLines(aim:CGPoint(x:1,y:0));let centers=lines.filter { $0.branch.isCenter }
+            check("beam-has-parent-and-fracture-lines",centers.count==3 && lines.count>centers.count)
+            self.beamVolleyEffects(.nothing,lines:lines,aim:CGPoint(x:1,y:0))
+            self.player.position=rooms.connections[0].center
+            later {
+                check("beam-one-echo-per-parent-not-branch",shots.count==centers.count)
+                check("beam-corridor-room-at-fire",shots.allSatisfy { rooms.rooms[0].rect.contains($0.origin) && rooms.valid($0.origin,radius:12) })
+                check("beam-captured-parent-headings",shots.count==centers.count && zip(shots,centers).allSatisfy { ($0.direction-$1.direction).length<0.001 })
+                check("beam-echo-half-basis-no-primary",shots.allSatisfy { abs($0.multiplier-0.5)<0.001 && $0.fragment && $0.terrain })
+                self.playerStats.fractureTier=0;self.playerStats.rapidFireTier=0;menu()
+            }
+        }
+        playerStats.erasureEcho=true;playerStats.longShotTier=0
+        player.position=rooms.rooms[0].center
+        fireProjectile(direction:CGPoint(x:0,y:1))
+        player.position=rooms.rooms[5].center
+        later {
+            check("ordinary-one-delayed-echo",shots.count==1)
+            check("ordinary-room-selected-at-fire",shots.first.map { rooms.rooms[5].rect.contains($0.origin) && rooms.valid($0.origin,radius:12) } == true)
+            check("ordinary-captured-heading",shots.first.map { ($0.direction-CGPoint(x:0,y:1)).length<0.001 } == true)
+            check("ordinary-half-basis-fragment-terrain",shots.first.map { abs($0.multiplier-0.5)<0.001 && $0.fragment && !$0.terrain } == true)
+            beam()
+        }
     }
 }
 #endif

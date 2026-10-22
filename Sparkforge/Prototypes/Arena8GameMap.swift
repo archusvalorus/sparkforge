@@ -101,6 +101,30 @@ struct Arena8GameMap {
         if let room = rooms.first(where: { $0.rect.contains(point) }) { return room.id }
         return rooms.min { $0.center.distance(to: point) < $1.center.distance(to: point) }?.id ?? 0
     }
+    /// Run at delayed Echo firing time. Unit perimeter distance gives equal
+    /// weight per wall length, including exact corners; room ties keep the
+    /// existing authored-order lookup. No world-circle or camera fallback.
+    func echoOrigin(near point: CGPoint, perimeterUnit: CGFloat) -> CGPoint? {
+        guard isSixRoom, point.x.isFinite, point.y.isFinite,
+              perimeterUnit.isFinite, (0...1).contains(perimeterUnit),
+              let room = rooms.first(where: { $0.id == roomID(near: point) }) else { return nil }
+        let fraction = GameConfig.Arena8Game.echoEdgeFraction
+        let rect = room.rect.insetBy(dx: room.rect.width * (1 - fraction) / 2,
+                                     dy: room.rect.height * (1 - fraction) / 2)
+        let distance = perimeterUnit * 2 * (rect.width + rect.height)
+        let origin: CGPoint
+        if distance < rect.width {
+            origin = CGPoint(x: rect.minX + distance, y: rect.minY)
+        } else if distance < rect.width + rect.height {
+            origin = CGPoint(x: rect.maxX, y: rect.minY + distance - rect.width)
+        } else if distance < 2 * rect.width + rect.height {
+            origin = CGPoint(x: rect.maxX - (distance - rect.width - rect.height), y: rect.maxY)
+        } else {
+            origin = CGPoint(x: rect.minX, y: rect.maxY - (distance - 2 * rect.width - rect.height))
+        }
+        return valid(origin, radius: GameConfig.Arena8Game.echoOriginClearance) ? origin : nil
+    }
+
     func neighborhood(near point: CGPoint) -> [Int] {
         let current = roomID(near: point)
         let adjacent = connections.compactMap { $0.from == current ? $0.to : ($0.to == current ? $0.from : nil) }.sorted()

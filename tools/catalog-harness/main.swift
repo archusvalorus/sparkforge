@@ -3294,14 +3294,25 @@ do {
                     && !tickBody.contains("takeDamage") && !tickBody.contains("takeDirectHit") && !tickBody.contains("dealDirectDamage")   // damage lands only through the parents + rider copies
                     && !beamNodeFile.contains("takeDamage") && !beamNodeFile.contains("takeDirectHit") && !beamNodeFile.contains("playerStats") && !beamNodeFile.contains("EnemyNode"))
             // NB6 — the Echo ruling (Brandon, Oct 13: "ordinary echo shot"): the gun and the beam schedule the SAME
-            // ordinary Echo; its body is the pre-ruling inline block, statement for statement.
+            // ordinary Echo; G4 changes only its origin adapter, not the attack ledger.
+            // G4: the room adapter moves only origin selection into a helper.
+            // Census the complete scene minus the one explicit Debug check body;
+            // a new production caller anywhere else still fails. This is not a
+            // blanket DEBUG exclusion (normal preview code is DEBUG too).
+            let echoFixture = SwiftSource.block(in: raw("Sparkforge/Scenes/GameScene.swift"), after: "private func runEchoChecks(")
+            let fixtureText = echoFixture?.text ?? ""
+            let fixtureIsDebug = flat(scene).contains("#if DEBUG extension GameScene { private func runEchoChecks()")
+            func outsideEchoFixture(_ needle: String) -> Int { count(scene, needle) - count(fixtureText, needle) }
+            let originBody = flat(body(scene, "private func erasureEchoOrigin("))
             let echoBody = flat(body(scene, "private func scheduleErasureEcho("))
             let fireBody = flat(body(scene, "private func fireProjectile("))
-            check("NB6 [source-only; the scheduler is executed in the neutral harness as EX0–EX7, and its action-phase `.playing` guard by the separate frame-phase regression EXP1 (N4-R1)] Erasure T4's Echo: ONE shared scheduler holding the pre-ruling block verbatim (1.5 s wait, the `.playing` guard, an edge origin, damageScale = Erasure.echoFraction, allowModifiers: false); the gun calls it only AFTER `guard allowModifiers` (no echo of an echo); the beam calls it once per PARENT lane (centre lines) inside the virtual volley's effects — nowhere else",
-                  echoBody == "direction: CGPoint) { let echoDir = direction run(SKAction.sequence([ SKAction.wait(forDuration: GameConfig.Erasure.echoDelay), SKAction.run { [weak self] in guard let self = self, self.gameState == .playing else { return } let edge = PlacementSampler.randomPoint( in: self.arenaGeometry, minRadius: GameConfig.Arena.radius * 0.85, maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12) self.fireProjectile(direction: echoDir, originOffset: edge - self.player.position, damageScale: GameConfig.Erasure.echoFraction, allowModifiers: false) } ])) }"
+            check("NB6 [source-only; the scheduler is executed in the neutral harness as EX0–EX7, and its action-phase `.playing` guard by the separate frame-phase regression EXP1 (N4-R1)] Erasure T4's Echo: ONE shared scheduler and exact six-only origin helper, preserving the ordinary circle fallback (1.5 s wait, the `.playing` guard, an edge origin, damageScale = Erasure.echoFraction, allowModifiers: false); the gun calls it only AFTER `guard allowModifiers` (no echo of an echo); the beam calls it once per PARENT lane (centre lines) inside the virtual volley's effects — nowhere else",
+                  echoBody == "direction: CGPoint) { let echoDir = direction run(SKAction.sequence([ SKAction.wait(forDuration: GameConfig.Erasure.echoDelay), SKAction.run { [weak self] in guard let self = self, self.gameState == .playing else { return } guard let edge = self.erasureEchoOrigin() else { return } self.fireProjectile(direction: echoDir, originOffset: edge - self.player.position, damageScale: GameConfig.Erasure.echoFraction, allowModifiers: false) #if DEBUG if let shot = self.projectiles.last { self.roomEchoObserver?(shot) } #endif } ])) }"
                     && ordered(fireBody, ["guard allowModifiers else { return }", "if playerStats.erasureEcho { scheduleErasureEcho(direction: direction) }"])
                     && effects.contains("if playerStats.erasureEcho { for line in centres { scheduleErasureEcho(direction: line.direction) } }")
-                    && count(scene, "scheduleErasureEcho(") == 3 && count(scene, "GameConfig.Erasure.echoDelay") == 1 && count(scene, "GameConfig.Erasure.echoFraction") == 1,
+                    && echoFixture != nil && fixtureIsDebug
+                    && originBody == ") -> CGPoint? { #if DEBUG if let rooms = debugRoomIntegration, rooms.isSixRoom { return rooms.echoOrigin(near: player.position, perimeterUnit: CGFloat.random(in: 0...1)) } #endif return PlacementSampler.randomPoint( in: arenaGeometry, minRadius: GameConfig.Arena.radius * 0.85, maxRadius: GameConfig.Arena.radius * 0.85 + 1, margin: 12) }"
+                    && outsideEchoFixture("scheduleErasureEcho(") == 3 && outsideEchoFixture("GameConfig.Erasure.echoDelay") == 1 && outsideEchoFixture("GameConfig.Erasure.echoFraction") == 1,
                   "body \(echoBody.prefix(120))…")
         }
 
