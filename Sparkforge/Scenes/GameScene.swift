@@ -41,6 +41,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomInputSamples: [[String: Any]] = []
     private var roomEchoChecksRunning = false
     private var roomGrowthChecksRunning = false
+    private var roomSummonChecksRunning = false
+    private var roomSummonInputTimer: TimeInterval = 0
+    private var roomSummonInputLaunches = 0
+    private var roomSummonInputEpoch = ""
     private var roomEchoObserver: ((ProjectileNode) -> Void)?
     #endif
 
@@ -564,7 +568,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-growth-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-summons-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runSummonChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-summons-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginSummonInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-growth-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runGrowthChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-growth-input") {
                 // Explicit native-input fixture only; ordinary six-room drafting
@@ -3975,6 +3983,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateNatureMissiles(dt)
         updateCanonTurrets(dt)
         updatePoisonClouds(dt)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-summons-input") {
+            // Selected existing animals only, for repeatable native evidence;
+            // the ordinary capstone roll/cadence remains unchanged elsewhere.
+            updateSummonInput(dt)
+            return
+        }
+        #endif
 
         treeAnimalTimer += dt
         capstoneTimers.set("tree", label: "🌳 NATURE CANON", colorHex: 0x5FCF62,
@@ -4210,6 +4227,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         /// Who it has already gored, so one charge can't grind a single enemy
         /// down frame after frame.
         var struck: Set<ObjectIdentifier> = []
+        #if DEBUG
+        var roomEntry: Arena8SummonRules.PayloadFlight? = nil
+        #endif
+    }
+
+    private func appendNatureMissile(_ missile: NatureMissile) {
+        #if DEBUG
+        if let map = debugRoomIntegration, let rules = Arena8SummonRules(map: map) {
+            var captured = missile
+            let allowance = GameConfig.Arena.radius * 1.2 - GameConfig.Arena.radius
+            captured.roomEntry = rules.payloadFlight(from: missile.body.position, allowance: allowance)
+            natureMissiles.append(captured)
+            return
+        }
+        #endif
+        natureMissiles.append(missile)
     }
 
     private func launchHomingBurst(_ animal: NatureCanon.Animal, at target: CombatTarget) {
@@ -4222,7 +4255,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return 0
         }()
         let heading = (target.position - body.position).normalized
-        natureMissiles.append(NatureMissile(
+        appendNatureMissile(NatureMissile(
             body: body,
             mark: target.node,
             markPad: pad,
@@ -4266,7 +4299,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // on its mark.
             if missile.piercing {
                 goreAlongPath(&missile)
-                if missile.life <= 0 || missile.body.position.length > strayLimit {
+                if missile.life <= 0 || natureMissileOutsideRunBounds(&missile, legacyLimit: strayLimit) {
                     missile.body.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.15),
                                                         SKAction.removeFromParent()]))
                     natureMissiles.remove(at: i)
@@ -4281,7 +4314,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 return missile.body.position.distance(to: mark.position) < arrival + missile.markPad
             }()
 
-            if reached || missile.life <= 0 || missile.body.position.length > strayLimit {
+            if reached || missile.life <= 0 || natureMissileOutsideRunBounds(&missile, legacyLimit: strayLimit) {
                 detonations.append((missile.body.position, missile.damage, missile.radius))
                 missile.body.removeFromParent()
                 natureMissiles.remove(at: i)
@@ -4298,6 +4331,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             showRingPulse(at: hit.point, radius: hit.radius, colorHex: 0xE08A3C)  // fox orange
             showRingPulse(at: hit.point, radius: hit.radius * 0.6, colorHex: 0xF5F0E6)  // white belly
         }
+    }
+
+    /// Preserve the legacy cleanup for circles and the two-room control.
+    private func natureMissileOutsideRunBounds(_ missile: inout NatureMissile, legacyLimit: CGFloat? = nil) -> Bool {
+        #if DEBUG
+        if var entry = missile.roomEntry {
+            let outside = entry.outsideAfterAdvance(to: missile.body.position)
+            missile.roomEntry = entry
+            return outside
+        }
+        // An invalid capture refuses a six-room payload, never reinitializes
+        // from a later Tree/player position or falls back to the world circle.
+        if debugRoomIntegration?.isSixRoom == true { return true }
+        #endif
+        return missile.body.position.length > (legacyLimit ?? GameConfig.Arena.radius * 1.2)
     }
 
     // MARK: 🦌 Deer — "Trample"
@@ -4334,7 +4382,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         var heading = (target.position - body.position).normalized
         if heading == .zero { heading = CGPoint(x: 1, y: 0) }
-        natureMissiles.append(NatureMissile(
+        appendNatureMissile(NatureMissile(
             body: body,
             mark: nil,                       // no steering: it commits to the line
             markPad: 0,
@@ -4715,9 +4763,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // would strand the previous lion forever: still on the field, no longer
         // updated, never despawned.
         guard lionPet == nil else { return }
+        let root = treeNode?.position ?? player.position
+        let canopyOffset = (treeNode?.crownHeight ?? 24) * 0.8
+        var birth = root + CGPoint(x: 0, y: canopyOffset)
+        #if DEBUG
+        if let map = debugRoomIntegration, let rules = Arena8SummonRules(map: map) {
+            guard let safe = rules.lionSpawn(near: root, canopyOffset: canopyOffset,
+                                            bodyRadius: GameConfig.Tree.lionFootprintRadius) else { return }
+            birth = safe
+        }
+        #endif
         let lion = LionNode()
-        lion.position = (treeNode?.position ?? player.position)
-            + CGPoint(x: 0, y: (treeNode?.crownHeight ?? 24) * 0.8)
+        lion.position = birth
         lion.zPosition = 9
         worldNode.addChild(lion)
         lionPet = lion
@@ -5073,7 +5130,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomEchoChecksRunning || roomGrowthChecksRunning { return } // explicit fixtures only
+        if roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -15225,6 +15282,13 @@ extension GameScene {
             if let ghost = terraGhost { sample["ghost"] = ["x":Double(ghost.position.x),"y":Double(ghost.position.y)] }
             sample["nourished"] = player.isNourished
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-summons-input") {
+            sample["summonEpoch"] = roomSummonInputEpoch
+            sample["summonLaunches"] = roomSummonInputLaunches
+            sample["naturePayloads"] = natureMissiles.map { ["x":Double($0.body.position.x),"y":Double($0.body.position.y),"life":$0.life,"boar":$0.piercing,"entered":$0.roomEntry?.enteredNormalBounds ?? false] as [String:Any] }
+            if let tree = treeNode { sample["treeRoot"] = ["x":Double(tree.position.x),"y":Double(tree.position.y)] }
+            if let lion = lionPet { sample["lion"] = ["x":Double(lion.position.x),"y":Double(lion.position.y),"life":lionPetTimer,"safe":rooms.valid(lion.position,radius:GameConfig.Tree.lionFootprintRadius)] as [String:Any] }
+        }
         if let data = try? JSONSerialization.data(withJSONObject: sample, options: [.sortedKeys]),
            let value = String(data: data, encoding: .utf8) {
             view?.isAccessibilityElement = true
@@ -15755,6 +15819,219 @@ extension GameScene {
         check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }))
         let report:[String:Any] = ["passed":results.filter { ($0["pass"] as? Bool)==true }.count,"failed":results.filter { ($0["pass"] as? Bool)==false }.count,"checks":results,"maskComparisons":samples,"maskMismatches":maskErrors,"scope":"actual GameScene handlers/nodes with unrelated combat suppressed; native gesture/render checks separate"]
         if let data = try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]), let dir = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first { try? data.write(to:dir.appendingPathComponent("arena8-growth-checks.json")) }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// Repeat selected, already-existing animals for native evidence, without
+    /// enabling the untested rest of the Nature Canon or changing live rolls.
+    private func beginSummonInput() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom else { return }
+        roomSummonInputEpoch = UUID().uuidString
+        roomSummonInputLaunches = 0; roomSummonInputTimer = 0
+        let root = rooms.rooms[0].center + CGPoint(x:0,y:125)
+        player.position = root; camera?.position = root
+        playerStats.terraZoneRadius = 110
+        _ = plantCultivatedGround(at:root,radius:110)
+        growTree(to:5); playerStats.treeTier = 5
+        let target = EnemyNode(health:10000,moveSpeed:0,xpValue:1)
+        target.name = "arena8SummonTarget"; target.position = rooms.rooms[5].center
+        enemies.append(target); worldNode.addChild(target)
+        spawnLionPet()
+        roomSummonInputTimer = GameConfig.Tree.animalInterval
+        updateSummonInput(0)
+    }
+
+    private func updateSummonInput(_ dt: TimeInterval) {
+        roomSummonInputTimer += dt
+        guard roomSummonInputTimer >= GameConfig.Tree.animalInterval,
+              let target = enemies.first(where: { $0.name == "arena8SummonTarget" && !$0.isDying }) else { return }
+        roomSummonInputTimer = 0
+        let id = roomSummonInputLaunches.isMultiple(of:2) ? "fox" : "boar"
+        guard let animal = NatureCanon.roster.first(where: { $0.id == id }) else { return }
+        if id == "fox" { launchHomingBurst(animal,at:.enemy(target)) }
+        else { launchGore(animal,at:.enemy(target)) }
+        roomSummonInputLaunches += 1
+    }
+
+    /// Real Scene/Tree/missile/lion implementations. Explicit test-only update
+    /// suppression isolates these assertions from waves and ordinary autofire.
+    private func runSummonChecks() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom,
+              let fox = NatureCanon.roster.first(where: { $0.id == "fox" }),
+              let boar = NatureCanon.roster.first(where: { $0.id == "boar" }) else { return }
+        roomSummonChecksRunning = true
+        physicsWorld.speed = 0
+        var results: [[String:Any]] = []
+        var diagnostics: [[String:Any]] = []
+        func near(_ a:CGPoint,_ b:CGPoint) -> Bool { a.distance(to:b)<0.001 }
+        var retiring: [SKNode] = []
+        func check(_ id:String,_ pass:Bool) { results.append(["id":id,"pass":pass]) }
+        let saved = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        func clear() {
+            natureMissiles.forEach { $0.body.removeFromParent() }; natureMissiles.removeAll()
+            lionPet?.removeFromParent(); lionPet = nil; lionPetTimer = 0; lionMaulCooldown = 0
+            enemies.forEach { $0.removeFromParent() }; enemies.removeAll()
+            treeNode?.removeFromParent(); treeNode = nil
+            cultivatedZones.forEach { $0.removeFromParent() }; cultivatedZones.removeAll()
+        }
+        func tree(at root:CGPoint) {
+            let node = TreeNode();node.setTier(5);node.position = root
+            worldNode.addChild(node);treeNode = node
+        }
+        func mark(at point:CGPoint) -> EnemyNode {
+            let node = EnemyNode(health:10000,moveSpeed:0,xpValue:1);node.position = point
+            worldNode.addChild(node);enemies.append(node);return node
+        }
+        check("memory-only-preview",GameRunPreferences.isIsolated)
+        for room in rooms.rooms {
+            clear()
+            let root = room.center + CGPoint(x:0,y:125)
+            tree(at:root)
+            let target = mark(at:room.center-CGPoint(x:0,y:100))
+            launchHomingBurst(fox,at:.enemy(target))
+            guard let first = natureMissiles.first else {check("room\(room.id)-fox-launch",false);continue}
+            let origin = root+CGPoint(x:0,y:treeNode?.crownHeight ?? 0)
+            check("room\(room.id)-fox-original-crown-damage-life",near(first.body.position,origin) && first.life == GameConfig.NatureCanon.foxLifetime && first.damage == canonDamage(GameConfig.NatureCanon.foxImpactMult) && !first.piercing && first.mark === target)
+            diagnostics.append(["room":room.id,"foxActualX":Double(first.body.position.x),"foxActualY":Double(first.body.position.y),"expectedCrownX":Double(origin.x),"expectedCrownY":Double(origin.y),"life":first.life,"damage":first.damage,"expectedDamage":canonDamage(GameConfig.NatureCanon.foxImpactMult),"markMatches":first.mark === target])
+            let captured = first.roomEntry
+            let normal = captured?.normalBounds
+            let envelope = captured?.launchEnvelope
+            player.position = rooms.rooms[(room.id+1)%6].center
+            treeNode?.position = player.position; camera?.position = player.position
+            target.position.x += 20
+            updateNatureMissiles(1.0/60)
+            check("room\(room.id)-fox-first-step-survives",natureMissiles.count == 1)
+            check("room\(room.id)-capture-does-not-follow-tree-player-camera",natureMissiles.first?.roomEntry?.normalBounds == normal && natureMissiles.first?.roomEntry?.launchEnvelope == envelope)
+            check("room\(room.id)-fox-life-decreases-not-reset",natureMissiles.first.map { abs($0.life-(GameConfig.NatureCanon.foxLifetime-1.0/60))<0.000001 } == true)
+            if let limits = normal, origin.y > limits.maxY, !natureMissiles.isEmpty {
+                check("room\(room.id)-outside-crown-gets-entry-only",natureMissiles[0].roomEntry?.enteredNormalBounds == false)
+                natureMissiles[0].body.position = CGPoint(x:root.x,y:limits.maxY-1)
+                updateNatureMissiles(0)
+                check("room\(room.id)-entry-arms-cleanup",natureMissiles.first?.roomEntry?.enteredNormalBounds == true)
+                natureMissiles[0].body.position = origin
+                updateNatureMissiles(0)
+                check("room\(room.id)-reexit-retires-fox",natureMissiles.isEmpty)
+            }
+            natureMissiles.forEach { $0.body.removeFromParent() }; natureMissiles.removeAll()
+            treeNode?.position = root
+            launchGore(boar,at:.enemy(target))
+            check("room\(room.id)-boar-original-crown-damage-life",natureMissiles.first.map { near($0.body.position,origin) && $0.life==GameConfig.NatureCanon.boarLifetime && $0.damage==canonDamage(GameConfig.NatureCanon.boarDamageMult) && $0.piercing && $0.mark==nil } == true)
+            updateNatureMissiles(1.0/60)
+            check("room\(room.id)-boar-first-step-survives",natureMissiles.count == 1)
+            // Actual ledger: even revisiting the same target cannot gore twice.
+            if !natureMissiles.isEmpty {
+                natureMissiles[0].body.position = room.center
+                target.position = room.center
+                let hp = target.health,damage = natureMissiles[0].damage
+                updateNatureMissiles(0)
+                check("room\(room.id)-boar-first-gore-original-damage",target.health == hp-damage && natureMissiles.first?.struck.contains(ObjectIdentifier(target)) == true)
+                let after = target.health
+                target.position = room.center
+                updateNatureMissiles(0)
+                check("room\(room.id)-boar-ledger-once",target.health == after)
+                retiring.append(natureMissiles[0].body)
+                natureMissiles[0].life = 0.001
+                updateNatureMissiles(0.002)
+                check("room\(room.id)-boar-original-expiry",natureMissiles.isEmpty)
+            }
+            launchHomingBurst(fox,at:.enemy(target))
+            if !natureMissiles.isEmpty {
+                natureMissiles[0].body.position = room.center
+                let heading = natureMissiles[0].heading
+                target.removeFromParent()
+                updateNatureMissiles(0.01)
+                check("room\(room.id)-dead-mark-coasts-original-ttl",natureMissiles.count==1 && natureMissiles[0].heading==heading && abs(natureMissiles[0].life-(GameConfig.NatureCanon.foxLifetime-0.01))<0.000001)
+                if !natureMissiles.isEmpty {natureMissiles[0].life=0.001;updateNatureMissiles(0.002)}
+                check("room\(room.id)-dead-mark-expiry-cleans",natureMissiles.isEmpty)
+            }
+            enemies.removeAll()
+            treeNode?.position = root
+            let preferred = root+CGPoint(x:0,y:(treeNode?.crownHeight ?? 24)*0.8)
+            spawnLionPet()
+            let born = lionPet
+            check("room\(room.id)-lion-valid-birth",born.map { rooms.valid($0.position,radius:GameConfig.Tree.lionFootprintRadius) } == true)
+            let expected = rooms.valid(preferred,radius:GameConfig.Tree.lionFootprintRadius) ? preferred : root
+            diagnostics.append(["room":room.id,"lionActualX":Double(born?.position.x ?? -99999),"lionActualY":Double(born?.position.y ?? -99999),"lionExpectedX":Double(expected.x),"lionExpectedY":Double(expected.y)])
+            check("room\(room.id)-lion-preserve-or-root-fallback",born.map { near($0.position,expected) } == true)
+            let timer = lionPetTimer
+            spawnLionPet()
+            check("room\(room.id)-one-lion-no-timer-reset",lionPet === born && lionPetTimer == timer && timer == GameConfig.Tree.lionDuration)
+            if let born {
+                let prey = mark(at:born.position+CGPoint(x:10,y:0))
+                let hp = prey.health
+                let damage = Int(playerStats.effectiveAttack*GameConfig.Tree.lionMaulMult)
+                updateLionPet(0)
+                check("room\(room.id)-lion-original-maul",prey.health == hp-damage)
+                let after = prey.health
+                updateLionPet(0.01)
+                check("room\(room.id)-lion-cooldown-not-every-frame",prey.health == after)
+                for _ in 0..<(Int(ceil(GameConfig.Tree.lionMaulInterval/0.01))+1) { updateLionPet(0.01) }
+                check("room\(room.id)-lion-next-maul-original-interval",prey.health == hp-2*damage)
+                check("room\(room.id)-lion-stalking-remains-safe",rooms.valid(born.position,radius:GameConfig.Tree.lionFootprintRadius))
+                retiring.append(born)
+                lionPetTimer = 0.001
+                updateLionPet(0.002)
+                check("room\(room.id)-lion-original-expiry",lionPet == nil)
+            }
+        }
+        clear()
+        let connection = rooms.connections[0]
+        tree(at:connection.center)
+        spawnLionPet()
+        if let lion = lionPet {
+            lion.position = connection.center
+            let direction = (rooms.rooms[connection.to].center-rooms.rooms[connection.from].center).normalized
+            let across = CGPoint(x:-direction.y,y:direction.x)
+            _ = mark(at:connection.center-direction*130+across*150)
+            let before = lion.position
+            updateLionPet(0.01)
+            check("occluded-lion-stalk-does-not-add-pathfinding",lion.position == before)
+        }
+        for context: Arena8GameMap? in [nil,.twoRoom] {
+            let normal = GameScene(size:size)
+            normal.debugRoomIntegration = context
+            let t = TreeNode();t.setTier(5);t.position = CGPoint(x:100,y:100);normal.treeNode = t
+            normal.spawnLionPet()
+            check("legacy-lion-birth-\(context == nil ? "circle":"two")",normal.lionPet.map { near($0.position,t.position+CGPoint(x:0,y:t.crownHeight*0.8)) } == true)
+            let body = SKNode()
+            var payload = NatureMissile(body:body,mark:nil,markPad:0,heading:CGPoint(x:1,y:0),life:2,damage:1,radius:1,piercing:true,shoveForce:0)
+            normal.appendNatureMissile(payload)
+            check("legacy-entry-not-captured",normal.natureMissiles.first?.roomEntry == nil)
+            body.position = CGPoint(x:GameConfig.Arena.radius*1.2-1,y:0)
+            check("legacy-inside-rim",!normal.natureMissileOutsideRunBounds(&payload))
+            body.position.x += 2
+            check("legacy-circle-cleanup-retained",normal.natureMissileOutsideRunBounds(&payload))
+        }
+        clear()
+        let root = rooms.rooms[0].center
+        tree(at:root)
+        let target = mark(at:root+CGPoint(x:100,y:0))
+        launchHomingBurst(fox,at:.enemy(target));spawnLionPet()
+        gameState = .playing
+        pauseGame()
+        let life = natureMissiles.first?.life, petLife = lionPetTimer
+        let entry = natureMissiles.first?.roomEntry?.enteredNormalBounds
+        roomSummonChecksRunning = false
+        update(100);update(100.05)
+        roomSummonChecksRunning = true
+        check("pause-freezes-payload-entry-and-lion-clock",natureMissiles.first?.life == life && lionPetTimer == petLife && natureMissiles.first?.roomEntry?.enteredNormalBounds == entry)
+        resumeGame()
+        let activeBodies = natureMissiles.map(\.body)
+        let activeLion = lionPet
+        restartGame()
+        check("restart-removes-live-entry-payloads-and-lion",natureMissiles.isEmpty && lionPet == nil && activeBodies.allSatisfy { $0.parent == nil } && activeLion?.parent == nil && treeNode == nil)
+        // Keep real SKActions active while checking the original fade cleanup.
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.5) { [weak self] in
+            guard let self else { return }
+            check("retired-boar-lion-fades-remove-nodes",retiring.allSatisfy { $0.parent == nil })
+            check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }))
+            let report:[String:Any] = ["passed":results.filter { ($0["pass"] as? Bool)==true }.count,"failed":results.filter { ($0["pass"] as? Bool)==false }.count,"checks":results,"diagnostics":diagnostics,"scope":"actual Tree/fox/boar/lion handlers, entry snapshots, ledger/cooldown and action cleanup; native input separate"]
+            if let data = try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first { try? data.write(to:dir.appendingPathComponent("arena8-summons-checks.json")) }
+            _ = self // retained scene is deliberately the completed fixture
+        }
     }
 }
 #endif
