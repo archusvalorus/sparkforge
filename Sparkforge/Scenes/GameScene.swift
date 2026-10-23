@@ -42,6 +42,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomEchoChecksRunning = false
     private var roomGrowthChecksRunning = false
     private var roomSummonChecksRunning = false
+    private var roomPandaChecksRunning = false
+    private var roomPandaInputEpoch = ""
+    private var roomPandaInputCorrections = 0
     private var roomSummonInputTimer: TimeInterval = 0
     private var roomSummonInputLaunches = 0
     private var roomSummonInputEpoch = ""
@@ -568,7 +571,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-summons-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runPandaEndpointChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginPandaEndpointInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-summons-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runSummonChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-summons-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginSummonInput() }
@@ -3851,7 +3858,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             for e in enemies where !e.isDying
                 && e.position.distance(to: here) < GameConfig.Panda.aggroRadius {
                 let pull = (here - e.position).normalized * GameConfig.Panda.aggroPull * CGFloat(dt)
-                e.position += pull
+                let desired = e.position + pull
+                #if DEBUG
+                if let rooms = debugRoomIntegration, rooms.isSixRoom, e.geometryFootprintRadius > 0 {
+                    e.position = Arena8PandaEndpoints(map: rooms)?.resolved(from: e.position, toward: desired,
+                                                                          radius: e.geometryFootprintRadius) ?? e.position
+                    if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-input"),
+                       e.position.distance(to: desired) > 0.001 { roomPandaInputCorrections += 1 }
+                } else { e.position = desired }
+                #else
+                e.position = desired
+                #endif
             }
             return false
 
@@ -3872,8 +3889,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             victim.applyStun(0.3)
             // v2.1 (1A, Ruling 6): the pin may cross geometry; the pinned
             // actor's resolved destination must be outside the footprint.
+            #if DEBUG
+            if let rooms = debugRoomIntegration, rooms.isSixRoom, victim.geometryFootprintRadius > 0 {
+                victim.position = Arena8PandaEndpoints(map: rooms)?.resolved(from: victim.position,
+                    toward: panda.node.position, radius: victim.geometryFootprintRadius) ?? victim.position
+            } else {
+                victim.position = arenaGeometry.resolve(panda.node.position,
+                                                        actorRadius: victim.geometryFootprintRadius)
+            }
+            #else
             victim.position = arenaGeometry.resolve(panda.node.position,
                                                     actorRadius: victim.geometryFootprintRadius)
+            #endif
             return false
 
         case .nap:
@@ -5130,7 +5157,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning { return } // explicit fixtures only
+        if roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -15282,6 +15309,14 @@ extension GameScene {
             if let ghost = terraGhost { sample["ghost"] = ["x":Double(ghost.position.x),"y":Double(ghost.position.y)] }
             sample["nourished"] = player.isNourished
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-input") {
+            sample["pandaEndpointEpoch"] = roomPandaInputEpoch
+            sample["pandaCorrections"] = roomPandaInputCorrections
+            sample["pandaCount"] = pandas.count
+            sample["pandaActors"] = enemies.filter { $0.name == "arena8PandaEndpointActor" }.map {
+                ["x":Double($0.position.x),"y":Double($0.position.y),"safe":rooms.valid($0.position,radius:$0.geometryFootprintRadius)] as [String:Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-summons-input") {
             sample["summonEpoch"] = roomSummonInputEpoch
             sample["summonLaunches"] = roomSummonInputLaunches
@@ -16032,6 +16067,147 @@ extension GameScene {
             if let data = try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir = FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first { try? data.write(to:dir.appendingPathComponent("arena8-summons-checks.json")) }
             _ = self // retained scene is deliberately the completed fixture
         }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func runPandaEndpointChecks() {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom else { return }
+        roomPandaChecksRunning = true; physicsWorld.speed = 0
+        var results: [[String:Any]] = []
+        func check(_ name:String,_ yes:Bool) { results.append(["id":name,"pass":yes]) }
+        func near(_ a:CGPoint,_ b:CGPoint) -> Bool { a.distance(to:b)<0.001 }
+        func clear() { enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll() }
+        func actor(_ p:CGPoint,_ scale:CGFloat) -> EnemyNode {
+            let e=EnemyNode(health:100000,moveSpeed:0,xpValue:1);e.setScale(scale);e.position=p
+            enemies.append(e);worldNode.addChild(e);return e
+        }
+        func visitor(_ act:PandaAct,_ p:CGPoint) -> Panda {
+            let node=PandaNode();node.position=p;worldNode.addChild(node)
+            return Panda(node:node,act:act,phase:.acting,timer:10,destination:p)
+        }
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        for room in rooms.rooms { for scale:CGFloat in [1,1.5,2] {
+            clear()
+            let e=actor(room.center,scale);let radius=e.geometryFootprintRadius
+            let start=CGPoint(x:room.rect.maxX-radius-3,y:room.rect.maxY-radius-10)
+            e.position=start
+            var panda=visitor(.aggro,start+CGPoint(x:100,y:0))
+            let raw=start+CGPoint(x:GameConfig.Panda.aggroPull,y:0)
+            check("r\(room.id)-s\(scale)-setup-embeds",rooms.valid(start,radius:radius) && !rooms.valid(raw,radius:radius))
+            let health=e.health
+            _=runPandaAct(&panda,dt:1)
+            check("r\(room.id)-s\(scale)-aggro-immediate-safe",rooms.valid(e.position,radius:radius))
+            check("r\(room.id)-s\(scale)-aggro-projects-actual-body",Arena8GardenFootprint.placementRoot(in:rooms,toward:raw,clearance:radius).map{near($0,e.position)}==true)
+            check("r\(room.id)-s\(scale)-aggro-no-damage-or-timer-change",e.health==health && panda.timer==10)
+            var safe=true
+            for _ in 0..<60 { _=runPandaAct(&panda,dt:1.0/60);safe = safe && rooms.valid(e.position,radius:radius) }
+            check("r\(room.id)-s\(scale)-repeated-pull-safe-each-act",safe)
+            panda.node.removeFromParent()
+            var pin=visitor(.pin,CGPoint(x:room.rect.maxX+100,y:room.rect.maxY+100));pin.followMark=e
+            _=runPandaAct(&pin,dt:1.0/60)
+            check("r\(room.id)-s\(scale)-pin-immediate-safe",rooms.valid(e.position,radius:radius))
+            check("r\(room.id)-s\(scale)-pin-clearance-match",Arena8GardenFootprint.placementRoot(in:rooms,toward:pin.node.position,clearance:radius).map{near($0,e.position)}==true)
+            check("r\(room.id)-s\(scale)-pin-no-damage-or-timer-change",e.health==health && pin.timer==10)
+            pin.node.removeFromParent()
+        }}
+        clear()
+        let e=actor(rooms.rooms[0].center,1)
+        let across=rooms.rooms[4].center
+        var pin=visitor(.pin,across);pin.followMark=e
+        check("pin-setup-crosses-solid-wall",rooms.geometry.segmentBlockedExact(e.position,across))
+        _=runPandaAct(&pin,dt:1.0/60)
+        check("pin-valid-cross-wall-destination-preserved",near(e.position,across))
+        pin.node.removeFromParent()
+        // Aggro's travel exemption also remains endpoint-only. The unusually
+        // large direct-call dt isolates travel semantics, not a normal frame.
+        let from=CGPoint(x:rooms.rooms[0].rect.maxX-30,y:rooms.rooms[0].center.y+130)
+        let to=CGPoint(x:rooms.rooms[1].rect.minX+30,y:from.y)
+        e.position=from
+        var pull=visitor(.aggro,from+CGPoint(x:120,y:0))
+        check("aggro-setup-crosses-solid-wall",rooms.geometry.segmentBlockedExact(from,to) && rooms.valid(to,radius:e.geometryFootprintRadius))
+        _=runPandaAct(&pull,dt:Double(to.x-from.x)/Double(GameConfig.Panda.aggroPull))
+        check("aggro-valid-cross-wall-destination-preserved",near(e.position,to))
+        pull.node.removeFromParent()
+        for connection in rooms.connections {
+            clear()
+            let corridorActor=actor(connection.center,1)
+            var corridorPin=visitor(.pin,connection.center+CGPoint(x:80,y:80));corridorPin.followMark=corridorActor
+            _=runPandaAct(&corridorPin,dt:0.05)
+            check("corridor-\(connection.from)-\(connection.to)-pin-safe",rooms.valid(corridorActor.position,radius:corridorActor.geometryFootprintRadius))
+            corridorPin.node.removeFromParent()
+        }
+        clear()
+        let exempt=actor(rooms.rooms[0].center,1);exempt.geometryFootprintOverride=0
+        var exemptPull=visitor(.aggro,exempt.position+CGPoint(x:60,y:0))
+        let exemptExpected=exempt.position+CGPoint(x:GameConfig.Panda.aggroPull*0.05,y:0)
+        _=runPandaAct(&exemptPull,dt:0.05)
+        check("zero-footprint-aggro-keeps-original-path",near(exempt.position,exemptExpected))
+        exemptPull.node.removeFromParent()
+        var exemptPin=visitor(.pin,CGPoint(x:rooms.world.maxX+100,y:0));exemptPin.followMark=exempt
+        let exemptPinExpected=arenaGeometry.resolve(exemptPin.node.position,actorRadius:0)
+        _=runPandaAct(&exemptPin,dt:0.05)
+        check("zero-footprint-pin-keeps-original-path",near(exempt.position,exemptPinExpected))
+        exemptPin.node.removeFromParent();clear()
+        let live=actor(rooms.rooms[0].center,1)
+        let held=live.position
+        var missing=visitor(.pin,rooms.rooms[0].center);missing.followMark=live
+        enemies.removeAll()
+        check("pin-missing-mark-ends-without-mutation",runPandaAct(&missing,dt:0.05) && near(live.position,held))
+        enemies.append(live);_=live.takeDamage(1000000)
+        check("pin-dead-mark-ends-without-mutation",runPandaAct(&missing,dt:0.05) && near(live.position,held))
+        missing.node.removeFromParent();clear()
+        for context in [Arena8GameMap?.none,Arena8GameMap.twoRoom] {
+            let normal=GameScene(size:size);normal.debugRoomIntegration=context;normal.arenaGeometry=context?.geometry ?? .open
+            let target=EnemyNode(health:100,moveSpeed:0,xpValue:1);target.position=CGPoint(x:0,y:150);normal.enemies=[target]
+            let node=PandaNode();node.position=CGPoint(x:0,y:200)
+            var p=Panda(node:node,act:.aggro,phase:.acting,timer:3,destination:node.position)
+            let expected=target.position+CGPoint(x:0,y:GameConfig.Panda.aggroPull*0.05)
+            _=normal.runPandaAct(&p,dt:0.05)
+            check("legacy-aggro-unchanged",near(target.position,expected))
+            p=Panda(node:node,act:.pin,phase:.acting,timer:3,destination:node.position);p.followMark=target
+            let expectedPin=normal.arenaGeometry.resolve(node.position,actorRadius:target.geometryFootprintRadius)
+            _=normal.runPandaAct(&p,dt:0.05)
+            check("legacy-pin-unchanged",near(target.position,expectedPin))
+        }
+        clear()
+        let root=rooms.rooms[0].center
+        let target=actor(root,1);let active=visitor(.aggro,root+CGPoint(x:100,y:0));pandas=[active];playerStats.pandaTier=1;pandaArrivalTimer = -10000
+        gameState = .playing;pauseGame();let before=target.position
+        roomPandaChecksRunning=false;update(100);update(100.05);roomPandaChecksRunning=true
+        check("pause-freezes-acts",near(before,target.position))
+        resumeGame();let node=active.node
+        restartGame()
+        check("restart-clears-pandas-and-clock",pandas.isEmpty && node.parent==nil && pandaArrivalTimer==0 && napHealAccumulator==0)
+        check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
+        let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results,"scope":"actual Panda aggro/pin immediate endpoints; explicit acts, native inputs separate"]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first {try? data.write(to:dir.appendingPathComponent("arena8-panda-endpoints-checks.json"))}
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func beginPandaEndpointInput() {
+        guard let rooms=debugRoomIntegration,rooms.isSixRoom else { return }
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        roomPandaInputEpoch=UUID().uuidString;roomPandaInputCorrections=0
+        let room=rooms.rooms[0]
+        player.position=room.center;camera?.position=player.position
+        let enemy=EnemyNode(health:100000,moveSpeed:0,xpValue:1)
+        let radius=enemy.geometryFootprintRadius
+        enemy.name="arena8PandaEndpointActor"
+        enemy.position=CGPoint(x:room.rect.maxX-radius-1,y:room.rect.maxY-radius-10)
+        enemies.append(enemy);worldNode.addChild(enemy)
+        let node=PandaNode();node.position=enemy.position+CGPoint(x:100,y:0);worldNode.addChild(node)
+        // Selected existing act with extended fixture presence; production act
+        // selection and durations are unchanged. The Panda may be inside a
+        // wall as spectacle; its grounded victim may not remain embedded.
+        pandas=[Panda(node:node,act:.aggro,phase:.acting,timer:1000,destination:node.position)]
+        playerStats.pandaTier=1;pandaArrivalTimer = -10000
     }
 }
 #endif
