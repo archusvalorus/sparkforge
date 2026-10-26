@@ -44,6 +44,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomSummonChecksRunning = false
     private var roomPandaChecksRunning = false
     private var roomVoidChecksRunning = false
+    private var roomSentryChecksRunning = false
+    private var roomSentryInputEpoch = ""
     private var roomVoidInputEpoch = ""
     private var roomVoidInputBirths = 0
     private var roomVoidInputTimer: TimeInterval = 0
@@ -575,7 +577,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runSentryChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginSentryInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runVoidPlacementChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginVoidPlacementInput() }
@@ -5165,7 +5171,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -9229,14 +9235,36 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // is arena-wide regardless.
             sentryCoils.forEach { $0.node.removeFromParent() }
             sentryCoils.removeAll()
-            let centre = arenaGeometry.resolve(.zero, actorRadius: 22)
+            let centre: CGPoint
+            #if DEBUG
+            if let map = debugRoomIntegration, map.isSixRoom {
+                guard let safe = Arena8SentryPlacement(map: map)?.center(at: .zero, clearance: 22) else { return }
+                centre = safe
+            } else { centre = arenaGeometry.resolve(.zero, actorRadius: 22) }
+            #else
+            centre = arenaGeometry.resolve(.zero, actorRadius: 22)
+            #endif
             geometryDebug.recordResolve(actor: "coil", cause: .teleport)
             addSentryCoil(at: centre, network: true)
             showRingPulse(at: centre, radius: 120, colorHex: 0xFFE066)
             return
         }
         while sentryCoils.count < tier {
+            #if DEBUG
+            if let map = debugRoomIntegration, map.isSixRoom {
+                let S = GameConfig.Shock.self
+                guard let safe = Arena8SentryPlacement(map: map)?.nearSpark(
+                    existing: sentryCoils.map { $0.node.position }, spacing: S.sentrySpacing,
+                    nextCandidate: {
+                        let angle = CGFloat.random(in: 0..<(2 * .pi))
+                        let reach = CGFloat.random(in: S.sentryPlaceMin...S.sentryPlaceMax)
+                        return self.player.position + CGPoint(x: cos(angle) * reach, y: sin(angle) * reach)
+                    }) else { break }
+                addSentryCoil(at: safe, network: false)
+            } else { addSentryCoil(at: sentryPlacement(), network: false) }
+            #else
             addSentryCoil(at: sentryPlacement(), network: false)
+            #endif
         }
     }
 
@@ -15342,6 +15370,13 @@ extension GameScene {
             if let ghost = terraGhost { sample["ghost"] = ["x":Double(ghost.position.x),"y":Double(ghost.position.y)] }
             sample["nourished"] = player.isNourished
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-input") {
+            sample["sentryEpoch"] = roomSentryInputEpoch
+            sample["sentryCoils"] = sentryCoils.map {
+                ["x": Double($0.node.position.x), "y": Double($0.node.position.y),
+                 "timer": $0.timer, "safe": rooms.valid($0.node.position, radius: 16)] as [String: Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-input") {
             sample["voidEpoch"] = roomVoidInputEpoch
             sample["voidBirths"] = roomVoidInputBirths
@@ -16414,6 +16449,81 @@ extension GameScene {
         let oldID=nextVoidWellID
         spawnVoidWell(presets[roomVoidInputBirths%presets.count],at:point)
         if nextVoidWellID>oldID{roomVoidInputBirths += 1}
+    }
+}
+#endif
+#if DEBUG
+extension GameScene {
+    private func beginSentryInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        player.position=map.rooms[2].center;camera?.position=player.position
+        clearShockSystems();playerStats.lightningSentryTier=3
+        roomSentryInputEpoch=UUID().uuidString
+        updateSentryCoils(0)
+    }
+    private func runSentryChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomSentryChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func clear(){clearShockSystems();enemies.forEach{$0.removeFromParent()};enemies.removeAll()}
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        let points=map.rooms.map(\.center)+map.connections.map(\.center)+map.rooms.flatMap{[CGPoint(x:$0.rect.minX+20,y:$0.rect.maxY-20),CGPoint(x:$0.rect.maxX-20,y:$0.rect.minY+20)]}
+        for (i,p) in points.enumerated(){for tier in 1...3 {
+            clear();player.position=p;playerStats.lightningSentryTier=tier;updateSentryCoils(0)
+            check("placement-\(i)-tier\(tier)-count",sentryCoils.count==tier && sentryDeployedTier==tier)
+            check("placement-\(i)-tier\(tier)-safe-stored-roots",sentryCoils.allSatisfy{map.valid($0.node.position,radius:16)})
+            check("placement-\(i)-tier\(tier)-timer-zero",sentryCoils.allSatisfy{$0.timer==0})
+            if map.rooms.contains(where:{$0.center==p}) {
+                check("room-center-placement-near-Spark",sentryCoils.allSatisfy{$0.node.position.distance(to:p)<=GameConfig.Shock.sentryPlaceMax+0.001})
+            }
+        }}
+        clear();player.position=map.rooms[2].center;playerStats.lightningSentryTier=1;updateSentryCoils(0)
+        let first=sentryCoils[0].node;playerStats.lightningSentryTier=3;updateSentryCoils(0)
+        check("tier-growth-keeps-existing-coil",sentryCoils.count==3 && sentryCoils[0].node===first)
+        let old=sentryCoils.map(\.node);playerStats.lightningSentryTier=4;updateSentryCoils(0)
+        let expected=Arena8SentryPlacement(map:map)?.center(at:.zero,clearance:22)
+        check("network-merges-three-to-one",sentryCoils.count==1 && old.allSatisfy{$0.parent==nil})
+        check("network-central-safe-anchor",sentryCoils.first.map{map.valid($0.node.position,radius:22) && expected.map{$0.distance(to:sentryCoils[0].node.position)<0.001}==true}==true)
+        let stable=sentryCoils[0].node;updateSentryCoils(0)
+        check("same-tier-does-not-redeploy",sentryCoils.count==1 && sentryCoils[0].node===stable)
+        // Controlled target confirms real damage, cadence and network wall exemption.
+        let target=EnemyNode(health:100000,moveSpeed:0,xpValue:1);target.position=map.rooms[5].center;worldNode.addChild(target);enemies=[target]
+        let hp=target.health;let fraction=playerStats.shotFractionDamage(GameConfig.Shock.networkDamageFraction)
+        updateSentryCoils(GameConfig.Shock.networkInterval-0.001)
+        check("network-not-before-interval",target.health==hp)
+        updateSentryCoils(0.002)
+        check("network-global-damage-and-reset",target.health==hp-fraction && sentryCoils[0].timer==0)
+        clear();playerStats.lightningSentryTier=1;addSentryCoil(at:map.rooms[0].center,network:false);sentryDeployedTier=1
+        let nearby=EnemyNode(health:100000,moveSpeed:0,xpValue:1);nearby.position=map.rooms[0].center+CGPoint(x:40,y:0);worldNode.addChild(nearby);enemies=[nearby]
+        let before=nearby.health;updateSentryCoils(GameConfig.Shock.sentryInterval)
+        check("ordinary-visible-target-damage",nearby.health==before-playerStats.shotFractionDamage(GameConfig.Shock.sentryDamageFraction))
+        // Put a target close across a solid room wall; unchanged sight rule must block it.
+        clear();let room=map.rooms[0];let origin=CGPoint(x:room.rect.maxX-20,y:room.rect.maxY-70)
+        addSentryCoil(at:origin,network:false);sentryDeployedTier=1;playerStats.lightningSentryTier=1
+        let blocked=EnemyNode(health:100000,moveSpeed:0,xpValue:1);blocked.position=CGPoint(x:room.rect.maxX+25,y:origin.y);worldNode.addChild(blocked);enemies=[blocked]
+        check("blocked-target-fixture-crosses-wall",arenaGeometry.segmentBlockedExact(origin,blocked.position,travelRadius:GameConfig.Geometry.arcTravelRadius))
+        let blockedHP=blocked.health;updateSentryCoils(GameConfig.Shock.sentryInterval)
+        check("ordinary-wall-occlusion-retained",blocked.health==blockedHP && sentryCoils[0].timer>=GameConfig.Shock.sentryInterval)
+        clear();player.position=map.rooms[2].center;playerStats.lightningSentryTier=3;updateSentryCoils(0)
+        gameState = .playing;pauseGame();let timers=sentryCoils.map(\.timer);let roots=sentryCoils.map{$0.node.position}
+        roomSentryChecksRunning=false;update(100);update(100.05);roomSentryChecksRunning=true
+        check("pause-freezes-coils",sentryCoils.map(\.timer)==timers && sentryCoils.map{$0.node.position}==roots)
+        resumeGame();let nodes=sentryCoils.map(\.node);restartGame()
+        check("restart-clears-coil-state",sentryCoils.isEmpty && sentryDeployedTier==0 && nodes.allSatisfy{$0.parent==nil})
+        for useRooms in [false,true]{
+            let control=GameScene(size:size);if useRooms{control.debugRoomIntegration = .twoRoom};control.setupArena();control.setupPlayer()
+            control.playerStats.lightningSentryTier=3;control.updateSentryCoils(0)
+            check("legacy-circle-two-room-placement",control.sentryCoils.count==3 && control.sentryCoils.allSatisfy{$0.node.position.length<=GameConfig.Arena.radius-30+0.001})
+            control.playerStats.lightningSentryTier=4;control.updateSentryCoils(0)
+            let expected=control.arenaGeometry.resolve(.zero,actorRadius:22)
+            check("legacy-central-anchor",control.sentryCoils.count==1 && control.sentryCoils[0].node.position.distance(to:expected)<0.001)
+            control.clearShockSystems()
+        }
+        check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
+        let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-sentry-checks.json"))}
     }
 }
 #endif

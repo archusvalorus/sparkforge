@@ -1,0 +1,39 @@
+    private func updateSentryCoils(_ dt: TimeInterval) {
+        let tier = playerStats.lightningSentryTier
+        guard tier > 0 else { return }
+        if tier != sentryDeployedTier { deploySentryCoils(tier: tier) }
+
+        let S = GameConfig.Shock.self
+        let network = tier >= 4
+        let interval = network ? S.networkInterval : S.sentryInterval
+        let range = network ? CGFloat.greatestFiniteMagnitude : S.sentryRange
+        let damage = playerStats.shotFractionDamage(network ? S.networkDamageFraction : S.sentryDamageFraction)
+        for i in sentryCoils.indices {
+            sentryCoils[i].timer += dt
+            guard sentryCoils[i].timer >= interval else { continue }
+            let origin = sentryCoils[i].node.position
+            // v2.1 A7b S12 (CL-127a): hittable bodies only. S13 (CL-123a/b): a
+            // T1–T3 coil arcs only to what it can see; the T4 Lightning Network
+            // is arena-wide by ruling and approved copy (exempt).
+            let sight = network ? ArenaGeometry.open : arenaGeometry
+            if let target = sight.nearestVisible(
+                from: origin, among: enemies.filter { isHittable($0) },
+                position: { $0.position }, within: range,
+                travelRadius: GameConfig.Geometry.arcTravelRadius) {
+                sentryCoils[i].timer = 0
+                shockArc(from: CGPoint(x: origin.x, y: origin.y + 14), to: target.position, width: network ? 3.5 : 2)
+                if target.takeDamage(damage) {
+                    onEnemyKilled(at: target.position, xpValue: target.xpValue, enemy: target, source: .summon)
+                }
+                #if DEBUG
+                combatLedger.coilShocks += 1
+                #endif
+            } else if let b = boss, isHittable(b), origin.distance(to: b.position) - b.targetingRadius < range,
+                      !sight.segmentBlockedExact(origin, b.position, travelRadius: GameConfig.Geometry.arcTravelRadius) {
+                sentryCoils[i].timer = 0
+                shockArc(from: CGPoint(x: origin.x, y: origin.y + 14), to: b.position, width: network ? 3.5 : 2)
+                b.takeDamage(damage)
+            }
+        }
+    }
+
