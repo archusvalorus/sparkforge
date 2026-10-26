@@ -43,6 +43,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomGrowthChecksRunning = false
     private var roomSummonChecksRunning = false
     private var roomPandaChecksRunning = false
+    private var roomVoidChecksRunning = false
+    private var roomVoidInputEpoch = ""
+    private var roomVoidInputBirths = 0
+    private var roomVoidInputTimer: TimeInterval = 0
     private var roomPandaInputEpoch = ""
     private var roomPandaInputCorrections = 0
     private var roomSummonInputTimer: TimeInterval = 0
@@ -571,7 +575,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runVoidPlacementChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginVoidPlacementInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPandaEndpointChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginPandaEndpointInput() }
@@ -5157,7 +5165,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning { return } // explicit fixtures only
+        if roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5243,6 +5251,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateXPOrbs(dt)
         updatePassiveEffects(dt)
         updateVoidWells(dt)      // v2.1 A6 — after the hostile shots moved (absorb)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-input") { updateVoidPlacementInput(dt) }
+        #endif
         updateChillTrail(dt)
         updateShockSystems(dt)
         updateCultivatedGround(dt)
@@ -8505,11 +8517,27 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - v2.1 A6: Void — black holes (CL-10, CL-77…79, CL-87, CL-9)
 
-    /// Open a player black hole. The cap comes first: at four live, the oldest
+    /// Open a player black hole. For an accepted birth, at four live the oldest
     /// ordinary Gravity Well goes, else the oldest hole — never more than four
     /// (CL-10). Dead Circuit makes every hole linger ×1.5 and grow (CL-78).
     private func spawnVoidWell(_ preset: VoidWellPreset, at point: CGPoint) {
         let V = GameConfig.VoidTree.self
+        let radius: CGFloat
+        var lifetime: TimeInterval
+        switch preset {
+        case .gravityWell: radius = V.gravityWellRadius; lifetime = V.gravityWellLifetime
+        case .nullBloom: radius = V.blackholeRadius * V.nullBloomRadiusFraction; lifetime = V.nullBloomLifetime
+        case .blackhole: radius = V.blackholeRadius; lifetime = V.blackholeLifetime
+        }
+        #if DEBUG
+        let roomCenter: CGPoint?
+        if let map = debugRoomIntegration, map.isSixRoom {
+            // Reject a failed birth before cap eviction, ID allocation or node
+            // creation. No circle/origin fallback for this room context.
+            guard let center = Arena8VoidWellPlacement(map: map)?.center(at: point, wellRadius: radius) else { return }
+            roomCenter = center
+        } else { roomCenter = nil }
+        #endif
         if let evict = VoidWellCap.evictionIndex(presets: voidWells.map { $0.state.preset },
                                                  live: voidWells.map { $0.state.isLive },
                                                  cap: V.maxLiveWells) {
@@ -8517,13 +8545,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             #if DEBUG
             combatLedger.wellEvictions += 1
             #endif
-        }
-        let radius: CGFloat
-        var lifetime: TimeInterval
-        switch preset {
-        case .gravityWell: radius = V.gravityWellRadius; lifetime = V.gravityWellLifetime
-        case .nullBloom: radius = V.blackholeRadius * V.nullBloomRadiusFraction; lifetime = V.nullBloomLifetime
-        case .blackhole: radius = V.blackholeRadius; lifetime = V.blackholeLifetime
         }
         if playerStats.deadCircuitActive { lifetime *= V.deadCircuitLinger }
         nextVoidWellID += 1
@@ -8533,11 +8554,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             deadCircuit: playerStats.deadCircuitActive ? V.deadCircuitTuning : nil))
         // A hole's centre never sits inside solid geometry (CL-77), nor out
         // past the arena wall (a missed shot flies beyond the rim).
+        #if DEBUG
+        if let center = roomCenter {
+            well.position = center
+        } else {
+            var center = point
+            let wall = GameConfig.Arena.radius
+            let r = hypot(center.x, center.y)
+            if r > wall, r > 0 { center = CGPoint(x: center.x * wall / r, y: center.y * wall / r) }
+            well.position = arenaGeometry.resolve(center, actorRadius: radius * 0.5)
+        }
+        #else
         var center = point
         let wall = GameConfig.Arena.radius
         let r = hypot(center.x, center.y)
         if r > wall, r > 0 { center = CGPoint(x: center.x * wall / r, y: center.y * wall / r) }
         well.position = arenaGeometry.resolve(center, actorRadius: radius * 0.5)
+        #endif
         well.zPosition = 3
         voidWells.append(well)
         worldNode.addChild(well)
@@ -15309,6 +15342,14 @@ extension GameScene {
             if let ghost = terraGhost { sample["ghost"] = ["x":Double(ghost.position.x),"y":Double(ghost.position.y)] }
             sample["nourished"] = player.isNourished
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-input") {
+            sample["voidEpoch"] = roomVoidInputEpoch
+            sample["voidBirths"] = roomVoidInputBirths
+            sample["voidWells"] = voidWells.map {
+                ["x":Double($0.position.x),"y":Double($0.position.y),"radius":Double($0.state.radius),
+                 "life":$0.state.remaining,"safe":rooms.valid($0.position,radius:$0.state.baseRadius*0.5)] as [String:Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-input") {
             sample["pandaEndpointEpoch"] = roomPandaInputEpoch
             sample["pandaCorrections"] = roomPandaInputCorrections
@@ -16208,6 +16249,171 @@ extension GameScene {
         // wall as spectacle; its grounded victim may not remain embedded.
         pandas=[Panda(node:node,act:.aggro,phase:.acting,timer:1000,destination:node.position)]
         playerStats.pandaTier=1;pandaArrivalTimer = -10000
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func runVoidPlacementChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else {return}
+        roomVoidChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        var precisionCorrections:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func near(_ a:CGPoint,_ b:CGPoint)->Bool{a.distance(to:b)<0.001}
+        func clear(){
+            voidWells.forEach{$0.removeAllActions();$0.removeFromParent()};voidWells.removeAll()
+            enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+            projectiles.forEach{$0.removeFromParent()};projectiles.removeAll()
+            enemyProjectiles.forEach{$0.removeFromParent()};enemyProjectiles.removeAll()
+            playerStats.deadCircuitActive=false;playerStats.voidBlackhole=false;playerStats.voidListlessness=false
+        }
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        let presets:[VoidWellPreset]=[.gravityWell,.nullBloom,.blackhole]
+        func tuning(_ p:VoidWellPreset)->(CGFloat,TimeInterval){
+            switch p {
+            case .gravityWell:return(GameConfig.VoidTree.gravityWellRadius,GameConfig.VoidTree.gravityWellLifetime)
+            case .nullBloom:return(GameConfig.VoidTree.blackholeRadius*GameConfig.VoidTree.nullBloomRadiusFraction,GameConfig.VoidTree.nullBloomLifetime)
+            case .blackhole:return(GameConfig.VoidTree.blackholeRadius,GameConfig.VoidTree.blackholeLifetime)
+            }
+        }
+        for preset in presets {
+            let (radius,life)=tuning(preset)
+            let points=map.rooms.map(\.center)+map.connections.map(\.center)+map.rooms.flatMap{
+                [CGPoint(x:$0.rect.maxX+12,y:$0.rect.maxY-40),CGPoint(x:$0.rect.minX-80,y:$0.rect.minY-80)]
+            }+[CGPoint(x:map.world.maxX+300,y:map.world.maxY+300)]
+            for (i,point) in points.enumerated(){
+                clear();let before=nextVoidWellID;spawnVoidWell(preset,at:point)
+                guard let well=voidWells.last else{check("preset-\(preset)-\(i)-birth",false);continue}
+                let expected=Arena8VoidWellPlacement(map:map)?.center(at:point,wellRadius:radius)
+                if let raw=Arena8GardenFootprint.placementRoot(in:map,toward:point,clearance:radius*0.5) {
+                    let rounded=CGPoint(x:CGFloat(Float(raw.x)),y:CGFloat(Float(raw.y)))
+                    if !map.valid(rounded,radius:radius*0.5) {
+                        precisionCorrections.append(["preset":String(describing:preset),"point":i,
+                            "radius":Double(radius),"rawX":Double(raw.x),"rawY":Double(raw.y),
+                            "actualX":Double(well.position.x),"actualY":Double(well.position.y),
+                            "distance":Double(well.position.distance(to:raw)),
+                            "actualSafe":map.valid(well.position,radius:radius*0.5)])
+                    }
+                }
+                check("preset-\(preset)-\(i)-body-clear",map.valid(well.position,radius:radius*0.5))
+                check("preset-\(preset)-\(i)-projected-center",expected.map{near($0,well.position)}==true)
+                check("preset-\(preset)-\(i)-tuning-and-ID",well.state.baseRadius==radius && well.state.remaining==life && well.state.capacity==GameConfig.VoidTree.absorbCapacity && well.state.deadCircuit==nil && well.state.id==before+1)
+                if map.valid(point,radius:radius*0.5){check("valid-center-retained",near(point,well.position))}
+            }
+        }
+        clear()
+        for preset in [.blackhole,.nullBloom,.gravityWell,.blackhole] as [VoidWellPreset]{spawnVoidWell(preset,at:map.rooms[2].center)}
+        let old=voidWells;let victim=old[2];let ledger=combatLedger.wellEvictions
+        spawnVoidWell(.nullBloom,at:map.rooms[5].center)
+        check("cap-four-oldest-live-gravity-first",voidWells.count==4 && victim.state.ended && !voidWells.contains{$0===victim} && old.enumerated().filter{$0.offset != 2}.allSatisfy{!$0.element.state.ended})
+        check("cap-eviction-ledger-once",combatLedger.wellEvictions==ledger+1)
+        clear()
+        for _ in 0..<4{spawnVoidWell(.blackhole,at:map.rooms[0].center)}
+        let oldest=voidWells.first
+        spawnVoidWell(.blackhole,at:map.rooms[1].center)
+        check("cap-oldest-other-when-no-gravity",oldest?.state.ended==true && voidWells.count==4)
+        let roots=voidWells.map(\.state.id);let beforeID=nextVoidWellID;let beforeLedger=combatLedger.wellEvictions
+        if let holder=voidWells.first {
+            _=holder.state.tryAbsorb(holdForReturn:true,returnDelay:1)
+            let enemy=EnemyNode(health:100,moveSpeed:0,xpValue:1);enemy.position=holder.position
+            worldNode.addChild(enemy);enemies=[enemy]
+            _=enemy.captureInVoid(wellID:holder.state.id,wellRemaining:holder.state.remaining,singularity:false,tuning:GameConfig.VoidTree.trapTuning)
+            let held=holder.state.held;let trap=enemy.voidTrapWellID
+            check("failed-birth-setup-has-held-shot",held.count==1 && holder.state.absorbed==1)
+            spawnVoidWell(.blackhole,at:CGPoint(x:CGFloat.nan,y:0))
+            check("failed-birth-no-cap-ID-ledger-mutation",voidWells.map(\.state.id)==roots && nextVoidWellID==beforeID && combatLedger.wellEvictions==beforeLedger && voidWells.allSatisfy{!$0.state.ended})
+            check("failed-birth-keeps-held-shots-and-traps",holder.state.held==held && enemy.voidTrapWellID==trap && trap==holder.state.id)
+        }else{check("failed-birth-populated-setup",false)}
+        clear()
+        playerStats.deadCircuitActive=true
+        spawnVoidWell(.blackhole,at:map.rooms[5].center)
+        if let well=voidWells.first {
+            let root=well.position;let base=well.state.baseRadius
+            check("dead-circuit-lifetime-and-base-unchanged",well.state.remaining==GameConfig.VoidTree.blackholeLifetime*GameConfig.VoidTree.deadCircuitLinger && base==GameConfig.VoidTree.blackholeRadius)
+            well.state.addMatter()
+            check("dead-circuit-growth-keeps-root",well.position==root && well.state.radius==base*(1+GameConfig.VoidTree.deadCircuitGrowth))
+        }else{check("dead-circuit-setup",false)}
+        clear()
+        // Actual removed primary: Gravity Well precedes seeded Blackhole.
+        for preset in [.blackhole,.nullBloom,.gravityWell] as [VoidWellPreset]{spawnVoidWell(preset,at:map.rooms[0].center)}
+        let primary=ProjectileNode(direction:CGPoint(x:1,y:0),speed:0,range:100000,spawnsGravityWell:true)
+        primary.seedsBlackhole=true;primary.position=CGPoint(x:map.world.maxX+300,y:map.world.maxY+300)
+        worldNode.addChild(primary);projectiles=[primary];let next=nextVoidWellID
+        updateProjectiles(0)
+        check("outer-bound-primary-removed",projectiles.isEmpty && primary.parent==nil)
+        check("gravity-then-seeded-blackhole-caller-order",voidWells.suffix(2).map(\.state.preset)==[.gravityWell,.blackhole] && voidWells.suffix(2).map(\.state.id)==[next+1,next+2] && voidWells.filter{$0.state.isLive}.count==4)
+        check("outer-bound-wells-safe",voidWells.allSatisfy{map.valid($0.position,radius:$0.state.baseRadius*0.5)})
+        let count=voidWells.count;let id=nextVoidWellID
+        openBlackholeIfSeeded(primary)
+        check("seed-consumed-once",!primary.seedsBlackhole && voidWells.count==count && nextVoidWellID==id)
+        clear()
+        let room=map.rooms[0] // Internal room wall, not the outer cleanup margin.
+        let wallShot=ProjectileNode(direction:CGPoint(x:1,y:0),speed:100,range:100000,spawnsGravityWell:true)
+        wallShot.position=CGPoint(x:room.rect.maxX-50,y:room.center.y+130)
+        worldNode.addChild(wallShot);projectiles=[wallShot];let blocks=geometryDebug.projectileBlocksPlayer
+        check("wall-fixture-crosses-solid-internal-wall",arenaGeometry.segmentBlocked(wallShot.position,
+            wallShot.position+CGPoint(x:60,y:0),travelRadius:GameConfig.Geometry.projectileTravelRadius))
+        updateProjectiles(0.6)
+        check("ordinary-wall-shot-policy-kept",projectiles.isEmpty && geometryDebug.projectileBlocksPlayer==blocks+1)
+        check("wall-death-well-safe",voidWells.last.map{map.valid($0.position,radius:$0.state.baseRadius*0.5)}==true)
+        clear()
+        let root=map.rooms[2].center
+        spawnVoidWell(.blackhole,at:root);playerStats.voidBlackhole=true
+        let hostile=EnemyProjectileNode(direction:CGPoint(x:1,y:0));hostile.position=root
+        worldNode.addChild(hostile);enemyProjectiles=[hostile];updateVoidWells(0)
+        check("absorption-uses-new-center",enemyProjectiles.isEmpty && hostile.parent==nil && voidWells.first?.state.absorbed==1)
+        let enemy=EnemyNode(health:100,moveSpeed:0,xpValue:1);enemy.position=root+CGPoint(x:20,y:0)
+        worldNode.addChild(enemy);enemies=[enemy];let before=enemy.position
+        applyVoidWellPull(0.05)
+        check("pull-tuning-retained",abs(enemy.position.x-(before.x-GameConfig.VoidTree.pullSpeed*0.05))<0.001 && enemy.position.y==before.y)
+        clear()
+        for context in [Arena8GameMap?.none,Arena8GameMap.twoRoom]{
+            let control=GameScene(size:size);control.debugRoomIntegration=context;control.arenaGeometry=context?.geometry ?? .open
+            for preset in presets {
+                let (radius,life)=tuning(preset);let desired=CGPoint(x:GameConfig.Arena.radius+100,y:100)
+                let limited=desired.normalized*GameConfig.Arena.radius
+                let expected=control.arenaGeometry.resolve(limited,actorRadius:radius*0.5)
+                control.spawnVoidWell(preset,at:desired)
+                check("legacy-circle-two-room-center",control.voidWells.last.map{near($0.position,expected) && $0.state.baseRadius==radius && $0.state.remaining==life}==true)
+            }
+        }
+        spawnVoidWell(.blackhole,at:root);gameState = .playing;pauseGame()
+        let heldLife=voidWells.first?.state.remaining
+        roomVoidChecksRunning=false;update(100);update(100.05);roomVoidChecksRunning=true
+        check("pause-freezes-lifetime",voidWells.first?.state.remaining==heldLife)
+        resumeGame();let nodes=voidWells
+        restartGame()
+        check("restart-clears-well-nodes-and-state",voidWells.isEmpty && nodes.allSatisfy{$0.parent==nil})
+        check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
+        let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results,"precisionCorrections":precisionCorrections,"scope":"actual GameScene births, eviction, caller order, seeded removal, absorption/pull and lifecycle; native input separate"]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-void-placement-checks.json"))}
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func beginVoidPlacementInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        voidWells.forEach{$0.removeFromParent()};voidWells.removeAll()
+        roomVoidInputEpoch=UUID().uuidString;roomVoidInputBirths=0;roomVoidInputTimer=2
+        player.position=map.rooms[2].center;camera?.position=player.position
+        playerStats.deadCircuitActive=true
+        updateVoidPlacementInput(0)
+    }
+    private func updateVoidPlacementInput(_ dt:TimeInterval) {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomVoidInputTimer += dt
+        guard roomVoidInputTimer>=2 else{return}
+        roomVoidInputTimer=0
+        let presets:[VoidWellPreset]=[.blackhole,.nullBloom,.gravityWell]
+        let point=map.rooms[2].center+(roomVoidInputBirths.isMultiple(of:2) ? CGPoint(x:50,y:0):CGPoint(x:300,y:250))
+        let oldID=nextVoidWellID
+        spawnVoidWell(presets[roomVoidInputBirths%presets.count],at:point)
+        if nextVoidWellID>oldID{roomVoidInputBirths += 1}
     }
 }
 #endif
