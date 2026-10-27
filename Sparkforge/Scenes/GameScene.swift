@@ -46,6 +46,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomVoidChecksRunning = false
     private var roomSentryChecksRunning = false
     private var roomRiftChecksRunning = false
+    private var roomPandaDestChecksRunning = false
+    private var roomPandaDestLastSpawn: [String:Any] = [:]
+    private var roomPandaDestInputEpoch = ""
     private var roomRiftTestOrigin: CGPoint?
     private var roomRiftTestDirection: CGPoint?
     private var roomRiftInputEpoch = ""
@@ -584,7 +587,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-rift-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runPandaDestinationChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginPandaDestinationInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-rift-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runRiftChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-rift-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginRiftInput() }
@@ -3370,12 +3377,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let jitter = CGPoint(x: CGFloat.random(in: -70...70), y: CGFloat.random(in: -70...70))
             * DeviceScale.gameplay
         var destination = anchor + jitter
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom != true {
         let limit = GameConfig.Arena.radius * 0.9
         if destination.length > limit { destination = destination.normalized * limit }
         // v2.1 (1A, Ruling 6): pandas may violate geometry as SPECTACLE, not as
         // save-state corruption — the waddle may cross the Carrier, the panda
         // may not settle inside it.
         destination = arenaGeometry.resolve(destination, actorRadius: 20)
+        }
+        #else
+        let limit = GameConfig.Arena.radius * 0.9
+        if destination.length > limit { destination = destination.normalized * limit }
+        // v2.1 (1A, Ruling 6): pandas may violate geometry as SPECTACLE, not as
+        // save-state corruption — the waddle may cross the Carrier, the panda
+        // may not settle inside it.
+        destination = arenaGeometry.resolve(destination, actorRadius: 20)
+        #endif
 
         // The samurai. It is 5%. That is the entire trigger, and it is never
         // going to be anything else — the community can theorise for as long as
@@ -3399,6 +3417,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             act = PandaAct.allCases.filter { $0.minTier <= tier }.randomElement() ?? .pleased
         }
 
+        #if DEBUG
+        if let rooms = debugRoomIntegration, rooms.isSixRoom, act != .samurai {
+            // Select the act as before. Only ordinary destinations use the raw
+            // anchor+jitter instead of the old origin circle. Samurai's chosen
+            // mark/override and subsequent tracking are deliberately untouched.
+            guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: destination) else { return }
+            destination = safe
+            roomPandaDestLastSpawn = ["anchorX":Double(anchor.x),"anchorY":Double(anchor.y),
+                "jitterX":Double(jitter.x),"jitterY":Double(jitter.y),
+                "rawX":Double(anchor.x+jitter.x),"rawY":Double(anchor.y+jitter.y),
+                "destinationX":Double(destination.x),"destinationY":Double(destination.y),
+                "entryX":Double(entry.x),"entryY":Double(entry.y),"act":String(describing:act)]
+        }
+        #endif
         let node = PandaNode(variant: act == .samurai ? .samurai : .ordinary)
         node.position = entry
         worldNode.addChild(node)
@@ -5182,7 +5214,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5283,6 +5315,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateVineWall(dt)
         updateTreeCanopy(dt)
         updatePandas(dt)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-input") {
+            for i in pandas.indices where pandas[i].phase == .acting { pandas[i].timer = 1000 }
+        }
+        #endif
         updatePandaKaiju(dt)
         updateFalseOpening(dt)
 
@@ -15420,6 +15458,15 @@ extension GameScene {
             if let ghost = terraGhost { sample["ghost"] = ["x":Double(ghost.position.x),"y":Double(ghost.position.y)] }
             sample["nourished"] = player.isNourished
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-input") {
+            sample["pandaDestEpoch"] = roomPandaDestInputEpoch
+            sample["pandaDestLastSpawn"] = roomPandaDestLastSpawn
+            sample["pandaDestVisitors"] = pandas.map {
+                ["phase":String(describing:$0.phase),"x":Double($0.node.position.x),"y":Double($0.node.position.y),
+                 "destinationSafe":rooms.valid($0.destination,radius:20),
+                 "rootSafe":rooms.valid($0.node.position,radius:20)] as [String:Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-rift-input") {
             sample["riftEpoch"] = roomRiftInputEpoch
             sample["riftShots"] = roomRiftInputShots
@@ -16685,6 +16732,85 @@ extension GameScene {
         }
         finishRewardProof()
 
+    }
+}
+#endif
+#if DEBUG
+extension GameScene {
+    private func beginPandaDestinationInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        player.position=map.rooms[2].center;camera?.position=player.position
+        let target=EnemyNode(health:1000000,moveSpeed:0,xpValue:1)
+        target.position=map.rooms[2].center+CGPoint(x:80,y:50);worldNode.addChild(target);enemies=[target]
+        playerStats.pandaTier=1;pandaArrivalTimer = -10000
+        roomPandaDestInputEpoch=UUID().uuidString;spawnPanda()
+        // Only this explicit input fixture holds a non-attacking visitor for
+        // observation. Actual spawn sampling/selection is captured unchanged.
+        if let visitor=pandas.first { pandas[0]=Panda(node:visitor.node,act:.pleased,phase:visitor.phase,timer:visitor.timer,destination:visitor.destination) }
+    }
+    private func runPandaDestinationChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomPandaDestChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func clear(){enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll();roomPandaDestLastSpawn=[:]}
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        let points=map.rooms.map(\.center)+map.connections.map(\.center)+map.rooms.flatMap{[CGPoint(x:$0.rect.minX+20,y:$0.rect.maxY-20),CGPoint(x:$0.rect.maxX-20,y:$0.rect.minY+20)]}
+        playerStats.pandaTier=1
+        for (i,point) in points.enumerated(){for mode in 0...2 {
+            clear();player.position=point
+            let anchor:CGPoint
+            if mode==1 {
+                let target=EnemyNode(health:100000,moveSpeed:0,xpValue:1);target.position=point;worldNode.addChild(target);enemies=[target];anchor=target.position
+            } else if mode==2 {
+                let dead=EnemyNode(health:1,moveSpeed:0,xpValue:1);dead.position=map.rooms[5].center;worldNode.addChild(dead);_ = dead.takeDamage(100000);enemies=[dead];anchor=player.position
+                check("dying-anchor-fixture",dead.isDying)
+            } else {anchor=player.position}
+            spawnPanda()
+            guard let panda=pandas.last,let ax=roomPandaDestLastSpawn["anchorX"] as? Double,let ay=roomPandaDestLastSpawn["anchorY"] as? Double,
+                  let jx=roomPandaDestLastSpawn["jitterX"] as? Double,let jy=roomPandaDestLastSpawn["jitterY"] as? Double,
+                  let rx=roomPandaDestLastSpawn["rawX"] as? Double,let ry=roomPandaDestLastSpawn["rawY"] as? Double else{check("actual-spawn-created",false);continue}
+            let raw=CGPoint(x:rx,y:ry)
+            check("anchor-\(i)-\(mode)-retained",CGPoint(x:ax,y:ay)==anchor)
+            let limit=Double(70*DeviceScale.gameplay)
+            check("jitter-range-and-raw-sum",abs(jx)<=limit && abs(jy)<=limit && abs(ax+jx-rx)<0.000001 && abs(ay+jy-ry)<0.000001)
+            let expected=Arena8PandaDestination(map:map)?.destination(at:raw)
+            check("ordinary-destination-projection",expected==panda.destination)
+            let stored=CGPoint(x:CGFloat(Float(panda.destination.x)),y:CGFloat(Float(panda.destination.y)))
+            check("destination-and-Float-storage-safe",map.valid(panda.destination,radius:20) && map.valid(stored,radius:20))
+            if map.valid(raw,radius:20) && map.valid(CGPoint(x:CGFloat(Float(raw.x)),y:CGFloat(Float(raw.y))),radius:20){check("valid-raw-destination-exact",panda.destination==raw)}
+            check("original-arrival-circle-retained",abs(panda.node.position.length-GameConfig.Arena.radius*0.98)<0.001)
+            check("ordinary-selection-remains-eligible",panda.act != .samurai && panda.act.minTier<=1 && panda.phase == .approaching && panda.timer==0)
+        }}
+        clear();playerStats.pandaTier=1
+        for _ in 0..<GameConfig.Panda.maxPandas {spawnPanda()}
+        let ids=pandas.map{ObjectIdentifier($0.node)};spawnPanda()
+        check("max-population-guard-retained",pandas.count==GameConfig.Panda.maxPandas && pandas.map{ObjectIdentifier($0.node)}==ids)
+        // Actual unchanged waddle crosses a solid wall; this is travel coverage,
+        // not a guarantee about its separate close-enough stopping tolerance.
+        let walker=PandaNode();let from=CGPoint(x:map.rooms[0].rect.maxX-20,y:map.rooms[0].rect.maxY-60)
+        let toward=CGPoint(x:map.rooms[1].rect.minX+20,y:from.y);walker.position=from
+        check("cross-wall-travel-fixture",map.geometry.segmentBlockedExact(from,toward))
+        _=walker.waddle(toward:toward,speed:GameConfig.Panda.walkSpeed,dt:TimeInterval(from.distance(to:toward)/GameConfig.Panda.walkSpeed))
+        check("wall-crossing-waddle-unchanged",walker.position.distance(to:toward)<0.001)
+        clear();player.position=map.rooms[2].center;spawnPanda();gameState = .playing;pauseGame()
+        let held=pandas.map(\.destination),arrival=pandaArrivalTimer
+        roomPandaDestChecksRunning=false;update(100);update(100.05);roomPandaDestChecksRunning=true
+        check("pause-preserves-destinations-and-arrival-clock",pandas.map(\.destination)==held && pandaArrivalTimer==arrival)
+        resumeGame();let nodes=pandas.map(\.node);restartGame()
+        check("restart-clears-visitors-and-arrival-state",pandas.isEmpty && pandaArrivalTimer==0 && nodes.allSatisfy{$0.parent==nil})
+        for useRooms in [false,true]{
+            let control=GameScene(size:size);if useRooms{control.debugRoomIntegration = .twoRoom};control.setupArena();control.setupPlayer();control.playerStats.pandaTier=1
+            control.player.position=CGPoint(x:10000,y:0);control.spawnPanda()
+            check("legacy-circle-two-room-destination",control.pandas.count==1 && control.pandas[0].destination.length<=GameConfig.Arena.radius*0.9+0.001)
+            check("legacy-circle-arrival",control.pandas.count==1 && abs(control.pandas[0].node.position.length-GameConfig.Arena.radius*0.98)<0.001)
+            control.pandas.forEach{$0.node.removeFromParent()}
+        }
+        check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
+        let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results,"scope":"Ordinary destination safety only; waddle stopping tolerance and resting-body clearance are NOT certified" ]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-panda-destination-checks.json"))}
     }
 }
 #endif
