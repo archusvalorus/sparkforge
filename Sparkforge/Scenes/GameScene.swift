@@ -45,6 +45,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomPandaChecksRunning = false
     private var roomVoidChecksRunning = false
     private var roomSentryChecksRunning = false
+    private var roomRiftChecksRunning = false
+    private var roomRiftTestOrigin: CGPoint?
+    private var roomRiftTestDirection: CGPoint?
+    private var roomRiftInputEpoch = ""
+    private var roomRiftInputShots = 0
+    private var roomRiftInputTimer: TimeInterval = 0
+    private var roomRiftLastShot: [String: Any] = [:]
     private var roomSentryInputEpoch = ""
     private var roomVoidInputEpoch = ""
     private var roomVoidInputBirths = 0
@@ -577,7 +584,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-rift-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runRiftChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-rift-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginRiftInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runSentryChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginSentryInput() }
@@ -5171,7 +5182,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5257,6 +5268,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateXPOrbs(dt)
         updatePassiveEffects(dt)
         updateVoidWells(dt)      // v2.1 A6 — after the hostile shots moved (absorb)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-rift-input") { updateRiftInput(dt) }
+        #endif
         #if DEBUG
         if debugRoomIntegration?.isSixRoom == true,
            ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-input") { updateVoidPlacementInput(dt) }
@@ -8195,10 +8210,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let arenaR = GameConfig.Arena.radius
         // v2.1 (1A, Ruling 3): the rift's ORIGIN must be valid; the beam it
         // fires is canonically reality-piercing and crosses anything.
-        let origin = PlacementSampler.randomPoint(in: arenaGeometry, minRadius: 0,
+        let sampledOrigin = PlacementSampler.randomPoint(in: arenaGeometry, minRadius: 0,
                                                   maxRadius: arenaR * 0.6, margin: 16)
+        let origin: CGPoint
+        #if DEBUG
+        if let map = debugRoomIntegration, map.isSixRoom {
+            // Keep the sampler and its RNG draws. Only repair its unsafe final
+            // result; do not invent whole-floor or Spark-local distribution.
+            guard let safe = Arena8RiftGeometry(map: map)?.origin(at: roomRiftTestOrigin ?? sampledOrigin) else { return }
+            origin = safe
+        } else { origin = sampledOrigin }
+        #else
+        origin = sampledOrigin
+        #endif
         let vAng = CGFloat.random(in: 0..<(2 * .pi))
-        let dir = CGPoint(x: cos(vAng), y: sin(vAng))
+        let sampledDirection = CGPoint(x: cos(vAng), y: sin(vAng))
+        let dir: CGPoint
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true, let testDirection = roomRiftTestDirection { dir = testDirection }
+        else { dir = sampledDirection }
+        #else
+        dir = sampledDirection
+        #endif
         let dmg = max(1, Int(playerStats.effectiveAttack * GameConfig.Erasure.riftCannonMult))
         let width = GameConfig.Erasure.riftCannonWidth
 
@@ -8225,7 +8258,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func showRiftBeam(origin: CGPoint, dir: CGPoint) {
-        let span = GameConfig.Arena.radius * 2.2
+        let legacySpan = GameConfig.Arena.radius * 2.2
+        let span: CGFloat
+        #if DEBUG
+        if let map = debugRoomIntegration, map.isSixRoom,
+           let roomSpan = Arena8RiftGeometry(map: map)?.visualSpan(from: origin, legacySpan: legacySpan) { span = roomSpan }
+        else { span = legacySpan }
+        #else
+        span = legacySpan
+        #endif
         let path = CGMutablePath()
         path.move(to: origin - dir * span)
         path.addLine(to: origin + dir * span)
@@ -8234,6 +8275,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         beam.lineWidth = 5
         beam.glowWidth = 14
         beam.zPosition = 9
+        #if DEBUG
+        if let map = debugRoomIntegration, map.isSixRoom {
+            beam.name = "arena8-rift-beam"
+            roomRiftInputShots += 1
+            roomRiftLastShot = ["originX":Double(origin.x), "originY":Double(origin.y),
+                "dirX":Double(dir.x), "dirY":Double(dir.y), "span":Double(span),
+                "safe":map.valid(CGPoint(x:CGFloat(Float(origin.x)),y:CGFloat(Float(origin.y))),radius:16)]
+        }
+        #endif
         worldNode.addChild(beam)
         beam.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.35), SKAction.removeFromParent()]))
         showRingPulse(at: origin, radius: 52, colorHex: GameConfig.VoidTree.indigoLightHex)
@@ -15370,6 +15420,12 @@ extension GameScene {
             if let ghost = terraGhost { sample["ghost"] = ["x":Double(ghost.position.x),"y":Double(ghost.position.y)] }
             sample["nourished"] = player.isNourished
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-rift-input") {
+            sample["riftEpoch"] = roomRiftInputEpoch
+            sample["riftShots"] = roomRiftInputShots
+            sample["riftLastShot"] = roomRiftLastShot
+            sample["riftLiveBeams"] = worldNode.children.filter { $0.name == "arena8-rift-beam" }.count
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-input") {
             sample["sentryEpoch"] = roomSentryInputEpoch
             sample["sentryCoils"] = sentryCoils.map {
@@ -16524,6 +16580,111 @@ extension GameScene {
         check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
         let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results]
         if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-sentry-checks.json"))}
+    }
+}
+#endif
+#if DEBUG
+extension GameScene {
+    private func beginRiftInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        player.position=map.rooms[2].center;camera?.position=player.position
+        roomRiftInputEpoch=UUID().uuidString;roomRiftInputShots=0;roomRiftInputTimer=1
+        updateRiftInput(0)
+    }
+    private func updateRiftInput(_ dt:TimeInterval) {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomRiftInputTimer += dt
+        guard roomRiftInputTimer>=1 else{return}
+        roomRiftInputTimer=0
+        // Explicit no-enemy input fixture: repeated ordinary0.35s flashes,
+        // alternating outer-room safe/unsafe requested origins. No live cadence change.
+        roomRiftTestOrigin = roomRiftInputShots.isMultiple(of:2) ? map.rooms[2].center : CGPoint(x:map.world.maxX+60,y:map.world.maxY+30)
+        roomRiftTestDirection = CGPoint(x:1,y:0)
+        fireRiftCannon()
+        roomRiftTestOrigin=nil;roomRiftTestDirection=nil
+    }
+    private func runRiftChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomRiftChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func clear(){
+            enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+            worldNode.children.filter{$0.name=="arena8-rift-beam"}.forEach{$0.removeAllActions();$0.removeFromParent()}
+            worldNode.removeAllActions();worldNode.position = .zero
+        }
+        func shoot(_ point:CGPoint,_ direction:CGPoint){roomRiftTestOrigin=point;roomRiftTestDirection=direction;fireRiftCannon();roomRiftTestOrigin=nil;roomRiftTestDirection=nil}
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        let points=map.rooms.map(\.center)+map.connections.map(\.center)+map.rooms.flatMap{[CGPoint(x:$0.rect.minX,y:$0.rect.minY),CGPoint(x:$0.rect.maxX+30,y:$0.rect.maxY+30)]}
+        let directions=[CGPoint(x:1,y:0),CGPoint(x:0,y:1),CGPoint(x:sqrt(0.5),y:sqrt(0.5)),CGPoint(x:-sqrt(0.5),y:sqrt(0.5))]
+        let corners=[CGPoint(x:map.world.minX,y:map.world.minY),CGPoint(x:map.world.minX,y:map.world.maxY),CGPoint(x:map.world.maxX,y:map.world.minY),CGPoint(x:map.world.maxX,y:map.world.maxY)]
+        for (i,point) in points.enumerated(){for direction in directions {
+            clear();shoot(point,direction)
+            guard let x=roomRiftLastShot["originX"] as? Double,let y=roomRiftLastShot["originY"] as? Double,let span=roomRiftLastShot["span"] as? Double,
+                  let beam=worldNode.childNode(withName:"arena8-rift-beam") as? SKShapeNode,let box=beam.path?.boundingBox else{check("beam-fixture-created",false);continue}
+            let origin=CGPoint(x:x,y:y)
+            check("origin-\(i)-stored-safe",map.valid(CGPoint(x:CGFloat(Float(x)),y:CGFloat(Float(y))),radius:16))
+            if map.valid(point,radius:16){check("safe-origin-retained",point.distance(to:origin)<0.001)}
+            check("span-covers-all-floor-projections",corners.allSatisfy{abs(($0.x-origin.x)*direction.x+($0.y-origin.y)*direction.y)<=span+0.001})
+            let first=origin-direction*CGFloat(span),last=origin+direction*CGFloat(span)
+            check("actual-drawn-endpoints-match",abs(box.minX-min(first.x,last.x))<0.001 && abs(box.maxX-max(first.x,last.x))<0.001 && abs(box.minY-min(first.y,last.y))<0.001 && abs(box.maxY-max(first.y,last.y))<0.001)
+            check("visual-style-and-fade-action-retained",beam.lineWidth==5 && beam.glowWidth==14 && beam.zPosition==9 && beam.hasActions())
+        }}
+        clear()
+        let origin=map.rooms[0].center;let targetPoint=map.rooms[5].center;let heading=(targetPoint-origin).normalized;let perpendicular=CGPoint(x:-heading.y,y:heading.x)
+        let far=EnemyNode(health:100000,moveSpeed:0,xpValue:1);far.position=targetPoint;worldNode.addChild(far)
+        let outside=EnemyNode(health:100000,moveSpeed:0,xpValue:1);outside.position=targetPoint+perpendicular*(GameConfig.Erasure.riftCannonWidth+2);worldNode.addChild(outside);enemies=[far,outside]
+        check("distant-target-across-solid-wall-setup",arenaGeometry.segmentBlockedExact(origin,targetPoint))
+        let hp=far.health,miss=outside.health;let damage=max(1,Int(playerStats.effectiveAttack*GameConfig.Erasure.riftCannonMult))
+        shoot(origin,heading)
+        check("actual-distant-cross-wall-hit",far.health==hp-damage && outside.health==miss)
+        let span=roomRiftLastShot["span"] as? Double ?? 0
+        check("distant-hit-within-visible-longitudinal-span",targetPoint.distance(to:origin)<=span)
+        // Kill path still performs normal capstone kill bookkeeping/reward emission.
+        clear();let victim=EnemyNode(health:1,moveSpeed:0,xpValue:3);victim.position=targetPoint;worldNode.addChild(victim);enemies=[victim]
+        let kills=killCount;shoot(origin,heading)
+        check("immediate-kill-credit-retained",enemies.isEmpty && killCount==kills+1)
+        clear();playerStats.erasureRiftCannon=true
+        let before=roomRiftInputShots
+        playerStats.erasureActivations=1;fireRiftCannonIfDue();playerStats.erasureActivations=2;fireRiftCannonIfDue()
+        check("no-premature-cannon-activation",roomRiftInputShots==before)
+        playerStats.erasureActivations=3;fireRiftCannonIfDue()
+        check("every-third-cannon-activation-retained",roomRiftInputShots==before+1)
+        clear();shoot(CGPoint(x:CGFloat.nan,y:0),CGPoint(x:1,y:0))
+        check("invalid-origin-rejects-without-beam",worldNode.childNode(withName:"arena8-rift-beam")==nil)
+        roomRiftTestOrigin=nil;roomRiftTestDirection=nil
+        gameState = .playing;pauseGame();let held=roomRiftInputShots
+        roomRiftChecksRunning=false;update(100);update(100.05);roomRiftChecksRunning=true
+        check("paused-update-no-new-damage-or-beam",roomRiftInputShots==held)
+        resumeGame();restartGame()
+        check("reset-clears-upgrade-with-no-pending-test-overrides",!playerStats.erasureRiftCannon && roomRiftTestOrigin==nil && roomRiftTestDirection==nil)
+        for useRooms in [false,true]{
+            let control=GameScene(size:size);if useRooms{control.debugRoomIntegration = .twoRoom};control.setupArena();control.setupPlayer()
+            control.showRiftBeam(origin:.zero,dir:CGPoint(x:1,y:0))
+            let shapes=control.worldNode.children.compactMap{$0 as? SKShapeNode}
+            check("legacy-circle-two-room-span",shapes.contains{abs(($0.path?.boundingBox.width ?? 0)-GameConfig.Arena.radius*4.4)<0.001 && $0.lineWidth==5})
+        }
+        clear()
+        let rewardVictim=EnemyNode(health:1,moveSpeed:0,xpValue:3);rewardVictim.position=targetPoint;worldNode.addChild(rewardVictim);enemies=[rewardVictim]
+        let rewardOrbs=xpOrbs.count;shoot(origin,heading)
+        // Full-credit XP is emitted by the existing0.05s SKAction. Yield the
+        // main thread rather than treating it as synchronous or fabricating XP.
+        func finishRewardProof(attempt:Int=0) {
+            let paid=self.xpOrbs.count>rewardOrbs
+            let faded=self.worldNode.childNode(withName:"arena8-rift-beam")==nil
+            if (!paid || !faded) && attempt<30 {
+                DispatchQueue.main.asyncAfter(deadline:.now()+0.1){finishRewardProof(attempt:attempt+1)}
+                return
+            }
+            check("actual-delayed-XP-reward-retained",paid)
+            check("normal-beam-fade-removes-node",faded)
+            check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
+            let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results]
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-rift-checks.json"))}
+        }
+        finishRewardProof()
+
     }
 }
 #endif
