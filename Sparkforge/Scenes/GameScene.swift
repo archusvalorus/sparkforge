@@ -47,6 +47,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomSentryChecksRunning = false
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
+    private var roomPandaRollRests = 0
+    private var roomPandaRollLastRest: [String:Any] = [:]
+    private var roomPandaRollChecksRunning = false
+    private var roomPandaRollInputEpoch = ""
     private var roomPandaRimLastSpawn: [String:Any] = [:]
     private var roomPandaArrivalChecksRunning = false
     private var roomPandaArrivalHandoffs = 0
@@ -592,7 +596,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-rim-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runPandaRollChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginPandaRollInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-rim-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPandaRimChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-arrival-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPandaArrivalChecks() }
@@ -3371,6 +3379,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 panda.timer -= dt
                 let done = runPandaAct(&panda, dt: dt)
                 if done || panda.timer <= 0 {
+                    #if DEBUG
+                    let beforeRest = panda.node.position
+                    guard preparePandaRollRest(&panda) else {
+                        // Invalid/impossible state cannot linger or repeat an
+                        // expired roll's damage. Cancel only this visitor.
+                        endPandaAct(&panda)
+                        panda.node.removeAllActions()
+                        panda.node.removeFromParent()
+                        pandas.remove(at: i)
+                        continue
+                    }
+                    if debugRoomIntegration?.isSixRoom == true, panda.act == .roll {
+                        roomPandaRollRests += 1
+                        roomPandaRollLastRest = ["beforeX":Double(beforeRest.x),"beforeY":Double(beforeRest.y),
+                            "afterX":Double(panda.node.position.x),"afterY":Double(panda.node.position.y),
+                            "travelled":Double(panda.rollTravelled),"timerBefore":panda.timer,"done":done,
+                            "wasSafe":debugRoomIntegration?.valid(beforeRest,radius:20) ?? false]
+                    }
+                    #endif
                     endPandaAct(&panda)
                     panda.phase = .lingering
                     panda.timer = TimeInterval.random(in: 0.8...2.0)
@@ -3396,6 +3423,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// This does not alter travel, tolerance, destination or any later act.
     private func preparePandaArrival(_ panda: inout Panda) -> Bool {
         guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act != .samurai else { return true }
+        guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
+        panda.node.position = safe
+        return true
+    }
+    #endif
+
+    #if DEBUG
+    /// Resolve only a roll's terminal resting root, never its active travel.
+    private func preparePandaRollRest(_ panda: inout Panda) -> Bool {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act == .roll else { return true }
         guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
         panda.node.position = safe
         return true
@@ -3949,7 +3986,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 }
             }
             // Rolling out of the arena is not a panda's problem, but it is ours.
-            let out = panda.node.position.length > GameConfig.Arena.radius * 0.95
+            let out: Bool
+            #if DEBUG
+            if let rooms = debugRoomIntegration, rooms.isSixRoom {
+                out = Arena8PandaRollBounds.outside(panda.node.position, world: rooms.world, fraction: 0.95)
+            } else { out = panda.node.position.length > GameConfig.Arena.radius * 0.95 }
+            #else
+            out = panda.node.position.length > GameConfig.Arena.radius * 0.95
+            #endif
             return panda.rollTravelled >= GameConfig.Panda.rollDistance || out
 
         case .sit:
@@ -5268,7 +5312,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5369,6 +5413,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateVineWall(dt)
         updateTreeCanopy(dt)
         updatePandas(dt)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-input") {
+            // Hold only retired presence for native observation, not the roll.
+            for i in pandas.indices where pandas[i].phase == .lingering { pandas[i].timer = 1000 }
+        }
+        #endif
         #if DEBUG
         if debugRoomIntegration?.isSixRoom == true,
            ProcessInfo.processInfo.arguments.contains("--arena8-panda-arrival-input") {
@@ -15527,6 +15578,15 @@ extension GameScene {
                  "safeAtHandoff":rooms.valid($0.node.position,radius:20)] as [String:Any]
             }
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-input") {
+            sample["pandaRollEpoch"] = roomPandaRollInputEpoch
+            sample["pandaRollRests"] = roomPandaRollRests
+            sample["pandaRollLastRest"] = roomPandaRollLastRest
+            sample["pandaRollVisitors"] = pandas.map {
+                ["phase":String(describing:$0.phase),"x":Double($0.node.position.x),"y":Double($0.node.position.y),
+                 "rootSafe":rooms.valid($0.node.position,radius:20),"travelled":Double($0.rollTravelled),"struck":$0.struck.count] as [String:Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-input") {
             sample["pandaRimLastSpawn"] = roomPandaRimLastSpawn
             sample["pandaRimWorld"] = ["x":Double(rooms.world.midX),"y":Double(rooms.world.midY),
@@ -16822,6 +16882,92 @@ extension GameScene {
         // Only this explicit input fixture holds a non-attacking visitor for
         // observation. Actual spawn sampling/selection is captured unchanged.
         if let visitor=pandas.first { pandas[0]=Panda(node:visitor.node,act:.pleased,phase:visitor.phase,timer:visitor.timer,destination:visitor.destination) }
+    }
+    private func beginPandaRollInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        playerStats.pandaTier=1;pandaArrivalTimer = -10000;roomPandaRollRests=0;roomPandaRollLastRest=[:];roomPandaRollInputEpoch=UUID().uuidString
+        let room=map.rooms[0],start=CGPoint(x:room.rect.maxX-24,y:room.center.y+100)
+        player.position=room.center;camera?.position=player.position
+        let node=PandaNode();node.position=start;worldNode.addChild(node)
+        var v=Panda(node:node,act:.roll,phase:.acting,timer:GameConfig.Panda.lingerDuration,destination:start)
+        beginPandaAct(&v);v.rollDir=CGPoint(x:1,y:0);pandas=[v]
+        gameState = .playing;pauseGame()
+    }
+    private func runPandaRollChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomPandaRollChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func clear(){pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll();enemies.forEach{$0.removeFromParent()};enemies.removeAll();roomPandaRollRests=0;roomPandaRollLastRest=[:];pandaArrivalTimer = -10000}
+        func visitor(_ point:CGPoint,_ dir:CGPoint = .zero,_ travelled:CGFloat = 0,_ timer:TimeInterval = 10)->Panda {
+            let node=PandaNode();node.position=point;worldNode.addChild(node)
+            var v=Panda(node:node,act:.roll,phase:.acting,timer:timer,destination:map.player)
+            beginPandaAct(&v);v.rollDir=dir;v.rollTravelled=travelled;return v
+        }
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        playerStats.pandaTier=1
+        for point in map.rooms.map(\.center)+map.connections.map(\.center) {
+            clear();pandas=[visitor(point,.zero,0,0)];let before=pandas[0].node.position;updatePandas(0)
+            check("timer-only-expiry-retains-valid-actual",pandas[0].phase == .lingering && pandas[0].node.position==before && roomPandaRollRests==1)
+            check("linger-range-and-distance-unchanged",(0.8...2).contains(pandas[0].timer) && pandas[0].rollTravelled==0)
+            let held=pandas[0].timer;updatePandas(0);check("linger-initialized-once",pandas[0].timer==held && roomPandaRollRests==1)
+        }
+        for wall in map.geometry.blockedFootprints {
+            clear();pandas=[visitor(wall.center,.zero,GameConfig.Panda.rollDistance)];updatePandas(0)
+            check("distance-finish-resolves-wall-to-Float-safe-rest",pandas.count==1 && pandas[0].phase == .lingering && map.valid(pandas[0].node.position,radius:20) && roomPandaRollRests==1)
+        }
+        let room=map.rooms[0],start=CGPoint(x:room.rect.maxX-24,y:room.center.y+100)
+        clear();pandas=[visitor(start,CGPoint(x:1,y:0))]
+        let step:CGFloat=40,dt=TimeInterval(step/GameConfig.Panda.rollSpeed)
+        updatePandas(dt)
+        check("active-roll-crosses-internal-wall-without-projection",pandas[0].phase == .acting && !map.valid(pandas[0].node.position,radius:20) && roomPandaRollRests==0 && abs(pandas[0].rollTravelled-step)<0.001)
+        pandas[0].timer=0;updatePandas(0)
+        check("timer-end-repairs-unsafe-rest-only-now",pandas[0].phase == .lingering && map.valid(pandas[0].node.position,radius:20) && roomPandaRollRests==1)
+        // Outer-bound retirement after the original full movement/damage step.
+        for dir in [CGPoint(x:1,y:0),CGPoint(x:-1,y:0),CGPoint(x:0,y:1),CGPoint(x:0,y:-1)] {
+            clear();let hx=map.world.width*0.95/2,hy=map.world.height*0.95/2
+            let origin=CGPoint(x:map.world.midX+dir.x*(hx-5),y:map.world.midY+dir.y*(hy-5))
+            pandas=[visitor(origin,dir)];let before=pandas[0].node.position;let expected=before+dir*20
+            let enemy=EnemyNode(health:100000,moveSpeed:0,xpValue:1);enemy.position=expected;worldNode.addChild(enemy);enemies=[enemy];let hp=enemy.health
+            updatePandas(TimeInterval(20/GameConfig.Panda.rollSpeed))
+            check("outer-retirement-follows-full-step-and-hit",pandas[0].phase == .lingering && abs(pandas[0].rollTravelled-20)<0.001 && enemy.health==hp-Int(playerStats.effectiveAttack*GameConfig.Panda.rollDamageMult) && pandas[0].struck.count==1)
+            check("outer-rest-safe-after-endpoint-hit",map.valid(pandas[0].node.position,radius:20) && roomPandaRollRests==1)
+            let after=enemy.health;updatePandas(0);check("retired-roll-no-repeat-damage",enemy.health==after && roomPandaRollRests==1)
+        }
+        clear();let center=map.rooms[1].center;pandas=[visitor(center)]
+        let e=EnemyNode(health:100000,moveSpeed:0,xpValue:1);e.position=center;worldNode.addChild(e);enemies=[e];let hp=e.health
+        updatePandas(0);let once=e.health;updatePandas(0)
+        check("active-one-hit-ledger-and-damage-retained",once==hp-Int(playerStats.effectiveAttack*GameConfig.Panda.rollDamageMult) && e.health==once && pandas[0].struck.count==1 && pandas[0].phase == .acting)
+        clear();pandas=[visitor(start,CGPoint(x:1,y:0))];gameState = .playing;pauseGame();let paused=pandas[0].node.position
+        roomPandaRollChecksRunning=false;update(100);update(100.05);roomPandaRollChecksRunning=true
+        check("pause-keeps-roll-and-distance",pandas[0].node.position==paused && pandas[0].rollTravelled==0 && roomPandaRollRests==0)
+        resumeGame();updatePandas(dt);check("resume-original-travel",abs(pandas[0].rollTravelled-step)<0.001)
+        let nodes=pandas.map(\.node);restartGame();check("reset-clears-roll-state",pandas.isEmpty && nodes.allSatisfy{$0.parent==nil})
+        for useRooms in [false,true] {
+            let control=GameScene(size:size);if useRooms{control.debugRoomIntegration = .twoRoom};control.setupArena();control.setupPlayer()
+            let node=PandaNode();node.position=CGPoint(x:GameConfig.Arena.radius,y:0);control.worldNode.addChild(node)
+            var v=Panda(node:node,act:.roll,phase:.acting,timer:10,destination:.zero)
+            check("circle-two-room-original-out",control.runPandaAct(&v,dt:0))
+            let before=v.node.position;check("circle-two-room-rest-bypass",control.preparePandaRollRest(&v) && v.node.position==before)
+        }
+        clear();for act in [PandaAct.samurai,.avalanche,.bamboo] {
+            let node=PandaNode();node.position=room.center;var v=Panda(node:node,act:act,phase:.acting,timer:10,destination:.zero);let before=v.node.position
+            check("other-acts-rest-bypass",preparePandaRollRest(&v) && v.node.position==before)
+        }
+        clear();playerStats.pandaTier=1;pandas=[visitor(center)]
+        let victim=EnemyNode(health:1,moveSpeed:0,xpValue:3);victim.position=center;worldNode.addChild(victim);enemies=[victim];let kills=killCount,orbs=xpOrbs.count
+        updatePandas(0);check("roll-kill-credit-immediate",killCount==kills+1 && victim.killCredited && enemies.isEmpty)
+        // The real kill hook schedules XP after0.05 active seconds. Yield the
+        // scene instead of assuming synchronous delivery or resetting it away.
+        run(SKAction.wait(forDuration:0.2)) { [weak self] in
+            guard let self else{return}
+            check("roll-XP-delivered-on-real-action-clock",self.xpOrbs.count==orbs+1)
+            check("profile-isolation",saved as NSDictionary == UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")} as NSDictionary)
+            let report:[String:Any]=["passed":results.filter{$0["pass"] as? Bool == true}.count,"failed":results.filter{$0["pass"] as? Bool != true}.count,"checks":results]
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-panda-roll-checks.json"))}
+            self.roomPandaRollChecksRunning=false
+        }
     }
     private func runPandaRimChecks() {
         guard let map=debugRoomIntegration,map.isSixRoom else{return}
