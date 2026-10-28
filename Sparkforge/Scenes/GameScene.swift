@@ -47,6 +47,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomSentryChecksRunning = false
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
+    private var roomPandaMovingRests = 0
+    private var roomPandaMovingLastRest: [String:Any] = [:]
+    private var roomPandaMovingChecksRunning = false
+    private var roomPandaMovingInputEpoch = ""
     private var roomPandaRollRests = 0
     private var roomPandaRollLastRest: [String:Any] = [:]
     private var roomPandaRollChecksRunning = false
@@ -596,7 +600,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runPandaMovingRestChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginPandaMovingRestInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPandaRollChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginPandaRollInput() }
@@ -3381,7 +3389,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 if done || panda.timer <= 0 {
                     #if DEBUG
                     let beforeRest = panda.node.position
-                    guard preparePandaRollRest(&panda) else {
+                    guard preparePandaRollRest(&panda), preparePandaMovingRest(&panda) else {
                         // Invalid/impossible state cannot linger or repeat an
                         // expired roll's damage. Cancel only this visitor.
                         endPandaAct(&panda)
@@ -3396,6 +3404,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                             "afterX":Double(panda.node.position.x),"afterY":Double(panda.node.position.y),
                             "travelled":Double(panda.rollTravelled),"timerBefore":panda.timer,"done":done,
                             "wasSafe":debugRoomIntegration?.valid(beforeRest,radius:20) ?? false]
+                    }
+                    if debugRoomIntegration?.isSixRoom == true,
+                       panda.act == .bodyCheck || panda.act == .follow || panda.act == .pin {
+                        roomPandaMovingRests += 1
+                        roomPandaMovingLastRest = ["act":String(describing:panda.act),
+                            "beforeX":Double(beforeRest.x),"beforeY":Double(beforeRest.y),
+                            "afterX":Double(panda.node.position.x),"afterY":Double(panda.node.position.y),
+                            "timerBefore":panda.timer,"done":done]
                     }
                     #endif
                     endPandaAct(&panda)
@@ -3433,6 +3449,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Resolve only a roll's terminal resting root, never its active travel.
     private func preparePandaRollRest(_ panda: inout Panda) -> Bool {
         guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act == .roll else { return true }
+        guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
+        panda.node.position = safe
+        return true
+    }
+    #endif
+
+    #if DEBUG
+    /// Active scripted movement stays untouched. Only a completed moving act
+    /// must hand a valid persistent root to the existing lingering phase.
+    private func preparePandaMovingRest(_ panda: inout Panda) -> Bool {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom,
+              panda.act == .bodyCheck || panda.act == .follow || panda.act == .pin else { return true }
         guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
         panda.node.position = safe
         return true
@@ -5312,7 +5340,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5413,6 +5441,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateVineWall(dt)
         updateTreeCanopy(dt)
         updatePandas(dt)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-input") {
+            for i in pandas.indices where pandas[i].phase == .lingering { pandas[i].timer = 1000 }
+        }
+        #endif
         #if DEBUG
         if debugRoomIntegration?.isSixRoom == true,
            ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-input") {
@@ -15578,6 +15612,15 @@ extension GameScene {
                  "safeAtHandoff":rooms.valid($0.node.position,radius:20)] as [String:Any]
             }
         }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-input") {
+            sample["pandaMovingEpoch"] = roomPandaMovingInputEpoch
+            sample["pandaMovingRests"] = roomPandaMovingRests
+            sample["pandaMovingLastRest"] = roomPandaMovingLastRest
+            sample["pandaMovingVisitors"] = pandas.map {
+                ["phase":String(describing:$0.phase),"x":Double($0.node.position.x),"y":Double($0.node.position.y),
+                 "rootSafe":rooms.valid($0.node.position,radius:20)] as [String:Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-input") {
             sample["pandaRollEpoch"] = roomPandaRollInputEpoch
             sample["pandaRollRests"] = roomPandaRollRests
@@ -16882,6 +16925,107 @@ extension GameScene {
         // Only this explicit input fixture holds a non-attacking visitor for
         // observation. Actual spawn sampling/selection is captured unchanged.
         if let visitor=pandas.first { pandas[0]=Panda(node:visitor.node,act:.pleased,phase:visitor.phase,timer:visitor.timer,destination:visitor.destination) }
+    }
+    private func beginPandaMovingRestInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        playerStats.pandaTier=1;pandaArrivalTimer = -10000;roomPandaMovingRests=0;roomPandaMovingLastRest=[:];roomPandaMovingInputEpoch=UUID().uuidString
+        let room=map.rooms[0],start=CGPoint(x:room.rect.maxX-20,y:room.center.y+100)
+        player.position=room.center;camera?.position=player.position
+        let target=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);target.position=map.rooms[1].center+CGPoint(x:0,y:100);worldNode.addChild(target);enemies=[target]
+        let node=PandaNode();node.position=start;worldNode.addChild(node)
+        var v=Panda(node:node,act:.bodyCheck,phase:.acting,timer:GameConfig.Panda.lingerDuration,destination:start)
+        beginPandaAct(&v);pandas=[v];gameState = .playing;pauseGame()
+    }
+    private func runPandaMovingRestChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomPandaMovingChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func clear(){pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll();enemies.forEach{$0.removeFromParent()};enemies.removeAll();roomPandaMovingRests=0;roomPandaMovingLastRest=[:];pandaArrivalTimer = -10000}
+        func visitor(_ point:CGPoint,_ act:PandaAct,_ timer:TimeInterval)->Panda {
+            let node=PandaNode();node.position=point;worldNode.addChild(node)
+            return Panda(node:node,act:act,phase:.acting,timer:timer,destination:map.player)
+        }
+        func finishTimer(){for _ in 0..<100 {if pandas[0].phase != .acting {break};updatePandas(0.1)}}
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        playerStats.pandaTier=1
+        func otherCasesAndReport(){
+            let room=map.rooms[0],start=CGPoint(x:room.rect.maxX-20,y:room.center.y+100)
+            for mode in 0...2 {
+                clear();let mark=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);mark.position=map.rooms[1].center+CGPoint(x:0,y:100);worldNode.addChild(mark);enemies=[mark]
+                var v=visitor(start,.follow,GameConfig.Panda.lingerDuration);beginPandaAct(&v);pandas=[v]
+                let originalDuration=pandas[0].timer;updatePandas(0.1)
+                check("follow-active-wall-crossing-preserved",pandas[0].phase == .acting && !map.valid(pandas[0].node.position,radius:20) && roomPandaMovingRests==0)
+                let markPosition=mark.position
+                if mode==0 {finishTimer()}
+                else if mode==1 {_ = mark.takeDamage(mark.health+1);updatePandas(0)}
+                else {enemies.removeAll();updatePandas(0)}
+                check("follow-original-duration",originalDuration==GameConfig.Panda.followDuration)
+                check("follow-terminal-safe-and-no-reacquire",pandas[0].phase == .lingering && map.valid(pandas[0].node.position,radius:20) && pandas[0].followMark === mark && roomPandaMovingRests==1)
+                check("follow-mark-not-moved-by-rest",mark.position==markPosition)
+            }
+            for mode in 0...2 {
+                clear();let mark=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);mark.geometryFootprintOverride=8
+                mark.position=CGPoint(x:room.rect.maxX-12,y:room.center.y+100);worldNode.addChild(mark);enemies=[mark]
+                var v=visitor(room.center,.pin,GameConfig.Panda.lingerDuration);beginPandaAct(&v);pandas=[v]
+                let markedPosition=mark.position;updatePandas(0)
+                check("pin-active-root-and-victim-preserved",pandas[0].phase == .acting && pandas[0].node.position==markedPosition && !map.valid(pandas[0].node.position,radius:20) && map.valid(mark.position,radius:8) && roomPandaMovingRests==0)
+                check("pin-original-duration",pandas[0].timer==GameConfig.Panda.pinDuration)
+                if mode==0 {finishTimer()}
+                else if mode==1 {_ = mark.takeDamage(mark.health+1);updatePandas(0)}
+                else {enemies.removeAll();updatePandas(0)}
+                check("pin-terminal-Panda-safe-victim-not-repositioned",pandas[0].phase == .lingering && map.valid(pandas[0].node.position,radius:20) && mark.position==markedPosition && pandas[0].followMark === mark && roomPandaMovingRests==1)
+            }
+            for act in [PandaAct.bodyCheck,.follow,.pin] {
+                clear();let point=map.connections[0].center+CGPoint(x:1,y:0);var v=visitor(point,act,0)
+                if act != .bodyCheck {let mark=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);mark.position=point;worldNode.addChild(mark);enemies=[mark];v.followMark=mark}
+                pandas=[v];let before=pandas[0].node.position;updatePandas(0)
+                check("valid-actual-root-exact-retention",pandas[0].phase == .lingering && pandas[0].node.position==before && pandas[0].destination==map.player)
+            }
+            clear();pandas=[visitor(start,.follow,GameConfig.Panda.followDuration)];let mark=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);mark.position=map.rooms[1].center;worldNode.addChild(mark);enemies=[mark];pandas[0].followMark=mark
+            gameState = .playing;pauseGame();let before=pandas[0].node.position,timer=pandas[0].timer
+            roomPandaMovingChecksRunning=false;update(100);update(100.05);roomPandaMovingChecksRunning=true
+            check("pause-freezes-moving-act",pandas[0].node.position==before && pandas[0].timer==timer && roomPandaMovingRests==0)
+            resumeGame();updatePandas(0.1);check("resume-keeps-original-follow-motion",pandas[0].node.position != before && roomPandaMovingRests==0)
+            let nodes=pandas.map(\.node);restartGame();check("reset-clears-moving-actors",pandas.isEmpty && nodes.allSatisfy{$0.parent==nil})
+            for useRooms in [false,true] {
+                let control=GameScene(size:size);if useRooms{control.debugRoomIntegration = .twoRoom};control.setupArena();control.setupPlayer()
+                for act in [PandaAct.bodyCheck,.follow,.pin] {
+                    let node=PandaNode();node.position=CGPoint(x:9999,y:9999);var v=Panda(node:node,act:act,phase:.acting,timer:0,destination:.zero);let before=v.node.position
+                    check("circle-two-room-moving-rest-bypass",control.preparePandaMovingRest(&v) && v.node.position==before)
+                }
+            }
+            check("profile-isolation",saved as NSDictionary == UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")} as NSDictionary)
+            let report:[String:Any]=["passed":results.filter{$0["pass"] as? Bool == true}.count,"failed":results.filter{$0["pass"] as? Bool != true}.count,"checks":results]
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-panda-moving-rest-checks.json"))}
+            roomPandaMovingChecksRunning=false
+        }
+        func bodyCase(_ index:Int){
+            guard index<map.rooms.count else{otherCasesAndReport();return}
+            clear();let room=map.rooms[index],direction:CGFloat=index%3==2 ? -1 : 1
+            let neighbor=map.rooms[index+Int(direction)],start=CGPoint(x:direction>0 ? room.rect.maxX-20 : room.rect.minX+20,y:room.center.y+100)
+            let mark=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);mark.position=neighbor.center+CGPoint(x:0,y:100);worldNode.addChild(mark);enemies=[mark];let hp=mark.health
+            var v=visitor(start,.bodyCheck,GameConfig.Panda.lingerDuration);beginPandaAct(&v);pandas=[v]
+            check("bodyCheck-original-instant-damage",mark.health==hp-Int(playerStats.effectiveAttack*GameConfig.Panda.bodyCheckDamageMult))
+            run(SKAction.wait(forDuration:0.3)) { [weak self] in
+                guard let self else{return}
+                let actual=self.pandas[0].node.position
+                check("real-bodyCheck-animation-before-terminal-correction",abs(actual.x-(start.x+direction*24))<0.001 && self.pandas[0].phase == .acting && self.pandas[0].timer==GameConfig.Panda.lingerDuration && self.roomPandaMovingRests==0 && !map.valid(actual,radius:20))
+                // Animation has truly finished; advance only original active
+                // timer steps now, without assigning a synthetic short timer.
+                finishTimer();let settled=self.pandas[0].node.position
+                check("bodyCheck-original-finish-safe-rest",self.pandas[0].phase == .lingering && map.valid(settled,radius:20) && self.roomPandaMovingRests==1)
+                let timer=self.pandas[0].timer;self.updatePandas(0)
+                check("single-linger-initialization",self.pandas[0].timer==timer && self.roomPandaMovingRests==1)
+                self.run(SKAction.wait(forDuration:0.12)) { [weak self] in
+                    guard let self else{return}
+                    check("rest-stable-after-real-action-completion",self.pandas[0].node.position==settled)
+                    bodyCase(index+1)
+                }
+            }
+        }
+        bodyCase(0)
     }
     private func beginPandaRollInput() {
         guard let map=debugRoomIntegration,map.isSixRoom else{return}
