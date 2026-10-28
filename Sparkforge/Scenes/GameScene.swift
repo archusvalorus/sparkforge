@@ -36,6 +36,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     var debugRoomEntryFromTitle = false
     private let roomEntryEpoch = UUID().uuidString
     private var roomEnemyStarts: [ObjectIdentifier: CGPoint] = [:]
+    /// Only this update's certified fear step. Later pulls/pushes invalidate
+    /// equality and retain their existing resolution path.
+    private var roomFearAccepted: [ObjectIdentifier: CGPoint] = [:]
     private static var roomChecksAlreadyRun = false
     private var roomSpawnIndex = 0
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
@@ -50,6 +53,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
     private var roomPandaPickupGeneration: UInt64 = 0
+    private var roomFearChecksRunning = false
+    private var roomFearInputEpoch = ""
+    private var roomFearInputSteps = 0
+    private var roomFearInputSafe = true
     private var roomCleanupChecksRunning = false
     private var roomCleanupInputEpoch = ""
     private var roomCleanupInputAvalanche: PandaNode?
@@ -613,7 +620,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomFearChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-input") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginRoomFearInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomCleanupChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-input") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginRoomCleanupInput() }
@@ -3187,6 +3198,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             for enemy in enemies where !enemy.isDying {
                 let from = roomEnemyStarts[ObjectIdentifier(enemy)] ?? enemy.position
                 let desired = enemy.position
+                if rooms.isSixRoom, roomFearAccepted[ObjectIdentifier(enemy)] == desired {
+                    // Do not replace a proven outward straight segment with
+                    // two axis sweeps that could turn it toward Spark.
+                    enemy.geometryDisplacedThisFrame = false
+                    continue
+                }
                 enemy.position = rooms.move(from: from, toward: desired, radius: enemy.geometryFootprintRadius) ?? from
                 enemy.geometryDisplacedThisFrame = enemy.position.distance(to: desired) > 0.001
             }
@@ -5463,7 +5480,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomFearChecksRunning || roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5764,6 +5781,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Enemy Updates
     
     private func updateEnemies(_ dt: TimeInterval) {
+        #if DEBUG
+        roomFearAccepted.removeAll(keepingCapacity: true)
+        #endif
         updateChannelAttacks(dt)
         var diedFromDOT: [EnemyNode] = []
         // v2.1 A5 (CL-52) Ironhide: qualifying hostiles within 150pt of Spark.
@@ -5817,10 +5837,31 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // a face-slide is the step's own doing, not the resolve's.
                 let solid = arenaGeometry.hasBlockedGeometry
                 let margin = max(0, enemy.geometryFootprintRadius - 0.5)
+                #if DEBUG
+                if let rooms = debugRoomIntegration, rooms.isSixRoom {
+                    enemy.position = Arena8RoomFear(map: rooms).step(from: enemy.position,
+                        spark: player.position, preferred: fleeTo == nil ? nil : steerTarget,
+                        moveSpeed: enemy.moveSpeed, slow: enemy.currentSlow + playerStats.globalEnemySlow,
+                        dt: dt, radius: enemy.geometryFootprintRadius)
+                    if rooms.valid(enemy.position, radius: enemy.geometryFootprintRadius) {
+                        roomFearAccepted[ObjectIdentifier(enemy)] = enemy.position
+                        if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-input") {
+                            roomFearInputSteps += 1
+                            roomFearInputSafe = roomFearInputSafe && rooms.valid(enemy.position, radius: enemy.geometryFootprintRadius)
+                        }
+                    }
+                } else {
                 enemy.flee(from: player.position, preferred: fleeTo == nil ? nil : steerTarget,
                            deltaTime: dt, globalSlow: playerStats.globalEnemySlow) { [arenaGeometry] q in
                     solid && arenaGeometry.isBlocked(q, margin: margin)
                 }
+                }
+                #else
+                enemy.flee(from: player.position, preferred: fleeTo == nil ? nil : steerTarget,
+                           deltaTime: dt, globalSlow: playerStats.globalEnemySlow) { [arenaGeometry] q in
+                    solid && arenaGeometry.isBlocked(q, margin: margin)
+                }
+                #endif
             } else if let ranged = enemy as? RangedEnemyNode {
                 if enemy.voidHeldLastFrame { enemy.geometryDisplacedThisFrame = false }   // A6: not its own wall hit
                 // v2.1 (Unit 2, Ruling 4): a shooter denied line of sight keeps
@@ -9449,6 +9490,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Where a frightened enemy runs: away from Spark, inside the wall, never
     /// INTO solid geometry — the route steer takes it round the Carrier.
     private func fleeGoal(for enemy: EnemyNode) -> CGPoint? {
+        #if DEBUG
+        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+            return Arena8RoomFear(map: rooms).goal(from: enemy.position, spark: player.position,
+                lookahead: GameConfig.VoidTree.fleeLookahead, radius: enemy.geometryFootprintRadius)
+        }
+        #endif
         guard let goal = FleeRule.goal(from: enemy.position, awayFrom: player.position,
                                        lookahead: GameConfig.VoidTree.fleeLookahead,
                                        arenaRadius: GameConfig.Arena.radius,
@@ -15351,7 +15398,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameState = .playing
         #if DEBUG
         if let rooms = debugRoomIntegration {
-            roomEnemyStarts.removeAll(); roomSpawnIndex = 0; roomPlayerLastSafe = rooms.player
+            roomEnemyStarts.removeAll(); roomFearAccepted.removeAll(); roomSpawnIndex = 0; roomPlayerLastSafe = rooms.player
             player.position = rooms.player; camera?.position = player.position
             spawnRoomFixtureEnemy()
         }
@@ -15753,6 +15800,16 @@ extension GameScene {
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
         sample["bossMode"] = isGauntlet
+        if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-input") {
+            sample["fearEpoch"] = roomFearInputEpoch
+            sample["fearSteps"] = roomFearInputSteps
+            sample["fearSafe"] = roomFearInputSafe
+            sample["fearActors"] = enemies.filter { $0.isFeared }.map {
+                ["x":Double($0.position.x),"y":Double($0.position.y),
+                 "safe":rooms.valid($0.position,radius:$0.geometryFootprintRadius),
+                 "ranged":$0 is RangedEnemyNode] as [String:Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-input") {
             sample["cleanupEpoch"] = roomCleanupInputEpoch
             sample["rinkExists"] = iceRinkFloor != nil
@@ -17748,6 +17805,84 @@ extension GameScene {
         check("standard-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
         let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results,"scope":"Ordinary arrival handoff only, before existing act; later act motion excluded"]
         if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-panda-arrival-checks.json"))}
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func beginRoomFearInput() {
+        guard let rooms=debugRoomIntegration,rooms.isSixRoom,let room=rooms.rooms.last else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        player.position=room.center+CGPoint(x:-90,y:0);roomPlayerLastSafe=player.position;camera?.position=player.position
+        for ranged in [false,true] {
+            let e:EnemyNode = ranged ? RangedEnemyNode(health:100000,moveSpeed:24,xpValue:2) : EnemyNode(health:100000,moveSpeed:24,xpValue:2)
+            e.position=room.center+CGPoint(x:30,y:ranged ? 35 : -35)
+            enemies.append(e);worldNode.addChild(e);_ = e.tryFear(duration:1000)
+        }
+        roomFearInputEpoch=UUID().uuidString;roomFearInputSteps=0;roomFearInputSafe=true
+    }
+    private func runRoomFearChecks() {
+        guard let rooms=debugRoomIntegration,rooms.isSixRoom else{return}
+        roomFearChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ id:String,_ yes:Bool){results.append(["id":id,"pass":yes])}
+        func clear(){enemies.forEach{$0.removeAllActions();$0.removeFromParent()};enemies.removeAll();roomFearAccepted.removeAll();roomEnemyStarts.removeAll()}
+        check("actual-Title-room-context",debugRoomEntryFromTitle && GameRunPreferences.isIsolated && !isGauntlet)
+        for ranged in [false,true] {
+            for room in rooms.rooms {
+                for slow:CGFloat in [0,0.4,1.2] {
+                    clear()
+                    let e:EnemyNode = ranged ? RangedEnemyNode(health:10000,moveSpeed:80,xpValue:2) : EnemyNode(health:10000,moveSpeed:80,xpValue:2)
+                    e.position=room.center;enemies.append(e);worldNode.addChild(e)
+                    player.position=e.position+CGPoint(x:75,y:0)
+                    e.applySlow(slow,duration:5);check("actual-fear-start",e.tryFear(duration:5))
+                    let before=e.position,spark=player.position
+                    roomEnemyStarts=[ObjectIdentifier(e):before];updateEnemies(0.1)
+                    let after=e.position,limit:CGFloat=80*(1-min(max(slow,0),0.8))*0.1
+                    check("actual-free-room-moves",after != before)
+                    check("actual-keeps-away-after-resolve",FleeRule.keepsAway(from:before,toward:after,spark:spark))
+                    check("actual-full-body-safe",rooms.valid(after,radius:e.geometryFootprintRadius))
+                    check("actual-swept-clear",!rooms.geometry.segmentBlockedExact(before,after,travelRadius:e.geometryFootprintRadius))
+                    check("actual-speed-slow-cap",after.distance(to:before)<=limit+0.0001)
+                    check("actual-free-space-exact-speed",abs(after.distance(to:before)-limit)<0.001)
+                    check("actual-Float-root",after==CGPoint(x:CGFloat(Float(after.x)),y:CGFloat(Float(after.y))))
+                    check("certificate-matches-actual-root",roomFearAccepted[ObjectIdentifier(e)]==after)
+                    if before.length>GameConfig.Arena.radius {check("actual-outside-circle-moves",after != before)}
+                }
+            }
+        }
+        for connection in rooms.connections {
+            clear();let e=EnemyNode(health:10000,moveSpeed:80,xpValue:2)
+            e.position=connection.center;player.position=connection.center+CGPoint(x:connection.corridor.width>connection.corridor.height ? -50:0,y:connection.corridor.height>connection.corridor.width ? -50:0)
+            enemies=[e];worldNode.addChild(e);_ = e.tryFear(duration:5)
+            for _ in 0..<20 {
+                let before=e.position;roomEnemyStarts=[ObjectIdentifier(e):before];updateEnemies(1.0/60)
+                check("actual-corridor-away",FleeRule.keepsAway(from:before,toward:e.position,spark:player.position))
+                check("actual-corridor-body",rooms.valid(e.position,radius:e.geometryFootprintRadius))
+                check("actual-corridor-sweep",!rooms.geometry.segmentBlockedExact(before,e.position,travelRadius:e.geometryFootprintRadius))
+            }
+        }
+        clear();let e=EnemyNode(health:10000,moveSpeed:80,xpValue:2);e.position=rooms.rooms[0].center;enemies=[e];worldNode.addChild(e);player.position=e.position+CGPoint(x:75,y:0);_ = e.tryFear(duration:0.02)
+        roomEnemyStarts=[ObjectIdentifier(e):e.position];updateEnemies(0.1)
+        check("fear-expires-normal-clock",!e.isFeared)
+        roomEnemyStarts=[ObjectIdentifier(e):e.position];updateEnemies(0.1)
+        check("certificate-cleared-next-update",roomFearAccepted.isEmpty)
+        clear();let pausedEnemy=EnemyNode(health:10000,moveSpeed:80,xpValue:2)
+        pausedEnemy.position=rooms.rooms[0].center;enemies=[pausedEnemy];worldNode.addChild(pausedEnemy)
+        check("pause-fixture-fear-starts",pausedEnemy.tryFear(duration:5));let beforePause=pausedEnemy.position
+        pauseGame();let now=lastUpdateTime;roomFearChecksRunning=false;update(now+1);roomFearChecksRunning=true
+        check("pause-freezes-position",pausedEnemy.position==beforePause);check("pause-freezes-fear",pausedEnemy.isFeared)
+        restartGame();check("reset-clears-certificate",roomFearAccepted.isEmpty)
+        check("reset-retains-map",debugRoomIntegration?.isSixRoom==true)
+        check("reset-memory-profile",GameRunPreferences.isIsolated)
+        returnToTitle()
+        waitForRoomTitleCompletion {
+            check("Title-detaches-old-scene",self.view==nil)
+            let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results,"scope":"real basic/ranged updateEnemies and final resolver via Title; controlled explicit fear/slow, native input separate"]
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-void-fear-checks.json"))}
+            self.roomFearChecksRunning=false
+        }
     }
 }
 #endif
