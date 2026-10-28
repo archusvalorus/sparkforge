@@ -47,6 +47,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomSentryChecksRunning = false
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
+    private var roomPandaPickupGeneration: UInt64 = 0
+    private var roomPandaPickupChecksRunning = false
+    private var roomPandaPickupInputEpoch = ""
+    private var roomPandaPickupInputTarget = CGPoint.zero
     private var roomPandaMovingRests = 0
     private var roomPandaMovingLastRest: [String:Any] = [:]
     private var roomPandaMovingChecksRunning = false
@@ -600,7 +604,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runPandaPickupChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-input") {
+                DispatchQueue.main.async { [weak self] in self?.beginPandaPickupInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPandaMovingRestChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginPandaMovingRestInput() }
@@ -2410,6 +2418,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let view = view else { return }
         #if DEBUG
         if debugRoomIntegration != nil { removeAllActions() }
+        cancelRoomPandaPickupFalls()
         #endif
 
         // v2.0 (B2a): the gauntlet's arena override is transient run state. It
@@ -3948,11 +3957,33 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for _ in 0..<GameConfig.Panda.afterKaijuPandas { spawnPanda() }
     }
 
+    #if DEBUG
+    /// Cancel only real pickup falls at a run/scene boundary. Cosmetic rain
+    /// remains outside this adapter and normal active-run timing is unchanged.
+    private func cancelRoomPandaPickupFalls() {
+        guard debugRoomIntegration?.isSixRoom == true else { return }
+        roomPandaPickupGeneration &+= 1
+        for stalk in worldNode.children where stalk.name == "arena8-panda-health-stalk" {
+            stalk.removeAllActions()
+            stalk.removeFromParent()
+        }
+    }
+    #endif
+
     /// A bamboo pickup. Rides HealthOrbNode, so it stays non-magnetized — walking
     /// over to it is still a positioning decision (design canon).
     private func dropBamboo(at point: CGPoint) {
+        #if DEBUG
+        let pickupPoint: CGPoint
+        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+            guard let safe = Arena8PandaPickupPlacement(map: rooms)?.pickup(at: point) else { return }
+            pickupPoint = safe
+        } else { pickupPoint = point }
+        #else
+        let pickupPoint = point
+        #endif
         let orb = HealthOrbNode()
-        orb.position = point
+        orb.position = pickupPoint
         orb.zPosition = 4
         healthOrbs.append(orb)
         worldNode.addChild(orb)
@@ -3961,22 +3992,45 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// A stalk falling from off-screen. `isPickup` decides whether anything is
     /// actually there when it lands.
     private func dropFallingBamboo(at landing: CGPoint, isPickup: Bool) {
+        #if DEBUG
+        let targetLanding: CGPoint
+        let pickupGeneration: UInt64?
+        if isPickup, let rooms = debugRoomIntegration, rooms.isSixRoom {
+            guard let safe = Arena8PandaPickupPlacement(map: rooms)?.pickup(at: landing) else { return }
+            targetLanding = safe
+            pickupGeneration = roomPandaPickupGeneration
+        } else {
+            targetLanding = landing
+            pickupGeneration = nil
+        }
+        #else
+        let targetLanding = landing
+        #endif
         let s = DeviceScale.gameplay
         let stalk = SKShapeNode(rectOf: CGSize(width: 3 * s, height: 22 * s), cornerRadius: 1.5 * s)
         stalk.fillColor = SKColor(hex: 0x6FA83C)
         stalk.strokeColor = SKColor(hex: 0x3E6B22, alpha: 0.9)
         stalk.lineWidth = 1
-        stalk.position = landing + CGPoint(x: 0, y: 220 * s)
+        stalk.position = targetLanding + CGPoint(x: 0, y: 220 * s)
         stalk.zPosition = 6
         stalk.zRotation = CGFloat.random(in: -0.4...0.4)
+        #if DEBUG
+        if pickupGeneration != nil { stalk.name = "arena8-panda-health-stalk" }
+        #endif
         worldNode.addChild(stalk)
 
-        let fall = SKAction.move(to: landing, duration: TimeInterval.random(in: 0.45...0.75))
+        let fall = SKAction.move(to: targetLanding, duration: TimeInterval.random(in: 0.45...0.75))
         fall.timingMode = .easeIn
         stalk.run(SKAction.sequence([
             fall,
             SKAction.run { [weak self] in
-                if isPickup { self?.dropBamboo(at: landing) }
+                #if DEBUG
+                if let generation = pickupGeneration {
+                    guard let self, self.roomPandaPickupGeneration == generation,
+                          self.view?.scene === self else { return }
+                }
+                #endif
+                if isPickup { self?.dropBamboo(at: targetLanding) }
             },
             SKAction.group([SKAction.fadeOut(withDuration: 0.25),
                             SKAction.scaleY(to: 0.2, duration: 0.25)]),
@@ -5340,7 +5394,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -14994,6 +15048,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func restartGame() {
         #if DEBUG
         if debugRoomIntegration != nil { removeAllActions() }
+        cancelRoomPandaPickupFalls()
         #endif
         for enemy in enemies { enemy.removeFromParent() }
         enemies.removeAll()
@@ -15611,6 +15666,12 @@ extension GameScene {
                 ["phase":String(describing:$0.phase),"x":Double($0.node.position.x),"y":Double($0.node.position.y),
                  "safeAtHandoff":rooms.valid($0.node.position,radius:20)] as [String:Any]
             }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-input") {
+            sample["pandaPickupEpoch"] = roomPandaPickupInputEpoch
+            sample["pandaPickupTarget"] = ["x":Double(roomPandaPickupInputTarget.x),"y":Double(roomPandaPickupInputTarget.y)]
+            sample["pandaPickupOrbs"] = healthOrbs.map { ["x":Double($0.position.x),"y":Double($0.position.y),"safe":rooms.valid($0.position,radius:12)] as [String:Any] }
+            sample["pandaPickupFalls"] = worldNode.children.filter{$0.name == "arena8-panda-health-stalk"}.map{["x":Double($0.position.x),"y":Double($0.position.y)]}
         }
         if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-input") {
             sample["pandaMovingEpoch"] = roomPandaMovingInputEpoch
@@ -16925,6 +16986,108 @@ extension GameScene {
         // Only this explicit input fixture holds a non-attacking visitor for
         // observation. Actual spawn sampling/selection is captured unchanged.
         if let visitor=pandas.first { pandas[0]=Panda(node:visitor.node,act:.pleased,phase:visitor.phase,timer:visitor.timer,destination:visitor.destination) }
+    }
+    private func beginPandaPickupInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom,
+              let target=Arena8PandaPickupPlacement(map:map)?.pickup(at:CGPoint(x:map.rooms[0].rect.maxX,y:map.rooms[0].center.y+100)) else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();healthOrbs.forEach{$0.removeFromParent()};healthOrbs.removeAll()
+        roomPandaPickupInputEpoch=UUID().uuidString;roomPandaPickupInputTarget=target
+        playerStats.currentHP=max(1,playerStats.maxHP-40)
+        player.position=target+CGPoint(x:-120,y:0);camera?.position=player.position
+        dropFallingBamboo(at:CGPoint(x:map.rooms[0].rect.maxX,y:map.rooms[0].center.y+100),isPickup:true)
+        gameState = .playing;pauseGame()
+    }
+    private func runPandaPickupChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomPandaPickupChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func clear(){cancelRoomPandaPickupFalls();healthOrbs.forEach{$0.removeFromParent()};healthOrbs.removeAll()}
+        func realFalls()->[SKNode]{worldNode.children.filter{$0.name == "arena8-panda-health-stalk"}}
+        func later(_ duration:Double,_ body:@escaping()->Void){DispatchQueue.main.asyncAfter(deadline:.now()+duration,execute:body)}
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();clear()
+        let requests=map.rooms.map{CGPoint(x:$0.rect.maxX,y:$0.center.y+100)}+map.connections.map(\.center)
+        for requested in requests {
+            dropBamboo(at:requested)
+            check("generic-health-safe-floor",healthOrbs.last.map{map.valid($0.position,radius:12)} ?? false)
+            if map.valid(requested,radius:12){check("generic-valid-point-exact-retention",healthOrbs.last?.position==requested)}
+        }
+        clear()
+        let wall=CGPoint(x:map.rooms[0].rect.maxX,y:map.rooms[0].center.y+100)
+        guard let target=Arena8PandaPickupPlacement(map:map)?.pickup(at:wall) else{return}
+        dropFallingBamboo(at:wall,isPickup:true)
+        check("actual-real-art-starts-above-safe-target",realFalls().count==1 && (realFalls()[0].position-(target+CGPoint(x:0,y:220*DeviceScale.gameplay))).length<0.001 && healthOrbs.isEmpty)
+        // Scene/background pause freezes SpriteKit actions. The existing menu
+        // pause does not freeze rain actions; this unit preserves that timing.
+        isPaused=true;let held=realFalls()[0].position
+        later(0.9){[weak self] in
+            guard let self else{return}
+            check("scene-pause-freezes-fall-and-pickup",realFalls().count==1 && realFalls()[0].position==held && self.healthOrbs.isEmpty)
+            self.isPaused=false
+            var observedEndpoint=false
+            var pollCount=0
+            var observationComplete=false
+            func observe(){
+                guard !observationComplete, pollCount<110 else{return}
+                pollCount+=1
+                if let stalk=realFalls().first, !self.healthOrbs.isEmpty {
+                    check("real-art-at-captured-pickup-center",(stalk.position-target).length<0.001)
+                    check("orb-keeps-original-four-point-hover",abs(self.healthOrbs[0].position.x-target.x)<0.001 && self.healthOrbs[0].position.y>=target.y-0.001 && self.healthOrbs[0].position.y<=target.y+4.001)
+                    observedEndpoint=true;return
+                }
+                if !observedEndpoint {later(0.01,observe)}
+            }
+            observe()
+            later(1.15){[weak self] in
+                guard let self else{return}
+                observationComplete=true
+                check("successful-real-fall-exactly-one-pickup",self.healthOrbs.count==1 && abs(self.healthOrbs[0].position.x-target.x)<0.001 && abs(self.healthOrbs[0].position.y-target.y)<=4.001 && realFalls().isEmpty)
+                check("actual-visible-endpoint-observed",observedEndpoint)
+                if let orb=self.healthOrbs.first,let body=orb.physicsBody {
+                    self.playerStats.currentHP=max(1,self.playerStats.maxHP-40);let hp=self.playerStats.currentHP
+                    self.handleHealthOrbCollection(orbBody:body)
+                    check("actual-collection-original-heal-once",self.playerStats.currentHP==min(self.playerStats.maxHP,hp+GameConfig.HealthOrb.healAmount) && self.healthOrbs.isEmpty && orb.physicsBody==nil)
+                    self.handleHealthOrbCollection(orbBody:body)
+                    check("duplicate-contact-does-not-heal-twice",self.playerStats.currentHP==min(self.playerStats.maxHP,hp+GameConfig.HealthOrb.healAmount))
+                } else {check("actual-collection-available",false)}
+                let expiry=HealthOrbNode()
+                check("actual-orb-retains-lifespan-boundary",!expiry.update(deltaTime:GameConfig.HealthOrb.despawnTime-0.001) && expiry.update(deltaTime:0.001))
+                clear();let before=self.worldNode.children.count
+                self.dropFallingBamboo(at:wall,isPickup:false)
+                let decorative=self.worldNode.children.last
+                check("decorative-position-and-tag-unchanged",self.worldNode.children.count==before+1 && decorative.map{($0.position-(wall+CGPoint(x:0,y:220*DeviceScale.gameplay))).length<0.001} == true && decorative?.name==nil)
+                self.dropFallingBamboo(at:wall,isPickup:true);self.dropFallingBamboo(at:map.rooms[1].center,isPickup:true)
+                self.cancelRoomPandaPickupFalls()
+                check("cancel-removes-only-real-falls",realFalls().isEmpty && decorative?.parent === self.worldNode)
+                later(1.1){[weak self] in
+                    guard let self else{return}
+                    check("cancelled-and-decorative-falls-create-no-orbs",self.healthOrbs.isEmpty)
+                    self.dropFallingBamboo(at:wall,isPickup:true);let old=realFalls();self.restartGame()
+                    check("actual-restart-clears-real-falls",old.allSatisfy{$0.parent==nil} && realFalls().isEmpty && self.healthOrbs.isEmpty)
+                    later(1.1){[weak self] in
+                        guard let self else{return}
+                        check("no-post-restart-delayed-pickup",self.healthOrbs.isEmpty)
+                        for useRooms in [false,true] {
+                            let control=GameScene(size:self.size);if useRooms{control.debugRoomIntegration = .twoRoom};control.setupArena();control.setupPlayer()
+                            control.dropBamboo(at:wall);check("circle-two-room-generic-unchanged",control.healthOrbs.last?.position==wall)
+                            control.dropFallingBamboo(at:wall,isPickup:true);check("circle-two-room-fall-untagged",control.worldNode.children.last?.name==nil)
+                            control.worldNode.removeAllChildren()
+                        }
+                        self.dropFallingBamboo(at:wall,isPickup:true);let titleFalls=realFalls()
+                        self.returnToTitle()
+                        check("actual-title-clears-real-falls",titleFalls.allSatisfy{$0.parent==nil} && realFalls().isEmpty)
+                        later(1.1){[self] in
+                            check("no-post-title-delayed-pickup",self.healthOrbs.isEmpty)
+                        check("profile-isolation",saved as NSDictionary == UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")} as NSDictionary)
+                        let report:[String:Any]=["passed":results.filter{$0["pass"] as? Bool == true}.count,"failed":results.filter{$0["pass"] as? Bool != true}.count,"checks":results]
+                        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-panda-pickup-checks.json"))}
+                        self.roomPandaPickupChecksRunning=false
+                        }
+                    }
+                }
+            }
+        }
     }
     private func beginPandaMovingRestInput() {
         guard let map=debugRoomIntegration,map.isSixRoom else{return}
