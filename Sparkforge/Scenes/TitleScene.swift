@@ -58,6 +58,10 @@ final class TitleScene: SKScene {
     // MARK: - State
 
     private var isTransitioning = false
+    #if DEBUG
+    private static var roomAutomaticPlayStarted = false
+    private let roomTitleEpoch = UUID().uuidString
+    #endif
 
     /// Tracks the current Y cursor for sequential layout
     private var layoutY: CGFloat = 0
@@ -169,6 +173,24 @@ final class TitleScene: SKScene {
         // v2.0 Unit 1.5: snapshot the scrollable home stack (after all content
         // exists) so the menu can pan to reach every element.
         buildMenuScrollSet(topInset: view.safeAreaInsets.top, bottomInset: view.safeAreaInsets.bottom)
+        #if DEBUG
+        if GameRunPreferences.isIsolated {
+            let badge = SKLabelNode(fontNamed: "Menlo-Bold")
+            badge.name = "arena8OwnerTitleBadge"
+            let floor = ProcessInfo.processInfo.arguments.contains("--arena8-six") ? "SIX ROOMS" : "TWO ROOMS"
+            badge.text = "ARENA 8 OWNER TEST • " + floor + " • MEMORY PROFILE"
+            badge.fontColor = .cyan; badge.fontSize = 9; badge.zPosition = 200
+            if badge.frame.width > size.width - 24 { badge.fontSize *= (size.width - 24) / badge.frame.width }
+            badge.position = CGPoint(x: 0, y: size.height / 2 - view.safeAreaInsets.top - 18)
+            addChild(badge)
+        }
+        if GameRunPreferences.isIsolated,
+           ProcessInfo.processInfo.arguments.contains("--arena8-title-autoplay"),
+           !Self.roomAutomaticPlayStarted {
+            Self.roomAutomaticPlayStarted = true
+            DispatchQueue.main.async { [weak self] in self?.startGame() }
+        }
+        #endif
 
         // v1.7: warm up the blessing-choice ad while the forge is unclaimed
         if !DailyForgeManager.shared.hasClaimedToday && !IAPManager.shared.hasRemovedAds {
@@ -176,6 +198,28 @@ final class TitleScene: SKScene {
         }
     }
     
+    #if DEBUG
+    override func update(_ currentTime: TimeInterval) {
+        guard GameRunPreferences.isIsolated,
+              ProcessInfo.processInfo.arguments.contains("--arena8-title-input"),
+              let view = view, view.scene === self,
+              let button = childNode(withName: "ignitePromptBox") else { return }
+        let point = convertPoint(toView: button.position)
+        let sample: [String: Any] = ["titleEpoch": roomTitleEpoch,
+            "isolated": GameRunPreferences.isIsolated,
+            "selectedFloor": ProcessInfo.processInfo.arguments.contains("--arena8-six") ? 6 : 2,
+            "playX": Double(point.x), "playY": Double(point.y),
+            "registeredArenas": ArenaConfig.all.count]
+        if let data = try? JSONSerialization.data(withJSONObject: sample, options: [.sortedKeys]),
+           let value = String(data: data, encoding: .utf8) {
+            view.isAccessibilityElement = true
+            view.accessibilityIdentifier = "arena8-title-probe"
+            view.accessibilityLabel = "Arena 8 owner-title technical probe"
+            view.accessibilityValue = value
+        }
+    }
+    #endif
+
     // MARK: - Setup
     
     private func setupEmberParticles() {
@@ -3480,6 +3524,12 @@ final class TitleScene: SKScene {
         guard let view = view else { return }
         
         let gameScene = GameScene(size: view.bounds.size)
+        #if DEBUG
+        if GameRunPreferences.isIsolated {
+            gameScene.debugRoomIntegration = ProcessInfo.processInfo.arguments.contains("--arena8-six") ? .sixRoom : .twoRoom
+            gameScene.debugRoomEntryFromTitle = true
+        }
+        #endif
         gameScene.scaleMode = .resizeFill
         gameScene.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         

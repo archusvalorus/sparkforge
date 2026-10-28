@@ -33,6 +33,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     #if DEBUG
     var debugRoomIntegration: Arena8GameMap?
+    var debugRoomEntryFromTitle = false
+    private let roomEntryEpoch = UUID().uuidString
     private var roomEnemyStarts: [ObjectIdentifier: CGPoint] = [:]
     private static var roomChecksAlreadyRun = false
     private var roomSpawnIndex = 0
@@ -591,6 +593,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         statHUD.update(from: playerStats)
 
         #if DEBUG
+        recordRoomTitleEntry()
         if debugRoomIntegration != nil {
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") {
                 _ = waveManager.update(deltaTime: 120) // explicit native late-pressure fixture
@@ -604,62 +607,65 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
+            // Technical fixtures must start after Title's 0.3 s incoming
+            // transition restores scene pause state. Ordinary Play is not delayed.
+            let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
             if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPandaPickupChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaPickupChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginPandaPickupInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginPandaPickupInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPandaMovingRestChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaMovingRestChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginPandaMovingRestInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginPandaMovingRestInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPandaRollChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaRollChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-roll-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginPandaRollInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginPandaRollInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-rim-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPandaRimChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaRimChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-arrival-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPandaArrivalChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaArrivalChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-arrival-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginPandaArrivalInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginPandaArrivalInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPandaDestinationChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaDestinationChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginPandaDestinationInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginPandaDestinationInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-rift-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runRiftChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRiftChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-rift-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginRiftInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginRiftInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runSentryChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runSentryChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-sentry-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginSentryInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginSentryInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runVoidPlacementChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runVoidPlacementChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-placement-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginVoidPlacementInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginVoidPlacementInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPandaEndpointChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaEndpointChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginPandaEndpointInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginPandaEndpointInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-summons-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runSummonChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runSummonChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-summons-input") {
-                DispatchQueue.main.async { [weak self] in self?.beginSummonInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginSummonInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-growth-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runGrowthChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runGrowthChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-growth-input") {
                 // Explicit native-input fixture only; ordinary six-room drafting
                 // and its controlled compatibility boundary stay unchanged.
-                DispatchQueue.main.async { [weak self] in self?.beginGrowthInput() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginGrowthInput() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-echo-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runEchoChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runEchoChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-pressure-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runPressureChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPressureChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-six-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runSixRoomChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runSixRoomChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-game-checks") {
-                DispatchQueue.main.async { [weak self] in self?.runRoomIntegrationChecks() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomIntegrationChecks() }
             }
         }
         #endif
@@ -15343,6 +15349,21 @@ extension GameScene {
         return point.length > GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin
     }
     #if DEBUG
+    private func recordRoomTitleEntry() {
+        let args = ProcessInfo.processInfo.arguments
+        guard GameRunPreferences.isIsolated,
+              args.contains("--arena8-title-autoplay") || args.contains("--arena8-title-input") else { return }
+        let receipt: [String: Any] = ["entryFromTitle": debugRoomEntryFromTitle,
+            "entryEpoch": roomEntryEpoch, "isolated": GameRunPreferences.isIsolated,
+            "rooms": debugRoomIntegration?.rooms.count ?? 0,
+            "blockedFootprints": arenaGeometry.blockedFootprints.count,
+            "playerSafe": debugRoomIntegration?.valid(player.position, radius: playerStats.effectiveCollisionRadius) ?? false,
+            "bossMode": isGauntlet, "registeredArenas": ArenaConfig.all.count]
+        if let data = try? JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys]),
+           let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? data.write(to: dir.appendingPathComponent("arena8-title-entry.json"), options: .atomic)
+        }
+    }
     private var roomsBadgeText: String {
         guard let map = debugRoomIntegration else { return "" }
         if map.isSixRoom {
@@ -15651,6 +15672,10 @@ extension GameScene {
             "melee": enemies.filter { !($0 is RangedEnemyNode) && !$0.isDying }.count,
             "ranged": enemies.filter { $0 is RangedEnemyNode && !$0.isDying }.count,
             "largestBody": enemies.map(\.geometryFootprintRadius).max() ?? 0]
+        sample["entryFromTitle"] = debugRoomEntryFromTitle
+        sample["entryEpoch"] = roomEntryEpoch
+        sample["roomCount"] = rooms.rooms.count
+        sample["bossMode"] = isGauntlet
         if ProcessInfo.processInfo.arguments.contains("--arena8-growth-input") {
             sample["gardens"] = cultivatedZones.map { ["x":Double($0.position.x),"y":Double($0.position.y),"radius":Double($0.radius)] }
             sample["flowers"] = flowers.count
