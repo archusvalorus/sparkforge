@@ -50,6 +50,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
     private var roomPandaPickupGeneration: UInt64 = 0
+    private var roomCleanupChecksRunning = false
+    private var roomCleanupInputEpoch = ""
+    private var roomCleanupInputAvalanche: PandaNode?
     private var roomPandaPickupChecksRunning = false
     private var roomPandaPickupInputEpoch = ""
     private var roomPandaPickupInputTarget = CGPoint.zero
@@ -610,7 +613,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomCleanupChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-input") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginRoomCleanupInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-cleanup-baseline") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomCleanupBaseline() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runPandaPickupChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-pickup-input") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginPandaPickupInput() }
@@ -3645,9 +3654,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// walking-over part entirely.
     private func spawnStackedPanda(on base: PandaNode) {
         guard pandas.count < GameConfig.Panda.maxPandas else { return }
+        #if DEBUG
+        let requested = base.position + CGPoint(x: 0, y: 16 * DeviceScale.gameplay)
+        guard let stationaryRoot = roomStationaryPandaRoot(at: requested) else { return }
+        #endif
         let node = PandaNode()
         node.setBodyScale(PandaNode.baseScale * 0.85)   // the one on top is smaller
+        #if DEBUG
+        node.position = stationaryRoot
+        #else
         node.position = base.position + CGPoint(x: 0, y: 16 * DeviceScale.gameplay)
+        #endif
         node.zPosition = base.zPosition + 0.1
         node.alpha = 0
         worldNode.addChild(node)
@@ -3798,9 +3815,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         node.position = start
         node.alpha = 0
         worldNode.addChild(node)
+        #if DEBUG
+        let startRolling: SKAction
+        if debugRoomIntegration?.isSixRoom == true {
+            startRolling = SKAction.run { [weak self, weak node] in
+                guard let node else { return }
+                self?.beginRoomAvalancheRoll(node)
+            }
+        } else { startRolling = SKAction.run { node.startRolling() } }
+        node.run(SKAction.sequence([SKAction.wait(forDuration: delay),
+                                    SKAction.fadeIn(withDuration: 0.15), startRolling]))
+        #else
         node.run(SKAction.sequence([SKAction.wait(forDuration: delay),
                                     SKAction.fadeIn(withDuration: 0.15),
                                     SKAction.run { node.startRolling() }]))
+        #endif
 
         var panda = Panda(node: node,
                           act: .roll,
@@ -3947,6 +3976,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // And the arena is left with pandas doing vaguely supportive things.
         // One of them is eating bamboo and will not be acknowledging any of this.
+        #if DEBUG
+        func placeWitness() {
+            let requested = player.position + CGPoint(x: CGFloat.random(in: 40...70)
+                                                      * (Bool.random() ? 1 : -1), y: -10)
+            guard let stationaryRoot = roomStationaryPandaRoot(at: requested) else { return }
+            let witness = PandaNode()
+            witness.position = stationaryRoot
+            worldNode.addChild(witness)
+            witness.sit()
+            witness.bounce()
+            var chewing = Panda(node: witness, act: .pleased, phase: .lingering,
+                                timer: GameConfig.Panda.witnessLinger,
+                                destination: witness.position)
+            chewing.followMark = nil
+            pandas.append(chewing)
+            dropBamboo(at: witness.position + CGPoint(x: 14, y: 0))
+        }
+        placeWitness()
+        #else
         let witness = PandaNode()
         witness.position = player.position + CGPoint(x: CGFloat.random(in: 40...70)
                                                      * (Bool.random() ? 1 : -1), y: -10)
@@ -3959,6 +4007,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         chewing.followMark = nil
         pandas.append(chewing)
         dropBamboo(at: witness.position + CGPoint(x: 14, y: 0))
+
+        #endif
 
         for _ in 0..<GameConfig.Panda.afterKaijuPandas { spawnPanda() }
     }
@@ -3973,6 +4023,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             stalk.removeAllActions()
             stalk.removeFromParent()
         }
+    }
+    #endif
+
+    #if DEBUG
+    private func beginRoomAvalancheRoll(_ node: PandaNode) {
+        guard view?.scene === self, node.parent === worldNode,
+              pandas.contains(where: { $0.node === node && $0.act == .roll
+                  && $0.phase == .acting && !$0.leaving }) else { return }
+        node.startRolling()
+    }
+    private func roomStationaryPandaRoot(at requested: CGPoint) -> CGPoint? {
+        guard let map = debugRoomIntegration, map.isSixRoom else { return requested }
+        return Arena8PandaDestination(map: map)?.destination(at: requested)
     }
     #endif
 
@@ -5400,7 +5463,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5501,6 +5564,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateVineWall(dt)
         updateTreeCanopy(dt)
         updatePandas(dt)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-input") {
+            for i in pandas.indices where pandas[i].phase == .lingering { pandas[i].timer = 1000 }
+        }
+        #endif
         #if DEBUG
         if debugRoomIntegration?.isSixRoom == true,
            ProcessInfo.processInfo.arguments.contains("--arena8-panda-moving-rest-input") {
@@ -9695,7 +9764,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Placeholder Ice Rink floor (A9 art): the whole arena glazes over.
     private func showIceRinkFloor() {
+        #if DEBUG
+        let rink: SKShapeNode
+        if let rooms = debugRoomIntegration, rooms.isSixRoom,
+           let path = Arena8RinkFootprint.path(in: rooms) {
+            rink = SKShapeNode(path: path)
+        } else { rink = SKShapeNode(circleOfRadius: GameConfig.Arena.radius) }
+        #else
         let rink = SKShapeNode(circleOfRadius: GameConfig.Arena.radius)
+        #endif
         rink.fillColor = SKColor(hex: 0x88CCFF, alpha: 0.10)
         rink.strokeColor = SKColor(hex: 0xCCF2FF, alpha: 0.55)
         rink.lineWidth = 3
@@ -15676,6 +15753,19 @@ extension GameScene {
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
         sample["bossMode"] = isGauntlet
+        if ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-input") {
+            sample["cleanupEpoch"] = roomCleanupInputEpoch
+            sample["rinkExists"] = iceRinkFloor != nil
+            sample["rinkTier"] = upgradeManager.tier(of: "chill_4")
+            sample["staticRoots"] = pandas.filter { $0.node !== roomCleanupInputAvalanche }.map {
+                ["x":Double($0.node.position.x),"y":Double($0.node.position.y),"safe":rooms.valid($0.node.position,radius:20)] as [String:Any]
+            }
+            if let actor=pandas.first(where:{$0.node === roomCleanupInputAvalanche}) {
+                sample["cleanupAvalanche"] = ["phase":String(describing:actor.phase),
+                    "rolling":actor.node.action(forKey:"roll") != nil,
+                    "rootSafe":rooms.valid(actor.node.position,radius:20),"travelled":actor.rollTravelled]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-growth-input") {
             sample["gardens"] = cultivatedZones.map { ["x":Double($0.position.x),"y":Double($0.position.y),"radius":Double($0.radius)] }
             sample["flowers"] = flowers.count
@@ -17011,6 +17101,174 @@ extension GameScene {
         // Only this explicit input fixture holds a non-attacking visitor for
         // observation. Actual spawn sampling/selection is captured unchanged.
         if let visitor=pandas.first { pandas[0]=Panda(node:visitor.node,act:.pleased,phase:visitor.phase,timer:visitor.timer,destination:visitor.destination) }
+    }
+    private func configureRoomRinkForProof(render: Bool = true) {
+        if let whiteout=upgradeManager.allCards.first(where:{$0.id=="v16_whiteout"}),
+           let drift=upgradeManager.allCards.first(where:{$0.id=="chill_4"}) {
+            upgradeManager.pickCard(whiteout,stats:playerStats)
+            for _ in 0..<5 {upgradeManager.pickCard(drift,stats:playerStats)}
+        }
+        if render { updateChillTrail(0) }
+    }
+    private func beginRoomCleanupInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom,
+              let corridor=map.connections.first(where:{$0.corridor.height>$0.corridor.width}) else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        playerStats.pandaTier=5;pandaArrivalTimer = -10000
+        player.position=corridor.center;camera?.position=player.position
+        configureRoomRinkForProof();endKaiju()
+        if let witness=pandas.first {
+            for actor in pandas.dropFirst(){actor.node.removeAllActions();actor.node.removeFromParent()}
+            pandas=[witness]
+        }
+        let room=map.rooms[corridor.to],base=PandaNode()
+        base.position=CGPoint(x:room.center.x+100,y:room.rect.maxY-20);worldNode.addChild(base)
+        pandas.append(Panda(node:base,act:.pleased,phase:.lingering,timer:1000,destination:base.position))
+        spawnStackedPanda(on:base)
+        spawnAvalanchePanda(at:room.center,heading:CGPoint(x:1,y:0),delay:0.75)
+        roomCleanupInputAvalanche=pandas.last?.node;roomCleanupInputEpoch=UUID().uuidString
+    }
+    private func runRoomCleanupChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomCleanupChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func later(_ duration:Double,_ body:@escaping @MainActor ()->Void){DispatchQueue.main.asyncAfter(deadline:.now()+duration,execute:body)}
+        func clear(){
+            for node in worldNode.children where node is PandaNode{node.removeAllActions();node.removeFromParent()}
+            pandas.removeAll();healthOrbs.forEach{$0.removeAllActions();$0.removeFromParent()};healthOrbs.removeAll()
+            enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandaArrivalTimer = -10000
+        }
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        clear();configureRoomRinkForProof(render:false)
+        let move=playerStats.effectiveMoveSpeed,slow=playerStats.globalEnemySlow
+        updateChillTrail(0)
+        check("actual-controlled-catalog-picks-enable-rink",upgradeManager.tier(of:"chill_4")==5 && playerStats.iceRinkActive && chillGround.isRink)
+        let rink=iceRinkFloor
+        check("actual-rink-exists-with-original-style",rink != nil && rink?.lineWidth==3 && rink?.glowWidth==6 && abs((rink?.zPosition ?? -1)-1.2)<0.00001)
+        if let path=rink?.path {
+            let rects=map.rooms.map(\.rect)+map.connections.map(\.corridor)
+            var x=map.world.minX-11.23
+            while x<map.world.maxX+12 {
+                var y=map.world.minY-13.19
+                while y<map.world.maxY+14 {let point=CGPoint(x:x,y:y);check("actual-rink-fill-matches-floor",path.contains(point)==rects.contains{$0.contains(point)});y+=47.13}
+                x+=43.17
+            }
+            let stroke=path.copy(strokingWithWidth:3,lineCap:.butt,lineJoin:.miter,miterLimit:10)
+            for link in map.connections {
+                let rect=link.corridor
+                let points=rect.width>rect.height ? [CGPoint(x:rect.minX,y:rect.midY),CGPoint(x:rect.maxX,y:rect.midY)] : [CGPoint(x:rect.midX,y:rect.minY),CGPoint(x:rect.midX,y:rect.maxY)]
+                for point in points {check("actual-rink-no-false-door-seam",path.contains(point) && !stroke.contains(point))}
+            }
+            for wall in map.geometry.blockedFootprints {check("actual-rink-omits-wall-interior",!path.contains(wall.center))}
+        } else {check("actual-rink-path-present",false)}
+        check("renderer-keeps-card-speed-and-slow",playerStats.effectiveMoveSpeed==move && playerStats.globalEnemySlow==slow)
+        later(0.75){[self] in
+            check("actual-original-rink-fade-completes",abs((rink?.alpha ?? -1)-1)<0.001)
+            thawChillGround(newRun:true);check("actual-rink-cleanup",iceRinkFloor==nil && rink?.parent==nil)
+            for room in map.rooms {
+                for point in [room.center,CGPoint(x:room.center.x+100,y:room.rect.maxY-20)] {
+                    clear();let base=PandaNode();base.position=point;worldNode.addChild(base);let before=base.position
+                    let requested=before+CGPoint(x:0,y:16*DeviceScale.gameplay);spawnStackedPanda(on:base)
+                    check("actual-one-stack-base-unchanged",pandas.count==1 && base.position==before)
+                    if let child=pandas.first {
+                        check("actual-child-Float-root20-safe",map.valid(child.node.position,radius:20))
+                        if map.valid(requested,radius:20),map.valid(CGPoint(x:CGFloat(Float(requested.x)),y:CGFloat(Float(requested.y))),radius:20){check("actual-valid-stack-offset-retained",(child.node.position-requested).length<0.001)}
+                        check("actual-stack-original-linger-and-scale",child.timer==GameConfig.Panda.stackLinger && abs(child.node.yScale-PandaNode.baseScale*0.85)<0.001)
+                    }
+                }
+            }
+            for corridor in map.connections.filter({$0.corridor.height>$0.corridor.width}) {
+                clear();playerStats.pandaTier=5;player.position=corridor.center;let before=player.position
+                endKaiju()
+                check("actual-witness-and-following-three-arrivals",pandas.count==1+GameConfig.Panda.afterKaijuPandas && pandas.dropFirst().allSatisfy{$0.phase == .approaching})
+                if let witness=pandas.first {
+                    check("actual-witness-projected-from-narrow-corridor",map.valid(witness.node.position,radius:20) && abs(witness.node.position.x-before.x)<=corridor.corridor.width/2-20+0.001 && abs(witness.node.position.y-(before.y-10))<0.001)
+                    check("actual-witness-preserves-player-and-timer",player.position==before && witness.timer==GameConfig.Panda.witnessLinger)
+                }
+                check("actual-witness-health-birth12-safe",healthOrbs.count==1 && healthOrbs.allSatisfy{map.valid($0.position,radius:12) && $0.healAmount==GameConfig.HealthOrb.healAmount})
+            }
+            clear();playerStats.pandaTier=5;player.position=map.player
+            for i in 0..<GameConfig.Panda.maxPandas {let node=PandaNode();node.position=map.rooms[i%map.rooms.count].center;worldNode.addChild(node);pandas.append(Panda(node:node,act:.pleased,phase:.lingering,timer:10,destination:node.position))}
+            let nodes=worldNode.children.count
+            if let base=pandas.first?.node{spawnStackedPanda(on:base)}
+            check("actual-stack-cap-unchanged",pandas.count==GameConfig.Panda.maxPandas && worldNode.children.count==nodes)
+            endKaiju();check("actual-witness-retains-cap-exception",pandas.count==GameConfig.Panda.maxPandas+1 && healthOrbs.count==1)
+            for context in [nil,Arena8GameMap.twoRoom] {
+                let control=GameScene(size:size);control.debugRoomIntegration=context;control.setupArena();control.setupPlayer();control.showIceRinkFloor()
+                check("legacy-circle-two-room-rink",abs((control.iceRinkFloor?.path?.boundingBox.width ?? -1)-GameConfig.Arena.radius*2)<0.001)
+                let base=PandaNode();base.position=CGPoint(x:999,y:999);control.spawnStackedPanda(on:base)
+                check("legacy-static-stack-offset",control.pandas.first.map{($0.node.position-(base.position+CGPoint(x:0,y:16*DeviceScale.gameplay))).length<0.001} ?? false)
+                control.worldNode.removeAllChildren()
+            }
+            clear();playerStats.pandaTier=4
+            @MainActor func callbackCase(_ index:Int){
+                guard index<4 else{finish();return}
+                clear();spawnAvalanchePanda(at:map.rooms[0].center,heading:CGPoint(x:1,y:0),delay:index==1 ? 0.75 : 0.1)
+                guard let node=pandas.first?.node else{check("actual-avalanche-child-created",false);return}
+                if index==2{pandas.removeAll()}
+                if index==3{restartGame()}
+                if index==1 {
+                    @MainActor func step(_ n:Int){
+                        if n<5{later(0.1){[self] in updatePandas(0.1);step(n+1)}}
+                        else{
+                            check("retired-before-late-callback",pandas.first?.phase == .lingering && node.action(forKey:"roll")==nil)
+                            later(0.65){check("no-delayed-rolling-resurrection",node.action(forKey:"roll")==nil && map.valid(node.position,radius:20));callbackCase(index+1)}
+                        }
+                    }
+                    step(0)
+                } else {
+                    later(0.35){
+                        check("actual-callback-state-\(index)",(node.action(forKey:"roll") != nil)==(index==0))
+                        if index==3{check("actual-reset-child-detached",node.parent==nil)}
+                        callbackCase(index+1)
+                    }
+                }
+            }
+            @MainActor func finish(){
+                clear();configureRoomRinkForProof();let node=iceRinkFloor;restartGame()
+                check("actual-restart-clears-rink-and-pandas",iceRinkFloor==nil && node?.parent==nil && pandas.isEmpty && healthOrbs.isEmpty)
+                clear();playerStats.pandaTier=4;spawnAvalanchePanda(at:map.rooms[0].center,heading:CGPoint(x:1,y:0),delay:0.75)
+                let old=pandas.first?.node
+                returnToTitle()
+                later(1.1){[self] in
+                    if let old{beginRoomAvalancheRoll(old);check("forced-helper-after-title-rejected",old.action(forKey:"roll")==nil)}
+                    check("no-old-scene-roll-after-title",old?.action(forKey:"roll")==nil)
+                    check("profile-isolation",saved as NSDictionary == UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")} as NSDictionary)
+                    let report:[String:Any]=["passed":results.filter{$0["pass"] as? Bool==true}.count,"failed":results.filter{$0["pass"] as? Bool != true}.count,"checks":results]
+                    if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-room-cleanup-checks.json"))}
+                    roomCleanupChecksRunning=false
+                }
+            }
+            callbackCase(0)
+        }
+    }
+    private func runRoomCleanupBaseline() {
+        guard debugRoomIntegration?.isSixRoom == true else{return}
+        roomCleanupChecksRunning=true;physicsWorld.speed=0
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        playerStats.pandaTier=4;pandaArrivalTimer = -10000
+        let start=debugRoomIntegration?.rooms[0].center ?? .zero
+        spawnAvalanchePanda(at:start,heading:CGPoint(x:1,y:0),delay:0.75)
+        guard let child=pandas.first?.node else{return}
+        func step(_ index:Int){
+            if index<5 {
+                DispatchQueue.main.asyncAfter(deadline:.now()+0.1){[self] in updatePandas(0.1);step(index+1)}
+            } else {
+                let retired=pandas.first?.phase == .lingering
+                let rollingBefore=child.action(forKey:"roll") != nil
+                DispatchQueue.main.asyncAfter(deadline:.now()+0.65){[self] in
+                    let rollingAfter=child.action(forKey:"roll") != nil
+                    let report:[String:Any]=["retiredBeforeCallback":retired,"rollingBeforeCallback":rollingBefore,
+                        "rollingAfterCallback":rollingAfter,"observedStaleRestart":retired && !rollingBefore && rollingAfter,
+                        "rootSafe":debugRoomIntegration?.valid(child.position,radius:20) ?? false,
+                        "travelled":pandas.first?.rollTravelled ?? -1,"delay":0.75]
+                    if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-cleanup-baseline.json"))}
+                    roomCleanupChecksRunning=false
+                }
+            }
+        }
+        step(0)
     }
     private func beginPandaPickupInput() {
         guard let map=debugRoomIntegration,map.isSixRoom,
