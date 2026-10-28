@@ -47,6 +47,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomSentryChecksRunning = false
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
+    private var roomPandaRimLastSpawn: [String:Any] = [:]
     private var roomPandaArrivalChecksRunning = false
     private var roomPandaArrivalHandoffs = 0
     private var roomPandaArrivalLastHandoff: [String:Any] = [:]
@@ -591,7 +592,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
-            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-arrival-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-panda-rim-checks") {
+                DispatchQueue.main.async { [weak self] in self?.runPandaRimChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-arrival-checks") {
                 DispatchQueue.main.async { [weak self] in self?.runPandaArrivalChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-panda-arrival-input") {
                 DispatchQueue.main.async { [weak self] in self?.beginPandaArrivalInput() }
@@ -3405,7 +3408,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard pandas.count < GameConfig.Panda.maxPandas else { return }
 
         let angle = CGFloat.random(in: 0..<(2 * .pi))
-        let entry = CGPoint(x: cos(angle), y: sin(angle)) * (GameConfig.Arena.radius * 0.98)
+        var entry = CGPoint(x: cos(angle), y: sin(angle)) * (GameConfig.Arena.radius * 0.98)
+        #if DEBUG
+        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+            // Preserve the one existing angular draw and 98% rim inset.
+            // Entrance travel may cross walls; this is not a floor resolver.
+            guard let rimEntry = Arena8PandaEntry.entry(in: rooms.world, angle: angle,
+                                                       rimFraction: 0.98) else { return }
+            entry = rimEntry
+        }
+        #endif
 
         // Somewhere near something. Not the nearest threat, not the biggest — a
         // random enemy if any exist, otherwise a spot near Spark.
@@ -3465,6 +3477,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 "rawX":Double(anchor.x+jitter.x),"rawY":Double(anchor.y+jitter.y),
                 "destinationX":Double(destination.x),"destinationY":Double(destination.y),
                 "entryX":Double(entry.x),"entryY":Double(entry.y),"act":String(describing:act)]
+        }
+        #endif
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true {
+            roomPandaRimLastSpawn = ["angle":Double(angle),"x":Double(entry.x),"y":Double(entry.y),
+                "act":String(describing:act)]
         }
         #endif
         let node = PandaNode(variant: act == .samurai ? .samurai : .ordinary)
@@ -15510,6 +15528,10 @@ extension GameScene {
             }
         }
         if ProcessInfo.processInfo.arguments.contains("--arena8-panda-destination-input") {
+            sample["pandaRimLastSpawn"] = roomPandaRimLastSpawn
+            sample["pandaRimWorld"] = ["x":Double(rooms.world.midX),"y":Double(rooms.world.midY),
+                "halfX":Double(rooms.world.width*0.98/2),"halfY":Double(rooms.world.height*0.98/2)]
+            sample["pandaRimHandoffs"] = roomPandaArrivalHandoffs
             sample["pandaDestEpoch"] = roomPandaDestInputEpoch
             sample["pandaDestLastSpawn"] = roomPandaDestLastSpawn
             sample["pandaDestVisitors"] = pandas.map {
@@ -16801,6 +16823,48 @@ extension GameScene {
         // observation. Actual spawn sampling/selection is captured unchanged.
         if let visitor=pandas.first { pandas[0]=Panda(node:visitor.node,act:.pleased,phase:visitor.phase,timer:visitor.timer,destination:visitor.destination) }
     }
+    private func runPandaRimChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomPandaDestChecksRunning=true;physicsWorld.speed=0
+        var results:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){results.append(["id":name,"pass":yes])}
+        func clear(){pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll();pandaArrivalTimer = -10000;roomPandaArrivalHandoffs=0;roomPandaRimLastSpawn=[:]}
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        let target=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);target.position=map.rooms[5].center;worldNode.addChild(target);enemies=[target]
+        var samuraiSeen=0
+        for tier in [1,4] {for i in 0..<256 {
+            clear();playerStats.pandaTier=tier;player.position=map.rooms[i%map.rooms.count].center;spawnPanda()
+            guard let v=pandas.first,let a=roomPandaRimLastSpawn["angle"] as? Double else{check("real-spawn-metadata",false);continue}
+            let x=v.node.position.x-map.world.midX,y=v.node.position.y-map.world.midY
+            let hx=map.world.width*0.98/2,hy=map.world.height*0.98/2
+            check("actual-root-on-building-rim",abs(abs(x)-hx)<0.001 || abs(abs(y)-hy)<0.001)
+            check("actual-root-inside-outer-world",map.world.contains(v.node.position))
+            check("actual-original-angle-ray",abs(x*sin(a)-y*cos(a))<0.001 && x*cos(a)+y*sin(a)>0)
+            check("initial-phase-timer-population",v.phase == .approaching && v.timer==0 && pandas.count==1)
+            if v.act == .samurai {samuraiSeen+=1;check("samurai-mark-and-destination-retained",v.samuraiMark != nil && v.destination==target.position)}
+        }}
+        // Real spawn then controlled non-attacking act solely for approach proof.
+        // The captured original selection is not used as a probability claim.
+        playerStats.pandaTier=1
+        for i in 0..<12 {
+            clear();player.position=map.rooms[i%map.rooms.count].center;spawnPanda()
+            guard let initial=pandas.first else{check("approach-fixture-created",false);continue}
+            pandas[0]=Panda(node:initial.node,act:.pleased,phase:initial.phase,timer:0,destination:initial.destination)
+            let start=initial.node.position
+            gameState = .playing;pauseGame();roomPandaDestChecksRunning=false;update(100);update(100.05);roomPandaDestChecksRunning=true
+            check("pause-keeps-entry-and-phase",pandas[0].node.position==start && pandas[0].phase == .approaching && roomPandaArrivalHandoffs==0)
+            resumeGame()
+            for _ in 0..<4000 {if pandas[0].phase != .approaching {break};updatePandas(0.05)}
+            check("full-approach-reaches-one-safe-handoff",pandas[0].phase == .acting && map.valid(pandas[0].node.position,radius:20) && roomPandaArrivalHandoffs==1)
+            check("same-destination-and-original-act-timer",pandas[0].destination==initial.destination && pandas[0].timer==GameConfig.Panda.lingerDuration)
+        }
+        let nodes=pandas.map(\.node);restartGame();check("reset-removes-visitor-state",pandas.isEmpty && nodes.allSatisfy{$0.parent==nil})
+        check("profile-isolation",saved as NSDictionary == UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")} as NSDictionary)
+        let report:[String:Any]=["passed":results.filter{$0["pass"] as? Bool == true}.count,"failed":results.filter{$0["pass"] as? Bool != true}.count,"samuraiObserved":samuraiSeen,"checks":results]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-panda-rim-checks.json"))}
+        roomPandaDestChecksRunning=false
+    }
     private func runPandaDestinationChecks() {
         guard let map=debugRoomIntegration,map.isSixRoom else{return}
         roomPandaDestChecksRunning=true;physicsWorld.speed=0
@@ -16832,7 +16896,10 @@ extension GameScene {
             let stored=CGPoint(x:CGFloat(Float(panda.destination.x)),y:CGFloat(Float(panda.destination.y)))
             check("destination-and-Float-storage-safe",map.valid(panda.destination,radius:20) && map.valid(stored,radius:20))
             if map.valid(raw,radius:20) && map.valid(CGPoint(x:CGFloat(Float(raw.x)),y:CGFloat(Float(raw.y))),radius:20){check("valid-raw-destination-exact",panda.destination==raw)}
-            check("original-arrival-circle-retained",abs(panda.node.position.length-GameConfig.Arena.radius*0.98)<0.001)
+            let offset = panda.node.position - CGPoint(x: map.world.midX, y: map.world.midY)
+            let rimTolerance: CGFloat = 0.001
+            check("whole-building-entry-rim",abs(abs(offset.x)-map.world.width*0.98/2)<rimTolerance
+                || abs(abs(offset.y)-map.world.height*0.98/2)<rimTolerance)
             check("ordinary-selection-remains-eligible",panda.act != .samurai && panda.act.minTier<=1 && panda.phase == .approaching && panda.timer==0)
         }}
         clear();playerStats.pandaTier=1
