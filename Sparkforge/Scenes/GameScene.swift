@@ -27,7 +27,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case bossReveal       // v2.0.1 (Unit 2): camera visiting a fresh boss spawn
     }
     
-    private(set) var gameState: GameState = .playing
+    private(set) var gameState: GameState = .playing {
+        didSet { syncSamuraiStrikes() }
+    }
+    private var samuraiBackgroundHold = false
     
     // MARK: - Core Systems
 
@@ -53,6 +56,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
     private var roomPandaPickupGeneration: UInt64 = 0
+    private var roomSamuraiPauseChecksRunning = false
+    private var roomSamuraiPauseEpoch = ""
+    private var roomSamuraiPauseTarget: EnemyNode?
+    private var roomSamuraiPauseNode: PandaNode?
     private var roomKaijuChecksRunning = false
     private var roomKaijuCase = ""
     private var roomKaijuControl: PlayerNode?
@@ -556,6 +563,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Scene Lifecycle
     
     override func didMove(to view: SKView) {
+        samuraiBackgroundHold = UIApplication.shared.applicationState == .background
+
         MusicManager.shared.setContext(.run)
         backgroundColor = .black
 
@@ -635,7 +644,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-checks") {
+                DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runSamuraiPauseChecks()}
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-input") {
+                DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.beginSamuraiPauseInput()}
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runKaijuLungeChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-input") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginKaijuLungeInput() }
@@ -742,12 +755,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     @objc private func appDidEnterBackground() {
+        samuraiBackgroundHold = true
+        syncSamuraiStrikes()
         if gameState == .playing {
             isPaused = true
         }
     }
     
     @objc private func appWillEnterForeground() {
+        samuraiBackgroundHold = false
+        syncSamuraiStrikes()
         if gameState == .playing {
             isPaused = false
         }
@@ -2304,7 +2321,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
-        
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-input"), gameState == .playing,
+           let cam=camera,let arm=cam.childNode(withName:"samuraiPauseArm"),arm.frame.contains(touch.location(in:cam)) {
+            armSamuraiPauseInput();return
+        }
+        #endif
         switch gameState {
         case .playing:
             // v1.7: Pause hit zone is anchored to the drawn button, expanded to thumb size
@@ -2464,6 +2486,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Return to Title
     
     private func returnToTitle() {
+        cancelSamuraiStrikes()
         guard let view = view else { return }
         #if DEBUG
         if debugRoomIntegration != nil { removeAllActions() }
@@ -3717,6 +3740,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         worldNode.shake(intensity: 5, duration: 0.16)
     }
 
+    private func syncSamuraiStrike(_ node: PandaNode) {
+        switch gameState {
+        case .dead, .reviving:
+            node.cancelPendingStrike()
+        default:
+            node.holdPendingStrike(gameState != .playing || samuraiBackgroundHold)
+        }
+    }
+
+    private func syncSamuraiStrikes() {
+        // A ready callback can change game state or remove visitors. Snapshot
+        // nodes, then re-read the current holds separately for every node.
+        let nodes = pandas.filter { $0.act == .samurai }.map(\.node)
+        for node in nodes { syncSamuraiStrike(node) }
+    }
+
+    private func cancelSamuraiStrikes() {
+        let nodes = pandas.filter { $0.act == .samurai }.map(\.node)
+        for node in nodes { node.cancelPendingStrike() }
+    }
+
+    override func willMove(from view: SKView) {
+        cancelSamuraiStrikes()
+        super.willMove(from: view)
+    }
+
     /// The second panda in a `stack`. Arrives already on top, having skipped the
     /// walking-over part entirely.
     private func spawnStackedPanda(on base: PandaNode) {
@@ -3868,9 +3917,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 guard let idx = self.pandas.firstIndex(where: { $0.node === node }) else { return }
                 var live = self.pandas[idx]
                 self.resolveSamuraiStrike(&live)
-                live.node.bow()
-                self.pandas[idx] = live
+                // Damage can synchronously change lifecycle/visitor state.
+                // Never write an old value back through a stale array index.
+                guard let current = self.pandas.firstIndex(where: { $0.node === node }) else { return }
+                self.pandas[current].node.bow()
             }
+            syncSamuraiStrike(node)
         }
     }
 
@@ -5529,7 +5581,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Game Loop
     
     override func update(_ currentTime: TimeInterval) {
+        syncSamuraiStrikes()
         #if DEBUG
+        if roomSamuraiPauseChecksRunning { return }
         if roomKaijuChecksRunning {
             // Controlled fixture retains the ordinary pre-action geometry step.
             resolvePlayerAgainstGeometry(cause: .movement)
@@ -15264,6 +15318,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Restart
     
     private func restartGame() {
+        cancelSamuraiStrikes()
         #if DEBUG
         if debugRoomIntegration != nil { removeAllActions() }
         cancelRoomPandaPickupFalls()
@@ -15888,6 +15943,16 @@ extension GameScene {
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
         sample["bossMode"] = isGauntlet
+        if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-input") {
+            sample["pauseEpoch"] = roomSamuraiPauseEpoch
+            sample["pauseTargetHP"] = roomSamuraiPauseTarget?.health ?? -1
+            sample["pauseTargetDead"] = roomSamuraiPauseTarget?.isDying ?? false
+            sample["pauseStrike"] = roomSamuraiPauseNode?.debugStrikeVisualSample() ?? [:]
+            if let arm=camera?.childNode(withName:"samuraiPauseArm"),let view {
+                let point=view.convert(arm.convert(CGPoint.zero,to:self),from:self)
+                sample["armX"] = Double(point.x);sample["armY"] = Double(point.y)
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-input") {
             sample["kaijuEpoch"] = roomKaijuEpoch
             sample["kaijuRootSafe"] = rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius)
@@ -18084,9 +18149,9 @@ extension GameScene {
             let phase=pandas.first?.phase,timer=pandas.first?.timer;pauseGame();roomSamuraiChecksRunning=false;update(lastUpdateTime+1);roomSamuraiChecksRunning=true
             check("manual-pause-stops-phase-clock",pandas.first?.phase==phase && pandas.first?.timer==timer && n.position==root)
             later(0.6){
-                // Observation of inherited SKAction behavior, not a new pause policy.
+                // G22 changes the previously observed inherited pause defect.
                 pauseStrikeCompletes=target.isDying && target.health==0
-                check("inherited-manual-pause-callback-observed",pauseStrikeCompletes)
+                check("manual-pause-preserves-pending-strike",!pauseStrikeCompletes && n.hasPendingStrike)
                 self.resumeGame();clear();let (_,oldTarget)=make(map.player,map.player);let oldHP=oldTarget.health;self.updatePandas(0.01);self.restartGame()
                 later(0.6){
                     check("actual-reset-no-stale-strike",oldTarget.health==oldHP)
@@ -18226,6 +18291,115 @@ extension GameScene {
             }
         }
         next(0)
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func beginSamuraiPauseInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        playerStats.pandaTier=1;pandaArrivalTimer = -10000
+        player.position=map.rooms[0].center;roomPlayerLastSafe=player.position;camera?.position=player.position
+        let arm=SKShapeNode(rectOf:CGSize(width:220,height:40),cornerRadius:5)
+        arm.name="samuraiPauseArm";arm.fillColor = .darkGray;arm.strokeColor = .cyan;arm.zPosition=400
+        arm.position=CGPoint(x:0,y:-size.height/2+130)
+        let label=SKLabelNode(fontNamed:"Menlo-Bold");label.text="ARM + HOLD";label.fontSize=15;label.verticalAlignmentMode = .center;arm.addChild(label);camera?.addChild(arm)
+        roomSamuraiPauseEpoch=UUID().uuidString
+        roomSamuraiPauseTarget=nil;roomSamuraiPauseNode=nil
+    }
+    private func armSamuraiPauseInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        let e=EnemyNode(health:10000,moveSpeed:0,xpValue:2);e.position=map.rooms[0].center+CGPoint(x:60,y:0);enemies=[e];worldNode.addChild(e)
+        let n=PandaNode(variant:.samurai);n.position=e.position;n.equipSword();worldNode.addChild(n)
+        var v=Panda(node:n,act:.samurai,phase:.acting,timer:GameConfig.Panda.lingerDuration,destination:e.position);v.samuraiMark = .enemy(e)
+        pandas=[v];beginPandaAct(&v);pandas=[v]
+        roomSamuraiPauseTarget=e;roomSamuraiPauseNode=n
+        pauseGame()
+    }
+    private func runSamuraiPauseChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomSamuraiPauseChecksRunning=true;physicsWorld.speed=0;playerStats.pandaTier=1
+        var results:[[String:Any]]=[];var visualSamples:[[String:Any]]=[]
+        func check(_ id:String,_ yes:Bool){results.append(["id":id,"pass":yes])}
+        func later(_ delay:Double,_ body:@escaping @MainActor ()->Void){DispatchQueue.main.asyncAfter(deadline:.now()+delay,execute:body)}
+        func clear(){cancelSamuraiStrikes();pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll();enemies.forEach{$0.removeFromParent()};enemies.removeAll();samuraiBackgroundHold=false;isPaused=false;gameState = .playing;pandaArrivalTimer = -10000}
+        func make(_ fallback:Bool=false)->(PandaNode,EnemyNode){
+            clear();let e=EnemyNode(health:10000,moveSpeed:0,xpValue:2);e.position=map.rooms[1].center;enemies=[e];worldNode.addChild(e)
+            let n=PandaNode(variant:fallback ? .ordinary:.samurai);if fallback{n.debugUseVectorStrikeFallback()};n.equipSword();n.position=e.position;worldNode.addChild(n)
+            var p=Panda(node:n,act:.samurai,phase:.acting,timer:10,destination:e.position);p.samuraiMark = .enemy(e);pandas=[p];beginPandaAct(&p);pandas=[p]
+            return(n,e)
+        }
+        check("Title-isolated-context",debugRoomEntryFromTitle && GameRunPreferences.isIsolated)
+        let holds:[GameState]=[.paused,.levelUp,.removeAdsPrompt,.synergyReveal,.placingZone,.bossReveal]
+        func heldCase(_ index:Int){
+            guard index<holds.count*2 else{overlap();return}
+            let (n,e)=make(index>=holds.count),hp=e.health,state=holds[index%holds.count]
+            later(0.20){
+                check("partial-windup-not-yet-hit-\(index)",e.health==hp && n.hasPendingStrike)
+                self.gameState=state;let visual=n.debugStrikeVisualSample();visualSamples.append(visual)
+                if index<holds.count {check("authored-strike-frame-present-\(index)",(visual["frame"] as? Int ?? -1)>=0)}
+                else {check("vector-sword-path-present-\(index)",(visual["frame"] as? Int)==(-1) && (visual["swordPresent"] as? Bool)==true)}
+                later(0.60){
+                    let after=n.debugStrikeVisualSample();visualSamples.append(after)
+                    check("hold-prevents-hit-\(index)",e.health==hp && n.hasPendingStrike)
+                    check("hold-freezes-visual-\(index)",(visual["frame"] as? Int)==(after["frame"] as? Int) && (visual["sword"] as? Double)==(after["sword"] as? Double))
+                    self.gameState = .playing
+                    later(0.06){check("resume-not-early-\(index)",e.health==hp)}
+                    later(0.32){check("remaining-time-not-restarted-\(index)",e.isDying && e.health==0 && !n.hasPendingStrike);heldCase(index+1)}
+                }
+            }
+        }
+        func overlap(){
+            let (n,e)=make(),hp=e.health
+            later(0.15){
+                self.gameState = .levelUp;self.appDidEnterBackground();self.gameState = .playing
+                later(0.55){
+                    check("modal-dismiss-in-background-stays-held",e.health==hp && n.hasPendingStrike && n.isPaused)
+                    self.appWillEnterForeground()
+                    later(0.10){check("overlap-resume-not-early",e.health==hp)}
+                    later(0.35){check("overlap-resumes-remaining-once",e.isDying && !n.hasPendingStrike);dueRace()}
+                }
+            }
+        }
+        func dueRace(){
+            let (n,e)=make(),hp=e.health,saved=n.debugStrikeClockClosure()
+            self.gameState = .paused;saved?()
+            check("due-held-retains-unspent",e.health==hp && n.hasPendingStrike)
+            self.gameState = .playing;check("ready-resume-not-in-setter",e.health==hp)
+            later(0.15){check("ready-actionphase-hit-once",e.isDying && !n.hasPendingStrike);saved?();check("old-clock-after-hit-inert",!n.hasPendingStrike);priorPause()}
+        }
+        func priorPause(){
+            let (n,e)=make(),hp=e.health;n.isPaused=true;self.gameState = .paused;self.gameState = .playing
+            check("preexisting-own-pause-preserved",n.isPaused)
+            later(0.5){check("preexisting-pause-blocks",e.health==hp);n.cancelPendingStrike();check("cancel-restores-prior-pause",n.isPaused && !n.hasPendingStrike);terminals(0)}
+        }
+        func terminals(_ index:Int){
+            guard index<5 else{finish();return}
+            let (n,e)=make(),hp=e.health,saved=n.debugStrikeClockClosure()
+            self.gameState = .paused;saved?()
+            if index==0 {self.gameState = .playing;self.playerDied()}
+            if index==1 {self.gameState = .reviving}
+            if index==2 {self.restartGame()}
+            if index==3 {n.removeFromParent()}
+            if index==4 {n.removeAllActions()}
+            check("terminal-cancels-pending-\(index)",!n.hasPendingStrike)
+            saved?()
+            if index==0 || index==1 {self.gameState = .playing}
+            later(0.55){check("terminal-stale-callback-no-hit-\(index)",e.health==hp && !n.hasPendingStrike);self.player.reset();terminals(index+1)}
+        }
+        func finish(){
+            let (n,e)=make(),hp=e.health,saved=n.debugStrikeClockClosure();self.gameState = .paused;saved?()
+            self.returnToTitle()
+            self.waitForRoomTitleCompletion{
+                saved?();check("Title-cancels-old-windup",self.view==nil && !n.hasPendingStrike && e.health==hp)
+                let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results,"visualSamples":visualSamples,"scope":"real SpriteKit clock/visuals with controlled art/vector and Scene state transitions; native controls separate"]
+                if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-samurai-pause-checks.json"))}
+            }
+        }
+        heldCase(0)
     }
 }
 #endif

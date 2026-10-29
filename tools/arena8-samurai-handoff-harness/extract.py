@@ -60,6 +60,7 @@ struct Arena8PandaDestination {
 }
 final class Stats {var pandaTier=5;var effectiveAttack:CGFloat=10}
 final class GameScene {
+ func syncSamuraiStrike(_ node:PandaNode){} // explicit lifecycle boundary; G22 proves holds separately
  var debugRoomIntegration:Arena8GameMap? = .sixRoom
  var pandas:[Panda]=[],enemies:[EnemyNode]=[];var boss:Boss?
  let playerStats=Stats(),worldNode=SKNode()

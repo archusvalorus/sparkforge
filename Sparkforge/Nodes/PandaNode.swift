@@ -161,6 +161,89 @@ final class PandaNode: SKNode {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    // G22: one visitor-owned windup. SpriteKit retains its remaining time;
+    // only this pending strike owns a temporary pause of this node/subtree.
+    private var pendingStrikeID: UUID?
+    private var pendingStrikeCompletion: (() -> Void)?
+    private var pendingStrikeReady = false
+    private var strikeOwnsPause = false
+    private var strikePriorPause = false
+    var hasPendingStrike: Bool { pendingStrikeID != nil }
+
+    func holdPendingStrike(_ held: Bool) {
+        guard hasPendingStrike else { return }
+        if held && !strikeOwnsPause {
+            strikePriorPause = isPaused
+            strikeOwnsPause = true
+            isPaused = true
+        } else if !held {
+            restoreStrikePause()
+            scheduleReadyStrike()
+        }
+    }
+
+    private func restoreStrikePause() {
+        guard strikeOwnsPause else { return }
+        let previous = strikePriorPause
+        strikeOwnsPause = false
+        isPaused = previous
+    }
+
+    private func strikeClockFinished(_ id: UUID) {
+        guard pendingStrikeID == id else { return }
+        pendingStrikeReady = true
+        deliverPendingStrikeIfReady()
+    }
+
+    private func scheduleReadyStrike() {
+        guard let id = pendingStrikeID, pendingStrikeReady, !strikeOwnsPause, !isPaused else { return }
+        // Resume inside SpriteKit's action phase, not synchronously inside a
+        // modal/gameState setter whose remaining UI work has not finished.
+        run(.run { [weak self] in
+            guard let self = self, self.pendingStrikeID == id else { return }
+            self.deliverPendingStrikeIfReady()
+        }, withKey: "samuraiImpactReady")
+    }
+
+    private func deliverPendingStrikeIfReady() {
+        guard hasPendingStrike, pendingStrikeReady, !strikeOwnsPause, !isPaused else { return }
+        let completion = pendingStrikeCompletion
+        // Clear before calling into Scene: damage may synchronously open a
+        // hold, reset the run, remove this visitor, or start another strike.
+        pendingStrikeID = nil
+        pendingStrikeCompletion = nil
+        pendingStrikeReady = false
+        removeAction(forKey: "samuraiImpact")
+        removeAction(forKey: "samuraiImpactReady")
+        completion?()
+    }
+
+    func cancelPendingStrike() {
+        guard hasPendingStrike else { return }
+        // Invalidate queued completions before unpausing or removing actions.
+        pendingStrikeID = nil
+        pendingStrikeCompletion = nil
+        pendingStrikeReady = false
+        removeAction(forKey: "samuraiImpact")
+        removeAction(forKey: "samuraiImpactReady")
+        childNode(withName: "sword")?.removeAction(forKey: "samuraiStrikeVisual")
+        if currentClip == "strike" {
+            sprite?.removeAction(forKey: "anim")
+            playIdle()
+        }
+        restoreStrikePause()
+    }
+
+    override func removeAllActions() {
+        cancelPendingStrike()
+        super.removeAllActions()
+    }
+
+    override func removeFromParent() {
+        cancelPendingStrike()
+        super.removeFromParent()
+    }
+
     // MARK: - Movement
 
     /// Waddle toward a point. Returns true once it has arrived.
@@ -250,6 +333,15 @@ final class PandaNode: SKNode {
 
     /// One strike. Wind up, cut, hold the follow-through.
     func strike(completion: @escaping () -> Void) {
+        cancelPendingStrike()
+        let id = UUID()
+        pendingStrikeID = id
+        pendingStrikeCompletion = completion
+        pendingStrikeReady = false
+        let impact = SKAction.sequence([
+            .wait(forDuration: 0.40),
+            .run { [weak self] in self?.strikeClockFinished(id) }
+        ])
         removeAction(forKey: "pose")
 
         // With art: raise → cut → settle, on the same slow-fast-slow rhythm the
@@ -262,7 +354,7 @@ final class PandaNode: SKNode {
                 .setTexture(strikeFrames[1], resize: false), .wait(forDuration: 0.10),
                 .setTexture(strikeFrames[2], resize: false), .wait(forDuration: 0.22)
             ]), withKey: "anim")
-            run(.sequence([.wait(forDuration: 0.40), .run(completion)]))
+            run(impact, withKey: "samuraiImpact")
             return
         }
 
@@ -271,11 +363,8 @@ final class PandaNode: SKNode {
             SKAction.rotate(toAngle: -1.5, duration: 0.28),          // raised
             SKAction.wait(forDuration: 0.12),
             SKAction.rotate(toAngle: 1.9, duration: 0.06)            // through
-        ]))
-        run(SKAction.sequence([
-            SKAction.wait(forDuration: 0.4),
-            SKAction.run(completion)
-        ]))
+        ]), withKey: "samuraiStrikeVisual")
+        run(impact, withKey: "samuraiImpact")
     }
 
     /// Bows. Not to you.
@@ -360,3 +449,25 @@ final class PandaNode: SKNode {
         ]))
     }
 }
+
+#if DEBUG
+extension PandaNode {
+    func debugStrikeVisualSample() -> [String:Any] {
+        ["pending":hasPendingStrike,"ready":pendingStrikeReady,"paused":isPaused,
+         "frame":sprite.flatMap{ art in strikeFrames.firstIndex{$0 === art.texture} } ?? -1,
+         "sword":Double(childNode(withName:"sword")?.zRotation ?? 0),
+         "swordPresent":childNode(withName:"sword") != nil]
+    }
+    func debugStrikeClockClosure() -> (() -> Void)? {
+        guard let id=pendingStrikeID else{return nil}
+        return {[weak self] in self?.strikeClockFinished(id)}
+    }
+    func debugUseVectorStrikeFallback() {
+        guard !hasPendingStrike else{return}
+        sprite?.removeFromParent();sprite=nil
+        strikeFrames=[];idleFrames=[];walkFrames=[];bowFrames=[];currentClip=""
+        body.isHidden=false;leftEar.isHidden=false;rightEar.isHidden=false
+        equipSword()
+    }
+}
+#endif
