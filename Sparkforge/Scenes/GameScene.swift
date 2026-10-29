@@ -53,6 +53,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
     private var roomPandaPickupGeneration: UInt64 = 0
+    private var roomSamuraiChecksRunning = false
+    private var roomSamuraiInputEpoch = ""
+    private var roomSamuraiInputTarget: EnemyNode?
     private var roomFearChecksRunning = false
     private var roomFearInputEpoch = ""
     private var roomFearInputSteps = 0
@@ -620,7 +623,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runSamuraiHandoffChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-input") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginSamuraiHandoffInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomFearChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-input") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginRoomFearInput() }
@@ -3395,6 +3402,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                         panda.destination = live.position
                     } else {
                         panda.samuraiMark = nil
+                        #if DEBUG
+                        guard prepareSamuraiHandoff(&panda) else {
+                            // Invalid state cannot become a stationary bow or
+                            // strike. Cancel only this visitor, without reward.
+                            panda.node.removeAllActions()
+                            panda.node.removeFromParent()
+                            pandas.remove(at: i)
+                            continue
+                        }
+                        #endif
                         panda.node.bow()
                         panda.phase = .lingering
                         panda.timer = 1.0
@@ -3409,6 +3426,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                         // No safe handoff: retain approach state and do not
                         // start an act/timer or choose another destination.
                         pandas[i] = panda
+                        continue
+                    }
+                    guard prepareSamuraiHandoff(&panda) else {
+                        panda.node.removeAllActions()
+                        panda.node.removeFromParent()
+                        pandas.remove(at: i)
                         continue
                     }
                     if debugRoomIntegration?.isSixRoom == true, panda.act != .samurai {
@@ -3480,6 +3503,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// This does not alter travel, tolerance, destination or any later act.
     private func preparePandaArrival(_ panda: inout Panda) -> Bool {
         guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act != .samurai else { return true }
+        guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
+        panda.node.position = safe
+        return true
+    }
+    #endif
+
+    #if DEBUG
+    /// Samurai travel and live target tracking are untouched. Resolve only
+    /// its ACTUAL root before stationary strike or lost-mark bow.
+    private func prepareSamuraiHandoff(_ panda: inout Panda) -> Bool {
+        guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act == .samurai else { return true }
         guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
         panda.node.position = safe
         return true
@@ -5480,7 +5514,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
-        if roomFearChecksRunning || roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomSamuraiChecksRunning || roomFearChecksRunning || roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5581,6 +5615,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateVineWall(dt)
         updateTreeCanopy(dt)
         updatePandas(dt)
+        #if DEBUG
+        if debugRoomIntegration?.isSixRoom == true,
+           ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-input") {
+            for i in pandas.indices where pandas[i].phase != .approaching { pandas[i].timer = 1000 }
+        }
+        #endif
         #if DEBUG
         if debugRoomIntegration?.isSixRoom == true,
            ProcessInfo.processInfo.arguments.contains("--arena8-room-cleanup-input") {
@@ -15800,6 +15840,14 @@ extension GameScene {
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
         sample["bossMode"] = isGauntlet
+        if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-input") {
+            sample["samuraiEpoch"] = roomSamuraiInputEpoch
+            sample["samuraiTargetDead"] = roomSamuraiInputTarget?.isDying ?? false
+            sample["samuraiRoots"] = pandas.filter { $0.act == .samurai }.map {
+                ["x":Double($0.node.position.x),"y":Double($0.node.position.y),
+                 "safe":rooms.valid($0.node.position,radius:20),"phase":String(describing:$0.phase)] as [String:Any]
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-input") {
             sample["fearEpoch"] = roomFearInputEpoch
             sample["fearSteps"] = roomFearInputSteps
@@ -17883,6 +17931,123 @@ extension GameScene {
             if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-void-fear-checks.json"))}
             self.roomFearChecksRunning=false
         }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func beginSamuraiHandoffInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom,let room=map.rooms.last else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll()
+        playerStats.pandaTier=1;pandaArrivalTimer = -10000
+        player.position=room.center+CGPoint(x:60,y:60);roomPlayerLastSafe=player.position;camera?.position=player.position
+        let mark=EnemyNode(health:10000,moveSpeed:0,xpValue:2)
+        mark.position=CGPoint(x:room.rect.maxX-17.5,y:room.rect.maxY-60);enemies=[mark];worldNode.addChild(mark)
+        let strike=PandaNode(variant:.samurai);strike.position=mark.position+CGPoint(x:0.5,y:0.5);strike.equipSword();worldNode.addChild(strike)
+        var live=Panda(node:strike,act:.samurai,phase:.approaching,timer:17,destination:mark.position);live.samuraiMark = .enemy(mark);pandas.append(live)
+        let bow=PandaNode(variant:.samurai);bow.position=CGPoint(x:room.rect.maxX-60,y:room.rect.maxY+15);worldNode.addChild(bow)
+        pandas.append(Panda(node:bow,act:.samurai,phase:.approaching,timer:19,destination:mark.position))
+        roomSamuraiInputTarget=mark;roomSamuraiInputEpoch=UUID().uuidString
+    }
+    private func runSamuraiHandoffChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomSamuraiChecksRunning=true;physicsWorld.speed=0;playerStats.pandaTier=1
+        var pauseStrikeCompletes=false
+        var initializedHealthSamples:[Int]=[]
+        var results:[[String:Any]]=[]
+        func check(_ id:String,_ yes:Bool){results.append(["id":id,"pass":yes])}
+        func later(_ seconds:Double,_ body:@escaping @MainActor ()->Void){DispatchQueue.main.asyncAfter(deadline:.now()+seconds,execute:body)}
+        func clear(){pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll();enemies.forEach{$0.removeAllActions();$0.removeFromParent()};enemies.removeAll();pandaArrivalTimer = -10000}
+        func make(_ root:CGPoint,_ target:CGPoint,mini:Bool=false)->(PandaNode,EnemyNode){
+            let e=EnemyNode(health:10000,moveSpeed:0,xpValue:2);initializedHealthSamples.append(e.health);e.position=target;e.isMiniBoss=mini;enemies.append(e);worldNode.addChild(e)
+            let n=PandaNode(variant:.samurai);n.position=root;n.equipSword();worldNode.addChild(n)
+            var p=Panda(node:n,act:.samurai,phase:.approaching,timer:27,destination:target);p.samuraiMark = .enemy(e);pandas.append(p)
+            return(n,e)
+        }
+        check("actual-Title-context",debugRoomEntryFromTitle && GameRunPreferences.isIsolated && !isGauntlet)
+        for room in map.rooms {
+            let targets=[CGPoint(x:room.rect.minX+17.5,y:room.rect.maxY-60),CGPoint(x:room.rect.maxX-17.5,y:room.rect.maxY-60),CGPoint(x:room.rect.minX+60,y:room.rect.minY+17.5),CGPoint(x:room.rect.minX+60,y:room.rect.maxY-17.5),CGPoint(x:room.rect.maxX-17.5,y:room.rect.maxY-17.5)]
+            for target in targets {
+                clear();let (n,e)=make(target+CGPoint(x:0.5,y:0.5),target),before=n.position,enemyBefore=e.position,initialHealth=e.health
+                check("actual-live-mark-body-legal",map.valid(e.position,radius:e.geometryFootprintRadius))
+                check("actual-stopping-tolerance",before.distance(to:e.position)<4*DeviceScale.gameplay)
+                check("actual-preflight-unsafe20",!map.valid(before,radius:20))
+                updatePandas(0.01)
+                check("actual-arrival-safe-before-act",map.valid(n.position,radius:20) && pandas.first?.phase == .acting)
+                check("actual-mark-destination-unchanged",e.position==enemyBefore && pandas.first?.destination==enemyBefore)
+                check("actual-arrival-clock-original",pandas.first?.timer==GameConfig.Panda.lingerDuration)
+                check("actual-windup-not-instant",e.health==initialHealth)
+            }
+            clear();let (n,_)=make(room.center+CGPoint(x:0.5,y:0.5),room.center),before=n.position
+            updatePandas(0.01);check("actual-valid-root-retained",n.position==before)
+        }
+        for wall in map.geometry.blockedFootprints {
+            for removed in [false,true] {
+                clear();let (n,e)=make(wall.center,map.player),before=n.position
+                let decoy=EnemyNode(health:10000,moveSpeed:0,xpValue:2);decoy.position=map.rooms.last?.center ?? map.player;enemies.append(decoy);worldNode.addChild(decoy)
+                if removed {enemies.removeAll{$0 === e}} else {_ = e.takeDamage(e.health)}
+                updatePandas(0.01)
+                check("actual-lostmark-inside-solid-before",!map.valid(before,radius:20))
+                check("actual-lostmark-safe-bow",map.valid(n.position,radius:20) && pandas.first?.phase == .lingering)
+                check("actual-lostmark-original-clock",pandas.first?.timer==1)
+                check("actual-lostmark-cleared",pandas.first?.samuraiMark==nil && decoy.health==decoy.maxHealth)
+            }
+        }
+        for connection in map.connections {
+            clear();let (n,_)=make(connection.center,connection.center),before=n.position
+            updatePandas(0.01);check("actual-corridor-valid-root-retained",n.position==before && map.valid(before,radius:20))
+        }
+        clear();let (travel,mark)=make(map.geometry.blockedFootprints[0].center,map.rooms.last?.center ?? map.player),beforeTravel=travel.position
+        updatePandas(0.01)
+        check("actual-travel-exemption-retained",travel.position != beforeTravel && !map.valid(travel.position,radius:20) && pandas.first?.phase == .approaching)
+        check("actual-raw-live-tracking",pandas.first?.destination==mark.position)
+        mark.position=map.rooms[2].center;let movingFrom=travel.position;updatePandas(0.01)
+        check("actual-moving-live-tracking",pandas.first?.destination==mark.position)
+        check("actual-calm-travel-speed",abs(travel.position.distance(to:movingFrom)-GameConfig.Panda.samuraiWalkSpeed*0.01)<0.001)
+        // Real .4 second SKAction strike, including moving/dead/removed mark.
+        @MainActor func windup(_ index:Int){
+            clear();let mini=index==3,(n,target)=make(map.player,map.player,mini:mini);updatePandas(0.01);let root=n.position
+            let hp=target.health
+            if index==0 {target.position=map.rooms.last?.center ?? map.player}
+            let decoy=EnemyNode(health:10000,moveSpeed:0,xpValue:2);decoy.position=map.rooms.last?.center ?? map.player;enemies.append(decoy);worldNode.addChild(decoy)
+            if index==1 {_ = target.takeDamage(target.health)}
+            if index==2 {enemies.removeAll{$0 === target}}
+            later(0.20){check("actual-strike-not-before-windup-\(index)",target.health==(index==1 ? 0:hp))}
+            later(0.55){
+                if index==0 {check("actual-normal-strike-deletes",target.isDying && target.health==0)}
+                if index==1 || index==2 {check("actual-invalid-windup-no-extra-damage-\(index)",target.health==(index==1 ? 0:hp) && decoy.health==decoy.maxHealth)}
+                if index==3 {
+                    let expected=GameConfig.BossClass.scaledDamage(Int(self.playerStats.effectiveAttack*GameConfig.Panda.samuraiCatastrophicMult),isBossClass:true)
+                    check("actual-miniboss-original-damage",target.health==hp-expected)
+                }
+                check("actual-windup-root-stationary-\(index)",n.position==root && map.valid(root,radius:20))
+                if index<3 {windup(index+1)} else {pauseAndReset()}
+            }
+        }
+        @MainActor func pauseAndReset(){
+            clear();let (n,target)=make(map.player,map.player);updatePandas(0.01);let root=n.position
+            let phase=pandas.first?.phase,timer=pandas.first?.timer;pauseGame();roomSamuraiChecksRunning=false;update(lastUpdateTime+1);roomSamuraiChecksRunning=true
+            check("manual-pause-stops-phase-clock",pandas.first?.phase==phase && pandas.first?.timer==timer && n.position==root)
+            later(0.6){
+                // Observation of inherited SKAction behavior, not a new pause policy.
+                pauseStrikeCompletes=target.isDying && target.health==0
+                check("inherited-manual-pause-callback-observed",pauseStrikeCompletes)
+                self.resumeGame();clear();let (_,oldTarget)=make(map.player,map.player);let oldHP=oldTarget.health;self.updatePandas(0.01);self.restartGame()
+                later(0.6){
+                    check("actual-reset-no-stale-strike",oldTarget.health==oldHP)
+                    check("actual-reset-retains-room-isolation",self.debugRoomIntegration?.isSixRoom==true && GameRunPreferences.isIsolated)
+                    clear();let (_,titleTarget)=make(map.player,map.player);let titleHP=titleTarget.health;self.updatePandas(0.01);self.returnToTitle()
+                    later(0.7){
+                        check("actual-Title-no-stale-strike",titleTarget.health==titleHP && self.view==nil)
+                        let report:[String:Any]=["passed":results.filter{$0["pass"] as? Bool == true}.count,"failed":results.filter{$0["pass"] as? Bool != true}.count,"checks":results,"manualPauseStrikeCompletes":pauseStrikeCompletes,"initializedHealthSamples":Array(Set(initializedHealthSamples)).sorted(),"scope":"actual Samurai handoffs and original strike callback; inherited menu pause behavior observed, not changed"]
+                        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-samurai-handoff-checks.json"))}
+                        self.roomSamuraiChecksRunning=false
+                    }
+                }
+            }
+        }
+        windup(0)
     }
 }
 #endif
