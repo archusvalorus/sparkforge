@@ -97,7 +97,7 @@ for mode in ["active","retired","removed-membership","detached","same-scene-rese
 for context in [nil,Arena8GameMap.twoRoom] {
  let scene=GameScene();scene.debugRoomIntegration=context
  scene.spawnAvalanchePanda(at:.zero,heading:CGPoint(x:1,y:0),delay:0.75)
- if let node=scene.pandas.first?.node {scene.pandas[0].phase = .lingering;node.actions.flatMap{$0.callbacks()}.forEach{$0()};check("legacy-delayed-callback-unchanged",node.rollStarts==1)}
+ if let node=scene.pandas.first?.node {scene.pandas[0].phase = .lingering;node.actions.flatMap{$0.callbacks()}.forEach{$0()};check("shared-legacy-retired-callback-rejected",node.rollStarts==0)}
 }
 print("Room cleanup checks: \(passed) passed / \(failed) failed")
 exit(failed==0 ? 0 : 1)

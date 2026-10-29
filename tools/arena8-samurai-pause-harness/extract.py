@@ -22,6 +22,8 @@ final class PandaNode:SKNode {
 final class GameScene:SKNode {
  enum Act {case samurai,other}
  struct Panda {let node:PandaNode;let act:Act}
+ var avalancheBackgroundHold=false
+ func syncAvalancheEntrances(){} // G23 entrance lifecycle is proved by its own harness
  var pandas:[Panda]=[]
 '''+ '\n'.join(parts)+'''\n func attach(_ n:PandaNode,act:Act = .samurai){addChild(n);pandas.append(Panda(node:n,act:act))}
 }

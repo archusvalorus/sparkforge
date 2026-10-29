@@ -28,9 +28,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     private(set) var gameState: GameState = .playing {
-        didSet { syncSamuraiStrikes() }
+        didSet { syncSamuraiStrikes(); syncAvalancheEntrances() }
     }
     private var samuraiBackgroundHold = false
+    private var avalancheBackgroundHold = false
     
     // MARK: - Core Systems
 
@@ -56,6 +57,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
     private var roomPandaPickupGeneration: UInt64 = 0
+    private var roomAvalancheAuditRunning = false
+    private var roomAvalancheAuditLastTime: TimeInterval = 0
+    private var avalancheFrameSamples: [[String:Any]] = []
+    private var avalancheObserved: [PandaNode] = []
+    private var avalancheTarget: EnemyNode?
+    private var avalancheInputNode: PandaNode?
+    private var avalancheInputEpoch = ""
     private var roomSamuraiPauseChecksRunning = false
     private var roomSamuraiPauseEpoch = ""
     private var roomSamuraiPauseTarget: EnemyNode?
@@ -564,6 +572,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func didMove(to view: SKView) {
         samuraiBackgroundHold = UIApplication.shared.applicationState == .background
+        avalancheBackgroundHold = samuraiBackgroundHold
 
         MusicManager.shared.setContext(.run)
         backgroundColor = .black
@@ -644,7 +653,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-checks") {
+                DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runAvalancheChecks()}
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input") {
+                DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.beginAvalancheInput()}
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-checks") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runSamuraiPauseChecks()}
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-input") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.beginSamuraiPauseInput()}
@@ -756,7 +769,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     @objc private func appDidEnterBackground() {
         samuraiBackgroundHold = true
+        avalancheBackgroundHold = true
         syncSamuraiStrikes()
+        syncAvalancheEntrances()
         if gameState == .playing {
             isPaused = true
         }
@@ -764,7 +779,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     @objc private func appWillEnterForeground() {
         samuraiBackgroundHold = false
+        avalancheBackgroundHold = false
         syncSamuraiStrikes()
+        syncAvalancheEntrances()
         if gameState == .playing {
             isPaused = false
         }
@@ -2322,6 +2339,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input"), gameState == .playing,
+           let cam=camera,let arm=cam.childNode(withName:"avalancheArm"),arm.frame.contains(touch.location(in:cam)) {
+            armAvalancheInput();return
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-input"), gameState == .playing,
            let cam=camera,let arm=cam.childNode(withName:"samuraiPauseArm"),arm.frame.contains(touch.location(in:cam)) {
             armSamuraiPauseInput();return
@@ -2487,6 +2508,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func returnToTitle() {
         cancelSamuraiStrikes()
+        cancelAvalancheEntrances()
         guard let view = view else { return }
         #if DEBUG
         if debugRoomIntegration != nil { removeAllActions() }
@@ -3402,6 +3424,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var rollTravelled: CGFloat = 0
         var struck: Set<ObjectIdentifier> = []
         var leaving = false
+        var avalancheWaiting = false
         /// The thing a `follow` (or `pin`) panda has decided is its business.
         /// Weak: it is under no obligation to outlive its subject.
         weak var followMark: EnemyNode?
@@ -3487,6 +3510,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 }
 
             case .acting:
+                // Entrance consumes a population seat, not combat time or hits.
+                if panda.avalancheWaiting { continue }
                 panda.timer -= dt
                 let done = runPandaAct(&panda, dt: dt)
                 if done || panda.timer <= 0 {
@@ -3763,6 +3788,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     override func willMove(from view: SKView) {
         cancelSamuraiStrikes()
+        cancelAvalancheEntrances()
         super.willMove(from: view)
     }
 
@@ -3934,29 +3960,140 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         node.position = start
         node.alpha = 0
         worldNode.addChild(node)
-        #if DEBUG
-        let startRolling: SKAction
-        if debugRoomIntegration?.isSixRoom == true {
-            startRolling = SKAction.run { [weak self, weak node] in
-                guard let node else { return }
-                self?.beginRoomAvalancheRoll(node)
-            }
-        } else { startRolling = SKAction.run { node.startRolling() } }
-        node.run(SKAction.sequence([SKAction.wait(forDuration: delay),
-                                    SKAction.fadeIn(withDuration: 0.15), startRolling]))
-        #else
-        node.run(SKAction.sequence([SKAction.wait(forDuration: delay),
-                                    SKAction.fadeIn(withDuration: 0.15),
-                                    SKAction.run { node.startRolling() }]))
-        #endif
-
-        var panda = Panda(node: node,
-                          act: .roll,
-                          phase: .acting,
-                          timer: GameConfig.Panda.lingerDuration,
-                          destination: start)
+        var panda = Panda(node: node, act: .roll, phase: .acting,
+                          timer: GameConfig.Panda.lingerDuration, destination: start)
         panda.rollDir = heading
+        panda.avalancheWaiting = true
         pandas.append(panda)
+        scheduleAvalancheEntrance(node, delay: delay)
+    }
+
+    /// One delayed child, guarded independently of its render/action lifetime.
+    private final class AvalancheEntrance {
+        let token = UUID()
+        var clockKey: String { "avalancheEntrance.\(token.uuidString)" }
+        var readyKey: String { "avalancheEntranceReady.\(token.uuidString)" }
+        weak var node: PandaNode?
+        var ready = false
+        var ownsPause = false
+        var priorPause = false
+        init(_ node: PandaNode) { self.node = node }
+    }
+    private var avalancheEntrances: [ObjectIdentifier: AvalancheEntrance] = [:]
+
+    private func scheduleAvalancheEntrance(_ node: PandaNode, delay: TimeInterval) {
+        let key = ObjectIdentifier(node)
+        // Replacing this Scene's pending clock transfers no old pause ownership.
+        if let old = avalancheEntrances.removeValue(forKey: key) {
+            node.removeAction(forKey: old.clockKey)
+            node.removeAction(forKey: old.readyKey)
+            if node.parent === worldNode { restoreAvalanchePause(old) }
+        }
+        let entry = AvalancheEntrance(node)
+        avalancheEntrances[key] = entry
+        let token = entry.token
+        node.run(.sequence([.wait(forDuration: delay), .fadeIn(withDuration: 0.15),
+            .run { [weak self, weak node] in
+                guard let self, let node else { return }
+                self.finishAvalancheEntrance(node, token: token)
+            }]), withKey: entry.clockKey)
+        syncAvalancheEntrances()
+    }
+
+    private func finishAvalancheEntrance(_ node: PandaNode, token: UUID) {
+        guard let entry = avalancheEntrances[ObjectIdentifier(node)], entry.token == token,
+              !entry.ready else { return }
+        guard node.alpha >= 1 else { discardAvalancheEntrance(entry); return }
+        entry.ready = true
+        // Keep ownership observable if readiness races a hold. Explicit action
+        // cleanup then removes this marker too and must cancel, not rearm work.
+        node.run(.repeatForever(.wait(forDuration: 1)), withKey: entry.readyKey)
+        deliverAvalancheEntrance(node, token: token)
+    }
+
+    private func restoreAvalanchePause(_ entry: AvalancheEntrance) {
+        guard entry.ownsPause else { return }
+        entry.ownsPause = false
+        entry.node?.isPaused = entry.priorPause
+    }
+
+    private func discardAvalancheEntrance(_ entry: AvalancheEntrance) {
+        guard let node = entry.node else { return }
+        let key = ObjectIdentifier(node)
+        guard avalancheEntrances[key]?.token == entry.token else { return }
+        avalancheEntrances.removeValue(forKey: key)
+        node.removeAction(forKey: entry.clockKey)
+        node.removeAction(forKey: entry.readyKey)
+        // Only this Scene's still-owned node can have its pause restored.
+        // Another Scene's new actions/pause are never touched by stale cleanup.
+        if node.parent === worldNode {
+            restoreAvalanchePause(entry)
+            if !pandas.contains(where: { $0.node === node && !$0.avalancheWaiting }) {
+                node.removeFromParent()
+                pandas.removeAll { $0.node === node && $0.avalancheWaiting }
+            }
+        }
+    }
+
+    private func syncAvalancheEntrances() {
+        for (key, entry) in Array(avalancheEntrances) {
+            guard let node = entry.node else { avalancheEntrances.removeValue(forKey: key); continue }
+            guard node.parent === worldNode, view?.scene === self,
+                  pandas.contains(where: { $0.node === node && $0.act == .roll
+                      && $0.phase == .acting && $0.avalancheWaiting && !$0.leaving }) else {
+                discardAvalancheEntrance(entry); continue
+            }
+            if gameState == .dead || gameState == .reviving {
+                discardAvalancheEntrance(entry); continue
+            }
+            // Explicit action removal must not leave a permanently hidden seat.
+            if node.action(forKey: entry.clockKey) == nil && node.action(forKey: entry.readyKey) == nil {
+                discardAvalancheEntrance(entry); continue
+            }
+            let held = gameState != .playing || avalancheBackgroundHold
+            if held && !entry.ownsPause {
+                entry.priorPause = node.isPaused
+                entry.ownsPause = true
+                node.isPaused = true
+            } else if !held {
+                restoreAvalanchePause(entry)
+                if entry.ready && !node.isPaused {
+                    let token = entry.token
+                    node.run(.run { [weak self, weak node] in
+                        guard let self, let node else { return }
+                        self.deliverAvalancheEntrance(node, token: token)
+                    }, withKey: entry.readyKey)
+                }
+            }
+        }
+    }
+
+    private func deliverAvalancheEntrance(_ node: PandaNode, token: UUID) {
+        let key = ObjectIdentifier(node)
+        guard let entry = avalancheEntrances[key], entry.token == token, entry.ready,
+              !entry.ownsPause, !node.isPaused, gameState == .playing, !avalancheBackgroundHold else { return }
+        // Retain original full-opacity roll start; fade itself cannot damage.
+        guard node.alpha >= 1 else { return }
+        beginAvalancheRoll(node)
+    }
+
+    private func beginAvalancheRoll(_ node: PandaNode) {
+        let key = ObjectIdentifier(node)
+        guard view?.scene === self, node.parent === worldNode,
+              gameState == .playing, !avalancheBackgroundHold, node.alpha >= 1,
+              let index = pandas.firstIndex(where: { $0.node === node && $0.act == .roll
+                  && $0.phase == .acting && $0.avalancheWaiting && !$0.leaving }) else { return }
+        if let entry = avalancheEntrances.removeValue(forKey: key) {
+            node.removeAction(forKey: entry.clockKey)
+            node.removeAction(forKey: entry.readyKey)
+        }
+        pandas[index].avalancheWaiting = false
+        pandas[index].timer = GameConfig.Panda.lingerDuration
+        node.startRolling()
+    }
+
+    private func cancelAvalancheEntrances() {
+        for entry in Array(avalancheEntrances.values) { discardAvalancheEntrance(entry) }
     }
 
     // MARK: PANDA. (T5)
@@ -4147,10 +4284,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     #if DEBUG
     private func beginRoomAvalancheRoll(_ node: PandaNode) {
-        guard view?.scene === self, node.parent === worldNode,
-              pandas.contains(where: { $0.node === node && $0.act == .roll
-                  && $0.phase == .acting && !$0.leaving }) else { return }
-        node.startRolling()
+        // Historical fixture seam; the shared guarded handoff owns activation.
+        guard let entry = avalancheEntrances[ObjectIdentifier(node)], entry.ready else { return }
+        deliverAvalancheEntrance(node, token: entry.token)
     }
     private func roomStationaryPandaRoot(at requested: CGPoint) -> CGPoint? {
         guard let map = debugRoomIntegration, map.isSixRoom else { return requested }
@@ -5582,7 +5718,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         syncSamuraiStrikes()
+        syncAvalancheEntrances()
         #if DEBUG
+        if roomAvalancheAuditRunning {
+            if roomAvalancheAuditLastTime > 0, gameState == .playing { updatePandas(min(0.1,max(0,currentTime-roomAvalancheAuditLastTime))) }
+            roomAvalancheAuditLastTime=currentTime
+            recordAvalancheFrame()
+            return
+        }
         if roomSamuraiPauseChecksRunning { return }
         if roomKaijuChecksRunning {
             // Controlled fixture retains the ordinary pre-action geometry step.
@@ -15319,6 +15462,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func restartGame() {
         cancelSamuraiStrikes()
+        cancelAvalancheEntrances()
         #if DEBUG
         if debugRoomIntegration != nil { removeAllActions() }
         cancelRoomPandaPickupFalls()
@@ -15943,6 +16087,18 @@ extension GameScene {
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
         sample["bossMode"] = isGauntlet
+        if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input") {
+            sample["avalancheEpoch"] = avalancheInputEpoch
+            sample["avalancheTargetHP"] = avalancheTarget?.health ?? -1
+            sample["avalancheAlpha"] = Double(avalancheInputNode?.alpha ?? -1)
+            sample["avalancheWaiting"] = pandas.first(where:{$0.node === avalancheInputNode})?.avalancheWaiting ?? false
+            sample["avalancheTravel"] = Double(pandas.first(where:{$0.node === avalancheInputNode})?.rollTravelled ?? -1)
+            sample["avalancheEntries"] = avalancheEntrances.count
+            if let arm=camera?.childNode(withName:"avalancheArm"),let view {
+                let point=view.convert(arm.convert(CGPoint.zero,to:self),from:self)
+                sample["armX"] = Double(point.x);sample["armY"] = Double(point.y)
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-input") {
             sample["pauseEpoch"] = roomSamuraiPauseEpoch
             sample["pauseTargetHP"] = roomSamuraiPauseTarget?.health ?? -1
@@ -17436,8 +17592,8 @@ extension GameScene {
                     @MainActor func step(_ n:Int){
                         if n<5{later(0.1){[self] in updatePandas(0.1);step(n+1)}}
                         else{
-                            check("retired-before-late-callback",pandas.first?.phase == .lingering && node.action(forKey:"roll")==nil)
-                            later(0.65){check("no-delayed-rolling-resurrection",node.action(forKey:"roll")==nil && map.valid(node.position,radius:20));callbackCase(index+1)}
+                            check("pending-before-late-callback",pandas.first?.avalancheWaiting==true && node.action(forKey:"roll")==nil)
+                            later(0.65){check("late-callback-only-starts-visible-roll",node.action(forKey:"roll") != nil && node.alpha==1 && self.pandas.first?.avalancheWaiting==false && map.valid(node.position,radius:20));callbackCase(index+1)}
                         }
                     }
                     step(0)
@@ -18400,6 +18556,230 @@ extension GameScene {
             }
         }
         heldCase(0)
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func recordAvalancheFrame() {
+        for node in avalancheObserved {
+            guard let p=pandas.first(where:{$0.node === node}) else{continue}
+            avalancheFrameSamples.append(["node":String(describing:ObjectIdentifier(node)),"waiting":p.avalancheWaiting,
+                "alpha":Double(node.alpha),"x":Double(node.position.x),"y":Double(node.position.y),
+                "travel":Double(p.rollTravelled),"timer":p.timer,"phase":String(describing:p.phase),
+                "roll":node.action(forKey:"roll") != nil,"hp":avalancheTarget?.health ?? -1])
+        }
+    }
+    private func beginAvalancheInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        cancelAvalancheEntrances();enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        playerStats.pandaTier=4;pandaArrivalTimer = -10000
+        player.position=map.rooms[0].center;roomPlayerLastSafe=player.position;camera?.position=player.position
+        let arm=SKShapeNode(rectOf:CGSize(width:220,height:40),cornerRadius:5)
+        arm.name="avalancheArm";arm.fillColor = .darkGray;arm.strokeColor = .cyan;arm.zPosition=400
+        arm.position=CGPoint(x:0,y:-size.height/2+130)
+        let label=SKLabelNode(fontNamed:"Menlo-Bold");label.text="ARM + HOLD";label.fontSize=15;label.verticalAlignmentMode = .center;arm.addChild(label);camera?.addChild(arm)
+        avalancheInputEpoch=UUID().uuidString;avalancheTarget=nil;avalancheInputNode=nil
+    }
+    private func armAvalancheInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        cancelAvalancheEntrances();enemies.forEach{$0.removeFromParent()};enemies.removeAll();pandas.forEach{$0.node.removeFromParent()};pandas.removeAll()
+        let start=map.rooms[0].center
+        let e=EnemyNode(health:10000,moveSpeed:0,xpValue:2);e.position=start+CGPoint(x:60,y:0);enemies=[e];worldNode.addChild(e)
+        spawnAvalanchePanda(at:start,heading:CGPoint(x:1,y:0),delay:0.6)
+        avalancheTarget=e;avalancheInputNode=pandas.last?.node
+        pauseGame()
+    }
+    private func runAvalancheChecks() {
+        guard let original=debugRoomIntegration,original.isSixRoom else{return}
+        roomAvalancheAuditRunning=true;roomAvalancheAuditLastTime=0;physicsWorld.speed=0
+        playerStats.pandaTier=4
+        let savedArena=arenaConfig,savedOverride=ArenaConfig.overrideID
+        var checks:[[String:Any]]=[],caseSamples:[[String:Any]]=[]
+        func check(_ id:String,_ yes:Bool){checks.append(["id":id,"pass":yes])}
+        func later(_ seconds:Double,_ body:@escaping @MainActor ()->Void){DispatchQueue.main.asyncAfter(deadline:.now()+seconds,execute:body)}
+        func clear(){
+            cancelAvalancheEntrances();pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll()
+            enemies.forEach{$0.removeFromParent()};enemies.removeAll();avalancheTarget=nil;avalancheObserved=[];avalancheFrameSamples=[];roomPandaRollLastRest=[:]
+            avalancheBackgroundHold=false;isPaused=false;gameState = .playing;playerStats.pandaTier=4;pandaArrivalTimer = -10000
+        }
+        func context(_ index:Int){
+            teardownArena()
+            if index<13 {debugRoomIntegration=original;arenaConfig=savedArena;ArenaConfig.overrideID=savedOverride} else{debugRoomIntegration=nil;arenaConfig=ArenaConfig.all[[0,3,6][index-13]];ArenaConfig.overrideID=arenaConfig.id}
+            setupArena()
+        }
+        func make(_ start:CGPoint,delay:Double,mini:Bool=false)->(PandaNode,EnemyNode){
+            clear();let e=EnemyNode(health:1000000,moveSpeed:0,xpValue:1);e.isMiniBoss=mini
+            e.position=start+CGPoint(x:15,y:0);worldNode.addChild(e);enemies=[e];avalancheTarget=e
+            player.position=start;camera?.position=start
+            spawnAvalanchePanda(at:start,heading:CGPoint(x:1,y:0),delay:delay)
+            let n=pandas.last!.node;avalancheObserved=[n];return(n,e)
+        }
+        let sites=original.rooms.map(\.center)+original.connections.map(\.center)+[CGPoint.zero,CGPoint.zero,CGPoint.zero]
+        func site(_ index:Int){
+            guard index<sites.count else{completedGroup();return}
+            context(index);let delay=index.isMultiple(of:2) ? 0.12:0.75
+            let (n,e)=make(sites[index],delay:delay,mini:index==15);let hp=e.health,start=n.position
+            let damage=GameConfig.BossClass.scaledDamage(Int(playerStats.effectiveAttack*GameConfig.Panda.rollDamageMult),isBossClass:e.isMiniBoss)
+            later(delay+0.85){[self] in
+                let frames=avalancheFrameSamples,waiting=frames.filter{$0["waiting"] as? Bool==true}
+                check("waiting-frame-present-\(index)",!waiting.isEmpty)
+                check("waiting-never-travels-or-hits-\(index)",waiting.allSatisfy{($0["travel"] as? Double)==0 && ($0["hp"] as? Int)==hp && abs(($0["x"] as? Double ?? 0)-Double(start.x))<0.001 && abs(($0["y"] as? Double ?? 0)-Double(start.y))<0.001})
+                check("fade-frame-present-\(index)",frames.contains{let a=$0["alpha"] as? Double ?? -1;return a>0 && a<1})
+                check("damage-only-fully-visible-roll-\(index)",frames.filter{($0["hp"] as? Int ?? hp)<hp}.allSatisfy{($0["alpha"] as? Double)==1 && ($0["waiting"] as? Bool)==false})
+                check("one-unchanged-damage-hit-\(index)",e.health==hp-damage)
+                let rest=CGPoint(x:roomPandaRollLastRest["beforeX"] as? Double ?? 0,y:roomPandaRollLastRest["beforeY"] as? Double ?? 0)
+                let travelled=pandas.first?.rollTravelled ?? 0
+                let retiredByOriginalRule=travelled>=GameConfig.Panda.rollDistance || (index<13 && Arena8PandaRollBounds.outside(rest,world:original.world,fraction:0.95))
+                check("roll-started-and-retired-\(index)",pandas.first?.avalancheWaiting==false && pandas.first?.phase == .lingering && retiredByOriginalRule)
+                check("pending-entry-cleared-\(index)",avalancheEntrances.isEmpty)
+                if index<13{check("terminal-root20-safe-\(index)",original.valid(n.position,radius:20))}
+                caseSamples.append(["case":"site-\(index)","arena":index<13 ? "six-room":arenaConfig.name,"delay":delay,"frames":frames])
+                site(index+1)
+            }
+        }
+        func completedGroup(){
+            context(0);clear()
+            let room=original.rooms[0],e=EnemyNode(health:1000000,moveSpeed:0,xpValue:1)
+            // A real solid-wall shove boundary holds this target in place;
+            // ordinary damage/shove/collision code remains unchanged.
+            e.position=CGPoint(x:room.rect.maxX-e.geometryFootprintRadius-1,y:room.center.y+room.rect.height*0.3)
+            worldNode.addChild(e);enemies=[e];avalancheTarget=e
+            let n=PandaNode();n.position=e.position-CGPoint(x:25*DeviceScale.gameplay,y:0);worldNode.addChild(n)
+            var parent=Panda(node:n,act:.avalanche,phase:.acting,timer:GameConfig.Panda.lingerDuration,destination:n.position)
+            pandas=[parent];player.position=n.position+CGPoint(x:5,y:0);let start=n.position,hp=e.health
+            beginPandaAct(&parent);pandas[0]=parent;let children=Array(pandas.dropFirst());avalancheObserved=children.map(\.node)
+            let damage=Int(playerStats.effectiveAttack*GameConfig.Panda.rollDamageMult),id=ObjectIdentifier(e)
+            later(1.8){[self] in
+                check("actual-random-group-three-children",children.count==3 && children.allSatisfy{$0.rollDir==CGPoint(x:1,y:0)})
+                check("actual-group-parent-stationary-nondamaging",n.position==start && pandas.first?.act == .avalanche && pandas.first?.struck.isEmpty==true)
+                check("actual-group-independent-three-hits",e.health==hp-children.count*damage && children.allSatisfy{child in pandas.first(where:{$0.node === child.node})?.struck.contains(id)==true})
+                check("actual-group-ready-dictionary-empty",avalancheEntrances.isEmpty)
+                check("actual-group-travel-only-visible",avalancheFrameSamples.filter{($0["travel"] as? Double ?? 0)>0 && ($0["phase"] as? String)=="acting"}.allSatisfy{($0["alpha"] as? Double)==1})
+                caseSamples.append(["case":"actual-random-group","frames":avalancheFrameSamples,"healthBefore":hp,"healthAfter":e.health])
+                holds(0)
+            }
+        }
+
+        let states:[GameState]=[.paused,.levelUp,.removeAdsPrompt,.synergyReveal,.placingZone,.bossReveal]
+        func holds(_ index:Int){
+            guard index<states.count else{fadeHold();return}
+            debugRoomIntegration=original
+            let (n,e)=make(original.rooms[0].center,delay:0.3);let hp=e.health
+            later(0.1){[self] in
+                gameState=states[index];let before=n.position,alpha=n.alpha,timer=pandas.first?.timer
+                later(0.55){[self] in
+                    check("hold-freezes-entry-\(index)",n.position==before && n.alpha==alpha && e.health==hp && pandas.first?.timer==timer && pandas.first?.avalancheWaiting==true)
+                    gameState = .playing
+                    check("no-setter-activation-\(index)",pandas.first?.avalancheWaiting==true)
+                    later(0.05){[self] in check("hold-retains-remaining-delay-\(index)",pandas.first?.avalancheWaiting==true && e.health==hp)}
+                    later(0.85){[self] in check("hold-resumes-one-visible-hit-\(index)",e.health<hp && n.alpha==1 && pandas.first?.avalancheWaiting==false);holds(index+1)}
+                }
+            }
+        }
+        func fadeHold(){
+            let (n,e)=make(original.rooms[0].center,delay:0.05);let hp=e.health
+            later(0.12){[self] in
+                gameState = .paused;let alpha=n.alpha
+                check("hold-begins-during-fade",alpha>0 && alpha<1)
+                later(0.4){[self] in
+                    check("fade-held-no-contact",n.alpha==alpha && e.health==hp && pandas.first?.rollTravelled==0)
+                    gameState = .playing
+                    later(0.6){check("fade-resumes-visible-contact",n.alpha==1 && e.health<hp);overlap()}
+                }
+            }
+        }
+        func overlap(){
+            let (n,e)=make(original.rooms[0].center,delay:0.2);let hp=e.health
+            gameState = .levelUp;appDidEnterBackground();gameState = .playing
+            later(0.5){[self] in
+                check("modal-dismiss-does-not-release-background",pandas.first?.avalancheWaiting==true && n.alpha==0 && e.health==hp)
+                appWillEnterForeground()
+                later(0.75){[self] in check("foreground-releases-entry-once",n.alpha==1 && e.health<hp && avalancheEntrances.isEmpty);activePause()}
+            }
+        }
+        func activePause(){
+            let (n,e)=make(original.rooms[0].center,delay:0.05)
+            later(0.35){[self] in
+                check("active-before-pause",pandas.first?.avalancheWaiting==false && n.alpha==1)
+                gameState = .paused;let before=n.position,hp=e.health,timer=pandas.first?.timer
+                later(0.45){[self] in
+                    check("active-pause-no-movement-damage-or-timer",n.position==before && e.health==hp && pandas.first?.timer==timer)
+                    gameState = .playing
+                    later(0.5){[self] in check("active-resume-retirement",pandas.first?.phase == .lingering);caps()}
+                }
+            }
+        }
+        func caps(){
+            for initial in [1,4,5,6] {
+                clear();let parentNode=PandaNode();parentNode.position=original.rooms[0].center;worldNode.addChild(parentNode)
+                var parent=Panda(node:parentNode,act:.avalanche,phase:.acting,timer:GameConfig.Panda.lingerDuration,destination:parentNode.position)
+                pandas=[parent]
+                for _ in 1..<initial {let n=PandaNode();n.position=parentNode.position;worldNode.addChild(n);pandas.append(Panda(node:n,act:.pleased,phase:.lingering,timer:100,destination:n.position))}
+                player.position=parentNode.position;beginPandaAct(&parent);pandas[0]=parent
+                check("cap-seat-count-\(initial)",pandas.count==min(GameConfig.Panda.maxPandas,initial+GameConfig.Panda.avalanchePandas-1))
+                check("parent-keeps-avalanche-act-\(initial)",pandas[0].act == .avalanche)
+                let children=Array(pandas.dropFirst(initial))
+                check("children-wait-with-original-heading-\(initial)",children.allSatisfy{$0.avalancheWaiting && $0.rollDir==CGPoint(x:1,y:0) && $0.rollTravelled==0 && $0.timer==GameConfig.Panda.lingerDuration})
+                for (offset,child) in children.enumerated(){let i=offset+1,delta=child.node.position-parentNode.position
+                    check("original-rear-spacing-\(initial)-\(i)",abs(delta.x+CGFloat(i)*26*DeviceScale.gameplay)<0.001 && abs(delta.y)<=34*DeviceScale.gameplay+0.001)
+                }
+                let p=parentNode.position;let done=runPandaAct(&parent,dt:0.1)
+                check("parent-no-added-damaging-roll-\(initial)",!done && parentNode.position==p)
+            }
+            killCase()
+        }
+        func killCase(){
+            clear();let start=original.rooms[0].center,e=EnemyNode(health:1,moveSpeed:0,xpValue:3)
+            e.position=start+CGPoint(x:15,y:0);worldNode.addChild(e);enemies=[e]
+            let kills=killCount,orbs=xpOrbs.count
+            spawnAvalanchePanda(at:start,heading:CGPoint(x:1,y:0),delay:0.1)
+            later(0.9){[self] in
+                check("actual-summon-kill-credited-once",e.isDying && e.killCredited && !enemies.contains{$0 === e} && killCount==kills+1)
+                check("actual-kill-XP-orb-once",xpOrbs.count==orbs+1 && xpOrbs.last?.xpValue==3)
+                terminals(0)
+            }
+        }
+        func terminals(_ index:Int){
+            guard index<6 else{wallCase();return}
+            let (n,e)=make(original.rooms[0].center,delay:0.75);let hp=e.health,token=avalancheEntrances[ObjectIdentifier(n)]!.token
+            if index==0{playerDied()}
+            if index==1{gameState = .reviving}
+            if index==2{restartGame()}
+            if index==3{n.removeAllActions();syncAvalancheEntrances()}
+            if index==4{n.removeFromParent();syncAvalancheEntrances()}
+            if index==5{pandas.removeAll();syncAvalancheEntrances()}
+            finishAvalancheEntrance(n,token:token);gameState = .playing
+            later(0.95){[self] in
+                check("terminal-no-stale-activation-\(index)",avalancheEntrances.isEmpty && !pandas.contains{$0.node === n} && e.health==hp && n.action(forKey:"roll")==nil)
+                player.reset();terminals(index+1)
+            }
+        }
+        func wallCase(){
+            guard let wall=original.geometry.blockedFootprints.first else{check("wall-present",false);title();return}
+            let start=wall.center-CGPoint(x:20,y:0);let (n,_)=make(start,delay:0.1)
+            later(0.95){[self] in
+                let active=avalancheFrameSamples.filter{$0["waiting"] as? Bool==false && ($0["phase"] as? String)=="acting"}
+                check("intentional-active-wall-crossing-retained",active.contains{let p=CGPoint(x:$0["x"] as? Double ?? 0,y:$0["y"] as? Double ?? 0);return !original.valid(p,radius:20)})
+                check("wall-offset-ends-safe-rest",original.valid(n.position,radius:20) && pandas.first?.phase == .lingering)
+                title()
+            }
+        }
+        func title(){
+            let (n,e)=make(original.rooms[0].center,delay:0.75);let hp=e.health,token=avalancheEntrances[ObjectIdentifier(n)]!.token
+            returnToTitle()
+            waitForRoomTitleCompletion{[self] in
+                finishAvalancheEntrance(n,token:token)
+                later(1){[self] in
+                    check("Title-cancels-old-entry",view==nil && avalancheEntrances.isEmpty && n.action(forKey:"roll")==nil && e.health==hp)
+                    let report:[String:Any]=["passed":checks.filter{$0["pass"] as? Bool==true}.count,"failed":checks.filter{$0["pass"] as? Bool != true}.count,"checks":checks,"caseSamples":caseSamples,
+                        "scope":"real frame-clock Panda updates and SpriteKit entrance clocks; controlled six-room + ordinary arena configurations; native controls separate"]
+                    if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-avalanche-checks.json"))}
+                }
+            }
+        }
+        site(0)
     }
 }
 #endif

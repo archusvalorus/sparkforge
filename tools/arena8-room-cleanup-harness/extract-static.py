@@ -24,10 +24,12 @@ final class SKAction {
 }
 class SKNode {
  var position=CGPoint.zero {didSet{position=CGPoint(x:CGFloat(Float(position.x)),y:CGFloat(Float(position.y)))}}
- var zPosition:CGFloat=0;var alpha:CGFloat=1;var name:String?
+ var zPosition:CGFloat=0;var alpha:CGFloat=1;var name:String?;var isPaused=false
  weak var parent:SKNode?;var children:[SKNode]=[];var actions:[SKAction]=[]
  func addChild(_ n:SKNode){children.append(n);n.parent=self}
  func run(_ action:SKAction){actions.append(action)}
+ func run(_ action:SKAction,withKey:String){actions.append(action)}
+ func removeAction(forKey:String){}
  func removeFromParent(){parent?.children.removeAll{$0 === self};parent=nil}
 }
 final class PandaNode:SKNode {
@@ -42,16 +44,28 @@ final class HealthOrbNode:SKNode{}
 enum PandaAct {case pleased,roll}
 enum PandaPhase {case lingering,acting}
 struct Panda {
- let node:PandaNode;var act:PandaAct;var phase:PandaPhase;let timer:TimeInterval;let destination:CGPoint
- var leaving=false;var rollDir=CGPoint.zero
+ let node:PandaNode;var act:PandaAct;var phase:PandaPhase;var timer:TimeInterval;let destination:CGPoint
+ var leaving=false;var avalancheWaiting=false;var rollDir=CGPoint.zero
  var followMark:AnyObject?
 }
 final class TestView {weak var scene:GameScene?}
 final class GameScene {
+ // Explicit scheduler boundary: callback signifies completed wait + fade.
+ // G23's extracted lifecycle and actual Scene tests own clock/visibility proof.
+ enum GameState {case playing,paused}
+ var gameState=GameState.playing;var avalancheBackgroundHold=false
+ var avalancheEntrances:[ObjectIdentifier:AvalancheEntrance]=[:]
+ func scheduleAvalancheEntrance(_ node:PandaNode,delay:TimeInterval){
+  let entry=AvalancheEntrance(node);avalancheEntrances[ObjectIdentifier(node)]=entry
+  node.run(.sequence([.wait(forDuration:delay),.fadeIn(withDuration:0.15),.run{[weak self,weak node] in
+   guard let self,let node else{return};node.alpha=1;entry.ready=true;self.deliverAvalancheEntrance(node,token:entry.token)
+  }]))
+ }
  var view:TestView?
  var debugRoomIntegration:Arena8GameMap? = .sixRoom
  let player=SKNode(),worldNode=SKNode()
  var pandas:[Panda]=[];var healthOrbs:[HealthOrbNode]=[];var spawnAttempts=0
  func spawnPanda(){spawnAttempts+=1}
 '''
-Path(sys.argv[2]).write_text(head+'\n'.join(member('    private func '+n+'(') for n in ['roomStationaryPandaRoot','spawnStackedPanda','dropBamboo','beginRoomAvalancheRoll','spawnAvalanchePanda'])+'\n func actualWitnessBlock(){\n'+witness+'\n }\n}\n')
+entry=member('    private final class AvalancheEntrance').replace('private final class','final class')
+Path(sys.argv[2]).write_text(head+entry+'\n'+'\n'.join(member('    private func '+n+'(') for n in ['roomStationaryPandaRoot','spawnStackedPanda','dropBamboo','beginRoomAvalancheRoll','deliverAvalancheEntrance','beginAvalancheRoll','spawnAvalanchePanda'])+'\n func actualWitnessBlock(){\n'+witness+'\n }\n}\n')
