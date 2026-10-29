@@ -624,6 +624,23 @@ final class PlayerNode: SKNode {
     #if DEBUG
     // Opt-in isolated Arena 8 bridge. Unset in every normal game and P0/P1 lab.
     var debugMovementConstraint: ((CGPoint, CGPoint, CGFloat) -> CGPoint?)?
+    // G21: only installed by the six-room preview; forced action steps use a
+    // straight sweep rather than ordinary walking's axis-slide resolver.
+    var debugKaijuLungeConstraint: ((CGPoint, CGPoint, CGFloat) -> CGPoint)?
+
+    private func constrainedKaijuMove(by delta: CGPoint, duration: TimeInterval) -> SKAction {
+        var previous: CGFloat = 0
+        return .customAction(withDuration: duration) { node, elapsed in
+            guard let player = node as? PlayerNode else { return }
+            let fraction = min(1, max(0, elapsed / CGFloat(duration)))
+            let increment = delta * (fraction - previous)
+            // Consume blocked requests as well: later frames never repay them.
+            previous = fraction
+            let from = player.position, desired = from + increment
+            let radius = player.stats?.effectiveCollisionRadius ?? GameConfig.Player.collisionRadius
+            player.position = player.debugKaijuLungeConstraint?(from, desired, radius) ?? from
+        }
+    }
     #endif
 
     func move(direction: CGPoint, deltaTime: TimeInterval) {
@@ -1395,6 +1412,25 @@ final class PlayerNode: SKNode {
         if abs(heading.x) > 0.05 { kaijuBody?.xScale = heading.x < 0 ? -1 : 1 }
         kaijuPlayAttack()
 
+        #if DEBUG
+        let lunge: SKAction
+        if debugKaijuLungeConstraint != nil {
+            lunge = .sequence([
+                constrainedKaijuMove(by: heading * (-R * 0.25), duration: 0.08),
+                constrainedKaijuMove(by: heading * (R * 0.55), duration: 0.07),
+                constrainedKaijuMove(by: heading * (-R * 0.30), duration: 0.14)
+            ])
+        } else {
+            lunge = SKAction.sequence([
+            SKAction.move(by: CGVector(dx: -heading.x * R * 0.25,
+                                       dy: -heading.y * R * 0.25), duration: 0.08),
+            SKAction.move(by: CGVector(dx: heading.x * R * 0.55,
+                                       dy: heading.y * R * 0.55), duration: 0.07),
+            SKAction.move(by: CGVector(dx: -heading.x * R * 0.30,
+                                       dy: -heading.y * R * 0.30), duration: 0.14)
+        ])
+        }
+        #else
         let lunge = SKAction.sequence([
             SKAction.move(by: CGVector(dx: -heading.x * R * 0.25,
                                        dy: -heading.y * R * 0.25), duration: 0.08),
@@ -1403,6 +1439,7 @@ final class PlayerNode: SKNode {
             SKAction.move(by: CGVector(dx: -heading.x * R * 0.30,
                                        dy: -heading.y * R * 0.30), duration: 0.14)
         ])
+        #endif
         run(lunge, withKey: "kaijuLunge")
 
         // Claw arc — three raking lines fanned across the swing.

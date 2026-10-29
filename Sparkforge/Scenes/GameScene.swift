@@ -53,6 +53,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
     private var roomPandaPickupGeneration: UInt64 = 0
+    private var roomKaijuChecksRunning = false
+    private var roomKaijuCase = ""
+    private var roomKaijuControl: PlayerNode?
+    private var roomKaijuPairSamples: [[String:Any]] = []
+    private var roomKaijuEpoch = ""
+    private var roomKaijuInvalidInputFrames = 0
+    private var roomKaijuSamples: [[String:Any]] = []
     private var roomSamuraiChecksRunning = false
     private var roomSamuraiInputEpoch = ""
     private var roomSamuraiInputTarget: EnemyNode?
@@ -586,6 +593,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #if DEBUG
         if let rooms = debugRoomIntegration {
             player.debugMovementConstraint = { from, desired, radius in rooms.move(from: from, toward: desired, radius: radius) }
+            if rooms.isSixRoom {
+                player.debugKaijuLungeConstraint = { from, desired, radius in
+                    Arena8KaijuLunge(map: rooms).step(from: from, toward: desired, radius: radius)
+                }
+            }
         }
         #endif
         setupJoystick()
@@ -623,7 +635,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runKaijuLungeChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-input") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginKaijuLungeInput() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runSamuraiHandoffChecks() }
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-input") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.beginSamuraiHandoffInput() }
@@ -5514,6 +5530,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     override func update(_ currentTime: TimeInterval) {
         #if DEBUG
+        if roomKaijuChecksRunning {
+            // Controlled fixture retains the ordinary pre-action geometry step.
+            resolvePlayerAgainstGeometry(cause: .movement)
+            return
+        }
         if roomSamuraiChecksRunning || roomFearChecksRunning || roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
@@ -12680,7 +12701,34 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// every death this frame is already queued): drain Chain Reaction's FIFO
     /// queue in one loop. A burst that kills queues its victims' bursts on the
     /// same queue, so a whole cascade resolves here, iteratively (Q2).
+    #if DEBUG
+    override func didEvaluateActions() {
+        if roomKaijuChecksRunning, let rooms = debugRoomIntegration {
+            roomKaijuSamples.append(["case":roomKaijuCase,"stage":"afterActions",
+                "x":Double(player.position.x),"y":Double(player.position.y),
+                "safe":rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius)])
+            if let control = roomKaijuControl {
+                roomKaijuPairSamples.append(["case":roomKaijuCase,
+                    "distance":Double(player.position.distance(to:control.position)),
+                    "constrainedActive":player.action(forKey:"kaijuLunge") != nil,
+                    "legacyActive":control.action(forKey:"kaijuLunge") != nil])
+            }
+        }
+    }
+    #endif
+
     override func didFinishUpdate() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-input"), !roomKaijuEpoch.isEmpty,
+           let rooms = debugRoomIntegration, !rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius) {
+            roomKaijuInvalidInputFrames += 1
+        }
+        if roomKaijuChecksRunning, let rooms = debugRoomIntegration {
+            roomKaijuSamples.append(["case":roomKaijuCase,"stage":"frameEnd",
+                "x":Double(player.position.x),"y":Double(player.position.y),
+                "safe":rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius)])
+        }
+        #endif
         drainChainReactions()
         processTollkeeperPulses()
         processRailspikeLaunches()
@@ -15840,6 +15888,12 @@ extension GameScene {
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
         sample["bossMode"] = isGauntlet
+        if ProcessInfo.processInfo.arguments.contains("--arena8-kaiju-lunge-input") {
+            sample["kaijuEpoch"] = roomKaijuEpoch
+            sample["kaijuRootSafe"] = rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius)
+            sample["kaijuUnsafeFrames"] = roomKaijuInvalidInputFrames
+            sample["kaijuLungeActive"] = player.action(forKey:"kaijuLunge") != nil
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-handoff-input") {
             sample["samuraiEpoch"] = roomSamuraiInputEpoch
             sample["samuraiTargetDead"] = roomSamuraiInputTarget?.isDying ?? false
@@ -18048,6 +18102,130 @@ extension GameScene {
             }
         }
         windup(0)
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func beginKaijuLungeInput() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        playerStats.pandaTier=1;pandaArrivalTimer = -10000
+        kaijuRemaining=1000;kaijuMeleeTimer=1000;kaijuHitTimer=1000;player.setKaiju(true)
+        player.position=CGPoint(x:map.world.minX+playerStats.effectiveCollisionRadius+0.5,y:map.rooms[0].center.y)
+        roomPlayerLastSafe=player.position;camera?.position=player.position
+        roomKaijuEpoch=UUID().uuidString;roomKaijuInvalidInputFrames=0
+        run(.repeatForever(.sequence([.run{[weak self] in self?.player.kaijuStrike(toward:CGPoint(x:1,y:0))},.wait(forDuration:0.6)])),withKey:"g21InputRepeat")
+    }
+    private func runKaijuLungeChecks() {
+        guard let map=debugRoomIntegration,map.isSixRoom else{return}
+        roomKaijuChecksRunning=true;physicsWorld.speed=0
+        enemies.forEach{$0.removeAllActions();$0.removeFromParent()};enemies.removeAll()
+        var results:[[String:Any]]=[]
+        func check(_ id:String,_ pass:Bool){results.append(["id":id,"pass":pass])}
+        let rad=playerStats.effectiveCollisionRadius
+        check("Title-isolated-context",debugRoomEntryFromTitle && GameRunPreferences.isIsolated && ArenaConfig.all.count==7)
+        let adapter=Arena8KaijuLunge(map:map)
+        for room in map.rooms {
+            for radius:CGFloat in [10,12.5,17.777777] {
+                for heading in [CGPoint(x:1,y:0),CGPoint(x:-1,y:0),CGPoint(x:0,y:1),CGPoint(x:0,y:-1),CGPoint(x:0.6,y:0.8)] {
+                    var from=CGPoint(x:CGFloat(Float(room.center.x)),y:CGFloat(Float(room.center.y)))
+                    for amount:CGFloat in [-4,8.8,-4.8] {
+                        let desired=from+heading*amount,q=adapter.step(from:from,toward:desired,radius:radius)
+                        check("room-free-step-safe",map.valid(q,radius:radius))
+                        check("room-free-step-Float-exact",q==CGPoint(x:CGFloat(Float(q.x)),y:CGFloat(Float(q.y))))
+                        check("room-free-trace-retained",q.distance(to:desired)<0.001)
+                        from=q
+                    }
+                }
+                let roots=[CGPoint(x:room.rect.minX+radius+0.5,y:room.rect.maxY-60),CGPoint(x:room.rect.maxX-radius-0.5,y:room.rect.maxY-60),CGPoint(x:room.rect.minX+60,y:room.rect.minY+radius+0.5),CGPoint(x:room.rect.minX+60,y:room.rect.maxY-radius-0.5)]
+                for root in roots {
+                    let from=CGPoint(x:CGFloat(Float(root.x)),y:CGFloat(Float(root.y)))
+                    check("fixture-root-safe",map.valid(from,radius:radius))
+                    for heading in [CGPoint(x:1,y:0),CGPoint(x:-1,y:0),CGPoint(x:0,y:1),CGPoint(x:0,y:-1),CGPoint(x:0.6,y:0.8)] {
+                        let q=adapter.step(from:from,toward:from+heading*80,radius:radius)
+                        check("wall-step-safe",map.valid(q,radius:radius))
+                        check("wall-step-swept",!map.geometry.segmentBlockedExact(from,q,travelRadius:radius))
+                    }
+                }
+            }
+        }
+        for corridor in map.connections {
+            let from=corridor.center
+            for delta in [CGPoint(x:100,y:100),CGPoint(x:-100,y:-100),CGPoint(x:400,y:0),CGPoint(x:0,y:400)] {
+                let q=adapter.step(from:from,toward:from+delta,radius:rad)
+                check("corridor-step-safe",map.valid(q,radius:rad))
+                check("corridor-step-swept",!map.geometry.segmentBlockedExact(from,q,travelRadius:rad))
+            }
+        }
+        check("nonfinite-request-holds",adapter.step(from:map.player,toward:CGPoint(x:CGFloat.infinity,y:0),radius:rad)==map.player)
+        check("invalid-radius-holds",adapter.step(from:map.player,toward:map.player+CGPoint(x:5,y:0),radius:-1)==map.player)
+        check("two-room-adapter-inert",Arena8KaijuLunge(map:.twoRoom).step(from:map.player,toward:map.player+CGPoint(x:5,y:0),radius:rad)==map.player)
+        // Real SpriteKit action sequence: before-action correction is retained
+        // in update and both post-action/end-of-frame roots are recorded.
+        var cases:[(String,CGPoint,CGPoint)]=[
+            ("left-recoil",CGPoint(x:map.world.minX+rad+0.5,y:map.rooms[0].center.y),CGPoint(x:1,y:0)),
+            ("right-forward",CGPoint(x:map.world.maxX-rad-0.5,y:map.rooms[0].center.y),CGPoint(x:1,y:0))]
+        for room in map.rooms {
+            cases.append(("room-\(room.id)-corner",CGPoint(x:room.rect.maxX-rad-0.5,y:room.rect.maxY-rad-0.5),CGPoint(x:0.6,y:0.8)))
+        }
+        for (i,corridor) in map.connections.enumerated(){cases.append(("corridor-\(i)",corridor.center,CGPoint(x:0.6,y:0.8)))}
+        for label in ["free-legacy-trace","interleaved-input","keyed-replacement"] {
+            cases.append((label,map.rooms[0].center,CGPoint(x:0.6,y:0.8)))
+        }
+        func later(_ seconds:Double,_ body:@escaping @MainActor ()->Void){DispatchQueue.main.asyncAfter(deadline:.now()+seconds,execute:body)}
+        func finish(){
+            let bad=roomKaijuSamples.filter{($0["safe"] as? Bool)==false}
+            check("all-action-and-frame-roots-safe",bad.isEmpty)
+            check("real-frames-observed",roomKaijuSamples.count>20)
+            check("both-reproduction-cases-observed",Set(roomKaijuSamples.compactMap{$0["case"] as? String}).isSuperset(of:["left-recoil","right-forward"]))
+            check("paired-legacy-trace-present",roomKaijuPairSamples.count>20)
+            check("paired-legacy-trace-within-Float-tolerance",roomKaijuPairSamples.allSatisfy{($0["distance"] as? Double ?? 99)<0.002})
+            check("paired-keyed-completion-agrees",roomKaijuPairSamples.allSatisfy{($0["constrainedActive"] as? Bool)==($0["legacyActive"] as? Bool)})
+            roomKaijuControl?.removeAllActions();roomKaijuControl?.removeFromParent();roomKaijuControl=nil
+            player.removeAction(forKey:"kaijuLunge");player.setKaiju(false)
+            // Actual Scene combat caller: damage, kill credit, XP and victim
+            // shove run before PlayerNode's purely movement/art action.
+            player.position=map.rooms[0].center;roomPlayerLastSafe=player.position
+            let target=EnemyNode(health:10000,moveSpeed:0,xpValue:2);target.position=player.position+CGPoint(x:30,y:0);enemies=[target];worldNode.addChild(target)
+            let beforeHP=target.health;kaijuStrike()
+            check("real-melee-damage",target.health<beforeHP)
+            check("real-melee-victim-safe",map.valid(target.position,radius:target.geometryFootprintRadius))
+            let action=player.action(forKey:"kaijuLunge");check("ordinary-no-kaiju-no-lunge",action==nil)
+            player.setKaiju(true);player.kaijuStrike(toward:CGPoint(x:1,y:0))
+            check("keyed-lunge-duration",abs((player.action(forKey:"kaijuLunge")?.duration ?? -1)-0.29)<0.00001)
+            player.setKaiju(false)
+            check("expiry-preserves-inherited-residual-action",player.action(forKey:"kaijuLunge") != nil)
+            player.die();check("death-preserves-inherited-residual-action",player.action(forKey:"kaijuLunge") != nil)
+            player.reset();check("reset-cancels-lunge",player.action(forKey:"kaijuLunge")==nil)
+            let report:[String:Any]=["passed":results.filter{($0["pass"] as? Bool)==true}.count,"failed":results.filter{($0["pass"] as? Bool)==false}.count,"checks":results,"samples":roomKaijuSamples,"pairedSamples":roomKaijuPairSamples,"unsafeCount":bad.count,"radius":Double(rad),"isolated":GameRunPreferences.isIsolated,"entryFromTitle":debugRoomEntryFromTitle,"scope":"real action frames with ordinary pre-action correction; controlled fixtures, native input separate"]
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-kaiju-lunge-checks.json"))}
+        }
+        func next(_ i:Int){
+            guard i<cases.count else{finish();return}
+            let (label,root,heading)=cases[i]
+            player.removeAction(forKey:"kaijuLunge");player.setKaiju(true)
+            roomKaijuCase=label;player.position=root;roomPlayerLastSafe=player.position;camera?.position=player.position
+            check("real-case-initial-root-safe",map.valid(player.position,radius:rad))
+            roomKaijuControl?.removeAllActions();roomKaijuControl?.removeFromParent();roomKaijuControl=nil
+            if ["free-legacy-trace","interleaved-input","keyed-replacement"].contains(label) {
+                let control=PlayerNode();control.position=player.position;worldNode.addChild(control);control.setKaiju(true)
+                roomKaijuControl=control;control.kaijuStrike(toward:heading)
+                if label=="interleaved-input" {
+                    later(0.045){self.player.position+=CGPoint(x:20,y:10);self.roomKaijuControl?.position+=CGPoint(x:20,y:10)}
+                }
+                if label=="keyed-replacement" {
+                    later(0.06){self.player.kaijuStrike(toward:CGPoint(x:-0.8,y:0.6));self.roomKaijuControl?.kaijuStrike(toward:CGPoint(x:-0.8,y:0.6))}
+                }
+            }
+            player.kaijuStrike(toward:heading)
+            later(0.45){
+                check("real-case-completed",self.player.action(forKey:"kaijuLunge")==nil)
+                next(i+1)
+            }
+        }
+        next(0)
     }
 }
 #endif
