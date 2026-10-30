@@ -63,7 +63,8 @@ class GameViewController: UIViewController {
                 scene = TitleScene(size: skView.bounds.size)
             } else if GameRunPreferences.isIsolated {
                 let rooms = GameScene(size: skView.bounds.size)
-                rooms.debugRoomIntegration = ProcessInfo.processInfo.arguments.contains("--arena8-six") ? .sixRoom : .twoRoom
+                rooms.debugArena9Traversal = ProcessInfo.processInfo.arguments.contains("--arena9-traversal")
+                rooms.debugRoomIntegration = rooms.debugArena9Traversal ? GameConfig.Arena9TraversalLab.map : (ProcessInfo.processInfo.arguments.contains("--arena8-six") ? .sixRoom : .twoRoom)
                 scene = rooms
             } else {
                 scene = TitleScene(size: skView.bounds.size)

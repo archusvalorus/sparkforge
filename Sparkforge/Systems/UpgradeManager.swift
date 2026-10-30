@@ -362,6 +362,8 @@ final class UpgradeManager {
     /// plays with all of them, and the run is smaller rather than broken. That
     /// matters most for a brand-new save, which is exactly when a crash or an
     /// empty draft would be least forgivable.
+    private let excludedFamilies: Set<Tag>
+
     private var unlockedFamilies: [Tag] {
         let arenas = ProgressionManager.shared.arenasUnlocked
         return Tag.allCases.filter {
@@ -373,7 +375,7 @@ final class UpgradeManager {
     /// and Neutral is always there.
     private func rollActiveFamilies() {
         bannedFamily = SettingsManager.shared.bannedFamily
-        var candidates = unlockedFamilies
+        var candidates = unlockedFamilies.filter { !excludedFamilies.contains($0) }
         // The ban is a PROMISE — "one tree, never offered" — so it is honoured
         // whenever the tree is unlocked at all. Quietly ignoring it when the
         // pool is small would be the worse betrayal.
@@ -411,7 +413,8 @@ final class UpgradeManager {
     // MARK: - Init
     
     /// `seed` is for the catalog harness only (CL-90); the game never passes one.
-    init(seed: UInt64? = nil) {
+    init(seed: UInt64? = nil, excludedFamilies: Set<Tag> = []) {
+        self.excludedFamilies = excludedFamilies
         // v1.9 Unit 3: signature ladders now live in the release pool
         // (buildCardPool); the Unit 1 DEBUG proof ladder is retired.
         rng = DrawRandom(seed: seed)

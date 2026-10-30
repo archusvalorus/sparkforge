@@ -19,13 +19,14 @@ isolated=member(prefs,'    static var isIsolated: Bool').replace('ProcessInfo.pr
 shell='''import Foundation
 import CoreGraphics
 enum TestArgs {static var values:[String]=[]}
-enum Floor:Equatable {case sixRoom,twoRoom}
+enum Floor:Equatable {case sixRoom,twoRoom,arena9}
+enum GameConfig {enum Arena9TraversalLab {static let map:Floor? = .arena9}}
 enum Scale:Equatable {case resizeFill}
 class SKScene {
  let size:CGSize;var scaleMode:Scale = .resizeFill;var anchorPoint=CGPoint.zero
  init(size:CGSize){self.size=size}
 }
-final class GameScene:SKScene {var debugRoomIntegration:Floor?;var debugRoomEntryFromTitle=false}
+final class GameScene:SKScene {var debugRoomIntegration:Floor?;var debugRoomEntryFromTitle=false;var debugArena9Traversal=false}
 final class RainbowP1Scene:SKScene{}
 final class Arena8P0Scene:SKScene{}
 final class Arena8CombatScene:SKScene{}
@@ -48,13 +49,13 @@ STARTUP
 }
 var passed=0,failed=0
 func check(_ name:String,_ yes:Bool){if yes{passed+=1}else{failed+=1;print("FAIL \\(name)")}}
-let flags=["--arena8-six","--arena8-game","--arena8-title","--arena8-title-input","--arena8-title-autoplay","--rainbow-p1","--arena8-p0","--arena8-combat"]
+let flags=["--arena9-traversal","--arena8-six","--arena8-game","--arena8-title","--arena8-title-input","--arena8-title-autoplay","--rainbow-p1","--arena8-p0","--arena8-combat"]
 for mask in 0..<(1<<flags.count) {
  TestArgs.values=flags.enumerated().filter{mask & (1<<$0.offset) != 0}.map(\\.element)
  let title=TitleScene(size:CGSize(width:393,height:852)),view=View();title.view=view;title.transitionToGame()
  guard let game=view.presented else{check("actual-transition-presented",false);continue}
  #if DEBUG
- let expected:Floor?=TestArgs.values.contains("--arena8-six") ? .sixRoom : (TestArgs.values.contains("--arena8-game") ? .twoRoom : nil)
+ let expected:Floor?=TestArgs.values.contains("--arena9-traversal") ? .arena9 : (TestArgs.values.contains("--arena8-six") ? .sixRoom : (TestArgs.values.contains("--arena8-game") ? .twoRoom : nil))
  #else
  let expected:Floor?=nil
  #endif

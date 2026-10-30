@@ -178,7 +178,9 @@ final class TitleScene: SKScene {
             let badge = SKLabelNode(fontNamed: "Menlo-Bold")
             badge.name = "arena8OwnerTitleBadge"
             let floor = ProcessInfo.processInfo.arguments.contains("--arena8-six") ? "SIX ROOMS" : "TWO ROOMS"
-            badge.text = "ARENA 8 OWNER TEST • " + floor + " • MEMORY PROFILE"
+            badge.text = ProcessInfo.processInfo.arguments.contains("--arena9-traversal")
+                ? "ARENA 9 TRAVERSAL LAB • RETREAT TEST • MEMORY PROFILE"
+                : "ARENA 8 OWNER TEST • " + floor + " • MEMORY PROFILE"
             badge.fontColor = .cyan; badge.fontSize = 9; badge.zPosition = 200
             if badge.frame.width > size.width - 24 { badge.fontSize *= (size.width - 24) / badge.frame.width }
             badge.position = CGPoint(x: 0, y: size.height / 2 - view.safeAreaInsets.top - 18)
@@ -207,7 +209,7 @@ final class TitleScene: SKScene {
         let point = convertPoint(toView: button.position)
         let sample: [String: Any] = ["titleEpoch": roomTitleEpoch,
             "isolated": GameRunPreferences.isIsolated,
-            "selectedFloor": ProcessInfo.processInfo.arguments.contains("--arena8-six") ? 6 : 2,
+            "selectedFloor": ProcessInfo.processInfo.arguments.contains("--arena9-traversal") ? 9 : (ProcessInfo.processInfo.arguments.contains("--arena8-six") ? 6 : 2),
             "playX": Double(point.x), "playY": Double(point.y),
             "registeredArenas": ArenaConfig.all.count]
         if let data = try? JSONSerialization.data(withJSONObject: sample, options: [.sortedKeys]),
@@ -3526,7 +3528,8 @@ final class TitleScene: SKScene {
         let gameScene = GameScene(size: view.bounds.size)
         #if DEBUG
         if GameRunPreferences.isIsolated {
-            gameScene.debugRoomIntegration = ProcessInfo.processInfo.arguments.contains("--arena8-six") ? .sixRoom : .twoRoom
+            gameScene.debugArena9Traversal = ProcessInfo.processInfo.arguments.contains("--arena9-traversal")
+            gameScene.debugRoomIntegration = gameScene.debugArena9Traversal ? GameConfig.Arena9TraversalLab.map : (ProcessInfo.processInfo.arguments.contains("--arena8-six") ? .sixRoom : .twoRoom)
             gameScene.debugRoomEntryFromTitle = true
         }
         #endif

@@ -52,6 +52,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomEchoChecksRunning = false
     private var roomGrowthChecksRunning = false
     private var roomSummonChecksRunning = false
+    var debugArena9Traversal = false
+    private var arena9Run: Arena9TraversalRun?
+    private var arena9Pending: [Arena9EncounterLedger.Ticket] = []
+    private var arena9Spawned: [String: Int] = [:]
+    private var arena9Members: [ObjectIdentifier: UUID] = [:]
+    private var arena9SuccessCount = 0
+    private var arena9FixtureFireEnabled = true
+    private var arena9BackgroundWave: TimeInterval?
+    private var arena9ForegroundWave: TimeInterval?
+    private var arena9BackgroundCount = 0
+    private var arena9ForegroundCount = 0
     private var roomPandaChecksRunning = false
     private var roomVoidChecksRunning = false
     private var roomSentryChecksRunning = false
@@ -123,7 +134,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     #endif
 
     private let playerStats = PlayerStats()
-    private let upgradeManager = UpgradeManager()
+    private let upgradeManager = UpgradeManager(excludedFamilies: Arena9DraftPolicy.launchExclusions)
     private let adReviveManager = AdReviveManager()
 
     // v1.6: Selected arena's visual identity (resolved at scene creation)
@@ -610,6 +621,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         setupPlayer()
         #if DEBUG
+        if debugArena9Traversal {
+            resetArena9Traversal()
+            if ProcessInfo.processInfo.arguments.contains("--arena9-traversal-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + (debugRoomEntryFromTitle ? 0.4 : 0)) { [weak self] in self?.runArena9TraversalChecks() }
+            }
+        }
         if let rooms = debugRoomIntegration {
             player.debugMovementConstraint = { from, desired, radius in rooms.move(from: from, toward: desired, radius: radius) }
             if rooms.isSixRoom {
@@ -771,6 +788,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     @objc private func appDidEnterBackground() {
+        #if DEBUG
+        if debugArena9Traversal {
+            arena9BackgroundWave=waveManager.elapsedTime;arena9BackgroundCount += 1
+        }
+        #endif
         samuraiBackgroundHold = true
         avalancheBackgroundHold = true
         syncSamuraiStrikes()
@@ -781,6 +803,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     @objc private func appWillEnterForeground() {
+        #if DEBUG
+        if debugArena9Traversal {
+            arena9ForegroundWave=waveManager.elapsedTime;arena9ForegroundCount += 1
+        }
+        #endif
         samuraiBackgroundHold = false
         avalancheBackgroundHold = false
         syncSamuraiStrikes()
@@ -2342,6 +2369,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         #if DEBUG
+        if debugArena9Traversal, ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout"),
+           gameState == .playing, let cam=camera, let control=cam.childNode(withName:"arena9FireControl"),
+           control.frame.insetBy(dx:-14,dy:-14).contains(touch.location(in:cam)) {
+            arena9FixtureFireEnabled.toggle()
+            (control as? SKLabelNode)?.text = arena9FixtureFireEnabled ? "TEST FIRE: ON" : "TEST FIRE: OFF"
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input"), gameState == .playing,
            let cam=camera,let arm=cam.childNode(withName:"avalancheArm"),arm.frame.contains(touch.location(in:cam)) {
             armAvalancheInput();return
@@ -3790,6 +3824,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     override func willMove(from view: SKView) {
+        #if DEBUG
+        arena9Run?.cancel()
+        #endif
         cancelSamuraiStrikes()
         cancelAvalancheEntrances()
         super.willMove(from: view)
@@ -5812,7 +5849,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateGuardStance(dt)    // v2.1 A5 — Fortify + Grounded Core read THIS frame's combat
         updateRedSmile(dt)       // v2.1 A4c — before the gun, which it pauses
         #if DEBUG
-        if !(debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting")) { updateAutoAttack(dt) }
+        if !(debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting"))
+            && !(debugArena9Traversal && ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") && !arena9FixtureFireEnabled) { updateAutoAttack(dt) }
         #else
         updateAutoAttack(dt)
         #endif
@@ -5887,7 +5925,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // boss, not the wave manager, and are part of the fight.)
         #if DEBUG
         let roomFixture = debugRoomIntegration != nil
-        if roomFixture && !eventHorizonVoided && !falseEndingActive && spawnEvent.shouldSpawnEnemy { spawnRoomFixtureEnemy() }
+        if debugArena9Traversal { updateArena9Traversal() }
+        else if roomFixture && !eventHorizonVoided && !falseEndingActive && spawnEvent.shouldSpawnEnemy { spawnRoomFixtureEnemy() }
         #else
         let roomFixture = false
         #endif
@@ -6026,7 +6065,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateHUD()
 
         // Camera follows player
+        #if DEBUG
+        if debugArena9Traversal, let definition = try? GameConfig.Arena9TraversalLab.definition() {
+            camera?.position = Arena9StageBounds(definition: definition).cameraCenter(following: player.position, viewport: size) ?? player.position
+        } else { camera?.position = player.position }
+        #else
         camera?.position = player.position
+        #endif
 
         // v2.0: mark off-screen pickups. The doubled arena made orbs hard to
         // FIND — and a pickup you can't locate isn't a positioning decision,
@@ -11649,7 +11694,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for k in order {
             let a = base + CGFloat(k) * C.anchorAngleStep
             let cand = goal + CGPoint(x: cos(a), y: sin(a)) * C.standoff
+            #if DEBUG
+            if debugArena9Traversal, let map = debugRoomIntegration {
+                guard map.valid(cand, radius: bodyR) else { continue }
+            } else if cand.length > limit { continue }
+            #else
             guard cand.length <= limit else { continue }
+            #endif
             guard !geo.isBlocked(cand, margin: bodyR) else { continue }
             guard !geo.segmentBlocked(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius) else { continue }
             guard !geo.segmentBlocked(p, cand, travelRadius: bodyR * 0.8) else { continue }
@@ -15098,6 +15149,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func playerDied() {
         guard gameState == .playing else { return }
+        #if DEBUG
+        arena9Run?.cancel()
+        #endif
         gameState = .dead
         beamNode.isHidden = true   // v2.2 N4: the beam stops with Spark
         // v2.1 A4c (CL-34): death ends the form and zeroes the cycle — a revive
@@ -15485,6 +15539,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Restart
     
     private func restartGame() {
+        #if DEBUG
+        arena9Run?.cancel()
+        #endif
         cancelSamuraiStrikes()
         cancelAvalancheEntrances()
         #if DEBUG
@@ -15716,6 +15773,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #endif
 
         // A restart is a NEW run, so it rolled a new palette — show it again.
+        #if DEBUG
+        if debugArena9Traversal { resetArena9Traversal() }
+        #endif
         showActiveFamilyReveal()
 
         // v2.0 (B2a): restarting a gauntlet starts a NEW gauntlet from stage 1
@@ -15801,6 +15861,10 @@ extension GameScene {
     }
     private var roomsBadgeText: String {
         guard let map = debugRoomIntegration else { return "" }
+        if debugArena9Traversal {
+            let control = ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") ? " • SWIFT T\(upgradeManager.tier(of: "neutral_1"))/SPARK HP1000 FIXTURE" : ""
+            return "ARENA 9 • LAB HP1/XP1 • RETREAT TEST • MEMORY PROFILE" + control
+        }
         if map.isSixRoom {
             let id = map.roomID(near: player.position) + 1
             let fixture = ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting") ? " • TEST GUN OFF" : ""
@@ -15825,6 +15889,7 @@ extension GameScene {
         return safe
     }
     private func spawnRoomFixtureEnemy() {
+        if debugArena9Traversal { return }
         guard let rooms = debugRoomIntegration else { return }
         // Explicit native geometry fixture only: no encounters during the
         // all-door joystick traversal. Ordinary six-room combat is unchanged.
@@ -16114,6 +16179,31 @@ extension GameScene {
         sample["roomCount"] = rooms.rooms.count
         if ProcessInfo.processInfo.arguments.contains("--arena8-magnet-checks") {sample["magnetDone"] = !roomMagnetReport.isEmpty;sample["magnetPassed"] = roomMagnetReport["passed"] ?? -1;sample["magnetFailed"] = roomMagnetReport["failed"] ?? -1}
         sample["bossMode"] = isGauntlet
+        if debugArena9Traversal {
+            sample["arena9Traversal"] = true
+            sample["successCount"] = arena9SuccessCount
+            sample["goalReached"] = arena9Run?.reachedGoal ?? false
+            sample["successAwarded"] = arena9Run?.awardedSuccess ?? false
+            sample["stageActive"] = arena9Run?.active ?? false
+            sample["packetRegistrations"] = arena9Spawned
+            sample["liveMemberIDs"] = arena9Members.values.map(\.uuidString).sorted()
+            sample["enemyRoots"] = enemies.filter{!$0.isDying}.map{["x":Double($0.position.x),"y":Double($0.position.y),"hp":$0.health] as [String:Any]}
+            sample["pendingPackets"] = arena9Pending.count
+            sample["xpOrbs"] = xpOrbs.count
+            sample["activeFamilies"] = upgradeManager.activeFamilies.map(\.rawValue).sorted()
+            sample["controlledSwiftTier"] = upgradeManager.tier(of:"neutral_1")
+            sample["testFireEnabled"] = arena9FixtureFireEnabled
+            sample["backgroundWave"] = arena9BackgroundWave ?? -1
+            sample["foregroundWave"] = arena9ForegroundWave ?? -1
+            sample["backgroundCount"] = arena9BackgroundCount
+            sample["foregroundCount"] = arena9ForegroundCount
+            if let control=camera?.childNode(withName:"arena9FireControl"), let view {
+                let point=view.convert(control.convert(CGPoint.zero,to:self),from:self)
+                sample["fireX"]=Double(point.x);sample["fireY"]=Double(point.y)
+            }
+            sample["cameraX"] = Double(camera?.position.x ?? 0)
+            sample["cameraY"] = Double(camera?.position.y ?? 0)
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input") {
             sample["avalancheEpoch"] = avalancheInputEpoch
             sample["avalancheTargetHP"] = avalancheTarget?.health ?? -1
@@ -18914,6 +19004,243 @@ extension GameScene {
             self.roomMagnetReport=report
             if let data=try? JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-magnet-checks.json"))}
         }]))
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func resetArena9Traversal() {
+        arena9Run?.cancel()
+        arena9Pending.removeAll(); arena9Spawned.removeAll(); arena9Members.removeAll()
+        arena9SuccessCount = 0
+        arena9FixtureFireEnabled = true
+        arena9BackgroundWave=nil;arena9ForegroundWave=nil
+        arena9BackgroundCount=0;arena9ForegroundCount=0
+        guard let definition = try? GameConfig.Arena9TraversalLab.definition(),
+              let finalID = definition.encounters.last?.id else { return }
+        arena9Run = Arena9TraversalRun(definition: definition, finalID: finalID,
+                                     goal: GameConfig.Arena9TraversalLab.goal)
+        arenaLayer.childNode(withName: "arena9VisibleGoal")?.removeFromParent()
+        let goal = SKShapeNode(rect: GameConfig.Arena9TraversalLab.goal)
+        goal.name = "arena9VisibleGoal"; goal.strokeColor = .green
+        goal.fillColor = SKColor.green.withAlphaComponent(0.12); goal.lineWidth = 4
+        goal.zPosition = -8; arenaLayer.addChild(goal)
+        let text = SKLabelNode(fontNamed: "Menlo-Bold")
+        text.text = "GOAL"; text.fontSize = 20; text.fontColor = .green
+        text.position = CGPoint(x: GameConfig.Arena9TraversalLab.goal.midX, y: 0)
+        goal.addChild(text)
+        camera?.childNode(withName: "arena9SuccessBadge")?.removeFromParent()
+        camera?.childNode(withName: "arena9FireControl")?.removeFromParent()
+        if ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") {
+            // Automation can leave live mobs active during slow native probes.
+            // This labelled HP cushion preserves real incoming damage/death
+            // handlers; it is never used by an ordinary traversal launch.
+            playerStats.maxHP=GameConfig.Arena9TraversalLab.controlledSparkHP
+            playerStats.currentHP=playerStats.maxHP
+            hpBar.updateFill(playerStats.hpPercent,currentHP:playerStats.currentHP,maxHP:playerStats.maxHP)
+            statHUD.update(from:playerStats)
+            let control=SKLabelNode(fontNamed:"Menlo-Bold")
+            control.name="arena9FireControl";control.text="TEST FIRE: ON";control.fontSize=13
+            control.fontColor = .cyan;control.position=CGPoint(x:0,y:size.height/2-130)
+            control.zPosition=300;camera?.addChild(control)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout"),
+           let swift = upgradeManager.allCards.first(where: { $0.id == "neutral_1" }),
+           upgradeManager.tier(of: swift.id) == 0 {
+            // Technical fixture injection only, not a different roll/ban rule.
+            _ = upgradeManager.acquire(swift, stats: playerStats, level: player.currentLevel)
+        }
+    }
+
+    private func updateArena9Traversal() {
+        guard debugArena9Traversal, let run = arena9Run, let map = debugRoomIntegration else { return }
+        // Retirement follows actual ordinary actor death/removal, not camera,
+        // threshold crossing or retreat. Pickups and projectiles keep normal APIs.
+        let alive = Set(enemies.filter { !$0.isDying }.map(ObjectIdentifier.init))
+        for (key, id) in Array(arena9Members) where !alive.contains(key) {
+            _ = run.retire(id); arena9Members.removeValue(forKey: key)
+        }
+        arena9Pending.append(contentsOf: run.enter(at: player.position))
+        for ticket in arena9Pending {
+            let count = arena9Spawned[ticket.encounterID, default: 0]
+            guard count < GameConfig.Arena9TraversalLab.packetOffsets.count,
+                  let entry = GameConfig.Arena9TraversalLab.entries.first(where: { $0.id == ticket.encounterID }) else { continue }
+            let enemy: EnemyNode
+            if count == 0 {
+                enemy = SpurhoundNode(health: 1, xpValue: GameConfig.Arena9TraversalLab.fixtureEnemyXP)
+            } else {
+                let keeper = LinekeeperNode(health: 1, xpValue: GameConfig.Arena9TraversalLab.fixtureEnemyXP)
+                keeper.onFireProjectile = { [weak self] p, d in
+                    self?.spawnEnemyProjectile(at: p, direction: d,
+                        speed: GameConfig.Linekeeper.boltSpeed, range: GameConfig.Linekeeper.boltRange,
+                        colorHex: GameConfig.Linekeeper.boltColorHex, elongated: true)
+                }
+                keeper.resolveFiringAnchor = { [weak self] from, goal in
+                    self?.findFiringAnchor(from: from, toward: goal)
+                }
+                enemy = keeper
+            }
+            let requested = CGPoint(x: entry.x, y: 0) + GameConfig.Arena9TraversalLab.packetOffsets[count]
+            guard let safe = map.spawn(candidates: [requested], radius: enemy.geometryFootprintRadius,
+                avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { continue }
+            let id = UUID()
+            guard run.register(id, ticket: ticket) else { continue }
+            enemy.position = safe; enemies.append(enemy); worldNode.addChild(enemy)
+            arena9Members[ObjectIdentifier(enemy)] = id
+            arena9Spawned[ticket.encounterID] = count + 1
+            if count + 1 == GameConfig.Arena9TraversalLab.packetOffsets.count {
+                _ = run.seal(ticket, expectedCount: count + 1)
+            }
+        }
+        arena9Pending.removeAll { arena9Spawned[$0.encounterID] == GameConfig.Arena9TraversalLab.packetOffsets.count }
+        run.observeGoal(at: player.position)
+        if run.claimSuccess() {
+            arena9SuccessCount += 1
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.name = "arena9SuccessBadge"; label.text = "TRAVERSAL CLEAR • 1 SUCCESS • TEST ONLY"
+            label.fontSize = 12; label.fontColor = .green
+            label.position = CGPoint(x: 0, y: size.height / 2 - 100)
+            label.zPosition = 300; camera?.addChild(label)
+        }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func runArena9TraversalChecks() {
+        guard debugArena9Traversal, let map=debugRoomIntegration else { return }
+        physicsWorld.speed = 0
+        var checks:[[String:Any]]=[]
+        func check(_ id:String,_ yes:Bool){checks.append(["id":id,"pass":yes])}
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        check("actual-isolated-traversal-not-bossmode",GameRunPreferences.isIsolated && !isGauntlet)
+        check("actual-open-stage-not-circle",map.world == GameConfig.Arena9TraversalLab.world && map.geometry.blockedFootprints.isEmpty)
+        check("actual-Growth-omitted-Neutral-present",!upgradeManager.activeFamilies.contains(.growth) && upgradeManager.activeFamilies.contains(.neutral))
+        if ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") {
+            check("actual-labelled-Swift-T1-fixture-acquired",upgradeManager.tier(of:"neutral_1")==1 && playerStats.effectiveMoveSpeed>GameConfig.Player.speed)
+            check("actual-labelled-Spark-HP-fixture",playerStats.maxHP==GameConfig.Arena9TraversalLab.controlledSparkHP && playerStats.currentHP>0)
+            invulnerableTimer=0;damageCooldownTimer=0
+            let hp=playerStats.currentHP
+            spawnEnemyProjectile(at:player.position,direction:CGPoint(x:1,y:0))
+            if let body=enemyProjectiles.last?.physicsBody {handleEnemyProjectileHit(projectileBody:body)}
+            check("actual-controlled-HP-still-takes-ordinary-projectile-damage",playerStats.currentHP<hp && playerStats.currentHP>0)
+            enemyProjectiles.forEach{$0.removeFromParent()};enemyProjectiles.removeAll()
+        }
+        check("actual-visible-goal",arenaLayer.childNode(withName:"arena9VisibleGoal") != nil)
+        for radius:CGFloat in [4,12,16,20,14.3] {
+            for corner in [CGPoint(x:map.world.minX,y:map.world.minY),CGPoint(x:map.world.maxX,y:map.world.maxY)] {
+                if let q=map.approach(corner,radius:radius) {
+                    let stored=CGPoint(x:CGFloat(Float(q.x)),y:CGFloat(Float(q.y)))
+                    check("actual-Float-stored-body-clearance",map.valid(stored,radius:radius))
+                } else {check("actual-boundary-projection-exists",false)}
+            }
+        }
+        enemies.forEach{$0.removeAllActions();$0.removeFromParent()};enemies.removeAll()
+        resetArena9Traversal()
+        player.position = .zero;roomPlayerLastSafe = player.position
+        updateArena9Traversal();updateArena9Traversal()
+        let first=Set(enemies.map(ObjectIdentifier.init))
+        check("actual-reused-two-enemy-packet",enemies.count==2 && enemies.contains{$0 is SpurhoundNode} && enemies.contains{$0 is LinekeeperNode})
+        check("actual-all-grounded-roots-safe",enemies.allSatisfy{map.valid($0.position,radius:$0.geometryFootprintRadius)})
+        let orb=XPOrbNode(xpValue:1);orb.position=CGPoint(x:50,y:0);worldNode.addChild(orb);xpOrbs.append(orb)
+        player.position=map.player;roomPlayerLastSafe=player.position
+        updateArena9Traversal();updateXPOrbs(0)
+        check("actual-retreat-preserves-existing-packet",first.isSubset(of:Set(enemies.map(ObjectIdentifier.init))))
+        check("actual-retreat-keeps-XP-pickup",xpOrbs.contains{$0 === orb} && orb.parent != nil)
+        guard let finalEntry=GameConfig.Arena9TraversalLab.entries.last else { return }
+        player.position=CGPoint(x:finalEntry.x,y:0);roomPlayerLastSafe=player.position
+        updateArena9Traversal();updateArena9Traversal()
+        let final=enemies.filter{!first.contains(ObjectIdentifier($0))}
+        check("actual-final-packet-once",final.count==2)
+        player.position=CGPoint(x:2400,y:0);roomPlayerLastSafe=player.position
+        updateArena9Traversal()
+        check("actual-goal-without-final-clear-does-not-award",arena9SuccessCount==0)
+        guard let observedRun=arena9Run else { return }
+        let rewardOrbsBefore=xpOrbs.count
+        let rewardValueBefore=xpOrbs.reduce(0){$0+$1.xpValue}
+        // Hold dt-driven combat while allowing the normal Scene SKAction queue
+        // to deliver its real0.05s full-credit kill rewards. Never flush or call
+        // spawnXPOrb from the fixture to manufacture the expected result.
+        gameState = .paused
+        for e in final {dealDirectDamage(10000,toEnemy:e,source:.primary)}
+        updateArena9Traversal();updateArena9Traversal()
+        check("actual-final-clear-and-goal-award-once",arena9SuccessCount==1 && arena9Run?.awardedSuccess==true)
+        check("actual-earlier-stragglers-do-not-block",enemies.contains{first.contains(ObjectIdentifier($0))})
+        func finish(_ scene:GameScene) {
+            let beforeXP=scene.player.currentXP
+            if let body=orb.physicsBody {
+                scene.handleXPCollection(orbBody:body);let once=scene.player.currentXP
+                scene.handleXPCollection(orbBody:body)
+                check("actual-pickup-ownership-and-once-credit",once==beforeXP+1 && scene.player.currentXP==once && !scene.xpOrbs.contains{$0 === orb})
+            } else {check("actual-pickup-physics-body",false)}
+            scene.restartGame()
+            check("actual-reset-clears-actors-pickups-success",scene.enemies.isEmpty && scene.xpOrbs.isEmpty && scene.arena9SuccessCount==0 && scene.arena9Run?.awardedSuccess==false)
+            check("actual-reset-retains-stage-and-safe-start",scene.debugRoomIntegration?.world==map.world && scene.player.position==map.player && map.valid(scene.player.position,radius:scene.playerStats.effectiveCollisionRadius))
+            check("actual-reset-retains-Growth-omission",!scene.upgradeManager.activeFamilies.contains(.growth))
+            // Separate controlled actual level queue proof, not an all-tree
+            // offer redesign or a native level-up interaction claim.
+            scene.spawnXPOrb(at:scene.player.position,value:5)
+            if let body=scene.xpOrbs.last?.physicsBody {scene.handleXPCollection(orbBody:body)}
+            check("actual-A9-XP-opens-real-level-up",scene.gameState == .levelUp && scene.player.currentLevel==2)
+            let held=scene.waveManager.elapsedTime,heldPosition=scene.player.position
+            scene.update(100);scene.update(101)
+            check("actual-A9-level-up-holds-stage-clock-and-position",scene.waveManager.elapsedTime==held && scene.player.position==heldPosition)
+            if let swift=scene.upgradeManager.allCards.first(where:{$0.id=="neutral_1"}) {
+                let tier=scene.upgradeManager.tier(of:swift.id)
+                scene.showCardSelection([swift])
+                if let card=scene.displayedCards.first {
+                    scene.selectLevelCard(card)
+                    check("actual-controlled-card-waits-for-stat",scene.upgradeManager.tier(of:swift.id)==tier && scene.gameState == .levelUp)
+                    scene.selectStat(.hp)
+                    check("actual-controlled-Swift-tier-applied",scene.upgradeManager.tier(of:swift.id)==tier+1)
+                } else {check("actual-controlled-card-visible",false)}
+            } else {check("actual-controlled-card-exists",false)}
+            guard let levelRun=scene.arena9Run else { return }
+            func finishAfterLevel(_ scene:GameScene,_ resumed:Bool) {
+                check("actual-A9-natural-level-up-resumes",resumed && scene.gameState == .playing && scene.debugArena9Traversal)
+                let health=HealthOrbNode()
+                check("actual-health-ordinary-expiry-retained",!health.update(deltaTime:0) && health.update(deltaTime:GameConfig.HealthOrb.despawnTime+0.01))
+                scene.restartGame()
+                check("actual-level-proof-reset-clears-card-and-queue",scene.player.currentLevel==1 && scene.enemies.isEmpty && scene.xpOrbs.isEmpty && scene.arena9SuccessCount==0)
+                let now=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+                check("actual-standard-player-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:now))
+                scene.gameState = .paused
+                let report:[String:Any]=["passed":checks.filter{($0["pass"] as? Bool)==true}.count,"failed":checks.filter{($0["pass"] as? Bool)==false}.count,"checks":checks,"purpose":"Actual GameScene API fixture with bounded observation of genuine deferred kill-reward SKAction completion; direct damage/contact seams, not ordinary projectile/native-input/performance coverage"]
+                if let data=try? JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first {
+                    try? data.write(to:dir.appendingPathComponent("arena9-traversal-checks.json"))
+                }
+            }
+            func observeLevelCompletion(_ scene:GameScene,_ attemptsLeft:Int) {
+                scene.run(SKAction.wait(forDuration:0.02)) { [weak scene] in
+                    guard let scene, scene.view?.scene === scene, scene.arena9Run === levelRun,
+                          levelRun.active, scene.gameState != .dead else { return }
+                    if scene.gameState == .playing || attemptsLeft==0 {
+                        finishAfterLevel(scene,scene.gameState == .playing)
+                    } else { observeLevelCompletion(scene,attemptsLeft-1) }
+                }
+            }
+            // Observe the actual selected card animation -> finishLevelUp ->
+            // resumeAfterLevelUp path. Never invoke resume from this fixture.
+            observeLevelCompletion(scene,150)
+        }
+        func observeDeferredRewards(_ scene:GameScene,_ attemptsLeft:Int) {
+            scene.run(SKAction.wait(forDuration:0.02)) { [weak scene] in
+                guard let scene, scene.view?.scene === scene, scene.arena9Run === observedRun,
+                      observedRun.active, scene.gameState == .paused else { return }
+                let exact = scene.xpOrbs.count==rewardOrbsBefore+final.count
+                    && scene.xpOrbs.reduce(0){$0+$1.xpValue}==rewardValueBefore+final.reduce(0){$0+$1.xpValue}
+                if exact || attemptsLeft==0 {
+                    check("actual-real-deferred-kill-rewards-produce-exact-XP",exact)
+                    finish(scene)
+                } else { observeDeferredRewards(scene,attemptsLeft-1) }
+            }
+        }
+        // Bounded observation permits a coarse real render step to deliver
+        // the scheduled reward before judging it, without depending on action
+        // callback ordering or executing the reward path from the fixture.
+        observeDeferredRewards(self,100)
     }
 }
 #endif

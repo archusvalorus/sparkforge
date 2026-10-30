@@ -69,6 +69,14 @@ struct Arena8GameMap {
         return Self(control: nil, world: world, rooms: rooms, connections: corridors, geometry: geo, player: start)
     }
 
+    /// Transitional shared rectangular adapters; a single open stage, no
+    /// room cells or invented internal-wall layout. Ability coverage is gated
+    /// separately from traversal and must not be inferred from this adapter.
+    static func openStage(world rect: CGRect, start: CGPoint) -> Self {
+        Self(control: nil, world: rect, rooms: [Room(id: 0, rect: rect)],
+             connections: [], geometry: ArenaGeometry(), player: start)
+    }
+
     /// Exact complement of these authored rectangles, not a random level
     /// generator. Merge adjacent empty cells into continuous wall rectangles.
     private static func wallComplement(of walkable: [CGRect], in world: CGRect) -> [Footprint] {
