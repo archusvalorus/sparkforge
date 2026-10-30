@@ -63,7 +63,8 @@ for scale:CGFloat in [1,1.25,1.7777777] {
 // Actual extracted final resolver must retain a clear diagonal at a doorway.
 DeviceScale.gameplay=1
 let m=Arena8GameMap.sixRoom,f=Arena8RoomFear(map:m)
-let p=CGPoint(x:-350,y:230),spark=CGPoint(x:-450,y:330),q=CGPoint(x:-348,y:232)
+let corner=CGPoint(x:m.rooms[0].rect.maxX,y:m.connections[0].corridor.minY)
+let p=corner+CGPoint(x:-10,y:10),spark=corner+CGPoint(x:-110,y:110),q=corner+CGPoint(x:-8,y:12)
 check("review-fixture-clear",oracle(m,p,q,14))
 check("review-fixture-away",FleeRule.keepsAway(from:p,toward:q,spark:spark))
 let accepted=f.step(from:p,spark:spark,preferred:q,moveSpeed:80,slow:0,dt:0.1,radius:14)
@@ -74,11 +75,11 @@ check("final-resolver-keeps-certified",node.position==accepted)
 check("final-resolver-keeps-away",FleeRule.keepsAway(from:p,toward:node.position,spark:spark))
 resolver.roomFearAccepted.removeAll();node.position=q;resolver.resolve()
 check("old-axis-fixture-moves-inward",!FleeRule.keepsAway(from:p,toward:node.position,spark:spark))
-let changed=CGPoint(x:-355,y:225)
+let changed=corner+CGPoint(x:-15,y:5)
 node.position=changed;resolver.roomFearAccepted=[ObjectIdentifier(node):q];resolver.resolve()
 check("later-force-not-bypassed",node.position==(m.move(from:p,toward:changed,radius:14) ?? p))
 // Clear endpoints around a rounded doorway corner do not prove swept clearance.
-let tunnelP=CGPoint(x:-355,y:221),tunnelSpark=CGPoint(x:-455,y:121),tunnelQ=CGPoint(x:-341,y:235)
+let tunnelP=corner+CGPoint(x:-15,y:1),tunnelSpark=corner+CGPoint(x:-115,y:-99),tunnelQ=corner+CGPoint(x:-1,y:15)
 check("tunnel-fixture-clear-endpoints",m.valid(tunnelP,radius:14) && m.valid(tunnelQ,radius:14))
 check("tunnel-fixture-blocked-middle",!oracle(m,tunnelP,tunnelQ,14))
 let tunnelActual=f.step(from:tunnelP,spark:tunnelSpark,preferred:tunnelQ,moveSpeed:300,slow:0,dt:0.1,radius:14)

@@ -42,7 +42,12 @@ let lastFallback=rule.nearSpark(existing:[],spacing:60){draws += 1;return draws=
 check("fallback projects final sample not first",draws==16 && lastFallback==rule.center(at:unsafeB,clearance:16))
 // This raw point clears spacing, but Float storage brings it just inside 60.
 let existing=map.rooms[0].center
-let threshold=existing+CGPoint(x:36.00004,y:47.99998)
+var threshold=existing
+for ix in -20...20 {for iy in -20...20 {
+ let candidate=existing+CGPoint(x:36+CGFloat(ix)*0.00001,y:48+CGFloat(iy)*0.00001)
+ let value=CGPoint(x:CGFloat(Float(candidate.x)),y:CGFloat(Float(candidate.y)))
+ if candidate.distance(to:existing)>60 && value.distance(to:existing)<60 {threshold=candidate}
+}}
 let rounded=CGPoint(x:CGFloat(Float(threshold.x)),y:CGFloat(Float(threshold.y)))
 check("Float spacing fixture is nonvacuous",threshold.distance(to:existing)>=60 && rounded.distance(to:existing)<60)
 draws=0

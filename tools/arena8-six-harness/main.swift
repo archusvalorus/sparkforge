@@ -3,10 +3,13 @@ import CoreGraphics
 var passed=0,failed=0
 func check(_ name:String,_ value:Bool){if value{passed+=1;print("PASS \(name)")}else{failed+=1;print("FAIL \(name)")}}
 let map=Arena8GameMap.sixRoom
-check("six authored rooms seven open connections two loops",map.rooms.count==6 && map.connections.count==7 && map.world==CGRect(x:-700,y:-460,width:1400,height:920))
-check("safe start and all room centers",map.player==CGPoint(x:-520,y:280) && map.rooms.allSatisfy{map.valid($0.center,radius:40)})
+check("six authored rooms seven open connections two loops",map.rooms.count==6 && map.connections.count==7 && map.world==CGRect(x:-1050,y:-690,width:2100,height:1380))
+check("each room is540square",map.rooms.allSatisfy{$0.rect.width==540 && $0.rect.height==540})
+check("same exact graph and two loops",Set(map.connections.map{"\($0.from)-\($0.to)"})==Set(["0-1","1-2","3-4","4-5","0-3","1-4","2-5"]) && map.connections.count-map.rooms.count+1==2)
+check("unchanged120passages and scaled gaps",map.connections.allSatisfy{ min($0.corridor.width,$0.corridor.height)==120 && max($0.corridor.width,$0.corridor.height)==($0.corridor.width>$0.corridor.height ? 240:300) })
+check("safe start and all room centers",map.player==CGPoint(x:-780,y:420) && map.rooms.allSatisfy{map.valid($0.center,radius:40)})
 var exact=true
-for x in stride(from:-695.0,through:695,by:10){for y in stride(from:-455.0,through:455,by:10){let p=CGPoint(x:x,y:y);let open=(map.rooms.map(\.rect)+map.connections.map(\.corridor)).contains{$0.contains(p)};exact = exact && (map.valid(p,radius:0)==open)}}
+for x in stride(from:Double(map.world.minX+5),through:Double(map.world.maxX-5),by:10){for y in stride(from:Double(map.world.minY+5),through:Double(map.world.maxY-5),by:10){let p=CGPoint(x:x,y:y);let open=(map.rooms.map(\.rect)+map.connections.map(\.corridor)).contains{$0.contains(p)};exact = exact && (map.valid(p,radius:0)==open)}}
 check("sampled wall complement matches authored union",exact)
 for (index,c) in map.connections.enumerated(){
  let a=map.rooms[c.from].center,b=map.rooms[c.to].center
@@ -45,6 +48,14 @@ for room in map.rooms{
 }
 check("no unsafe fallback",map.spawn(candidates:[CGPoint(x:900,y:900),CGPoint(x:260,y:0)],radius:40,avoiding:map.player,clearance:160)==nil)
 check("invalid movement refused",map.move(from:CGPoint(x:CGFloat.nan,y:0),toward:map.player,radius:14)==nil && map.move(from:map.player,toward:.zero,radius:-1)==nil)
+for radius:CGFloat in [12,16,20,14.3] {
+ for corner in [CGPoint(x:map.world.minX,y:map.world.minY),CGPoint(x:map.world.minX,y:map.world.maxY),CGPoint(x:map.world.maxX,y:map.world.minY),CGPoint(x:map.world.maxX,y:map.world.maxY)] {
+  if let projected=map.approach(corner+CGPoint(x:corner.x<0 ? radius+0.01 : -radius-0.01,y:corner.y<0 ? radius+0.01 : -radius-0.01),radius:radius) {
+   let stored=CGPoint(x:CGFloat(Float(projected.x)),y:CGFloat(Float(projected.y)))
+   check("new1050outerFloatroot",map.valid(stored,radius:radius))
+  } else {check("new1050outerprojection",false)}
+ }
+}
 let old=Arena8P0Model(),control=Arena8GameMap.twoRoom
 var identical=true
 for r:CGFloat in [14,26,40,70]{for a in [CGPoint(x:-280,y:150),CGPoint(x:280,y:0)]{for b in [CGPoint(x:280,y:150),CGPoint(x:-900,y:-900),CGPoint.zero]{identical = identical && control.move(from:a,toward:b,radius:r)==old.move(from:a,toward:b,radius:r) && control.shove(from:a,toward:b,radius:r)==old.shove(from:a,toward:b,radius:r)}}}

@@ -6128,9 +6128,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // v2.1 (Unit 2, Ruling 4): a shooter denied line of sight keeps
                 // moving instead of firing into the wreck forever. One segment
                 // test; open arenas short-circuit to true.
-                let hasLoS = !arenaGeometry.segmentBlocked(
-                    ranged.position, player.position,
-                    travelRadius: GameConfig.Geometry.projectileTravelRadius)
+                let hasLoS = rangedHasLineOfSight(from: ranged.position, to: player.position)
                 if !hasLoS { geometryDebug.rangedHeldFire += 1 }
                 ranged.rangedChase(target: steerTarget, deltaTime: dt,
                                    globalSlow: playerStats.globalEnemySlow, canFire: hasLoS)
@@ -6301,6 +6299,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v2.1 (2b): how many enemies are committed to each route node this
     /// frame — one O(n) pass in `updateEnemies`, read by the bias hook.
     private var routeOccupancy: [Int: Int] = [:]
+
+    /// Room dividers can be wider than a short corner ray. The legacy
+    /// sampled query tests only endpoints there; room firing needs exact cover.
+    private func rangedHasLineOfSight(from origin: CGPoint, to target: CGPoint) -> Bool {
+        #if DEBUG
+        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+            return !rooms.geometry.segmentBlockedExact(origin, target,
+                travelRadius: GameConfig.Geometry.projectileTravelRadius)
+        }
+        #endif
+        return !arenaGeometry.segmentBlocked(origin, target,
+            travelRadius: GameConfig.Geometry.projectileTravelRadius)
+    }
 
     private func routeSteerTarget(for enemy: EnemyNode, toward goal: CGPoint,
                                   dt: TimeInterval) -> CGPoint {
@@ -16096,6 +16107,8 @@ extension GameScene {
             "melee": enemies.filter { !($0 is RangedEnemyNode) && !$0.isDying }.count,
             "ranged": enemies.filter { $0 is RangedEnemyNode && !$0.isDying }.count,
             "largestBody": enemies.map(\.geometryFootprintRadius).max() ?? 0]
+        sample["cameraX"] = Double(camera?.position.x ?? 99999)
+        sample["cameraY"] = Double(camera?.position.y ?? 99999)
         sample["entryFromTitle"] = debugRoomEntryFromTitle
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
@@ -16274,7 +16287,9 @@ extension GameScene {
         let analyticsBefore = try? Data(contentsOf: analyticsURL)
         check("six-context-and-memory", GameRunPreferences.isIsolated && !isGauntlet && rooms.rooms.count == 6 && rooms.connections.count == 7 && player.debugMovementConstraint != nil)
         check("isolated-profile-not-read", ProgressionManager.shared.currentArena == 0 && ProgressionManager.shared.arenasUnlocked == 1 && HighScoreManager.shared.totalRuns == 0 && !IAPManager.shared.hasRemovedAds && AnalyticsTracker.shared.totalRuns == 0)
-        check("six-start-camera", player.position == rooms.player && camera?.position == rooms.player)
+        let startDiagnostic: [String:Any] = ["playerX":Double(player.position.x),"playerY":Double(player.position.y),"cameraX":Double(camera?.position.x ?? 99999),"cameraY":Double(camera?.position.y ?? 99999),"expectedX":Double(rooms.player.x),"expectedY":Double(rooms.player.y)]
+        if let data=try? JSONSerialization.data(withJSONObject:startDiagnostic,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first {try? data.write(to:dir.appendingPathComponent("arena8-six-start-diagnostics.json"))}
+        check("six-start-camera-follow-and-safe-anchor", player.position.distance(to:rooms.player)<0.001 && camera?.position == player.position && rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius))
         for (index, c) in rooms.connections.enumerated() {
             let a = rooms.rooms[c.from].center, b = rooms.rooms[c.to].center
             let direction = (b-a).normalized
@@ -16329,26 +16344,36 @@ extension GameScene {
         let ranged = RangedEnemyNode(health:1,moveSpeed:GameConfig.Enemy.baseSpeed*0.75,xpValue:2)
         ranged.onFireProjectile = { [weak self] p,d in self?.spawnEnemyProjectile(at:p,direction:d) }
         enemies.append(ranged); worldNode.addChild(ranged)
-        player.position = CGPoint(x:-380,y:400)
-        for _ in 0..<180 { ranged.position=CGPoint(x:-140,y:400);roomEnemyStarts=[ObjectIdentifier(ranged):ranged.position];updateEnemies(1.0/60) }
+        let firstDoor = rooms.connections[0]
+        let wallX = rooms.rooms[firstDoor.from].rect.maxX
+        let shotY = firstDoor.corridor.maxY + 60
+        let corner = CGPoint(x:wallX,y:firstDoor.corridor.minY)
+        player.position = corner + CGPoint(x:-20,y:-40)
+        ranged.position = corner + CGPoint(x:40,y:20)
+        check("short-corner-exposes-legacy-sampling-gap",!rooms.geometry.segmentBlocked(ranged.position,player.position,travelRadius:GameConfig.Geometry.projectileTravelRadius) && rooms.geometry.segmentBlockedExact(ranged.position,player.position,travelRadius:GameConfig.Geometry.projectileTravelRadius))
+        check("actual-room-firing-query-blocks-short-corner",!rangedHasLineOfSight(from:ranged.position,to:player.position))
+        check("ranged-occlusion-fixture-valid-in-range",rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius) && rooms.valid(ranged.position,radius:ranged.geometryFootprintRadius) && ranged.position.distance(to:player.position)<GameConfig.RangedEnemy.engageRange && rooms.geometry.segmentBlockedExact(ranged.position,player.position))
+        let heldBefore = geometryDebug.rangedHeldFire
+        for _ in 0..<180 { ranged.position=corner+CGPoint(x:40,y:20);roomEnemyStarts=[ObjectIdentifier(ranged):ranged.position];updateEnemies(1.0/60) }
+        check("actual-room-LoS-denies-every-corner-shot",geometryDebug.rangedHeldFire-heldBefore==180)
         check("ranged-wall-occluded",enemyProjectiles.isEmpty)
-        player.position=CGPoint(x:-300,y:280);ranged.position=CGPoint(x:-220,y:280)
+        player.position=firstDoor.center+CGPoint(x:-40,y:0);ranged.position=firstDoor.center+CGPoint(x:40,y:0)
         for _ in 0..<180 {roomEnemyStarts=[ObjectIdentifier(ranged):ranged.position];updateEnemies(1.0/60)}
         check("ranged-open-corridor-fires",!enemyProjectiles.isEmpty)
         enemyProjectiles.forEach{$0.removeFromParent()};enemyProjectiles.removeAll()
         func shot(_ passes: Bool) -> ProjectileNode {
             let p=ProjectileNode(direction:CGPoint(x:1,y:0),unlimitedRange:true,piercesAll:passes,passesTerrain:passes)
-            p.position=CGPoint(x:-360,y:400);projectiles.append(p);worldNode.addChild(p);return p
+            p.position=CGPoint(x:wallX-20,y:shotY);projectiles.append(p);worldNode.addChild(p);return p
         }
         let ordinary=shot(false);updateProjectiles(0.1)
         check("ordinary-shot-six-wall",!projectiles.contains{$0===ordinary})
         let long=shot(true);updateProjectiles(0.1)
-        check("long-shot-six-wall-passage",projectiles.contains{$0===long} && long.position.x > -340)
-        long.position=CGPoint(x:760,y:0);updateProjectiles(0)
+        check("long-shot-six-wall-passage",projectiles.contains{$0===long} && long.position.x > wallX)
+        long.position=CGPoint(x:rooms.world.maxX+60,y:0);updateProjectiles(0)
         check("long-shot-six-outer-cleanup",!projectiles.contains{$0===long})
-        spawnEnemyProjectile(at:CGPoint(x:-360,y:400),direction:CGPoint(x:1,y:0));updateEnemyProjectiles(0.1)
+        spawnEnemyProjectile(at:CGPoint(x:wallX-20,y:shotY),direction:CGPoint(x:1,y:0));updateEnemyProjectiles(0.1)
         check("hostile-six-wall-cleanup",enemyProjectiles.isEmpty)
-        spawnEnemyProjectile(at:CGPoint(x:760,y:0),direction:CGPoint(x:1,y:0));updateEnemyProjectiles(0)
+        spawnEnemyProjectile(at:CGPoint(x:rooms.world.maxX+60,y:0),direction:CGPoint(x:1,y:0));updateEnemyProjectiles(0)
         check("hostile-six-outer-cleanup",enemyProjectiles.isEmpty)
         restartGame();let victim=enemies[0];let primary=shot(true)
         if let a=primary.physicsBody,let b=victim.physicsBody {
@@ -16356,8 +16381,8 @@ extension GameScene {
             check("actual-kill-one-credit",killCount==kills+1 && victim.killCredited)
         } else {check("actual-contact-bodies",false)}
         xpOrbs.forEach{$0.removeFromParent()};xpOrbs.removeAll()
-        player.position=CGPoint(x:-350,y:400)
-        let orb=XPOrbNode(xpValue:2);orb.position=CGPoint(x:-170,y:400);orb.startVacuum();xpOrbs.append(orb);worldNode.addChild(orb)
+        player.position=CGPoint(x:wallX-20,y:shotY)
+        let orb=XPOrbNode(xpValue:2);orb.position=CGPoint(x:rooms.rooms[firstDoor.to].rect.minX+20,y:shotY);orb.startVacuum();xpOrbs.append(orb);worldNode.addChild(orb)
         var orbSafe=true
         for _ in 0..<600 {updateXPOrbs(1.0/60);orbSafe=orbSafe && rooms.bounds.contains(orb.position,bodyRadius:XPOrbNode.visualRadius)}
         check("xp-six-vacuum-direct-arrival-within-outer-bounds",orbSafe && orb.position.distance(to:player.position)<30)
@@ -16541,11 +16566,13 @@ extension GameScene {
         func check(_ id: String, _ value: Bool) { results.append(["id": id, "pass": value]) }
         let standard = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
         for room in rooms.rooms {
-            let inset = room.rect.insetBy(dx: 27, dy: 27)
+            let insetAmount = room.rect.width * (1-GameConfig.Arena8Game.echoEdgeFraction)/2
+            let edgeRadius = room.rect.width * GameConfig.Arena8Game.echoEdgeFraction/2
+            let inset = room.rect.insetBy(dx: insetAmount, dy: insetAmount)
             for unit: CGFloat in [0,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1] {
                 let origin = rooms.echoOrigin(near: room.center, perimeterUnit: unit)
                 check("room-\(room.id)-edge-\(unit)", origin.map { p in
-                    rooms.valid(p, radius: 12) && abs(max(abs(p.x-room.center.x), abs(p.y-room.center.y))-153)<0.001 &&
+                    rooms.valid(p, radius: 12) && abs(max(abs(p.x-room.center.x), abs(p.y-room.center.y))-edgeRadius)<0.001 &&
                     p.x >= inset.minX && p.x <= inset.maxX && p.y >= inset.minY && p.y <= inset.maxY
                 } == true)
             }
@@ -16669,6 +16696,7 @@ extension GameScene {
             enemyProjectiles.forEach { $0.removeFromParent() }; enemyProjectiles.removeAll()
         }
         check("memory-only-context",GameRunPreferences.isIsolated)
+        let cap = GameConfig.Arena8Game.roomSide / 2
         for room in rooms.rooms {
             clearGround()
             playerStats.terraZoneRadius = 110
@@ -16688,11 +16716,12 @@ extension GameScene {
             modifyAllCultivatedZones(radiusScale:1.22)
             check("room\(room.id)-rich-soil-growth",abs(zone.radius-110*(1+GameConfig.Growth.expansionPerCard)*1.22)<0.001)
             growTree(to:1); growTree(to:2); growTree(to:4)
-            check("room\(room.id)-tree-same-cap-root",zone.radius == 180 && zone.position == root && treeNode?.position == root && zone.roomGardenFootprint?.roomID == room.id)
+            for _ in 0..<20 {expandGarden()}
+            check("room\(room.id)-tree-same-cap-root",zone.radius == cap && zone.position == root && treeNode?.position == root && zone.roomGardenFootprint?.roomID == room.id)
             check("room\(room.id)-rooted-flowers",growFlower() && growFlower() && growFlower() && !growFlower() && flowers.allSatisfy { zone.covers($0.position) && rooms.valid($0.position,radius:GameConfig.Growth.flowerRootMargin) })
-            zone.setRadius(220,animated:false)
+            zone.setRadius(cap+40,animated:false)
             expandGarden(); modifyAllCultivatedZones(radiusScale:1.22); growTree(to:4)
-            check("room\(room.id)-existing-growth-never-shrinks",zone.radius == 220 && zone.xScale == 1 && zone.yScale == 1)
+            check("room\(room.id)-existing-growth-never-shrinks",zone.radius == cap+40 && zone.xScale == 1 && zone.yScale == 1)
         }
         // Raw actual local-space mask, with no gameplay-side validity/LoS
         // filtering. Tests the path installed on SKCropNode and its transform.
@@ -16700,11 +16729,11 @@ extension GameScene {
         var samples = 0, maskErrors = 0
         for root in roots {
             guard let footprint = Arena8GardenFootprint(map:rooms,root:root,startingRadius:110) else { maskErrors += 1;continue }
-            let node = CultivatedZoneNode(radius:180)
+            let node = CultivatedZoneNode(radius:cap)
             node.setRoomGardenFootprint(footprint)
-            for x in stride(from:-690.0,through:690,by:37) { for y in stride(from:-450.0,through:450,by:31) {
+            for x in stride(from:Double(rooms.world.minX+10),through:Double(rooms.world.maxX-10),by:37) { for y in stride(from:Double(rooms.world.minY+10),through:Double(rooms.world.maxY-10),by:31) {
                 let point = CGPoint(x:x+0.173,y:y+0.319)
-                let expected = point.distance(to:root)<180 && rooms.valid(point,radius:0) && !rooms.geometry.segmentBlockedExact(root,point)
+                let expected = point.distance(to:root)<cap && rooms.valid(point,radius:0) && !rooms.geometry.segmentBlockedExact(root,point)
                 let rendered = (node.roomMaskPath?.contains(point-node.position) == true) && point.distance(to:node.position)<node.radius
                 if rendered != expected { maskErrors += 1 }
                 samples += 1
@@ -16716,13 +16745,15 @@ extension GameScene {
             let root = connection.center
             let direction = (rooms.rooms[connection.to].center-rooms.rooms[connection.from].center).normalized
             let across = CGPoint(x:-direction.y,y:direction.x)
-            let visible = root-direction*165
-            let hidden = root-direction*130+across*100
+            let visible = root-direction*(cap-15)
+            let halfLength = max(connection.corridor.width,connection.corridor.height)/2
+            let hidden = root-direction*(halfLength+30)+across*100
+            check("corridor\(index)-visibility-fixtures-valid",rooms.valid(visible,radius:14) && rooms.valid(hidden,radius:14) && visible.distance(to:root)<cap && hidden.distance(to:root)<cap && !rooms.geometry.segmentBlockedExact(root,visible) && rooms.geometry.segmentBlockedExact(root,hidden))
             playerStats.vineWallTier = 3
             playerStats.thornsoilDPS = 2
             playerStats.deeprootDEF = 2
             guard let zone = plantCultivatedGround(at:root,radius:110) else { check("corridor\(index)-plant",false);continue }
-            zone.setRadius(180,animated:false)
+            zone.setRadius(cap,animated:false)
             check("corridor\(index)-fixed-root-after-growth",zone.position == root)
             let a = EnemyNode(health:100,moveSpeed:0,xpValue:1), b = EnemyNode(health:100,moveSpeed:0,xpValue:1)
             a.position = visible; b.position = hidden
@@ -16791,7 +16822,8 @@ extension GameScene {
         guard let rooms = debugRoomIntegration, rooms.isSixRoom else { return }
         roomSummonInputEpoch = UUID().uuidString
         roomSummonInputLaunches = 0; roomSummonInputTimer = 0
-        let root = rooms.rooms[0].center + CGPoint(x:0,y:125)
+        let room = rooms.rooms[0]
+        let root = CGPoint(x:room.center.x,y:room.rect.maxY-55*DeviceScale.gameplay)
         player.position = root; camera?.position = root
         playerStats.terraZoneRadius = 110
         _ = plantCultivatedGround(at:root,radius:110)
@@ -16848,7 +16880,7 @@ extension GameScene {
         check("memory-only-preview",GameRunPreferences.isIsolated)
         for room in rooms.rooms {
             clear()
-            let root = room.center + CGPoint(x:0,y:125)
+            let root = CGPoint(x:room.center.x,y:room.rect.maxY-55*DeviceScale.gameplay)
             tree(at:root)
             let target = mark(at:room.center-CGPoint(x:0,y:100))
             launchHomingBurst(fox,at:.enemy(target))
@@ -16866,6 +16898,9 @@ extension GameScene {
             check("room\(room.id)-fox-first-step-survives",natureMissiles.count == 1)
             check("room\(room.id)-capture-does-not-follow-tree-player-camera",natureMissiles.first?.roomEntry?.normalBounds == normal && natureMissiles.first?.roomEntry?.launchEnvelope == envelope)
             check("room\(room.id)-fox-life-decreases-not-reset",natureMissiles.first.map { abs($0.life-(GameConfig.NatureCanon.foxLifetime-1.0/60))<0.000001 } == true)
+            if room.rect.maxY == rooms.world.maxY {
+                check("top-row-crown-exercises-launch-entry",normal.map { origin.y > $0.maxY } == true)
+            }
             if let limits = normal, origin.y > limits.maxY, !natureMissiles.isEmpty {
                 check("room\(room.id)-outside-crown-gets-entry-only",natureMissiles[0].roomEntry?.enteredNormalBounds == false)
                 natureMissiles[0].body.position = CGPoint(x:root.x,y:limits.maxY-1)
@@ -16910,6 +16945,9 @@ extension GameScene {
             enemies.removeAll()
             treeNode?.position = root
             let preferred = root+CGPoint(x:0,y:(treeNode?.crownHeight ?? 24)*0.8)
+            if room.rect.maxY == rooms.world.maxY {
+                check("top-row-lion-preference-exercises-fallback",rooms.valid(root,radius:GameConfig.Tree.lionFootprintRadius) && !rooms.valid(preferred,radius:GameConfig.Tree.lionFootprintRadius))
+            }
             spawnLionPet()
             let born = lionPet
             check("room\(room.id)-lion-valid-birth",born.map { rooms.valid($0.position,radius:GameConfig.Tree.lionFootprintRadius) } == true)
@@ -16945,7 +16983,10 @@ extension GameScene {
             lion.position = connection.center
             let direction = (rooms.rooms[connection.to].center-rooms.rooms[connection.from].center).normalized
             let across = CGPoint(x:-direction.y,y:direction.x)
-            _ = mark(at:connection.center-direction*130+across*150)
+            let halfLength = max(connection.corridor.width,connection.corridor.height)/2
+            let hidden = connection.center-direction*(halfLength+30)+across*150
+            let target = mark(at:hidden)
+            check("occluded-lion-target-valid-and-blocked",rooms.valid(target.position,radius:target.geometryFootprintRadius) && rooms.geometry.segmentBlockedExact(lion.position,target.position))
             let before = lion.position
             updateLionPet(0.01)
             check("occluded-lion-stalk-does-not-add-pathfinding",lion.position == before)

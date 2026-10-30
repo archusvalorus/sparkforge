@@ -58,8 +58,8 @@ check("outside root refuses unsafe birth",rules.lionSpawn(near:CGPoint(x:9999,y:
 check("nonfinite canopy refuses birth",rules.lionSpawn(near:map.player,canopyOffset:.nan,bodyRadius:12) == nil)
 // Approved bounded launch entry; ordinary cleanup resumes permanently.
 for scale:CGFloat in [1, 1.7969230769230768] {
-    let rootY:CGFloat = 460 - 55*scale
-    let birth = CGPoint(x:520,y:rootY + 165*0.92*scale)
+    let rootY:CGFloat = map.world.maxY - 55*scale
+    let birth = CGPoint(x:map.rooms[2].center.x,y:rootY + 165*0.92*scale)
     let allowance:CGFloat = 350*scale*1.2 - 350*scale
     guard var fox = rules.payloadFlight(from:birth,allowance:allowance),
           var boar = rules.payloadFlight(from:birth,allowance:allowance) else {
@@ -69,7 +69,7 @@ for scale:CGFloat in [1, 1.7969230769230768] {
     check("captured crown starts inside envelope",!fox.outsideAfterAdvance(to:birth))
     check("fox first inward step survives",!fox.outsideAfterAdvance(to:birth-CGPoint(x:0,y:300*scale/60)))
     check("boar first inward step survives",!boar.outsideAfterAdvance(to:birth-CGPoint(x:0,y:460*scale/60)))
-    let edge = CGPoint(x:520,y:460+allowance)
+    let edge = CGPoint(x:map.rooms[2].center.x,y:map.world.maxY+allowance)
     check("exact ordinary rim arms permanent cleanup",!fox.outsideAfterAdvance(to:edge) && fox.enteredNormalBounds)
     check("return into launch exception now retires",fox.outsideAfterAdvance(to:birth-CGPoint(x:0,y:1)))
     check("other payload entry state independent",!boar.enteredNormalBounds && !boar.outsideAfterAdvance(to:birth))

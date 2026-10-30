@@ -3,25 +3,26 @@ import CoreGraphics
 var passed=0,failed=0
 func check(_ name:String,_ value:Bool){if value{passed+=1;print("PASS \(name)")}else{failed+=1;print("FAIL \(name)")}}
 let map=Arena8GameMap.sixRoom
+let edgeRadius=GameConfig.Arena8Game.roomSide*GameConfig.Arena8Game.echoEdgeFraction/2
 for room in map.rooms {
  var safe=true,edge=true,which=Set<Int>()
  for i in 0...1000 {
   guard let p=map.echoOrigin(near:room.center,perimeterUnit:CGFloat(i)/1000) else {safe=false;continue}
   safe = safe && map.valid(p,radius:12)
-  let d=p-room.center;edge = edge && abs(max(abs(d.x),abs(d.y))-153)<0.000001
-  if abs(d.y+153)<0.000001 {which.insert(0)}
-  if abs(d.x-153)<0.000001 {which.insert(1)}
-  if abs(d.y-153)<0.000001 {which.insert(2)}
-  if abs(d.x+153)<0.000001 {which.insert(3)}
+  let d=p-room.center;edge = edge && abs(max(abs(d.x),abs(d.y))-edgeRadius)<0.000001
+  if abs(d.y+edgeRadius)<0.000001 {which.insert(0)}
+  if abs(d.x-edgeRadius)<0.000001 {which.insert(1)}
+  if abs(d.y-edgeRadius)<0.000001 {which.insert(2)}
+  if abs(d.x+edgeRadius)<0.000001 {which.insert(3)}
  }
  check("room \(room.id) entire sampled perimeter valid and inset",safe && edge && which.count==4)
- let corners=[CGPoint(x:-153,y:-153),CGPoint(x:153,y:-153),CGPoint(x:153,y:153),CGPoint(x:-153,y:153),CGPoint(x:-153,y:-153)]
+ let corners=[CGPoint(x:-edgeRadius,y:-edgeRadius),CGPoint(x:edgeRadius,y:-edgeRadius),CGPoint(x:edgeRadius,y:edgeRadius),CGPoint(x:-edgeRadius,y:edgeRadius),CGPoint(x:-edgeRadius,y:-edgeRadius)]
  for i in 0...4 {check("room \(room.id) corner \(i)",map.echoOrigin(near:room.center,perimeterUnit:CGFloat(i)/4)==room.center+corners[i])}
  // Equal intervals of unit perimeter distance yield equal physical wall distance.
- check("room \(room.id) uniform wall-length parameter",map.echoOrigin(near:room.center,perimeterUnit:0.125)==room.center+CGPoint(x:0,y:-153))
+ check("room \(room.id) uniform wall-length parameter",map.echoOrigin(near:room.center,perimeterUnit:0.125)==room.center+CGPoint(x:0,y:-edgeRadius))
 }
 for c in map.connections {
- check("corridor tie \(c.from)-\(c.to)",map.roomID(near:c.center)==min(c.from,c.to) && map.echoOrigin(near:c.center,perimeterUnit:0)==map.rooms[min(c.from,c.to)].center+CGPoint(x:-153,y:-153))
+ check("corridor tie \(c.from)-\(c.to)",map.roomID(near:c.center)==min(c.from,c.to) && map.echoOrigin(near:c.center,perimeterUnit:0)==map.rooms[min(c.from,c.to)].center+CGPoint(x:-edgeRadius,y:-edgeRadius))
  let d=(map.rooms[c.to].center-map.rooms[c.from].center).normalized
  check("corridor sides \(c.from)-\(c.to)",map.roomID(near:c.center-d*0.01)==c.from && map.roomID(near:c.center+d*0.01)==c.to)
 }

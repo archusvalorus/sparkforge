@@ -5,25 +5,26 @@ func check(_ name: String, _ condition: Bool) {
     if condition { passed += 1; print("PASS \(name)") } else { failed += 1; print("FAIL \(name)") }
 }
 let map = Arena8GameMap.sixRoom
+let cap = GameConfig.Arena8Game.roomSide / 2
 var roots = map.rooms.map(\.center) + map.connections.map(\.center)
 roots += map.rooms.map { CGPoint(x:$0.rect.minX + 55.01, y:$0.rect.minY + 55.01) }
 for room in map.rooms {
     let f = Arena8GardenFootprint(map:map, root:room.center, startingRadius:110)
-    check("room\(room.id) cap is180 not world or legacy circle",f?.maximumRadius == 180)
+    check("room\(room.id) cap is room half not world or legacy circle",f?.maximumRadius == cap)
     check("room\(room.id) root room captured",f?.roomID == room.id)
     check("room\(room.id) covers own root",f?.covers(room.center,radius:110) == true)
     if let f {
         var radius: CGFloat = 110
         for multiplier: CGFloat in [1.16,1.22,1.20,1.16,1.22,1.20] {
             let grown = f.grownRadius(current:radius,multiplier:multiplier)
-            check("room\(room.id) monotonic growth",grown >= radius && grown <= 180)
+            check("room\(room.id) monotonic growth",grown >= radius && grown <= cap)
             radius = grown
         }
-        check("room\(room.id) expansion Tree RichSoil reach same cap",radius == 180)
-        check("room\(room.id) already above cap never shrinks",f.grownRadius(current:240,multiplier:1.22) == 240)
+        check("room\(room.id) expansion Tree RichSoil reach same cap",radius == cap)
+        check("room\(room.id) already above cap never shrinks",f.grownRadius(current:cap+60,multiplier:1.22) == cap+60)
         check("room\(room.id) non-growth never shrinks",f.grownRadius(current:170,multiplier:0.5) == 170)
-        let large = Arena8GardenFootprint(map:map,root:room.center,startingRadius:220)
-        check("room\(room.id) starting size retained",large?.maximumRadius == 220)
+        let large = Arena8GardenFootprint(map:map,root:room.center,startingRadius:cap+40)
+        check("room\(room.id) starting size retained",large?.maximumRadius == cap+40)
         var validSamples = 0, badSamples = 0
         for i in 0...100 {
             if let p = f.flowerPoint(radius:153,radialUnit:CGFloat(i)/100,angularUnit:CGFloat((i*37)%101)/100,margin:10) {
@@ -44,11 +45,12 @@ for connection in map.connections {
     let perpendicular = CGPoint(x:-d.y,y:d.x)
     guard let f = Arena8GardenFootprint(map:map,root:root,startingRadius:110) else { check("corridor initializer",false); continue }
     check("corridor\(connection.from)-\(connection.to) tie retains authored order",f.roomID == min(connection.from,connection.to))
-    let visible = root - d * 130 + perpendicular * 20
-    let hidden = root - d * 130 + perpendicular * 100
-    check("corridor\(connection.from)-\(connection.to) open doorway covered",f.covers(visible,radius:180) && !map.geometry.segmentBlockedExact(root,visible))
-    check("corridor\(connection.from)-\(connection.to) valid floor behind wall excluded",map.valid(hidden,radius:0) && hidden.distance(to:root)<180 && map.geometry.segmentBlockedExact(root,hidden) && !f.covers(hidden,radius:180))
-    check("corridor\(connection.from)-\(connection.to) solid side excluded",!f.covers(root+perpendicular*80,radius:180))
+    let halfLength = (connection.corridor.width > connection.corridor.height ? connection.corridor.width : connection.corridor.height) / 2
+    let visible = root - d * (halfLength+30) + perpendicular * 20
+    let hidden = root - d * (halfLength+30) + perpendicular * 100
+    check("corridor\(connection.from)-\(connection.to) open doorway covered",f.covers(visible,radius:cap) && !map.geometry.segmentBlockedExact(root,visible))
+    check("corridor\(connection.from)-\(connection.to) valid floor behind wall excluded",map.valid(hidden,radius:0) && hidden.distance(to:root)<cap && map.geometry.segmentBlockedExact(root,hidden) && !f.covers(hidden,radius:cap))
+    check("corridor\(connection.from)-\(connection.to) solid side excluded",!f.covers(root+perpendicular*80,radius:cap))
     check("corridor\(connection.from)-\(connection.to) root projection stays here",Arena8GardenFootprint.placementRoot(in:map,toward:root,clearance:55) == root)
 }
 var comparisons = 0, mismatches = 0, maskMismatches = 0
@@ -60,12 +62,12 @@ for root in roots {
     let rawMask = CGMutablePath()
     rawMask.addLines(between:f.visibilityPolygon)
     rawMask.closeSubpath()
-    for x in stride(from:-690.0,through:690,by:37) { for y in stride(from:-450.0,through:450,by:31) {
+    for x in stride(from:Double(map.world.minX+10),through:Double(map.world.maxX-10),by:37) { for y in stride(from:Double(map.world.minY+10),through:Double(map.world.maxY-10),by:31) {
         let p = CGPoint(x:x+0.173,y:y+0.319)
-        let expected = p.distance(to:root)<180 && map.valid(p,radius:0) && !map.geometry.segmentBlockedExact(root,p)
+        let expected = p.distance(to:root)<cap && map.valid(p,radius:0) && !map.geometry.segmentBlockedExact(root,p)
         comparisons += 1
-        if f.covers(p,radius:180) != expected { mismatches += 1 }
-        let rendered = rawMask.contains(p) && p.distance(to:root)<180
+        if f.covers(p,radius:cap) != expected { mismatches += 1 }
+        let rendered = rawMask.contains(p) && p.distance(to:root)<cap
         if rendered != expected { maskMismatches += 1 }
     }}
 }
