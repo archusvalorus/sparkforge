@@ -48,6 +48,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
     private var roomInputLastTime: TimeInterval = -1
     private var roomInputSamples: [[String: Any]] = []
+    private var roomMagnetReport: [String:Any] = [:]
     private var roomEchoChecksRunning = false
     private var roomGrowthChecksRunning = false
     private var roomSummonChecksRunning = false
@@ -657,6 +658,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runAvalancheChecks()}
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.beginAvalancheInput()}
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-magnet-checks") {
+                DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runMagnetChecks()}
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-checks") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runSamuraiPauseChecks()}
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-samurai-pause-input") {
@@ -7006,8 +7009,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             orb.updateMagnet(playerPosition: player.position, pickupRadius: pickupRadius, deltaTime: dt)
             #if DEBUG
             if let rooms = debugRoomIntegration {
-                // Magnetic XP may route through the open passage; health never magnets.
+                // The blue magnet's full vacuum intentionally crosses internal
+                // walls. Keep the outer body bounds and cap at the live target
+                // on long frames; ordinary passive pickup routing is unchanged.
                 let desired = orb.position
+                if orb.isVacuuming {
+                    let delta = player.position - from
+                    let step = min(from.distance(to: desired), delta.length)
+                    let target = from + delta.normalized * step
+                    orb.position = rooms.bounds.clamped(target, bodyRadius: XPOrbNode.visualRadius) ?? from
+                    continue
+                }
                 if rooms.geometry.segmentBlockedExact(from, desired, travelRadius: XPOrbNode.visualRadius),
                    let next = rooms.geometry.graphWaypoint(from: from, toward: player.position,
                        travelRadius: XPOrbNode.visualRadius, arriveRadius: GameConfig.Arena8Prototype.arrival) {
@@ -14836,9 +14848,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func handleXPCollection(orbBody: SKPhysicsBody) {
         guard let orbNode = orbBody.node as? XPOrbNode else { return }
         
-        if let index = xpOrbs.firstIndex(where: { $0 === orbNode }) {
-            xpOrbs.remove(at: index)
-        }
+        // A physics callback may already be queued when collection/reset removes
+        // the orb. Only the currently owned orb can award XP, exactly once.
+        guard let index = xpOrbs.firstIndex(where: { $0 === orbNode }) else { return }
+        xpOrbs.remove(at: index)
         orbNode.collect()
         AudioManager.shared.play(.orbPickup)
         
@@ -15967,14 +15980,14 @@ extension GameScene {
             handleProjectileHit(projectileBody: a, enemyBody: b)
             check("actual-contact-one-credit", killCount == kills + 1 && victim.killCredited)
         } else { check("actual-physics-bodies-present", false) }
-        // A magnetic orb cannot tunnel through the divider.
+        // Blue magnet vacuum intentionally crosses the divider; outer bounds still apply.
         xpOrbs.forEach { $0.removeFromParent() }; xpOrbs.removeAll()
         player.position = CGPoint(x: -110, y: 150)
         let orb = XPOrbNode(xpValue: 2); orb.position = CGPoint(x: 110, y: 150); orb.startVacuum()
         xpOrbs.append(orb); worldNode.addChild(orb)
         var orbSafe = true
-        for _ in 0..<240 { updateXPOrbs(1.0/60); orbSafe = orbSafe && rooms.valid(orb.position, radius: XPOrbNode.visualRadius) }
-        check("actual-xp-vacuum-routes-through-door", orbSafe && orb.position.distance(to: player.position) < 30)
+        for _ in 0..<240 { updateXPOrbs(1.0/60); orbSafe = orbSafe && rooms.bounds.contains(orb.position, bodyRadius: XPOrbNode.visualRadius) }
+        check("actual-xp-vacuum-crosses-wall-within-outer-bounds", orbSafe && orb.position.distance(to: player.position) < 30)
         // Actual XP -> level screen -> stat/card selection methods. Animation
         // completion is advanced explicitly here; XCTest covers timed UI input.
         restartGame(); spawnXPOrb(at: player.position, value: 30)
@@ -16086,6 +16099,7 @@ extension GameScene {
         sample["entryFromTitle"] = debugRoomEntryFromTitle
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
+        if ProcessInfo.processInfo.arguments.contains("--arena8-magnet-checks") {sample["magnetDone"] = !roomMagnetReport.isEmpty;sample["magnetPassed"] = roomMagnetReport["passed"] ?? -1;sample["magnetFailed"] = roomMagnetReport["failed"] ?? -1}
         sample["bossMode"] = isGauntlet
         if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input") {
             sample["avalancheEpoch"] = avalancheInputEpoch
@@ -16345,8 +16359,8 @@ extension GameScene {
         player.position=CGPoint(x:-350,y:400)
         let orb=XPOrbNode(xpValue:2);orb.position=CGPoint(x:-170,y:400);orb.startVacuum();xpOrbs.append(orb);worldNode.addChild(orb)
         var orbSafe=true
-        for _ in 0..<600 {updateXPOrbs(1.0/60);orbSafe=orbSafe && rooms.valid(orb.position,radius:XPOrbNode.visualRadius)}
-        check("xp-six-routes-around-solid",orbSafe && orb.position.distance(to:player.position)<30)
+        for _ in 0..<600 {updateXPOrbs(1.0/60);orbSafe=orbSafe && rooms.bounds.contains(orb.position,bodyRadius:XPOrbNode.visualRadius)}
+        check("xp-six-vacuum-direct-arrival-within-outer-bounds",orbSafe && orb.position.distance(to:player.position)<30)
         // Actual XP -> level screen -> stat/card selection methods. Animation
         // completion is advanced explicitly here; XCTest covers timed UI input.
         restartGame(); spawnXPOrb(at: player.position, value: 30)
@@ -18780,6 +18794,85 @@ extension GameScene {
             }
         }
         site(0)
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private func runMagnetChecks() {
+        var checks:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){checks.append(["name":name,"pass":yes])}
+        guard let rooms=debugRoomIntegration else{return}
+        check("real-Title-Play-isolated",debugRoomEntryFromTitle && GameRunPreferences.isIsolated && !isGauntlet)
+        restartGame();gameState = .paused
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        xpOrbs.forEach{$0.removeFromParent()};xpOrbs.removeAll()
+        for source in rooms.rooms {
+            for target in rooms.rooms where target.id != source.id {
+                let orb=XPOrbNode(xpValue:2);orb.position=source.center;worldNode.addChild(orb);xpOrbs=[orb]
+                player.position=target.center
+                let magnet=MagnetOrbNode();worldNode.addChild(magnet);magnetOrbs=[magnet]
+                if let body=magnet.physicsBody{handleMagnetOrbCollection(orbBody:body)}
+                check("blue-magnet-starts-real-vacuum",orb.isVacuuming && magnetOrbs.isEmpty)
+                var crossed=false,contained=true,direct=true
+                for _ in 0..<300 {
+                    let previous=orb.position
+                    updateXPOrbs(1.0/60)
+                    crossed = crossed || rooms.geometry.isBlocked(orb.position,margin:XPOrbNode.visualRadius)
+                    contained = contained && rooms.bounds.contains(orb.position,bodyRadius:XPOrbNode.visualRadius)
+                    if previous.distance(to:player.position)>12 {direct = direct && (orb.position-previous).normalized.distance(to:(player.position-previous).normalized)<0.001}
+                    if orb.position.distance(to:player.position)<1 {break}
+                }
+                check("real-room-pair-direct-arrival",direct && orb.position.distance(to:player.position)<1)
+                check("real-room-pair-outer-contained",contained)
+                if rooms.geometry.segmentBlockedExact(source.center,target.center,travelRadius:XPOrbNode.visualRadius){check("real-room-pair-wall-crossing",crossed)}
+                orb.removeFromParent();xpOrbs.removeAll()
+            }
+        }
+        let passive=XPOrbNode(xpValue:1);passive.position=rooms.player;worldNode.addChild(passive);xpOrbs=[passive];player.position=rooms.player+CGPoint(x:500,y:0)
+        updateXPOrbs(1)
+        check("ordinary-out-of-range-unchanged",passive.position==rooms.player && !passive.isVacuuming)
+        passive.removeFromParent();xpOrbs.removeAll()
+        let orb=XPOrbNode(xpValue:2);orb.position=rooms.player;worldNode.addChild(orb);xpOrbs=[orb];orb.startVacuum()
+        player.position=rooms.rooms.last?.center ?? rooms.player;updateXPOrbs(1.0/60)
+        player.position=rooms.player;let previous=orb.position;updateXPOrbs(1.0/60)
+        check("vacuum-reaims-live-player",orb.position.distance(to:player.position)<previous.distance(to:player.position))
+        player.position=CGPoint(x:rooms.world.maxX-20,y:rooms.world.maxY-20);updateXPOrbs(10)
+        check("corner-long-frame-caps-at-player",orb.position==player.position && rooms.bounds.contains(orb.position,bodyRadius:XPOrbNode.visualRadius))
+        player.position=rooms.player
+        if let body=orb.physicsBody {
+            let before=player.currentXP
+            handleXPCollection(orbBody:body);handleXPCollection(orbBody:body)
+            check("real-player-XP-once",player.currentXP==before+2 && xpOrbs.isEmpty)
+            restartGame();gameState = .paused;handleXPCollection(orbBody:body)
+            check("reset-rejects-old-pickup",player.currentXP==0 && xpOrbs.isEmpty)
+        } else {check("real-XP-body-present",false)}
+        let health=HealthOrbNode();health.position=rooms.player;worldNode.addChild(health);healthOrbs=[health];let hp=health.position
+        updateXPOrbs(1)
+        check("health-does-not-magnet",health.position==hp)
+        health.removeFromParent();healthOrbs.removeAll();player.position=rooms.player
+        // Finish with real frame updates + SpriteKit XP contact after an
+        // actual native Title Play. The checks above are synchronous seams.
+        restartGame();gameState = .playing
+        enemies.forEach{$0.removeFromParent()};enemies.removeAll()
+        player.position=rooms.rooms.last?.center ?? rooms.player
+        let flowing=XPOrbNode(xpValue:2);flowing.position=rooms.rooms[0].center;xpOrbs=[flowing];worldNode.addChild(flowing)
+        let actualMagnet=MagnetOrbNode();magnetOrbs=[actualMagnet];worldNode.addChild(actualMagnet)
+        if let body=actualMagnet.physicsBody{handleMagnetOrbCollection(orbBody:body)}
+        let expectedXP=player.currentXP+2
+        run(SKAction.sequence([.wait(forDuration:4),.run{[weak self] in
+            guard let self,self.view?.scene === self else{return}
+            check("real-frames-physics-XP-collection",self.xpOrbs.isEmpty && self.player.currentXP==expectedXP)
+            if let body=flowing.physicsBody {
+                self.handleXPCollection(orbBody:body)
+                check("real-physics-callback-cannot-double-credit",self.player.currentXP==expectedXP)
+            }
+            self.gameState = .paused
+            let report:[String:Any]=["passed":checks.filter{($0["pass"] as? Bool)==true}.count,"failed":checks.filter{($0["pass"] as? Bool)==false}.count,"checks":checks,"entryFromTitle":self.debugRoomEntryFromTitle,"rooms":rooms.rooms.count]
+            self.roomMagnetReport=report
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-magnet-checks.json"))}
+        }]))
     }
 }
 #endif
