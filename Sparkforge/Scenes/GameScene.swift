@@ -664,6 +664,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.name = "arena8RoomBadge"
             label.text = roomsBadgeText
             label.fontSize = 9; label.fontColor = .cyan
+            if debugArena9Traversal, label.frame.width>size.width-24 {
+                label.fontSize *= (size.width-24)/label.frame.width
+            }
             label.position = CGPoint(x: 0, y: -size.height / 2 + 32)
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
@@ -671,7 +674,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--arena89-spatial-checks") {
+                DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runArena9SpatialChecks()}
+            } else if ProcessInfo.processInfo.arguments.contains("--arena89-fractional-checks") {
+                DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runFractionalPlayerMovementChecks()}
+            } else if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-checks") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runAvalancheChecks()}
             } else if ProcessInfo.processInfo.arguments.contains("--arena8-avalanche-input") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.beginAvalancheInput()}
@@ -13823,17 +13830,44 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let aimAngle = atan2(aim.y, aim.x)
         let perp = CGPoint(x: -aim.y, y: aim.x)
         let geometry = arenaGeometry
-        let blocked: ((CGPoint, CGPoint) -> Bool)? = geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain
+        let blocked: ((CGPoint, CGPoint) -> Bool)?
+        #if DEBUG
+        if let map = debugRoomIntegration, map.isSixRoom {
+            // Short room corners can fall between sampled points. Preserve
+            // the existing first-solid rule with the exact room query.
+            blocked = geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain
+                ? { a, b in geometry.segmentBlockedExact(a, b, travelRadius: GameConfig.Geometry.projectileTravelRadius) }
+                : nil
+        } else {
+            blocked = geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain
+                ? { a, b in geometry.segmentBlocked(a, b, travelRadius: GameConfig.Geometry.projectileTravelRadius) }
+                : nil
+        }
+        #else
+        blocked = geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain
             ? { a, b in geometry.segmentBlocked(a, b, travelRadius: GameConfig.Geometry.projectileTravelRadius) }
             : nil
+        #endif
         return branches.map { branch in
             let angle = aimAngle + branch.heading
             let direction = CGPoint(x: cos(angle), y: sin(angle))
             let origin = player.position + perp * branch.originOffset
-            let length = BeamTick.length(origin: origin, direction: direction,
-                                         maxLength: playerStats.effectiveProjectileRange,
-                                         arenaRadius: GameConfig.Arena.radius, blocked: blocked,
-                                         steps: GameConfig.Neutral.beamTerrainBisectionSteps)
+            let length: CGFloat
+            #if DEBUG
+            if let map = debugRoomIntegration, map.isSixRoom {
+                length = BeamTick.length(origin: origin, direction: direction,
+                    maxLength: playerStats.effectiveProjectileRange, arenaRect: map.world,
+                    blocked: blocked, steps: GameConfig.Neutral.beamTerrainBisectionSteps)
+            } else {
+                length = BeamTick.length(origin: origin, direction: direction,
+                    maxLength: playerStats.effectiveProjectileRange, arenaRadius: GameConfig.Arena.radius,
+                    blocked: blocked, steps: GameConfig.Neutral.beamTerrainBisectionSteps)
+            }
+            #else
+            length = BeamTick.length(origin: origin, direction: direction,
+                maxLength: playerStats.effectiveProjectileRange, arenaRadius: GameConfig.Arena.radius,
+                blocked: blocked, steps: GameConfig.Neutral.beamTerrainBisectionSteps)
+            #endif
             return BeamLine(branch: branch, origin: origin, direction: direction, length: length)
         }
     }
@@ -15862,8 +15896,8 @@ extension GameScene {
     private var roomsBadgeText: String {
         guard let map = debugRoomIntegration else { return "" }
         if debugArena9Traversal {
-            let control = ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") ? " • SWIFT T\(upgradeManager.tier(of: "neutral_1"))/SPARK HP1000 FIXTURE" : ""
-            return "ARENA 9 • LAB HP1/XP1 • RETREAT TEST • MEMORY PROFILE" + control
+            let control = ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") ? " • SWIFT\(upgradeManager.tier(of: "neutral_1")) / HP1000" : ""
+            return "A9 LAB • FOES 1HP/1XP • RETREAT • MEMORY" + control
         }
         if map.isSixRoom {
             let id = map.roomID(near: player.position) + 1
@@ -19042,7 +19076,7 @@ extension GameScene {
             statHUD.update(from:playerStats)
             let control=SKLabelNode(fontNamed:"Menlo-Bold")
             control.name="arena9FireControl";control.text="TEST FIRE: ON";control.fontSize=13
-            control.fontColor = .cyan;control.position=CGPoint(x:0,y:size.height/2-130)
+            control.fontColor = .cyan;control.position=CGPoint(x:0,y:-size.height/2+70)
             control.zPosition=300;camera?.addChild(control)
         }
         if ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout"),
@@ -19100,7 +19134,7 @@ extension GameScene {
             let label = SKLabelNode(fontNamed: "Menlo-Bold")
             label.name = "arena9SuccessBadge"; label.text = "TRAVERSAL CLEAR • 1 SUCCESS • TEST ONLY"
             label.fontSize = 12; label.fontColor = .green
-            label.position = CGPoint(x: 0, y: size.height / 2 - 100)
+            label.position = CGPoint(x: 0, y: -size.height / 2 + 100)
             label.zPosition = 300; camera?.addChild(label)
         }
     }
@@ -19241,6 +19275,394 @@ extension GameScene {
         // the scheduled reward before judging it, without depending on action
         // callback ordering or executing the reward path from the fixture.
         observeDeferredRewards(self,100)
+    }
+}
+#endif
+
+// Isolated qualification hook under explicit --arena89-spatial-checks.
+// This fixture checks actual Scene beam rendering/contact and retained spatial
+// behavior. Pre-fix failures are preserved separately; these source repairs
+// require fresh execution. A compiler failure, crash or vacuous setup never
+// counts as a behavioral PASS.
+#if DEBUG
+extension GameScene {
+    private func runArena9SpatialChecks() {
+        guard debugArena9Traversal, let map=debugRoomIntegration, let observedRun=arena9Run else{return}
+        roomPandaChecksRunning=true;physicsWorld.speed=0;gameState = .playing
+        var checks:[[String:Any]]=[]
+        var metrics:[String:Double]=[:]
+        metrics["actualLegacyCircleRadius"] = Double(GameConfig.Arena.radius)
+        func check(_ id:String,_ yes:Bool){checks.append(["id":id,"pass":yes])}
+        func near(_ a:CGPoint,_ b:CGPoint)->Bool{a.distance(to:b)<0.001}
+        func clearActors(){
+            clearShockSystems();playerStats.lightningSentryTier=0
+            enemies.forEach{$0.removeAllActions();$0.removeFromParent()};enemies.removeAll()
+            projectiles.forEach{$0.removeAllActions();$0.removeFromParent()};projectiles.removeAll()
+            enemyProjectiles.forEach{$0.removeAllActions();$0.removeFromParent()};enemyProjectiles.removeAll()
+            voidWells.forEach{$0.removeAllActions();$0.removeFromParent()};voidWells.removeAll()
+            pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll()
+            worldNode.children.filter{$0 is PandaNode}.forEach{$0.removeAllActions();$0.removeFromParent()}
+            beamNode.isHidden=true
+            playerStats.longShotTier=0;playerStats.rapidFireTier=0;playerStats.scatterTier=0;playerStats.fractureTier=0
+            playerStats.deadCircuitActive=false;playerStats.voidBlackhole=false
+            roomRiftTestOrigin=nil;roomRiftTestDirection=nil
+            worldNode.children.filter{$0.name=="arena8-rift-beam"}.forEach{$0.removeAllActions();$0.removeFromParent()}
+            worldNode.removeAllActions();worldNode.position = .zero
+        }
+        func target(_ point:CGPoint,_ hp:Int=100000)->EnemyNode{
+            let e=EnemyNode(health:hp,moveSpeed:0,xpValue:1);e.position=point;worldNode.addChild(e);enemies.append(e);return e
+        }
+        func visitor(_ act:PandaAct,_ point:CGPoint)->Panda{
+            let n=PandaNode();n.position=point;worldNode.addChild(n)
+            return Panda(node:n,act:act,phase:.acting,timer:10,destination:point)
+        }
+        let saved=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        let points=[map.player,CGPoint(x:map.world.midX,y:0),CGPoint(x:map.world.maxX-100,y:0)]
+        let corners=[CGPoint(x:map.world.minX,y:map.world.minY),CGPoint(x:map.world.minX,y:map.world.maxY),CGPoint(x:map.world.maxX,y:map.world.minY),CGPoint(x:map.world.maxX,y:map.world.maxY)]
+        check("matrix-actual-stage-context",GameRunPreferences.isIsolated && debugRoomEntryFromTitle && map.rooms.count==1 && !isGauntlet)
+        check("matrix-start-mid-far-fixtures-legal",points.allSatisfy{map.valid($0,radius:30)} && points.last.map{$0.length>GameConfig.Arena.radius}==true)
+
+        // Sentry roots, deployment growth, distant network damage and timing.
+        for (i,p) in (points+corners).enumerated(){for tier in 1...3{
+            clearActors();player.position=map.bounds.clamped(p,bodyRadius:playerStats.effectiveCollisionRadius) ?? map.player
+            playerStats.lightningSentryTier=tier;updateSentryCoils(0)
+            check("sentry-\(i)-T\(tier)-count",sentryCoils.count==tier)
+            check("sentry-\(i)-T\(tier)-Float-body-safe",sentryCoils.allSatisfy{map.valid($0.node.position,radius:16)})
+        }}
+        clearActors();player.position=points[2];playerStats.lightningSentryTier=3;updateSentryCoils(0)
+        let previousCoils=sentryCoils.map(\.node);playerStats.lightningSentryTier=4;updateSentryCoils(0)
+        check("network-merge-and-old-node-cleanup",sentryCoils.count==1 && previousCoils.allSatisfy{$0.parent==nil})
+        check("network-root-safe",sentryCoils.first.map{map.valid($0.node.position,radius:22)}==true)
+        let distant=target(points[2]),beforeNetwork=distant.health
+        updateSentryCoils(GameConfig.Shock.networkInterval-0.001)
+        check("network-not-before-existing-interval",distant.health==beforeNetwork)
+        updateSentryCoils(0.002)
+        check("network-distant-existing-damage",distant.health==beforeNetwork-playerStats.shotFractionDamage(GameConfig.Shock.networkDamageFraction))
+
+        // All existing well presets, requested centers and outer-body safety.
+        for preset in [VoidWellPreset.gravityWell,.nullBloom,.blackhole] {
+            for (i,p) in (points+corners+[CGPoint(x:map.world.maxX+100,y:map.world.maxY+100)]).enumerated(){
+                clearActors();let id=nextVoidWellID;spawnVoidWell(preset,at:p)
+                guard let well=voidWells.first else{check("well-\(preset)-\(i)-birth",false);continue}
+                check("well-\(preset)-\(i)-Float-half-radius-clear",map.valid(well.position,radius:well.state.baseRadius*0.5))
+                check("well-\(preset)-\(i)-ID-and-preset",well.state.id==id+1 && well.state.preset==preset)
+                let radius:CGFloat,lifetime:TimeInterval
+                switch preset {
+                case .gravityWell:radius=GameConfig.VoidTree.gravityWellRadius;lifetime=GameConfig.VoidTree.gravityWellLifetime
+                case .nullBloom:radius=GameConfig.VoidTree.blackholeRadius*GameConfig.VoidTree.nullBloomRadiusFraction;lifetime=GameConfig.VoidTree.nullBloomLifetime
+                case .blackhole:radius=GameConfig.VoidTree.blackholeRadius;lifetime=GameConfig.VoidTree.blackholeLifetime
+                }
+                check("well-existing-radius-life-capacity",well.state.baseRadius==radius && well.state.remaining==lifetime && well.state.capacity==GameConfig.VoidTree.absorbCapacity)
+                if map.valid(p,radius:well.state.baseRadius*0.5){check("well-valid-request-retained",near(p,well.position))}
+            }
+        }
+        clearActors();for preset in [VoidWellPreset.blackhole,.nullBloom,.gravityWell,.blackhole]{spawnVoidWell(preset,at:points[2])}
+        let gravity=voidWells.first{$0.state.preset == .gravityWell}
+        check("well-cap-fixture-populated",voidWells.count==4 && gravity != nil)
+        spawnVoidWell(.nullBloom,at:points[1])
+        check("well-four-cap-existing-gravity-eviction",voidWells.count==4 && gravity?.state.ended==true && gravity.map{old in !voidWells.contains{$0 === old}}==true)
+        clearActors();playerStats.voidBlackhole=true;spawnVoidWell(.blackhole,at:points[2])
+        let hostile=EnemyProjectileNode(direction:CGPoint(x:1,y:0));hostile.position=points[2];worldNode.addChild(hostile);enemyProjectiles=[hostile]
+        updateVoidWells(0)
+        check("well-far-stage-absorption",enemyProjectiles.isEmpty && voidWells.first?.state.absorbed==1)
+        let pulled=target(points[2]+CGPoint(x:20,y:0)),beforePull=pulled.position
+        applyVoidWellPull(0.05)
+        check("well-existing-pull-speed",abs(pulled.position.x-(beforePull.x-GameConfig.VoidTree.pullSpeed*0.05))<0.001 && pulled.position.y==beforePull.y)
+
+        // Rift origin repair, line art and actual distant narrow-line damage.
+        for (i,p) in (points+corners+[CGPoint(x:map.world.maxX+100,y:0)]).enumerated(){
+            clearActors();roomRiftTestOrigin=p;roomRiftTestDirection=CGPoint(x:1,y:0);fireRiftCannon()
+            if let x=roomRiftLastShot["originX"] as? Double,let y=roomRiftLastShot["originY"] as? Double,let span=roomRiftLastShot["span"] as? Double,
+               let beam=worldNode.childNode(withName:"arena8-rift-beam") as? SKShapeNode,let box=beam.path?.boundingBox {
+                let origin=CGPoint(x:x,y:y)
+                check("rift-\(i)-actual-stored-origin-safe",map.valid(origin,radius:16))
+                if map.valid(p,radius:16){check("rift-valid-origin-retained",near(p,origin))}
+                check("rift-span-and-art-cover-entire-stage",corners.allSatisfy{abs($0.x-origin.x)<=span+0.001} && abs(box.minX-(origin.x-span))<0.001 && abs(box.maxX-(origin.x+span))<0.001)
+            } else {check("rift-\(i)-actual-art-and-metadata",false)}
+        }
+        clearActors();let hit=target(points[2]),miss=target(points[2]+CGPoint(x:0,y:GameConfig.Erasure.riftCannonWidth+30))
+        let hp=hit.health,missHP=miss.health;roomRiftTestOrigin=points[0];roomRiftTestDirection=CGPoint(x:1,y:0);fireRiftCannon()
+        check("rift-distant-real-damage-and-width",hit.health==hp-max(1,Int(playerStats.effectiveAttack*GameConfig.Erasure.riftCannonMult)) && miss.health==missHP)
+
+        // Unlimited primary must remain alive beyond old circle, then clean
+        // at actual stage outer margin. This is an API movement seam, not a
+        // normal-frame physics/projectile hit claim.
+        clearActors();player.position=points[2];playerStats.longShotTier=4
+        fireShotSpread(count:1,baseDirection:CGPoint(x:1,y:0))
+        let primary=projectiles.first
+        check("longshot-created-with-existing-passage",projectiles.count==1 && primary?.killSource == .primary && primary?.passesTerrain==true)
+        updateProjectiles(0.05)
+        check("longshot-far-stage-not-retired-by-old-circle",primary.map{shot in projectiles.contains{$0 === shot}}==true && primary?.parent != nil && projectiles.count==1)
+        if let primary {primary.position=CGPoint(x:map.world.maxX+GameConfig.Neutral.projectileCleanupMargin+10,y:0);updateProjectiles(0);check("longshot-actual-outer-cleanup",primary.parent==nil && projectiles.isEmpty)}
+
+        // Same actual attached GameScene beamLines/beamTick reproduction in
+        // BOTH the resizedA8 outer room and A9's distant legal stage section.
+        // Locked N4R4: first of range, first solid(unlessLongShot4), outer
+        // arena boundary. No additional beam width/tick/crit/rider changes.
+        let a8=Arena8GameMap.sixRoom
+        // One ordinary low-basis beam tick can validly round to zero. Use a
+        // controlled positive basis for this spatial oracle, then restore it.
+        let savedBeamMultiplier=playerStats.damageMultiplier
+        playerStats.damageMultiplier=max(savedBeamMultiplier,100)
+        var beamContexts:[(String,Arena8GameMap,CGPoint,Bool)]=[("A9-far-stage",map,CGPoint(x:2000,y:0),true)]
+        if let outer=a8.rooms.first(where:{$0.id==2}) {beamContexts.append(("A8-resized-outer-room",a8,outer.center,false))}
+        else {check("A8-beam-outer-room-present",false)}
+        for (label,context,root,isA9) in beamContexts {
+            clearActors();debugRoomIntegration=context;arenaGeometry=context.geometry;debugArena9Traversal=isA9
+            player.position=root;playerStats.longShotTier=4;playerStats.rapidFireTier=5
+            let beamVictim=target(root+CGPoint(x:100,y:0)),beamMiss=target(root+CGPoint(x:100,y:100))
+            check("\(label)-beam-targets-safe-and-clear",context.valid(root,radius:20) && context.valid(beamVictim.position,radius:beamVictim.geometryFootprintRadius) && context.valid(beamMiss.position,radius:beamMiss.geometryFootprintRadius) && !context.geometry.segmentBlockedExact(root,beamVictim.position))
+            let lines=beamLines(aim:CGPoint(x:1,y:0))
+            check("\(label)-actual-beam-reaches-legal-target",!lines.isEmpty && lines.allSatisfy{$0.length>=100 && $0.end.x<=context.world.maxX+0.001})
+            if beamNode.parent==nil{worldNode.addChild(beamNode)};beamNode.draw(lines.map{($0.origin,$0.end)})
+            let visibleLayers=Array(beamNode.children.prefix(3)).compactMap{$0 as? SKShapeNode}
+            check("\(label)-actual-rendered-layers-match-reach",visibleLayers.count==3 && visibleLayers.allSatisfy{($0.path?.boundingBox.maxX ?? -CGFloat.infinity)>=beamVictim.position.x && ($0.path?.boundingBox.maxX ?? CGFloat.infinity)<=context.world.maxX+0.001})
+            let beforeBeam=beamVictim.health,beforeMiss=beamMiss.health;beamTick(lines)
+            check("\(label)-actual-damage-respects-reach-and-width",beamVictim.health<beforeBeam && beamMiss.health==beforeMiss)
+            if isA9 {check("beam-spatial-oracle-positive-observed-tick",beforeBeam-beamVictim.health>=2)}
+            metrics[label+"BeamLength"]=Double(lines.first?.length ?? -1)
+        }
+        // One actual internal-wall control on the unchanged resizedA8 map:
+        // ordinary beam stops at first solid; LongShot4 keeps passage. The
+        // rectangular outer adapter must not accidentally become wall-phasing.
+        if let left=a8.rooms.first(where:{$0.id==0}),let right=a8.rooms.first(where:{$0.id==1}) {
+            clearActors();debugRoomIntegration=a8;arenaGeometry=a8.geometry;debugArena9Traversal=false
+            let root=CGPoint(x:left.rect.maxX-30,y:left.center.y+180)
+            let across=CGPoint(x:right.rect.minX+30,y:root.y)
+            player.position=root;playerStats.rapidFireTier=5;playerStats.longShotTier=0
+            let hidden=target(across),hp=hidden.health
+            check("A8-beam-wall-control-body-and-range-legal",a8.valid(root,radius:20) && a8.valid(across,radius:hidden.geometryFootprintRadius) && root.distance(to:across)<playerStats.effectiveProjectileRange && a8.geometry.segmentBlockedExact(root,across))
+            let stopped=beamLines(aim:CGPoint(x:1,y:0));beamTick(stopped)
+            check("A8-ordinary-beam-first-solid-positive-reach",!stopped.isEmpty && stopped.allSatisfy{$0.length>0 && $0.end.x<=left.rect.maxX+0.001} && hidden.health==hp)
+            playerStats.longShotTier=4;let passing=beamLines(aim:CGPoint(x:1,y:0));beamTick(passing)
+            check("A8-LongShot4-beam-terrain-exception-retained",!passing.isEmpty && passing.allSatisfy{$0.length>=root.distance(to:across)} && hidden.health<hp)
+        } else {check("A8-beam-wall-rooms-present",false)}
+        // Retained inner-room corner becomes a terrain-query diagnostic once
+        // rectangular reach is restored. The actual phone circle is smaller
+        // than this root, so its pre-fix zero length MASKS terrain behavior;
+        // do not claim a sampled-query leak until post-length evidence exists.
+        // Long Shot4 remains exempt from solid terrain.
+        if let middle=a8.rooms.first(where:{$0.id==1}),let door=a8.connections.first(where:{$0.from==0 && $0.to==1}) {
+            clearActors();debugRoomIntegration=a8;arenaGeometry=a8.geometry;debugArena9Traversal=false
+            let corner=CGPoint(x:middle.rect.minX,y:door.corridor.minY)
+            let root=corner+CGPoint(x:20,y:-40),hiddenPoint=corner+CGPoint(x:-40,y:20)
+            player.position=root;playerStats.rapidFireTier=5;playerStats.longShotTier=0
+            let hidden=target(hiddenPoint),hp=hidden.health,aim=(hiddenPoint-root).normalized
+            check("A8-short-corner-body-valid-and-exact-solid",a8.valid(root,radius:playerStats.effectiveCollisionRadius) && a8.valid(hiddenPoint,radius:hidden.geometryFootprintRadius) && a8.geometry.segmentBlockedExact(root,hiddenPoint,travelRadius:GameConfig.Geometry.projectileTravelRadius))
+            let lines=beamLines(aim:aim);beamTick(lines)
+            metrics["A8ShortCornerBeamLength"]=Double(lines.first?.length ?? -1)
+            metrics["A8ShortCornerHPBefore"]=Double(hp);metrics["A8ShortCornerHPAfter"]=Double(hidden.health)
+            check("A8-short-corner-ordinary-beam-no-hidden-damage",hidden.health==hp)
+            check("A8-short-corner-ordinary-beam-positive-first-solid",!lines.isEmpty && lines.allSatisfy{$0.length>0 && $0.length<root.distance(to:hiddenPoint)} && hidden.health==hp)
+            playerStats.longShotTier=4;let passing=beamLines(aim:aim);beamTick(passing)
+            check("A8-short-corner-LongShot4-passage",passing.allSatisfy{$0.length>=root.distance(to:hiddenPoint)} && hidden.health<hp)
+        }else{check("A8-short-corner-fixture-exists",false)}
+        playerStats.damageMultiplier=savedBeamMultiplier
+        clearActors();debugRoomIntegration=map;arenaGeometry=map.geometry;debugArena9Traversal=true
+
+        // Panda endpoint contract at outer corners; active movement keeps its
+        // existing travel exemption, terminal roots must be Float-safe.
+        for (i,p) in corners.enumerated(){for scale:CGFloat in [1,1.5,2]{
+            clearActors();let e=target(map.bounds.clamped(p,bodyRadius:40) ?? map.player);e.setScale(scale)
+            guard let start=map.approach(e.position,radius:e.geometryFootprintRadius) else{check("panda-\(i)-actor-setup",false);continue};e.position=start
+            var pin=visitor(.pin,p+CGPoint(x:100,y:100));pin.followMark=e;let health=e.health
+            _=runPandaAct(&pin,dt:0.05)
+            check("panda-pin-scaled-endpoint-safe",map.valid(e.position,radius:e.geometryFootprintRadius) && e.health==health)
+            pin.node.removeAllActions();pin.node.removeFromParent()
+            let pullDirection=(p-CGPoint(x:map.world.midX,y:map.world.midY)).normalized
+            var pull=visitor(.aggro,e.position+pullDirection*min(60,GameConfig.Panda.aggroRadius/2))
+            let beforePull=e.position
+            _=runPandaAct(&pull,dt:1)
+            check("panda-aggro-scaled-endpoint-safe",map.valid(e.position,radius:e.geometryFootprintRadius) && e.health==health)
+            check("panda-aggro-nonvacuous-range",beforePull.distance(to:pull.node.position)<GameConfig.Panda.aggroRadius)
+            pull.node.removeFromParent()
+            for act in [PandaAct.pleased,.samurai,.roll,.bodyCheck,.follow,.pin] {
+                var v=visitor(act,p);v.node.position=p
+                let accepted:Bool
+                switch act {
+                case .samurai:accepted=prepareSamuraiHandoff(&v)
+                case .roll:accepted=preparePandaRollRest(&v)
+                case .bodyCheck,.follow,.pin:accepted=preparePandaMovingRest(&v)
+                default:accepted=preparePandaArrival(&v)
+                }
+                check("panda-\(act)-actual-terminal-root-safe",accepted && map.valid(v.node.position,radius:20));v.node.removeFromParent()
+            }
+        }}
+        // Current whole-stage roll domain is measured as EXPERIMENTAL ONLY.
+        for dir in [CGPoint(x:1,y:0),CGPoint(x:-1,y:0),CGPoint(x:0,y:1),CGPoint(x:0,y:-1)]{
+            clearActors();playerStats.pandaTier=1
+            let origin=CGPoint(x:map.world.midX+dir.x*(map.world.width*0.95/2-5),y:map.world.midY+dir.y*(map.world.height*0.95/2-5))
+            var v=visitor(.roll,origin);beginPandaAct(&v);v.rollDir=dir;v.rollTravelled=0;pandas=[v]
+            let endpoint=origin+dir*20,e=target(origin)
+            e.position=map.bounds.clamped(endpoint,bodyRadius:e.geometryFootprintRadius) ?? origin
+            let before=e.health
+            check("experimental-roll-target-legal-and-within-hit",map.valid(e.position,radius:e.geometryFootprintRadius) && e.position.distance(to:endpoint)<GameConfig.Panda.rollRadius)
+            updatePandas(TimeInterval(20/GameConfig.Panda.rollSpeed))
+            check("experimental-panda-rect-roll-full-step-and-hit",pandas.first?.phase == .lingering && abs((pandas.first?.rollTravelled ?? -1)-20)<0.001 && e.health==before-Int(playerStats.effectiveAttack*GameConfig.Panda.rollDamageMult))
+            check("experimental-panda-rect-roll-safe-rest",pandas.first.map{map.valid($0.node.position,radius:20)}==true)
+        }
+        clearActors();playerStats.pandaTier=1
+        var farthestArrival:CGFloat=0
+        for i in 0..<32 {
+            pandas.forEach{$0.node.removeAllActions();$0.node.removeFromParent()};pandas.removeAll()
+            player.position=points[i%points.count];spawnPanda()
+            if let visitor=pandas.first,let angle=roomPandaRimLastSpawn["angle"] as? Double {
+                let p=visitor.node.position,dx=p.x-map.world.midX,dy=p.y-map.world.midY
+                check("experimental-panda-whole-stage-rim",abs(abs(dx)-map.world.width*0.98/2)<0.001 || abs(abs(dy)-map.world.height*0.98/2)<0.001)
+                check("experimental-panda-original-angle",abs(dx*sin(angle)-dy*cos(angle))<0.001)
+                farthestArrival=max(farthestArrival,p.distance(to:visitor.destination))
+            } else{check("experimental-panda-actual-spawn",false)}
+        }
+        metrics["sampledMaxPandaArrivalDistance"]=Double(farthestArrival)
+        var farthestEcho:CGFloat=0
+        for p in points{for i in 0...16{
+            if let origin=map.echoOrigin(near:p,perimeterUnit:CGFloat(i)/16){
+                check("experimental-Echo-actual-current-domain-safe",map.valid(origin,radius:12))
+                farthestEcho=max(farthestEcho,origin.distance(to:p))
+            }else{check("experimental-Echo-origin-exists",false)}
+        }}
+        metrics["sampledMaxEchoOriginDistance"]=Double(farthestEcho)
+
+        // Real pause handler plus ordinary update guard holds these dt-driven
+        // effects; this is API-level lifecycle proof, not native menu input.
+        clearActors();player.position=points[2];playerStats.lightningSentryTier=1;updateSentryCoils(0)
+        spawnVoidWell(.blackhole,at:points[2]);playerStats.pandaTier=1;pandaArrivalTimer = -10000
+        pandas=[visitor(.pleased,points[2])]
+        let coilTimers=sentryCoils.map(\.timer),wellTimes=voidWells.map{$0.state.remaining},pandaRoots=pandas.map{$0.node.position},pandaTimes=pandas.map(\.timer)
+        pauseGame();roomPandaChecksRunning=false;update(100);update(101);roomPandaChecksRunning=true
+        check("actual-pause-holds-coil-well-Panda-clocks",gameState == .paused && sentryCoils.map(\.timer)==coilTimers && voidWells.map{$0.state.remaining}==wellTimes && pandas.map{$0.node.position}==pandaRoots && pandas.map(\.timer)==pandaTimes)
+        resumeGame();check("actual-resume-handler-restores-playing",gameState == .playing)
+
+        // Actual rink catalog setup and drawing: every actual floor point is
+        // covered, no old-circle-sized visual. Await real fade at the tail.
+        clearActors();configureRoomRinkForProof()
+        let rink=iceRinkFloor
+        check("rink-real-catalog-gameplay-mode",upgradeManager.tier(of:"chill_4")==5 && playerStats.iceRinkActive && chillGround.isRink)
+        if let path=rink?.path{
+            for x in stride(from:map.world.minX+5,through:map.world.maxX-5,by:137){for y in stride(from:map.world.minY+5,through:map.world.maxY-5,by:97){check("rink-art-covers-stage-floor",path.contains(CGPoint(x:x,y:y)))}}
+            check("rink-art-exact-world-bounds",path.boundingBox==map.world)
+        }else{check("rink-art-present",false)}
+        // Real falling bamboo uses its actual projected landing and callback.
+        healthOrbs.forEach{$0.removeAllActions();$0.removeFromParent()};healthOrbs.removeAll()
+        let rainRequest=CGPoint(x:map.world.maxX+50,y:map.world.maxY+50)
+        guard let rainLanding=Arena8PandaPickupPlacement(map:map)?.pickup(at:rainRequest) else{check("rain-safe-landing-projection-exists",false);return}
+        dropFallingBamboo(at:rainRequest,isPickup:true)
+        let stalk=worldNode.children.last{$0.name=="arena8-panda-health-stalk"}
+        check("rain-art-starts-above-captured-safe-root",stalk.map{near($0.position,rainLanding+CGPoint(x:0,y:220*DeviceScale.gameplay))}==true && map.valid(rainLanding,radius:12))
+        var observedLanding=false
+        gameState = .paused
+        func finish(_ scene:GameScene){
+            check("rink-real-fade-completed",abs((rink?.alpha ?? -1)-1)<0.001)
+            check("panda-real-rain-one-safe-captured-root",scene.healthOrbs.count==1 && map.valid(rainLanding,radius:12) && scene.healthOrbs.allSatisfy{map.bounds.contains($0.position)})
+            // HealthOrbNode keeps its original0...4pt vertical hover. Compare
+            // stalk to captured landing, not the later bobbing node position.
+            check("panda-rain-art-actual-endpoint-observed",observedLanding)
+            check("panda-pickup-preserves-original-hover",scene.healthOrbs.first.map{abs($0.position.x-rainLanding.x)<0.001 && $0.position.y>=rainLanding.y-0.001 && $0.position.y<=rainLanding.y+4.001}==true)
+            scene.restartGame()
+            check("matrix-reset-clears-owned-effects",scene.iceRinkFloor==nil && rink?.parent==nil && scene.voidWells.isEmpty && scene.sentryCoils.isEmpty && scene.pandas.isEmpty && scene.healthOrbs.isEmpty)
+            check("matrix-profile-unchanged",NSDictionary(dictionary:saved).isEqual(to:UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}))
+            scene.roomPandaChecksRunning=false;scene.gameState = .paused
+            let report:[String:Any]=["passed":checks.filter{$0["pass"] as? Bool==true}.count,"failed":checks.filter{$0["pass"] as? Bool==false}.count,"checks":checks,"metrics":metrics,"scope":"actual API and genuine SKAction fade/rain callbacks; no normal-frame projectile/native/performance proof","experimentalDomains":["Echo whole-stage perimeter","Panda whole-stage arrivals and roll retirement"],"domainPolicyAccepted":false]
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena9-spatial-checks.json"))}
+        }
+        func observeTail(_ scene:GameScene,_ attemptsLeft:Int) {
+            scene.run(SKAction.wait(forDuration:0.02)){[weak scene] in
+                guard let scene,scene.view?.scene === scene,scene.arena9Run === observedRun,observedRun.active,scene.gameState == .paused else{return}
+                if !scene.healthOrbs.isEmpty,let stalk,stalk.parent != nil,near(stalk.position,rainLanding){observedLanding=true}
+                let ready=scene.healthOrbs.count==1 && observedLanding && stalk?.parent==nil && abs((rink?.alpha ?? -1)-1)<0.001
+                if ready || attemptsLeft==0{finish(scene)}else{observeTail(scene,attemptsLeft-1)}
+            }
+        }
+        observeTail(self,150)
+    }
+}
+#endif
+
+// PREPARED ONLY. Insert in GameScene.swift under DEBUG and invoke only from
+// an isolated technical proof flag. No map.approach, safety padding, rounded
+// radius or alternative collision rule is used in this reproduction.
+#if DEBUG
+extension GameScene {
+    private func runFractionalPlayerMovementChecks() {
+        guard GameRunPreferences.isIsolated,let stage=debugRoomIntegration else{return}
+        physicsWorld.speed=0;gameState = .paused
+        var checks:[[String:Any]]=[],traces:[[String:Any]]=[]
+        func check(_ id:String,_ yes:Bool){checks.append(["id":id,"pass":yes])}
+        guard let harden=AbilityBehaviors.registry.cards["guard_3"]?.tiers.first,
+              let unbroken=AbilityBehaviors.registry.synergies["guard.7"] else{
+            // A missing real behavior is a setup failure, never a passing
+            // substitute using hand-copied collision multipliers.
+            check("actual-Guard-behaviors-exist",false);return
+        }
+        for (label,map) in [("A8-resized",Arena8GameMap.sixRoom),("A9-stage",stage)] {
+            guard let left=map.rooms.first(where:{$0.rect.minX==map.world.minX}),
+                  let right=map.rooms.first(where:{$0.rect.maxX==map.world.maxX}),
+                  let top=map.rooms.first(where:{$0.rect.maxY==map.world.maxY}),
+                  let bottom=map.rooms.first(where:{$0.rect.minY==map.world.minY}) else{
+                check(label+"-four-authored-edge-fixtures",false);continue
+            }
+            let edges:[(String,CGPoint,CGPoint)]=[
+                ("left",CGPoint(x:map.world.minX+20,y:left.center.y),CGPoint(x:-1,y:0)),
+                ("right",CGPoint(x:map.world.maxX-20,y:right.center.y),CGPoint(x:1,y:0)),
+                ("top",CGPoint(x:top.center.x,y:map.world.maxY-20),CGPoint(x:0,y:1)),
+                ("bottom",CGPoint(x:bottom.center.x,y:map.world.minY+20),CGPoint(x:0,y:-1))]
+            for (edge,start,direction) in edges {
+                let stats=PlayerStats()
+                harden(stats);unbroken(stats) // Actual shipped effects, not copies.
+                let radius=stats.effectiveCollisionRadius
+                check("actual-Harden-and-Guard7-nonintegral-radius",stats.hardenOwned && stats.unbrokenRescueAvailable && abs(radius-5.95)<0.000000001 && radius.rounded() != radius)
+                let actor=PlayerNode();actor.stats=stats;actor.updateCollisionRadius()
+                actor.position=start;worldNode.addChild(actor)
+                check(label+"-"+edge+"-initial-stored-root-safe",map.valid(actor.position,radius:radius))
+                var calls=0,raw:CGPoint?
+                actor.debugMovementConstraint={from,desired,body in
+                    calls+=1;raw=map.move(from:from,toward:desired,radius:body);return raw
+                }
+                // Fresh stats speed250 × .1s =25 points. Starting20 from the
+                // edge forces an actual outer-boundary clamp for radius5.95.
+                let desired=actor.position+direction*stats.effectiveMoveSpeed*0.1
+                actor.move(direction:direction,deltaTime:0.1)
+                let stored=actor.position
+                let bound:CGFloat = direction.x>0 ? map.world.maxX-radius :
+                    (direction.x<0 ? map.world.minX+radius :
+                    (direction.y>0 ? map.world.maxY-radius : map.world.minY+radius))
+                check(label+"-"+edge+"-actual-Player-move-used-map",calls==1)
+                check(label+"-"+edge+"-raw-CGFloat-clamp-safe",raw.map{map.valid($0,radius:radius)}==true)
+                check(label+"-"+edge+"-clamp-is-nearest-representable-neighbor",raw.map{abs((direction.x != 0 ? $0.x:$0.y)-bound)<=CGFloat(Float(bound).ulp)}==true)
+                check(label+"-"+edge+"-actual-stored-Player-body-safe",map.valid(stored,radius:radius))
+                let coordinate=Float(direction.x != 0 ? stored.x:stored.y)
+                let outward=(direction.x>0 || direction.y>0) ? coordinate.nextUp:coordinate.nextDown
+                let oneStepOut=direction.x != 0 ? CGPoint(x:CGFloat(outward),y:stored.y):CGPoint(x:stored.x,y:CGFloat(outward))
+                check(label+"-"+edge+"-stored-root-is-maximally-safe",!map.valid(oneStepOut,radius:radius))
+                check(label+"-"+edge+"-actual-SKNode-Float-storage",stored==CGPoint(x:CGFloat(Float(stored.x)),y:CGFloat(Float(stored.y))))
+                traces.append(["map":label,"edge":edge,"caller":"actualPlayer.move + debugMovementConstraint",
+                    "radius":Double(radius),"startX":Double(start.x),"startY":Double(start.y),
+                    "requestedX":Double(desired.x),"requestedY":Double(desired.y),
+                    "rawX":raw.map{Double($0.x) as Any} ?? NSNull(),"rawY":raw.map{Double($0.y) as Any} ?? NSNull(),
+                    "storedX":Double(stored.x),"storedY":Double(stored.y),
+                    "safe":map.valid(stored,radius:radius)])
+                // A second zero-input ordinary move must not strand the body
+                // at an invalid Float root. No radius/tolerance relaxation.
+                actor.move(direction:.zero,deltaTime:0.1)
+                check(label+"-"+edge+"-next-zero-input-body-safe",map.valid(actor.position,radius:radius))
+                // Distinct API proof: actual map.shove result assigned through
+                // the same real SKNode setter; not a claim that every Scene
+                // forced-displacement caller was exercised by this one test.
+                actor.position=start
+                let shoved=map.shove(from:actor.position,toward:desired,radius:radius)
+                if let shoved {actor.position=shoved}
+                check(label+"-"+edge+"-raw-shove-valid",shoved.map{map.valid($0,radius:radius)}==true)
+                check(label+"-"+edge+"-stored-shove-body-safe",shoved != nil && map.valid(actor.position,radius:radius))
+                traces.append(["map":label,"edge":edge,"caller":"actualMap.shove + actualSKNode.setter",
+                    "radius":Double(radius),"rawX":shoved.map{Double($0.x) as Any} ?? NSNull(),"rawY":shoved.map{Double($0.y) as Any} ?? NSNull(),
+                    "storedX":Double(actor.position.x),"storedY":Double(actor.position.y),"safe":map.valid(actor.position,radius:radius)])
+                actor.debugMovementConstraint=nil;actor.removeAllActions();actor.removeFromParent()
+            }
+        }
+        let report:[String:Any]=["passed":checks.filter{$0["pass"] as? Bool==true}.count,"failed":checks.filter{$0["pass"] as? Bool==false}.count,"checks":checks,"traces":traces,
+            "effects":["guard_3 tier1 actual registry effect","guard.7 actual registry synergy effect"],
+            "scope":"actual PlayerStats behavior closures, PlayerNode.move/debug constraint and SKNode storage; synchronous API proof, not draft acquisition/native input/performance"]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("fractional-player-movement-checks.json"))}
     }
 }
 #endif

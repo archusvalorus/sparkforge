@@ -110,6 +110,42 @@ enum BeamTick {
         return limit
     }
 
+    /// Rectangular counterpart of the existing positive-exit circle rule.
+    /// Directions come from the same unit headings. Parallel offset origins
+    /// may begin just outside the floor; only rays intersecting the rectangle
+    /// have a positive exit. This never moves origins or changes lane counts.
+    /// Positive infinite range is Long Shot3+, not an invalid input.
+    static func length(origin: CGPoint, direction d: CGPoint, maxLength: CGFloat, arenaRect rect: CGRect,
+                       blocked: ((CGPoint, CGPoint) -> Bool)?, steps: Int) -> CGFloat {
+        guard origin.x.isFinite, origin.y.isFinite, d.x.isFinite, d.y.isFinite,
+              d.x != 0 || d.y != 0, !maxLength.isNaN, maxLength >= 0,
+              !rect.isNull, !rect.isInfinite, rect.minX.isFinite, rect.minY.isFinite,
+              rect.maxX.isFinite, rect.maxY.isFinite, rect.width > 0, rect.height > 0,
+              rect.minX < rect.maxX, rect.minY < rect.maxY else { return 0 }
+        var entry = -CGFloat.infinity, exit = CGFloat.infinity
+        for (value, delta, low, high) in [(origin.x, d.x, rect.minX, rect.maxX),
+                                          (origin.y, d.y, rect.minY, rect.maxY)] {
+            if delta == 0 {
+                if value < low || value > high { return 0 }
+                continue
+            }
+            let first = (low - value) / delta, second = (high - value) / delta
+            entry = max(entry, min(first, second)); exit = min(exit, max(first, second))
+        }
+        guard exit.isFinite, exit >= max(0, entry) else { return 0 }
+        var limit = min(maxLength, max(0, exit))
+        guard limit > 0, let blocked else { return max(0, limit) }
+        let end = CGPoint(x: origin.x + d.x * limit, y: origin.y + d.y * limit)
+        guard blocked(origin, end) else { return limit }
+        var lo: CGFloat = 0, hi = limit
+        for _ in 0..<max(1, steps) {
+            let mid = (lo + hi) / 2
+            if blocked(origin, CGPoint(x: origin.x + d.x * mid, y: origin.y + d.y * mid)) { hi = mid } else { lo = mid }
+        }
+        limit = lo
+        return limit
+    }
+
     // MARK: One hit per (parent lane, target, tick)
 
     struct LaneHit: Equatable {

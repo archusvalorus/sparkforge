@@ -1,0 +1,9 @@
+{
+  "recorded_radius": 5.949999999999999,
+  "source": "Actual PlayerStats with registered Harden guard_3 tier1 and guard.7 effects, observed through actual PlayerNode move/SKNode storage",
+  "ability_behaviors_sha256": "b4e39d25af918814987acecf4b9c5cd734e596aee5980fa8935e4bee269b4c05",
+  "player_stats_sha256": "41c57fa6da5f97696a90af1596d0900185e958e46115ad150e8cbd3046f6d3d7",
+  "game_config_sha256": "44a8224dc1b3948cda3187f61783ba24dcc0366fa2f6e000b74380d1633c95f0",
+  "legacy_beam_sha256": "c35e6217da45b2af26be237681df29073069ec8d073c84412fc527d479a006c5",
+  "attack_pattern_sha256": "6cb8607b3aef17704a545e3aca036adb92cdd8db966a7c06f97d92587286caee"
+}

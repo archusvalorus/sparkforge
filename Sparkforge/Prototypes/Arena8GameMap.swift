@@ -168,18 +168,46 @@ struct Arena8GameMap {
         }
         return ArenaGeometry(blockedFootprints: obstacles).pathShove(from: from, to: to, radius: radius)
     }
+    /// Match the Float representation SKNode stores, using the same nearest
+    /// neighboring representable-point rule as existing Sentry/Kaiju roots.
+    /// A candidate must retain full body clearance AND the caller's approved
+    /// swept path; no radius/tolerance relaxation or across-wall projection.
+    private func storedSafeEnd(_ point: CGPoint, radius: CGFloat,
+                               reachable: (CGPoint) -> Bool) -> CGPoint? {
+        guard valid(point, radius: radius) else { return nil }
+        let x = Float(point.x), y = Float(point.y)
+        guard x.isFinite, y.isFinite else { return nil }
+        let stored = CGPoint(x: CGFloat(x), y: CGFloat(y))
+        if stored == point { return point } // Already the validated endpoint.
+        func legal(_ q: CGPoint) -> Bool { valid(q, radius: radius) && reachable(q) }
+        if legal(stored) { return point } // Preserve existing raw API result.
+        let neighbors = [x.nextDown, x, x.nextUp].flatMap { a in
+            [y.nextDown, y, y.nextUp].map { b in CGPoint(x: CGFloat(a), y: CGFloat(b)) }
+        }
+        return neighbors.filter { legal($0) }
+            .min { $0.distance(to: point) < $1.distance(to: point) }
+    }
+
     func move(from: CGPoint, toward desired: CGPoint, radius: CGFloat) -> CGPoint? {
         if let control { return control.move(from: from, toward: desired, radius: radius) }
         guard valid(from, radius: radius), let end = bounds.clamped(desired, bodyRadius: radius) else { return nil }
         let x = walkingSweep(from: from, to: CGPoint(x: end.x, y: from.y), radius: radius)
         let result = walkingSweep(from: x, to: CGPoint(x: x.x, y: end.y), radius: radius)
-        return valid(result, radius: radius) ? result : nil
+        return storedSafeEnd(result, radius: radius) { q in
+            // Retain the existing X-then-Y face-slide path, rather than
+            // replacing ordinary walking with a straight diagonal shove.
+            let first = walkingSweep(from: from, to: CGPoint(x: q.x, y: from.y), radius: radius)
+            let last = walkingSweep(from: first, to: CGPoint(x: first.x, y: q.y), radius: radius)
+            return last == q
+        }
     }
     func shove(from: CGPoint, toward desired: CGPoint, radius: CGFloat) -> CGPoint? {
         if let control { return control.shove(from: from, toward: desired, radius: radius) }
         guard valid(from, radius: radius), let end = bounds.clamped(desired, bodyRadius: radius) else { return nil }
         let stopped = geometry.pathShove(from: from, to: end, radius: radius)
-        return valid(stopped, radius: radius) ? stopped : nil
+        return storedSafeEnd(stopped, radius: radius) { q in
+            geometry.pathShove(from: from, to: q, radius: radius) == q
+        }
     }
     func approach(_ goal: CGPoint, radius: CGFloat) -> CGPoint? {
         if let control { return control.approach(goal, radius: radius) }
