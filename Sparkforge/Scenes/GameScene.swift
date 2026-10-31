@@ -45,6 +45,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomFearAccepted: [ObjectIdentifier: CGPoint] = [:]
     private static var roomChecksAlreadyRun = false
     private var roomSpawnIndex = 0
+    private let roomCarrierPackets = Arena8PacketCommands()
+    private var roomCarrierActors: [UUID: EnemyNode] = [:]
+    private var roomCarrierIDs: [ObjectIdentifier: UUID] = [:]
+    private var roomCarrierMembership: [UUID: Arena8PacketCommands.MembershipTicket] = [:]
+    private var roomCarrierOrder: [UUID] = []
+    private var roomCarrierPacketID: UUID?
+    private var roomCarrierCommand: Arena8PacketCommands.Ticket?
+    private var roomCarrierDestinations: [UUID: CGPoint] = [:]
+    private var roomCarrierConnectionCursor = 0
+    private var roomCarrierCommitCount = 0
+    private var roomCarrierFireEnabled = true
+    private var roomCarrierChecksRunning = false
+    private var roomCarrierNeedsFreshStep = false
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
     private var roomInputLastTime: TimeInterval = -1
     private var roomInputSamples: [[String: Any]] = []
@@ -670,11 +683,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.position = CGPoint(x: 0, y: -size.height / 2 + 32)
             label.zPosition = 300; camera?.addChild(label)
             spawnRoomFixtureEnemy()
+            if roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if ProcessInfo.processInfo.arguments.contains("--arena89-spatial-checks") {
+            if roomCarrierFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-carrier-projectile-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomCarrierProjectileChecks() }
+            } else if roomCarrierFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-carrier-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomCarrierChecks() }
+            } else if ProcessInfo.processInfo.arguments.contains("--arena89-spatial-checks") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runArena9SpatialChecks()}
             } else if ProcessInfo.processInfo.arguments.contains("--arena89-fractional-checks") {
                 DispatchQueue.main.asyncAfter(deadline:.now()+roomProofDelay){[weak self] in self?.runFractionalPlayerMovementChecks()}
@@ -799,6 +817,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if debugArena9Traversal {
             arena9BackgroundWave=waveManager.elapsedTime;arena9BackgroundCount += 1
         }
+        if roomCarrierFixtureEnabled { roomCarrierNeedsFreshStep = true }
         #endif
         samuraiBackgroundHold = true
         avalancheBackgroundHold = true
@@ -2376,6 +2395,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         #if DEBUG
+        if roomCarrierFixtureEnabled, gameState == .playing,
+           let cam = camera {
+            let point = touch.location(in: cam)
+            if cam.childNode(withName: "roomCarrierSpawn")?.frame.insetBy(dx: -10, dy: -12).contains(point) == true {
+                spawnRoomCarrierPacket(); return
+            }
+            if cam.childNode(withName: "roomCarrierMigrate")?.frame.insetBy(dx: -10, dy: -12).contains(point) == true {
+                requestRoomCarrierMigration(); return
+            }
+            if let fire = cam.childNode(withName: "roomCarrierFire"), fire.frame.insetBy(dx: -10, dy: -12).contains(point) {
+                roomCarrierFireEnabled.toggle()
+                (fire as? SKLabelNode)?.text = roomCarrierFireEnabled ? "TEST FIRE: ON" : "TEST FIRE: OFF"
+                return
+            }
+        }
         if debugArena9Traversal, ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout"),
            gameState == .playing, let cam=camera, let control=cam.childNode(withName:"arena9FireControl"),
            control.frame.insetBy(dx:-14,dy:-14).contains(touch.location(in:cam)) {
@@ -2551,6 +2585,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Return to Title
     
     private func returnToTitle() {
+        #if DEBUG
+        resetRoomCarrierFixture()
+        #endif
         cancelSamuraiStrikes()
         cancelAvalancheEntrances()
         guard let view = view else { return }
@@ -5779,7 +5816,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             resolvePlayerAgainstGeometry(cause: .movement)
             return
         }
-        if roomSamuraiChecksRunning || roomFearChecksRunning || roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
+        if roomCarrierChecksRunning || roomSamuraiChecksRunning || roomFearChecksRunning || roomCleanupChecksRunning || roomPandaPickupChecksRunning || roomPandaMovingChecksRunning || roomPandaRollChecksRunning || roomPandaArrivalChecksRunning || roomPandaDestChecksRunning || roomRiftChecksRunning || roomSentryChecksRunning || roomEchoChecksRunning || roomGrowthChecksRunning || roomSummonChecksRunning || roomPandaChecksRunning || roomVoidChecksRunning { return } // explicit fixtures only
         #endif
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         // Clamp dt so a pause, app-background, or frame hitch can't leap the
@@ -5850,6 +5887,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateRepulseFlights(dt) // v2.1 A5 (CL-63) — before the chase, which fliers skip
         #if DEBUG
         if debugRoomIntegration != nil { roomEnemyStarts = Dictionary(uniqueKeysWithValues: enemies.map { (ObjectIdentifier($0), $0.position) }) }
+        if roomCarrierFixtureEnabled { updateRoomCarrierFixture(dt) }
         #endif
         updateEnemies(dt)
         updateActiveCombat(dt)   // v2.1 A4c (CL-33) — after this frame's DoT deaths
@@ -5857,7 +5895,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateRedSmile(dt)       // v2.1 A4c — before the gun, which it pauses
         #if DEBUG
         if !(debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting"))
-            && !(debugArena9Traversal && ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") && !arena9FixtureFireEnabled) { updateAutoAttack(dt) }
+            && !(debugArena9Traversal && ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") && !arena9FixtureFireEnabled)
+            && !(roomCarrierFixtureEnabled && !roomCarrierFireEnabled) { updateAutoAttack(dt) }
         #else
         updateAutoAttack(dt)
         #endif
@@ -6225,6 +6264,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                                                        openWounds: playerStats.bleedingEnemyDamageTaken) {
                 diedFromDOT.append(enemy)
                 #if DEBUG
+                removeRoomCarrierActor(enemy)
                 combatLedger.recordDotKill(channel)
                 // Glass Blood's check, counted HERE (independent of the burst code).
                 if channel == .bleed, playerStats.glassBloodActive {
@@ -10757,7 +10797,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         channelSpawnWestNext.toggle()
     }
 
-    private func spawnBasicMelee(elapsed: TimeInterval, placement: ((EnemyNode) -> CGPoint?)? = nil) {
+    private func spawnBasicMelee(elapsed: TimeInterval, placement: ((EnemyNode) -> CGPoint?)? = nil,
+                                 observeBaseProfile: ((Int, Int) -> Void)? = nil) {
         // HP scales with time — enemies get beefier (v1.4: softened curve)
         let baseHP: Int
         if elapsed < 30 {
@@ -10776,6 +10817,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let enemySpeed = GameConfig.Enemy.baseSpeed * speedScale
         let xpValue = max(1, baseHP + 1)  // v1.4: +1 XP per kill across the board
 
+        // Optional read-only fixture observer: default callers retain the
+        // exact draw/constructor/placement order and the central health dial.
+        observeBaseProfile?(baseHP, xpValue)
         let enemy = EnemyNode(health: baseHP, moveSpeed: enemySpeed, xpValue: xpValue)
         // Preserve the circle's position/RNG ordering. Room placement runs
         // after scaling so safe clearance uses the actual final footprint.
@@ -11702,15 +11746,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let a = base + CGFloat(k) * C.anchorAngleStep
             let cand = goal + CGPoint(x: cos(a), y: sin(a)) * C.standoff
             #if DEBUG
-            if debugArena9Traversal, let map = debugRoomIntegration {
+            if debugArena9Traversal || roomCarrierFixtureEnabled, let map = debugRoomIntegration {
                 guard map.valid(cand, radius: bodyR) else { continue }
             } else if cand.length > limit { continue }
             #else
             guard cand.length <= limit else { continue }
             #endif
             guard !geo.isBlocked(cand, margin: bodyR) else { continue }
-            guard !geo.segmentBlocked(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius) else { continue }
-            guard !geo.segmentBlocked(p, cand, travelRadius: bodyR * 0.8) else { continue }
+            #if DEBUG
+            if roomCarrierFixtureEnabled {
+                guard !geo.segmentBlockedExact(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius),
+                      !geo.segmentBlockedExact(p, cand, travelRadius: bodyR * 0.8) else { continue }
+            } else {
+                guard !geo.segmentBlocked(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius),
+                      !geo.segmentBlocked(p, cand, travelRadius: bodyR * 0.8) else { continue }
+            }
+            #else
+            guard !geo.segmentBlocked(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius),
+                  !geo.segmentBlocked(p, cand, travelRadius: bodyR * 0.8) else { continue }
+            #endif
             return cand
         }
         return nil
@@ -12728,6 +12782,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 return
             }
             enemy.killCredited = true
+            #if DEBUG
+            removeRoomCarrierActor(enemy)
+            #endif
             (enemy as? TollkeeperNode)?.cancelAttack()
             (enemy as? RailspikeNode)?.cancelAttack()
             if let index = enemies.firstIndex(where: { $0 === enemy }) {
@@ -15184,6 +15241,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func playerDied() {
         guard gameState == .playing else { return }
         #if DEBUG
+        // Same-run revive retains enemies. Cancel the old order without
+        // forgetting its surviving group and admitting a duplicate packet.
+        clearRoomCarrierCommand()
         arena9Run?.cancel()
         #endif
         gameState = .dead
@@ -15574,6 +15634,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func restartGame() {
         #if DEBUG
+        resetRoomCarrierFixture()
         arena9Run?.cancel()
         #endif
         cancelSamuraiStrikes()
@@ -15803,6 +15864,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             roomEnemyStarts.removeAll(); roomFearAccepted.removeAll(); roomSpawnIndex = 0; roomPlayerLastSafe = rooms.player
             player.position = rooms.player; camera?.position = player.position
             spawnRoomFixtureEnemy()
+            if roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
         }
         #endif
 
@@ -15923,7 +15985,7 @@ extension GameScene {
         return safe
     }
     private func spawnRoomFixtureEnemy() {
-        if debugArena9Traversal { return }
+        if debugArena9Traversal || roomCarrierFixtureEnabled { return }
         guard let rooms = debugRoomIntegration else { return }
         // Explicit native geometry fixture only: no encounters during the
         // all-door joystick traversal. Ordinary six-room combat is unchanged.
@@ -16211,6 +16273,25 @@ extension GameScene {
         sample["entryFromTitle"] = debugRoomEntryFromTitle
         sample["entryEpoch"] = roomEntryEpoch
         sample["roomCount"] = rooms.rooms.count
+        if roomCarrierFixtureEnabled {
+            sample["carrierPackets"] = roomCarrierPackets.packets.count
+            sample["carrierActors"] = roomCarrierActors.map { id, actor in
+                ["id": id.uuidString, "kind": String(describing: type(of: actor)),
+                 "x": Double(actor.position.x), "y": Double(actor.position.y),
+                 "combatX": Double(actor.goalPosition.x), "combatY": Double(actor.goalPosition.y),
+                 "safe": rooms.valid(actor.position, radius: actor.geometryFootprintRadius),
+                 "hp": actor.health, "xp": actor.xpValue] as [String: Any]
+            }
+            sample["carrierWarningRemaining"] = roomCarrierCommand.flatMap { roomCarrierPackets.remaining($0) } ?? -1
+            sample["carrierCommits"] = roomCarrierCommitCount
+            sample["carrierFireEnabled"] = roomCarrierFireEnabled
+            for name in ["roomCarrierSpawn", "roomCarrierMigrate", "roomCarrierFire"] {
+                if let node = camera?.childNode(withName: name), let view {
+                    let point = view.convert(node.convert(CGPoint.zero, to: self), from: self)
+                    sample[name + "X"] = Double(point.x); sample[name + "Y"] = Double(point.y)
+                }
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--arena8-magnet-checks") {sample["magnetDone"] = !roomMagnetReport.isEmpty;sample["magnetPassed"] = roomMagnetReport["passed"] ?? -1;sample["magnetFailed"] = roomMagnetReport["failed"] ?? -1}
         sample["bossMode"] = isGauntlet
         if debugArena9Traversal {
@@ -19275,6 +19356,725 @@ extension GameScene {
         // the scheduled reward before judging it, without depending on action
         // callback ordering or executing the reward path from the fixture.
         observeDeferredRewards(self,100)
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private var roomCarrierFixtureEnabled: Bool {
+        debugRoomIntegration?.isSixRoom == true && !debugArena9Traversal
+            && GameRunPreferences.isIsolated
+            && ProcessInfo.processInfo.arguments.contains("--arena8-carrier-fixture")
+    }
+
+    private func setRoomCarrierNavigation(_ actor: EnemyNode, to point: CGPoint?) {
+        (actor as? CinderCarrierNode)?.packetNavigationTarget = point
+        (actor as? SpurhoundNode)?.packetNavigationTarget = point
+        (actor as? LinekeeperNode)?.packetNavigationTarget = point
+    }
+
+    private func setupRoomCarrierFixture() {
+        guard roomCarrierFixtureEnabled, let camera else { return }
+        for name in ["roomCarrierSpawn", "roomCarrierMigrate", "roomCarrierFire", "roomCarrierStatus"] {
+            camera.childNode(withName: name)?.removeFromParent()
+        }
+        for (name, text, x, y) in [
+            ("roomCarrierSpawn", "SPAWN PACKET", CGFloat(-95), CGFloat(80)),
+            ("roomCarrierMigrate", "MIGRATE", CGFloat(95), CGFloat(80)),
+            ("roomCarrierFire", "TEST FIRE: ON", CGFloat(0), CGFloat(125)),
+            ("roomCarrierStatus", "CARRIER FIXTURE / NO WAVES", CGFloat(0), CGFloat(155))
+        ] {
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.name = name; label.text = text; label.fontSize = 11
+            label.fontColor = name == "roomCarrierStatus" ? .orange : .cyan
+            label.position = CGPoint(x: x, y: -size.height / 2 + y)
+            label.zPosition = 300; camera.addChild(label)
+        }
+        roomCarrierFireEnabled = true
+    }
+
+    private func clearRoomCarrierCommand() {
+        if let command = roomCarrierCommand { _ = roomCarrierPackets.cancel(command) }
+        roomCarrierCommand = nil; roomCarrierDestinations.removeAll()
+        for actor in roomCarrierActors.values { setRoomCarrierNavigation(actor, to: nil) }
+        worldNode.childNode(withName: "roomCarrierWarning")?.removeFromParent()
+    }
+
+    private func resetRoomCarrierFixture() {
+        clearRoomCarrierCommand()
+        roomCarrierPackets.reset()
+        roomCarrierActors.removeAll(); roomCarrierIDs.removeAll()
+        roomCarrierMembership.removeAll(); roomCarrierOrder.removeAll()
+        roomCarrierPacketID = nil; roomCarrierCommitCount = 0
+        roomCarrierConnectionCursor = 0; roomCarrierFireEnabled = true
+        roomCarrierNeedsFreshStep = false
+    }
+
+    private func removeRoomCarrierActor(_ actor: EnemyNode) {
+        guard let id = roomCarrierIDs.removeValue(forKey: ObjectIdentifier(actor)) else { return }
+        setRoomCarrierNavigation(actor, to: nil)
+        if let membership = roomCarrierMembership.removeValue(forKey: id) {
+            let released = roomCarrierPackets.remove(membership)
+            for survivor in released {
+                if let node = roomCarrierActors[survivor] { setRoomCarrierNavigation(node, to: nil) }
+            }
+        }
+        roomCarrierActors.removeValue(forKey: id)
+        roomCarrierOrder.removeAll { $0 == id }
+        if let packetID = roomCarrierPacketID, roomCarrierPackets.packets[packetID] == nil {
+            clearRoomCarrierCommand(); roomCarrierPacketID = nil
+        } else if let command = roomCarrierCommand, roomCarrierPackets.remaining(command) == nil {
+            clearRoomCarrierCommand()
+        }
+    }
+
+    private func spawnRoomCarrierPacket() {
+        guard roomCarrierFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
+              let map = debugRoomIntegration else { return }
+        for actor in Array(roomCarrierActors.values) where actor.isDying || actor.parent == nil {
+            removeRoomCarrierActor(actor)
+        }
+        // A controlled group must be cleared before another is injected. Owner
+        // death releases escorts, but does not quietly despawn or reward them.
+        guard roomCarrierActors.isEmpty,
+              roomCarrierPackets.packets.count < GameConfig.Arena8CarrierFixture.maxPackets else { return }
+        var profile: (health: Int, xp: Int)?
+        spawnBasicMelee(elapsed: waveManager.elapsedTime, placement: { _ in nil },
+                        observeBaseProfile: { health, xp in profile = (health, xp) })
+        guard let profile else { return }
+        let carrier = CinderCarrierNode(health: profile.health, xpValue: profile.xp)
+        let hound = SpurhoundNode(health: profile.health, xpValue: profile.xp)
+        let keeper = LinekeeperNode(health: profile.health, xpValue: profile.xp)
+        keeper.onFireProjectile = { [weak self] point, direction in
+            self?.spawnEnemyProjectile(at: point, direction: direction,
+                speed: GameConfig.Linekeeper.boltSpeed, range: GameConfig.Linekeeper.boltRange,
+                colorHex: GameConfig.Linekeeper.boltColorHex, elongated: true)
+        }
+        keeper.resolveFiringAnchor = { [weak self] from, goal in
+            self?.findFiringAnchor(from: from, toward: goal)
+        }
+        let actors: [EnemyNode] = [carrier, hound, keeper]
+        let offset = GameConfig.Arena8Game.spawnAnchorOffset
+        var positions: [CGPoint]?
+        let orderedRooms = map.rooms.sorted {
+            let left = $0.center.distance(to: player.position), right = $1.center.distance(to: player.position)
+            return left == right ? $0.id < $1.id : left < right
+        }
+        for room in orderedRooms {
+            var candidates = [CGPoint(x: -offset, y: -offset), CGPoint(x: offset, y: -offset),
+                              CGPoint(x: 0, y: offset), .zero].map { room.center + $0 }
+            var chosen: [CGPoint] = []
+            for actor in actors {
+                guard let point = map.spawn(candidates: candidates, radius: actor.geometryFootprintRadius,
+                    avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { break }
+                chosen.append(point)
+                candidates.removeAll { $0 == point }
+            }
+            if chosen.count == actors.count { positions = chosen; break }
+        }
+        guard let positions else { return }
+        let ids = actors.map { _ in UUID() }, packetID = UUID()
+        guard let owner = ids.first,
+              roomCarrierPackets.register(id: packetID, owner: owner, escorts: Array(ids.dropFirst())) else { return }
+        for (index, actor) in actors.enumerated() {
+            let id = ids[index]
+            actor.position = positions[index]
+            actor.name = index == 0 ? "arena8Carrier" : "arena8CarrierEscort"
+            roomCarrierActors[id] = actor; roomCarrierIDs[ObjectIdentifier(actor)] = id
+            roomCarrierMembership[id] = roomCarrierPackets.membershipTicket(for: id)
+            enemies.append(actor); worldNode.addChild(actor)
+        }
+        roomCarrierOrder = ids; roomCarrierPacketID = packetID
+        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "PACKET READY / MANUAL MIGRATION"
+    }
+
+    private func requestRoomCarrierMigration(connection forcedConnection: Int? = nil) {
+        guard roomCarrierFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
+              roomCarrierCommand == nil, let map = debugRoomIntegration,
+              let packetID = roomCarrierPacketID, let packet = roomCarrierPackets.packets[packetID],
+              let carrier = roomCarrierActors[packet.owner], !carrier.isDying else { return }
+        let room = map.roomID(near: carrier.position)
+        let options = map.connections.indices.filter { map.connections[$0].from == room || map.connections[$0].to == room }
+        guard !options.isEmpty else { return }
+        let connectionID: Int
+        if let forcedConnection {
+            guard options.contains(forcedConnection) else { return }
+            connectionID = forcedConnection
+        } else {
+            connectionID = options[roomCarrierConnectionCursor % options.count]
+        }
+        let connection = map.connections[connectionID]
+        let destinationID = connection.from == room ? connection.to : connection.from
+        guard let destination = map.rooms.first(where: { $0.id == destinationID }) else { return }
+        let offset = GameConfig.Arena8Game.spawnAnchorOffset
+        let offsets = [CGPoint(x: -offset, y: -offset), CGPoint(x: offset, y: -offset), CGPoint(x: 0, y: offset)]
+        var targets: [UUID: CGPoint] = [:]
+        let members = roomCarrierOrder.filter { packet.members.contains($0) }
+        for (index, id) in members.enumerated() {
+            guard let actor = roomCarrierActors[id], !actor.isDying, index < offsets.count else { return }
+            let requested = destination.center + offsets[index]
+            let stored = CGPoint(x: CGFloat(Float(requested.x)), y: CGFloat(Float(requested.y)))
+            guard map.valid(stored, radius: actor.geometryFootprintRadius) else { return }
+            targets[id] = stored
+        }
+        let live = Set(roomCarrierActors.filter { !$0.value.isDying && $0.value.parent != nil }.map { $0.key })
+        guard let ticket = roomCarrierPackets.prepare(packetID: packetID, expectedRevision: packet.revision,
+            source: packet.owner, connectionID: connectionID,
+            telegraphDuration: GameConfig.Arena8CarrierFixture.warningDuration, live: live,
+            destinationValid: { !targets.isEmpty && Set(targets.keys) == packet.members }) else { return }
+        roomCarrierDestinations = targets; roomCarrierCommand = ticket
+        roomCarrierConnectionCursor += 1
+        let marker = SKShapeNode(rect: connection.corridor)
+        marker.name = "roomCarrierWarning"; marker.strokeColor = .orange
+        marker.fillColor = SKColor.orange.withAlphaComponent(0.12); marker.lineWidth = 3; marker.zPosition = 2
+        worldNode.addChild(marker)
+        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "DOOR WARNING / 1 ACTIVE SECOND"
+    }
+
+    private func updateRoomCarrierFixture(_ dt: TimeInterval) {
+        guard roomCarrierFixtureEnabled, dt.isFinite, dt >= 0,
+              let map = debugRoomIntegration else { return }
+        for actor in Array(roomCarrierActors.values)
+            where actor.isDying || actor.parent == nil || !enemies.contains(where: { $0 === actor }) {
+            removeRoomCarrierActor(actor)
+        }
+        for actor in roomCarrierActors.values { setRoomCarrierNavigation(actor, to: nil) }
+        let held = gameState != .playing || samuraiBackgroundHold || isPaused
+        // Consume the first fresh active frame even when no order is pending,
+        // so a later manual trigger cannot inherit an obsolete background gap.
+        let warningDT = !held && roomCarrierNeedsFreshStep ? 0 : dt
+        if !held { roomCarrierNeedsFreshStep = false }
+        guard let command = roomCarrierCommand else { return }
+        _ = roomCarrierPackets.advance(command, dt: warningDT, held: held)
+        guard roomCarrierPackets.remaining(command) != nil else { clearRoomCarrierCommand(); return }
+        guard !held else { return }
+        let live = Set(roomCarrierActors.filter { !$0.value.isDying && $0.value.parent != nil }.map { $0.key })
+        if roomCarrierPackets.navigation(command) == nil,
+           roomCarrierPackets.commit(command, held: false, live: live, destinationValid: {
+               !self.roomCarrierDestinations.isEmpty && self.roomCarrierDestinations.allSatisfy { id, point in
+                   self.roomCarrierActors[id].map { map.valid(point, radius: $0.geometryFootprintRadius) } == true
+               }
+           }) != nil {
+            roomCarrierCommitCount += 1
+            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIGRATING / SPARK REMAINS TARGET"
+        }
+        guard let navigation = roomCarrierPackets.navigation(command) else { return }
+        var arrived = true
+        for id in navigation.members {
+            guard let actor = roomCarrierActors[id], let destination = roomCarrierDestinations[id] else {
+                arrived = false; continue
+            }
+            if actor.position.distance(to: destination) <= GameConfig.Arena8CarrierFixture.arrivalTolerance {
+                // Hold completed navigation without interrupting an attack.
+                // Otherwise an early arrival would immediately chase away
+                // before its slower escort could finish the same command.
+                setRoomCarrierNavigation(actor, to: actor.position)
+                continue
+            }
+            arrived = false
+            guard !actor.isStunned, !actor.isFrozen, !actor.isFeared, !actor.isVoidTrapped,
+                  repulseFlights[ObjectIdentifier(actor)] == nil,
+                  map.valid(actor.position, radius: actor.geometryFootprintRadius) else { continue }
+            let safePhase = (actor as? CinderCarrierNode)?.packetNavigationSafePhase
+                ?? (actor as? SpurhoundNode)?.packetNavigationSafePhase
+                ?? (actor as? LinekeeperNode)?.packetNavigationSafePhase ?? false
+            guard safePhase else { continue }
+            let blocked = map.geometry.segmentBlockedExact(actor.position, destination, travelRadius: actor.geometryFootprintRadius)
+            // Final destinations use the approved 12-point tolerance. Route
+            // nodes retain the existing routing handoff radius, which is
+            // larger than the keeper's stop radius and avoids a <=12 / <12
+            // waypoint boundary deadlock. Exact successor visibility remains.
+            let waypoint = blocked ? map.geometry.graphWaypoint(from: actor.position, toward: destination,
+                travelRadius: actor.geometryFootprintRadius,
+                arriveRadius: GameConfig.Routing.arriveRadius)?.position : destination
+            if let waypoint { setRoomCarrierNavigation(actor, to: waypoint) }
+        }
+        if arrived {
+            clearRoomCarrierCommand()
+            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIGRATION DONE / NO AUTO REPEAT"
+        }
+    }
+}
+#endif
+
+// PREPARED SOURCE ONLY. Append in the SAME GameScene.swift file under DEBUG.
+// Invoke only for the isolated six-room fixture + --arena8-carrier-checks.
+// These are direct Scene/Node API checks; no native traversal/combat claim.
+#if DEBUG
+extension GameScene {
+    private func runRoomCarrierChecks() {
+        guard roomCarrierFixtureEnabled, let map = debugRoomIntegration else { return }
+        roomCarrierChecksRunning = true
+        physicsWorld.speed = 0
+        var checks: [[String: Any]] = []
+        var routeSamples: [[String: Any]] = []
+        func check(_ id: String, _ passed: Bool) { checks.append(["id": id, "pass": passed]) }
+        func report() {
+            let result: [String: Any] = [
+                "passed": checks.filter { $0["pass"] as? Bool == true }.count,
+                "failed": checks.filter { $0["pass"] as? Bool == false }.count,
+                "checks": checks, "routeSamples": routeSamples,
+                "scope": "Actual Scene/Node API and common kill/collection handlers; controlled placement and direct timer steps, not native movement, physics hits, ads or performance",
+                "unrun": ["native seven-door input", "separate real-frame projectile/deferred-XP proof", "native OS background/foreground", "native contact damage scaling"]
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys, .prettyPrinted]),
+               let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                try? data.write(to: directory.appendingPathComponent("arena8-carrier-checks.json"), options: .atomic)
+            }
+        }
+        let savedProfile = UserDefaults.standard.dictionaryRepresentation().filter {
+            $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")
+        }
+        func clearCase() {
+            clearRoomCarrierCommand()
+            for enemy in enemies { enemy.removeAllActions(); enemy.removeFromParent() }
+            enemies.removeAll()
+            for orb in xpOrbs { orb.removeAllActions(); orb.removeFromParent() }
+            xpOrbs.removeAll()
+            repulseFlights.removeAll()
+            resetRoomCarrierFixture()
+            samuraiBackgroundHold = false; isPaused = false; gameState = .playing
+            player.position = map.player
+        }
+        func freshPacket(_ label: String) -> (CinderCarrierNode, SpurhoundNode, LinekeeperNode)? {
+            clearCase()
+            spawnRoomCarrierPacket()
+            check(label + "-three-actors-one-packet", enemies.count == 3 && roomCarrierActors.count == 3 && roomCarrierPackets.packets.count == 1)
+            guard let carrier = enemies.compactMap({ $0 as? CinderCarrierNode }).first,
+                  let hound = enemies.compactMap({ $0 as? SpurhoundNode }).first,
+                  let keeper = enemies.compactMap({ $0 as? LinekeeperNode }).first else {
+                check(label + "-actual-three-class-setup", false); return nil
+            }
+            check(label + "-all-spawned-bodies-safe", enemies.allSatisfy { map.valid($0.position, radius: $0.geometryFootprintRadius) })
+            let count = enemies.count
+            spawnRoomCarrierPacket()
+            check(label + "-duplicate-spawn-rejected", enemies.count == count && roomCarrierPackets.packets.count == 1)
+            return (carrier, hound, keeper)
+        }
+        check("isolated-six-room-title-context", GameRunPreferences.isIsolated && debugRoomEntryFromTitle && map.rooms.count == 6 && !debugArena9Traversal && !isGauntlet)
+        let beforeOrdinary = enemies.count
+        spawnRoomFixtureEnemy()
+        check("ordinary-room-spawn-suppressed", enemies.count == beforeOrdinary)
+        if let (carrier, _, _) = freshPacket("initial") {
+            check("carrier-literal-approved-bounds-speed", carrier.geometryFootprintRadius == 14 && carrier.hitBodyRadius == 12 && carrier.moveSpeed == 104 && carrier.xScale == 1 && carrier.yScale == 1)
+            check("carrier-actual-contact-category", carrier.physicsBody?.categoryBitMask == GameConfig.Physics.enemy && carrier.physicsBody?.contactTestBitMask == (GameConfig.Physics.player | GameConfig.Physics.projectile))
+        }
+        // Observe the unscaled values from the REAL ordinary constructor. No
+        // mirrored health formula or division through the central scale dial.
+        for time: TimeInterval in [0, 29.999, 30, 59.999, 60, 89.999, 90, 119.999, 120, 180] {
+            for _ in 0..<8 {
+                var profile: (health: Int, xp: Int)?
+                let before = enemies.count
+                spawnBasicMelee(elapsed: time, placement: { _ in nil }, observeBaseProfile: { profile = ($0, $1) })
+                guard let profile else { check("ordinary-profile-observed-\(time)", false); continue }
+                let expected: ClosedRange<Int> = time < 60 ? 1...1 : (time < 90 ? 2...2 : (time < 120 ? 2...3 : 3...5))
+                let node = CinderCarrierNode(health: profile.health, xpValue: profile.xp)
+                check("ordinary-profile-valid-\(time)", expected.contains(profile.health) && profile.xp == profile.health + 1 && enemies.count == before)
+                check("carrier-central-health-scaled-once-\(time)", node.health == GameConfig.Enemy.scaledHealth(profile.health) && node.maxHealth == node.health && node.xpValue == profile.xp && node.xScale == 1)
+            }
+        }
+        // Actual existing contact-handler seam, not a synthetic physics
+        // contact or native-touch claim. Carrier must use ordinary melee's
+        // elapsed progression, cooldown and invulnerability/hold guards.
+        if let (carrier, _, _) = freshPacket("contact") {
+            let savedHP = playerStats.currentHP
+            let savedElapsed = waveManager.elapsedTime
+            let savedContactIFrameTimer = invulnerableTimer
+            let savedCooldown = damageCooldownTimer
+            let ordinary = EnemyNode(health: 1, xpValue: 1)
+            for time: TimeInterval in [29.999, 30, 39.999, 40, 59.999, 60, 89.999, 90, 119.999, 120] {
+                waveManager.reset(); _ = waveManager.update(deltaTime: time)
+                gameState = .playing; invulnerableTimer = 0; damageCooldownTimer = 0
+                playerStats.currentHP = playerStats.maxHP
+                let hp = playerStats.currentHP
+                if let body = carrier.physicsBody { handlePlayerEnemyContact(enemyBody: body) }
+                else { check("carrier-contact-body-present", false) }
+                let carrierLoss = hp - playerStats.currentHP
+                let cooldown = damageCooldownTimer
+                invulnerableTimer = 0; damageCooldownTimer = 0
+                playerStats.currentHP = hp
+                if let body = ordinary.physicsBody { handlePlayerEnemyContact(enemyBody: body) }
+                else { check("ordinary-contact-body-present", false) }
+                let ordinaryLoss = hp - playerStats.currentHP
+                let raw = GameConfig.Enemy.baseMeleeDamage + Int(time / 30) * GameConfig.Enemy.meleeDamageScaling
+                check("carrier-existing-melee-contact-progression-\(time)", carrierLoss > 0 && carrierLoss == ordinaryLoss && carrierLoss == max(1, raw - playerStats.effectiveFlatDEF) && cooldown == GameConfig.Player.damageCooldown)
+            }
+            playerStats.currentHP = playerStats.maxHP; damageCooldownTimer = 0; invulnerableTimer = 1
+            let untouched = playerStats.currentHP
+            if let body = carrier.physicsBody { handlePlayerEnemyContact(enemyBody: body) }
+            check("carrier-contact-invulnerability-guard", playerStats.currentHP == untouched)
+            invulnerableTimer = 0; gameState = .paused
+            if let body = carrier.physicsBody { handlePlayerEnemyContact(enemyBody: body) }
+            check("carrier-contact-paused-guard", playerStats.currentHP == untouched)
+            gameState = .playing; invulnerableTimer = 0; damageCooldownTimer = 1
+            if let body = carrier.physicsBody { handlePlayerEnemyContact(enemyBody: body) }
+            check("carrier-contact-cooldown-guard", playerStats.currentHP == untouched)
+            playerStats.currentHP = savedHP
+            waveManager.reset(); _ = waveManager.update(deltaTime: savedElapsed)
+            invulnerableTimer = savedContactIFrameTimer; damageCooldownTimer = savedCooldown
+        }
+        // Controlled source-room placement exposes every actual destination and
+        // routing query. It is NOT claimed as completed physical traversal.
+        for connectionID in map.connections.indices {
+            let connection = map.connections[connectionID]
+            for sourceID in [connection.from, connection.to] {
+                guard let (carrier, _, _) = freshPacket("door-\(connectionID)-\(sourceID)"),
+                      let sourceRoom = map.rooms.first(where: { $0.id == sourceID }) else { continue }
+                let offsets = [CGPoint(x: -100, y: -100), CGPoint(x: 100, y: -100), CGPoint(x: 0, y: 100)]
+                for (index, id) in roomCarrierOrder.enumerated() {
+                    roomCarrierActors[id]?.position = sourceRoom.center + offsets[index]
+                }
+                check("door-owner-source-room", map.roomID(near: carrier.position) == sourceID)
+                requestRoomCarrierMigration(connection: connectionID)
+                guard let ticket = roomCarrierCommand else { check("door-command-created", false); continue }
+                check("door-warning-marker-and-full-second", worldNode.childNode(withName: "roomCarrierWarning") != nil && roomCarrierPackets.remaining(ticket) == 1)
+                let commits = roomCarrierCommitCount
+                updateRoomCarrierFixture(0.5)
+                gameState = .paused; updateRoomCarrierFixture(10)
+                check("manual-hold-keeps-warning", roomCarrierPackets.remaining(ticket) == 0.5 && roomCarrierCommitCount == commits)
+                gameState = .levelUp; updateRoomCarrierFixture(10)
+                check("upgrade-hold-keeps-warning", roomCarrierPackets.remaining(ticket) == 0.5 && roomCarrierCommitCount == commits)
+                gameState = .playing; updateRoomCarrierFixture(0.499)
+                check("no-early-commit", roomCarrierPackets.navigation(ticket) == nil && roomCarrierCommitCount == commits)
+                updateRoomCarrierFixture(0.002)
+                check("one-commit-after-active-warning", roomCarrierPackets.navigation(ticket) != nil && roomCarrierCommitCount == commits + 1)
+                check("all-live-body-clear-destinations", roomCarrierDestinations.count == 3 && roomCarrierDestinations.allSatisfy { id, goal in
+                    roomCarrierActors[id].map { map.valid(goal, radius: $0.geometryFootprintRadius) } == true
+                })
+                updateRoomCarrierFixture(0)
+                check("no-repeat-from-update", roomCarrierCommitCount == commits + 1)
+                if let firstID = roomCarrierOrder.first, let first = roomCarrierActors[firstID], let goal = roomCarrierDestinations[firstID] {
+                    first.position = goal
+                    updateRoomCarrierFixture(0)
+                    check("early-arrival-held-within-active-command", roomCarrierCommand != nil && (first as? CinderCarrierNode)?.packetNavigationTarget == first.position)
+                } else { check("early-arrival-positive-setup", false) }
+                for (id, goal) in roomCarrierDestinations { roomCarrierActors[id]?.position = goal }
+                updateRoomCarrierFixture(0)
+                check("completion-clears-only-intent", roomCarrierCommand == nil && roomCarrierPackets.packets.count == 1 && roomCarrierActors.count == 3 && worldNode.childNode(withName: "roomCarrierWarning") == nil)
+                updateRoomCarrierFixture(10)
+                check("completed-command-no-auto-reissue", roomCarrierCommand == nil && roomCarrierCommitCount == commits + 1)
+            }
+        }
+        // Actual EnemyNode chase/status and Scene sweep resolver at controlled
+        // frame steps. Spark is parked away from both rooms so existing attack
+        // commitments do not make this route-only oracle chase a moving goal.
+        for connectionID in map.connections.indices {
+            let connection = map.connections[connectionID]
+            for sourceID in [connection.from, connection.to] {
+                guard let (carrier, _, _) = freshPacket("march-\(connectionID)-\(sourceID)"),
+                      let sourceRoom = map.rooms.first(where: { $0.id == sourceID }),
+                      let destinationRoom = map.rooms.first(where: { $0.id == (connection.from == sourceID ? connection.to : connection.from) }) else { continue }
+                let midpoint = (sourceRoom.center + destinationRoom.center) * 0.5
+                guard let parked = map.rooms.max(by: { $0.center.distance(to: midpoint) < $1.center.distance(to: midpoint) }) else {
+                    check("march-distant-Spark-setup", false); continue
+                }
+                player.position = parked.center
+                let offset = GameConfig.Arena8Game.spawnAnchorOffset
+                let offsets = [CGPoint(x: -offset, y: -offset), CGPoint(x: offset, y: -offset), CGPoint(x: 0, y: offset)]
+                for (index, id) in roomCarrierOrder.enumerated() {
+                    roomCarrierActors[id]?.position = sourceRoom.center + offsets[index]
+                }
+                check("march-real-source-bodies-safe", map.roomID(near: carrier.position) == sourceID && roomCarrierActors.values.allSatisfy { map.valid($0.position, radius: $0.geometryFootprintRadius) })
+                requestRoomCarrierMigration(connection: connectionID)
+                guard roomCarrierCommand != nil else { check("march-command-positive-setup", false); continue }
+                let targets = roomCarrierDestinations
+                updateRoomCarrierFixture(1)
+                var safe = true, completed = false, bodySamples = 0
+                for _ in 0..<1500 {
+                    roomEnemyStarts = Dictionary(uniqueKeysWithValues: enemies.map { (ObjectIdentifier($0), $0.position) })
+                    updateRoomCarrierFixture(1.0 / 60)
+                    if roomCarrierCommand == nil { completed = true; break }
+                    // updateEnemies includes its single end-frame resolver.
+                    updateEnemies(1.0 / 60)
+                    for actor in roomCarrierActors.values {
+                        bodySamples += 1
+                        safe = safe && map.valid(actor.position, radius: actor.geometryFootprintRadius)
+                    }
+                    if !safe { break }
+                }
+                check("march-actual-body-frames-safe-\(connectionID)-\(sourceID)", bodySamples > 0 && safe)
+                check("march-completes-all-three-on-requested-floor-\(connectionID)-\(sourceID)", completed && roomCarrierCommitCount == 1 && targets.count == 3 && roomCarrierActors.count == 3 && targets.allSatisfy { id, goal in
+                    roomCarrierActors[id].map { $0.position.distance(to: goal) <= GameConfig.Arena8CarrierFixture.arrivalTolerance && map.valid($0.position, radius: $0.geometryFootprintRadius) } == true
+                })
+                routeSamples.append(["connection": connectionID, "source": sourceID,
+                                     "bodySamples": bodySamples, "safe": safe, "completed": completed])
+            }
+        }
+
+        if let (carrier, _, _) = freshPacket("background") {
+            requestRoomCarrierMigration()
+            if let ticket = roomCarrierCommand {
+                updateRoomCarrierFixture(0.25)
+                appDidEnterBackground(); updateRoomCarrierFixture(30)
+                check("background-handler-holds-warning", roomCarrierPackets.remaining(ticket) == 0.75)
+                appWillEnterForeground(); updateRoomCarrierFixture(0.1)
+                check("first-post-background-warning-step-has-no-catchup", roomCarrierPackets.remaining(ticket) == 0.75)
+                clearRoomCarrierCommand()
+                appDidEnterBackground(); appWillEnterForeground()
+                updateRoomCarrierFixture(0.1) // No command; consumes the obsolete gap marker.
+                requestRoomCarrierMigration()
+                if let fresh = roomCarrierCommand {
+                    updateRoomCarrierFixture(0.25)
+                    check("idle-foreground-does-not-delay-later-warning", roomCarrierPackets.remaining(fresh) == 0.75)
+                } else { check("later-background-command-setup", false) }
+            } else { check("background-command-setup", false) }
+            check("background-does-not-remove-owner", roomCarrierActors.values.contains { $0 === carrier })
+        }
+        if let (carrier, hound, keeper) = freshPacket("status") {
+            requestRoomCarrierMigration(); updateRoomCarrierFixture(1)
+            let statusActors: [EnemyNode] = [carrier, hound, keeper]
+            for actor in statusActors { actor.applyStun(0.5) }
+            updateRoomCarrierFixture(0.1)
+            check("stun-clears-navigation-not-packet", carrier.packetNavigationTarget == nil && hound.packetNavigationTarget == nil && keeper.packetNavigationTarget == nil && roomCarrierPackets.packets.count == 1)
+            let positions = [carrier.position, hound.position, keeper.position]
+            for actor in statusActors {
+                actor.chase(target: player.position, deltaTime: 0.1)
+            }
+            check("actual-stunned-node-chase-held", positions == [carrier.position, hound.position, keeper.position])
+        }
+        // Compare actual node state machines against uncommanded twins. Public
+        // commit/outcome callbacks and observed positions prove timing/aim;
+        // no private phase proxy or replacement attack model is introduced.
+        if let (_, hound, _) = freshPacket("hound-commit") {
+            let spark = map.rooms[1].center
+            player.position = spark; hound.position = spark + CGPoint(x: 80, y: 0)
+            let twin = SpurhoundNode(health: 1, xpValue: 1)
+            twin.position = hound.position; worldNode.addChild(twin)
+            var commandedCommits = 0, ordinaryCommits = 0
+            var commandedOutcomes: [String] = [], ordinaryOutcomes: [String] = []
+            hound.onLungeCommitted = { commandedCommits += 1 }
+            twin.onLungeCommitted = { ordinaryCommits += 1 }
+            hound.onLungeOutcome = { commandedOutcomes.append(String(describing: $0)) }
+            twin.onLungeOutcome = { ordinaryOutcomes.append(String(describing: $0)) }
+            _ = routeSteerTarget(for: hound, toward: spark, dt: 0)
+            _ = routeSteerTarget(for: twin, toward: spark, dt: 0)
+            hound.packetNavigationTarget = spark + CGPoint(x: 400, y: 0)
+            hound.chase(target: spark, deltaTime: 0); twin.chase(target: spark, deltaTime: 0)
+            check("hound-door-intent-does-not-replace-Spark-tell", !hound.packetNavigationSafePhase && !twin.packetNavigationSafePhase && commandedCommits == 0 && ordinaryCommits == 0)
+            let tell = GameConfig.Spurhound.tellDuration
+            hound.chase(target: spark, deltaTime: tell * 0.5)
+            twin.chase(target: spark, deltaTime: tell * 0.5)
+            check("hound-command-does-not-shorten-tell", commandedCommits == 0 && ordinaryCommits == 0)
+            hound.chase(target: spark, deltaTime: tell * 0.5 + 0.001)
+            twin.chase(target: spark, deltaTime: tell * 0.5 + 0.001)
+            let before = hound.position
+            hound.chase(target: spark, deltaTime: 0.01); twin.chase(target: spark, deltaTime: 0.01)
+            check("hound-committed-lunge-keeps-Spark-direction-and-speed", commandedCommits == 1 && ordinaryCommits == 1 && hound.position == twin.position && (hound.position - before).dot((spark - before).normalized) > 0)
+            hound.chase(target: spark, deltaTime: GameConfig.Spurhound.lungeDuration)
+            twin.chase(target: spark, deltaTime: GameConfig.Spurhound.lungeDuration)
+            check("hound-miss-enters-ordinary-recovery", commandedOutcomes == ["miss"] && commandedOutcomes == ordinaryOutcomes && !hound.packetNavigationSafePhase && !twin.packetNavigationSafePhase)
+            let recovery = GameConfig.Spurhound.recoverAfterMiss
+            let resting = hound.position
+            hound.chase(target: spark, deltaTime: recovery * 0.5)
+            twin.chase(target: spark, deltaTime: recovery * 0.5)
+            check("hound-command-does-not-cancel-recovery", hound.position == resting && twin.position == resting && !hound.packetNavigationSafePhase && !twin.packetNavigationSafePhase)
+            hound.chase(target: spark, deltaTime: recovery * 0.5 + 0.001)
+            twin.chase(target: spark, deltaTime: recovery * 0.5 + 0.001)
+            check("hound-recovery-releases-at-original-boundary", hound.packetNavigationSafePhase && twin.packetNavigationSafePhase && hound.position == twin.position)
+            twin.removeAllActions(); twin.removeFromParent()
+        }
+        if let (_, _, keeper) = freshPacket("keeper-commit") {
+            let spark = map.rooms[1].center
+            player.position = spark
+            let requested = spark + CGPoint(x: GameConfig.Linekeeper.standoff, y: 0)
+            if let anchor = findFiringAnchor(from: requested, toward: spark) {
+                keeper.position = anchor
+                let planted = keeper.position // Actual SKNode Float storage.
+                let twin = LinekeeperNode(health: 1, xpValue: 1)
+                twin.position = planted; worldNode.addChild(twin)
+                twin.resolveFiringAnchor = { [weak self] from, goal in self?.findFiringAnchor(from: from, toward: goal) }
+                var commandedShots: [CGPoint] = [], ordinaryShots: [CGPoint] = []
+                keeper.onFireProjectile = { _, direction in commandedShots.append(direction) }
+                twin.onFireProjectile = { _, direction in ordinaryShots.append(direction) }
+                _ = routeSteerTarget(for: keeper, toward: spark, dt: 0)
+                _ = routeSteerTarget(for: twin, toward: spark, dt: 0)
+                keeper.chase(target: spark, deltaTime: 0); twin.chase(target: spark, deltaTime: 0)
+                check("keeper-real-valid-anchor-enters-aim", map.valid(planted, radius: keeper.geometryFootprintRadius) && !keeper.packetNavigationSafePhase && !twin.packetNavigationSafePhase)
+                keeper.packetNavigationTarget = planted + CGPoint(x: 100, y: 100)
+                let aim = GameConfig.Linekeeper.aimDuration
+                keeper.chase(target: spark, deltaTime: aim * 0.5)
+                twin.chase(target: spark, deltaTime: aim * 0.5)
+                check("keeper-command-does-not-shorten-aim", commandedShots.isEmpty && ordinaryShots.isEmpty)
+                keeper.chase(target: spark, deltaTime: aim * 0.5 + 0.001)
+                twin.chase(target: spark, deltaTime: aim * 0.5 + 0.001)
+                let expected = (spark - planted).normalized
+                check("keeper-committed-shot-aims-at-Spark-not-door", commandedShots.count == 1 && commandedShots == ordinaryShots && commandedShots.first.map { ($0 - expected).length < 0.000001 } == true && keeper.position == planted && twin.position == planted)
+                let cooldown = GameConfig.Linekeeper.fireInterval
+                keeper.chase(target: spark, deltaTime: cooldown * 0.5)
+                twin.chase(target: spark, deltaTime: cooldown * 0.5)
+                check("keeper-command-preserves-cooldown", commandedShots.count == 1 && ordinaryShots.count == 1 && !keeper.packetNavigationSafePhase && !twin.packetNavigationSafePhase && keeper.position == planted)
+                keeper.chase(target: spark, deltaTime: cooldown * 0.5 + 0.001)
+                twin.chase(target: spark, deltaTime: cooldown * 0.5 + 0.001)
+                check("keeper-cooldown-releases-at-original-boundary", keeper.packetNavigationSafePhase && twin.packetNavigationSafePhase && commandedShots.count == 1 && ordinaryShots.count == 1)
+                twin.removeAllActions(); twin.removeFromParent()
+            } else { check("keeper-valid-actual-anchor-positive-setup", false) }
+        }
+        for kind in ["freeze", "fear", "trap", "launch"] {
+            if let (carrier, hound, keeper) = freshPacket("forced-" + kind) {
+                requestRoomCarrierMigration(); updateRoomCarrierFixture(1)
+                let actors: [EnemyNode] = [carrier, hound, keeper]
+                let savedRepulse = playerStats.repulseTier
+                for actor in actors {
+                    switch kind {
+                    case "freeze": actor.applyFreeze(1)
+                    case "fear": check("real-fear-positive-setup", actor.tryFear(duration: 1))
+                    case "trap": check("real-trap-positive-setup", actor.captureInVoid(wellID: 777, wellRemaining: 1, singularity: false, tuning: GameConfig.VoidTree.trapTuning))
+                    default: playerStats.repulseTier = 3; applyRepulse(to: actor)
+                    }
+                }
+                updateRoomCarrierFixture(0.1)
+                check("forced-control-clears-only-navigation-" + kind, carrier.packetNavigationTarget == nil && hound.packetNavigationTarget == nil && keeper.packetNavigationTarget == nil && roomCarrierPackets.packets.count == 1)
+                check("actual-control-remains-owned-by-original-system-" + kind, actors.allSatisfy { actor in
+                    switch kind {
+                    case "freeze": return actor.isFrozen
+                    case "fear": return actor.isFeared
+                    case "trap": return actor.isVoidTrapped
+                    default: return repulseFlights[ObjectIdentifier(actor)] != nil
+                    }
+                })
+                playerStats.repulseTier = savedRepulse
+            }
+        }
+
+        // Lethal API calls use the actual death/credit chokepoint. `.sweep`
+        // intentionally gives its existing immediate XP-only behavior; real
+        // ordinary projectile/deferred-primary proof remains a separate gate.
+        if let (carrier, _, _) = freshPacket("owner-death") {
+            requestRoomCarrierMigration(); updateRoomCarrierFixture(1)
+            let survivors = roomCarrierActors.values.filter { $0 !== carrier }
+            let killed = carrier.takeDamage(carrier.health)
+            check("owner-actual-lethal-setup", killed && carrier.isDying)
+            if killed { onEnemyKilled(at: carrier.position, xpValue: carrier.xpValue, enemy: carrier, source: .sweep) }
+            check("owner-loss-releases-existing-escorts", roomCarrierPackets.packets.isEmpty && roomCarrierCommand == nil && survivors.count == 2 && survivors.allSatisfy { survivor in survivor.parent != nil && enemies.contains(where: { $0 === survivor }) })
+            let before = enemies.count
+            spawnRoomCarrierPacket()
+            check("released-escorts-block-duplicate-group", enemies.count == before && roomCarrierActors.count == 2)
+            let xpBeforeDuplicate = xpOrbs.reduce(0) { $0 + $1.xpValue }
+            onEnemyKilled(at: carrier.position, xpValue: carrier.xpValue, enemy: carrier, source: .sweep)
+            check("duplicate-owner-kill-does-not-pay", xpOrbs.reduce(0) { $0 + $1.xpValue } == xpBeforeDuplicate)
+            if let orb = xpOrbs.first, let body = orb.physicsBody {
+                let beforeXP = player.currentXP, value = orb.xpValue
+                gameState = .paused // No automatic level-screen dispatch in this handler seam.
+                handleXPCollection(orbBody: body)
+                check("owned-XP-collection-once", player.currentXP == beforeXP + value && !xpOrbs.contains(where: { $0 === orb }))
+                handleXPCollection(orbBody: body)
+                check("duplicate-XP-body-no-second-credit", player.currentXP == beforeXP + value)
+                gameState = .playing
+            } else { check("XP-collection-owned-positive-setup", false) }
+        }
+        if let (carrier, _, _) = freshPacket("same-run-revive") {
+            // The real revive handler clears enemies inside100; this fixture's
+            // actual spawn clearance puts the group outside that bubble.
+            check("revive-survivor-setup-outside-bubble", roomCarrierActors.values.allSatisfy { $0.position.distance(to: player.position) > 100 })
+            let identities = Set(roomCarrierActors.keys)
+            requestRoomCarrierMigration(); playerStats.currentHP = 0; playerDied()
+            check("player-death-cancels-intent-keeps-registry", roomCarrierCommand == nil && Set(roomCarrierActors.keys) == identities && carrier.parent != nil)
+            gameState = .reviving; executeRevive(); resumeFromRevive()
+            check("actual-revive-resumes-with-group", gameState == .playing && Set(roomCarrierActors.keys) == identities && enemies.count == 3)
+            spawnRoomCarrierPacket()
+            check("same-run-revive-rejects-extra-packet", enemies.count == 3 && roomCarrierPackets.packets.count == 1)
+        }
+        clearCase()
+        spawnRoomCarrierPacket()
+        let oldMembership = roomCarrierMembership.values.first
+        requestRoomCarrierMigration()
+        let oldCommand = roomCarrierCommand
+        restartGame()
+        check("actual-restart-clears-group-and-marker", roomCarrierActors.isEmpty && roomCarrierPackets.packets.isEmpty && roomCarrierCommand == nil && enemies.isEmpty && worldNode.childNode(withName: "roomCarrierWarning") == nil)
+        spawnRoomCarrierPacket()
+        let newIDs = Set(roomCarrierActors.keys)
+        if let oldMembership { _ = roomCarrierPackets.remove(oldMembership) } else { check("stale-membership-positive-setup", false) }
+        if let oldCommand {
+            check("old-command-invalid-after-restart", roomCarrierPackets.navigation(oldCommand) == nil && roomCarrierPackets.remaining(oldCommand) == nil)
+        } else { check("stale-command-positive-setup", false) }
+        check("stale-membership-cannot-remove-new-group", Set(roomCarrierActors.keys) == newIDs && roomCarrierPackets.packets.count == 1 && roomCarrierPackets.packets.values.first?.members == newIDs)
+        let now = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        check("standard-persistent-profile-unchanged", NSDictionary(dictionary: savedProfile).isEqual(to: now))
+        returnToTitle()
+        check("actual-title-handler-clears-ownership", roomCarrierActors.isEmpty && roomCarrierPackets.packets.isEmpty && roomCarrierCommand == nil && worldNode.childNode(withName: "roomCarrierWarning") == nil)
+        report()
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// Explicit proof setup, followed by the real frame loop, auto-aim gun,
+    /// physics/contact pipeline and delayed primary XP. No direct kill/credit.
+    private func runRoomCarrierProjectileChecks() {
+        guard roomCarrierFixtureEnabled, let map = debugRoomIntegration else { return }
+        roomCarrierChecksRunning = false
+        gameState = .playing; isPaused = false; physicsWorld.speed = 1
+        roomCarrierFireEnabled = true
+        spawnRoomCarrierPacket()
+        guard let carrier = roomCarrierActors.values.compactMap({ $0 as? CinderCarrierNode }).first,
+              let distant = map.rooms.max(by: {
+                  $0.center.distance(to: player.position) < $1.center.distance(to: player.position)
+              }) else { return }
+        let position = player.position + CGPoint(x: 80, y: 0)
+        guard map.valid(position, radius: carrier.geometryFootprintRadius) else { return }
+        carrier.position = position
+        var index = 0
+        for actor in roomCarrierActors.values where actor !== carrier {
+            actor.position = distant.center + CGPoint(x: index == 0 ? -80 : 80, y: 0)
+            index += 1
+        }
+        let generation = roomCarrierPackets.generation
+        let initialXP = player.currentXP, expectedXP = carrier.xpValue
+        let initialOwnedXP = xpOrbs.reduce(0) { $0 + $1.xpValue }
+        let initialKills = killCount, initialVolleys = combatLedger.gunVolleys
+        let profile = UserDefaults.standard.dictionaryRepresentation().filter {
+            $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")
+        }
+        var observedPositiveCredit = false
+        var settle = 0
+        var framesObserved = 0
+        func finish(_ completed: Bool) {
+            var checks: [[String: Any]] = []
+            func check(_ name: String, _ pass: Bool) { checks.append(["id": name, "pass": pass]) }
+            check("actual-frame-autoattack-fired", combatLedger.gunVolleys > initialVolleys)
+            check("actual-projectile-killed-owned-carrier", carrier.isDying && carrier.killCredited && killCount == initialKills + 1)
+            let remainingOwnedXP = xpOrbs.reduce(0) { $0 + $1.xpValue }
+            check("clean-real-primary-reward-baseline", initialOwnedXP == 0)
+            check("real-primary-XP-collected-once", completed && observedPositiveCredit && initialOwnedXP == 0 && player.currentXP == initialXP + expectedXP && remainingOwnedXP == 0)
+            check("owner-death-released-surviving-escorts", roomCarrierPackets.packets.isEmpty && roomCarrierCommand == nil && roomCarrierActors.count == 2 && roomCarrierActors.values.allSatisfy { !$0.isDying && $0.parent != nil })
+            let now = UserDefaults.standard.dictionaryRepresentation().filter {
+                $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")
+            }
+            check("frame-proof-profile-unchanged", NSDictionary(dictionary: profile).isEqual(to: now))
+            if gameState == .playing { gameState = .paused }
+            physicsWorld.speed = 0
+            let report: [String: Any] = [
+                "passed": checks.filter { $0["pass"] as? Bool == true }.count,
+                "failed": checks.filter { $0["pass"] as? Bool == false }.count,
+                "checks": checks, "pollSamples": framesObserved,
+                "expectedXP": expectedXP, "actualXPDelta": player.currentXP - initialXP,
+                "initialOwnedXP": initialOwnedXP, "remainingOwnedXP": remainingOwnedXP,
+                "endState": String(describing: gameState),
+                "scope": "Real frame autoattack, physics/contact kill and delayed primary XP; explicit initial actor placement and optional Spark-to-orb setup, no native-input/ad/performance claim"
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]),
+               let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                try? data.write(to: directory.appendingPathComponent("arena8-carrier-projectile-checks.json"), options: .atomic)
+            }
+        }
+        func observe(_ attempts: Int) {
+            guard roomCarrierPackets.generation == generation, view?.scene === self else { return }
+            framesObserved += 1
+            let owned = xpOrbs.reduce(0) { $0 + $1.xpValue }
+            if carrier.killCredited && player.currentXP - initialXP + owned == expectedXP {
+                observedPositiveCredit = true
+                if let orb = xpOrbs.first { player.position = orb.position }
+            }
+            if observedPositiveCredit && initialOwnedXP == 0 && owned == 0 && player.currentXP == initialXP + expectedXP {
+                settle += 1
+                if settle >= 3 { finish(true); return }
+            } else { settle = 0 }
+            if attempts == 0 || gameState == .dead { finish(false); return }
+            run(SKAction.sequence([.wait(forDuration: 0.05), .run { observe(attempts - 1) }]))
+        }
+        observe(120)
     }
 }
 #endif

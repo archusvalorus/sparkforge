@@ -24,6 +24,13 @@ final class SpurhoundNode: EnemyNode {
     var onLungeOutcome: ((LungeOutcome) -> Void)?
     var onLungeCommitted: (() -> Void)?
 
+    #if DEBUG
+    /// Optional room-order waypoint, never a replacement combat target.
+    /// The scene clears it during forced motion/status holds and on teardown.
+    var packetNavigationTarget: CGPoint?
+    var packetNavigationSafePhase: Bool { phase == .hunt && !isStunned && !isFrozen }
+    #endif
+
     private var phase: Phase = .hunt
     private var phaseTimer: TimeInterval = 0
     private var lungeCooldown: TimeInterval = 0
@@ -107,7 +114,14 @@ final class SpurhoundNode: EnemyNode {
             }
             let factor = C.huntSpeedFactor + (C.sprintSpeedFactor - C.huntSpeedFactor) * sprint
             let slow = min(currentSlow + globalSlow, 0.8)
-            let dir = (target - position).normalized
+            #if DEBUG
+            let movementGoal = packetNavigationTarget ?? target
+            let attackGoal = packetNavigationTarget == nil ? target : goalPosition
+            #else
+            let movementGoal = target
+            let attackGoal = target
+            #endif
+            let dir = (movementGoal - position).normalized
             position += dir * GameConfig.Enemy.baseSpeed * factor * (1 - slow) * CGFloat(dt)
             aim(dir)
             exhaust.alpha = 0.15 + 0.5 * sprint
@@ -116,8 +130,8 @@ final class SpurhoundNode: EnemyNode {
             // the real player position whenever we're not occluded (the steer
             // pass only substitutes a node while the line is blocked).
             if !isOccludedFromGoal, lungeCooldown <= 0,
-               position.distance(to: target) < C.lungeRange {
-                enterTell(toward: target)
+               position.distance(to: attackGoal) < C.lungeRange {
+                enterTell(toward: attackGoal)
             }
 
         case .tell:
