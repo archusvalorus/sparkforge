@@ -14,8 +14,8 @@ faults=[
  ('held_commit','guard !held, var command = current(ticket), !command.committed,','guard true, var command = current(ticket), !command.committed,','held ready cannot commit'),
  ('repeat_commit','guard !held, var command = current(ticket), !command.committed,','guard !held, var command = current(ticket),','commit only once'),
  ('stale_membership','packet.incarnation == ticket.incarnation else','true else','regrouped escort rejects old association callback'),
- ('commit_live','packet.owner == ticket.source, packet.members.isSubset(of: live),','packet.owner == ticket.source,','live source required again'),
- ('commit_geometry','packet.owner == ticket.source, packet.members.isSubset(of: live),\n              destinationValid() else','packet.owner == ticket.source, packet.members.isSubset(of: live) else','geometry required again'),
+ ('commit_live','live.contains(ticket.source),\n              (ticket.sourceRole == .carrier ? packet.owner == ticket.source : authorizedSignaler == ticket.source && !packet.members.contains(ticket.source)),\n              packet.members.isSubset(of: live),','(ticket.sourceRole == .carrier ? packet.owner == ticket.source : authorizedSignaler == ticket.source && !packet.members.contains(ticket.source)),','live source required again'),
+ ('commit_geometry','packet.members.isSubset(of: live),\n              destinationValid() else','packet.members.isSubset(of: live) else','geometry required again'),
 ]
 results=[]
 for name,before,after,expected in faults:

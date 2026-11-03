@@ -1,7 +1,8 @@
-// Inert run-owned ownership/command core. No spawning, movement, attacks or saves.
+// Run-owned ownership/command ledger. No spawning, movement, attacks or saves.
 import Foundation
 
 final class Arena8PacketCommands {
+    enum SourceRole: Equatable { case carrier, signaler }
     struct Packet: Equatable {
         let id: UUID
         let owner: UUID
@@ -21,6 +22,7 @@ final class Arena8PacketCommands {
         let packetRevision: UUID
         let commandID: UUID
         let source: UUID
+        let sourceRole: SourceRole
         let connectionID: Int
     }
     struct Navigation: Equatable {
@@ -49,17 +51,20 @@ final class Arena8PacketCommands {
         return true
     }
 
-    /// The only source supported here is the owning carrier. No signaler priority is chosen.
+    /// The Scene authorizes a same-room Signaler at prepare AND commit.
+    /// Pending/committed commands share one slot: the first valid claim wins.
     func prepare(packetID: UUID, expectedRevision: UUID, source: UUID,
-                 connectionID: Int, telegraphDuration: TimeInterval,
+                 authorizedSignaler: UUID? = nil, connectionID: Int, telegraphDuration: TimeInterval,
                  live: Set<UUID>, destinationValid: () -> Bool) -> Ticket? {
         guard let packet = packets[packetID], packet.revision == expectedRevision,
-              packet.owner == source, commands[packetID] == nil,
+              commands[packetID] == nil, live.contains(source),
+              (packet.owner == source || (authorizedSignaler == source && !packet.members.contains(source))),
               telegraphDuration.isFinite, telegraphDuration >= 0,
               packet.members.isSubset(of: live), destinationValid() else { return nil }
         let ticket = Ticket(generation: generation, packetID: packetID,
                             packetRevision: packet.revision, commandID: UUID(),
-                            source: source, connectionID: connectionID)
+                            source: source, sourceRole: packet.owner == source ? .carrier : .signaler,
+                            connectionID: connectionID)
         commands[packetID] = Command(ticket: ticket, remaining: telegraphDuration, committed: false)
         return ticket
     }
@@ -77,11 +82,13 @@ final class Arena8PacketCommands {
 
     /// No automatic commit. Recheck the live set and actual body-clear destination here.
     func commit(_ ticket: Ticket, held: Bool, live: Set<UUID>,
-                destinationValid: () -> Bool) -> Navigation? {
+                authorizedSignaler: UUID? = nil, destinationValid: () -> Bool) -> Navigation? {
         guard !held, var command = current(ticket), !command.committed,
               command.remaining == 0, let packet = packets[ticket.packetID],
               packet.revision == ticket.packetRevision,
-              packet.owner == ticket.source, packet.members.isSubset(of: live),
+              live.contains(ticket.source),
+              (ticket.sourceRole == .carrier ? packet.owner == ticket.source : authorizedSignaler == ticket.source && !packet.members.contains(ticket.source)),
+              packet.members.isSubset(of: live),
               destinationValid() else { return nil }
         command.committed = true
         commands[ticket.packetID] = command
@@ -141,7 +148,8 @@ final class Arena8PacketCommands {
 
     private func current(_ ticket: Ticket) -> Command? {
         guard ticket.generation == generation, let packet = packets[ticket.packetID],
-              packet.owner == ticket.source, let command = commands[ticket.packetID],
+              (ticket.sourceRole == .carrier ? packet.owner == ticket.source : !packet.members.contains(ticket.source)),
+              let command = commands[ticket.packetID],
               command.ticket == ticket else { return nil }
         return command
     }
