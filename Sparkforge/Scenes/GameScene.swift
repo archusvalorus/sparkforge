@@ -63,6 +63,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomSignalerAcceptedCount = 0
     private var roomSignalerCommitCount = 0
     private var roomSignalerLastResult = "READY"
+    private var roomMixedClock = Arena8PreviewSpawnClock(profile: .baseline)
+    private var roomMixedOrdinary = (startup: 0, timed: 0, placed: 0, thinned: 0, blocked: 0)
+    private var roomMixedManual = (packetAttempts: 0, packets: 0, signalerAttempts: 0, signalers: 0)
+    private var roomMixedSuppressed = 0
+    private var roomMixedLastWaveElapsed: TimeInterval?
+
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
     private var roomInputLastTime: TimeInterval = -1
     private var roomInputSamples: [[String: Any]] = []
@@ -674,7 +680,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #if DEBUG
         recordRoomTitleEntry()
         if debugRoomIntegration != nil {
-            if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") {
+            if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") && !roomMixedPressureRequested {
                 _ = waveManager.update(deltaTime: 120) // explicit native late-pressure fixture
             }
             camera?.position = player.position
@@ -687,13 +693,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             label.position = CGPoint(x: 0, y: -size.height / 2 + 32)
             label.zPosition = 300; camera?.addChild(label)
+            resetRoomMixedPressure()
             spawnRoomFixtureEnemy()
             if roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
-            if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") { pauseGame() }
+            if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") && !roomMixedPressureRequested { pauseGame() }
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if roomSignalerFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-signaler-projectile-checks") {
+            if roomMixedPressureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomMixedPressureChecks() }
+            } else if roomSignalerFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-signaler-projectile-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomSignalerProjectileChecks() }
             } else if roomSignalerFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-signaler-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomSignalerChecks() }
@@ -5911,7 +5920,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         updateGuardStance(dt)    // v2.1 A5 — Fortify + Grounded Core read THIS frame's combat
         updateRedSmile(dt)       // v2.1 A4c — before the gun, which it pauses
         #if DEBUG
-        if !(debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting"))
+        if !(debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting") && !roomMixedPressureRequested)
             && !(debugArena9Traversal && ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") && !arena9FixtureFireEnabled)
             && !(roomCarrierFixtureEnabled && !roomCarrierFireEnabled) { updateAutoAttack(dt) }
         #else
@@ -5989,6 +5998,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #if DEBUG
         let roomFixture = debugRoomIntegration != nil
         if debugArena9Traversal { updateArena9Traversal() }
+        else if roomMixedPressureEnabled { updateRoomMixedPressure(dt) }
         else if roomFixture && !eventHorizonVoided && !falseEndingActive && spawnEvent.shouldSpawnEnemy { spawnRoomFixtureEnemy() }
         #else
         let roomFixture = false
@@ -15974,6 +15984,7 @@ extension GameScene {
     }
     private var roomsBadgeText: String {
         guard let map = debugRoomIntegration else { return "" }
+        if roomMixedPressureRequested && !roomMixedPressureEnabled { return "ARENA8 LAB FLAG CONFLICT / MIXED OFF" }
         if debugArena9Traversal {
             let control = ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") ? " • SWIFT\(upgradeManager.tier(of: "neutral_1")) / HP1000" : ""
             return "A9 LAB • FOES 1HP/1XP • RETREAT • MEMORY" + control
@@ -16002,6 +16013,8 @@ extension GameScene {
         return safe
     }
     private func spawnRoomFixtureEnemy() {
+        if roomMixedPressureEnabled { spawnRoomMixedOrdinary(startup: true); return }
+        if roomMixedPressureRequested { return } // Conflicting labs never enable a hidden swarm.
         if debugArena9Traversal || roomCarrierFixtureEnabled { return }
         guard let rooms = debugRoomIntegration else { return }
         // Explicit native geometry fixture only: no encounters during the
@@ -16307,6 +16320,27 @@ extension GameScene {
                     let point = view.convert(node.convert(CGPoint.zero, to: self), from: self)
                     sample[name + "X"] = Double(point.x); sample[name + "Y"] = Double(point.y)
                 }
+            }
+        }
+        if roomMixedPressureEnabled {
+            for (key, value) in roomMixedTelemetry { sample[key] = value }
+            if gameState == .levelUp, let view {
+                sample["mixedNeedsStat"] = levelNeedsStat
+                sample["mixedCardChoices"] = displayedCards.filter { $0.xScale > 0.1 }.map { node in
+                    let point = view.convert(node.convert(CGPoint.zero, to: self), from: self)
+                    return ["id": node.card.id, "tag": String(describing: node.card.tag), "x": Double(point.x), "y": Double(point.y)] as [String: Any]
+                }
+                if let row = levelUpOverlay.childNode(withName: "statRow"), levelNeedsStat {
+                    sample["mixedStatChoices"] = PlayerStats.StatKind.allCases.compactMap { kind -> [String: Any]? in
+                        guard let chip = row.childNode(withName: "statChip_\(kind.rawValue)") else { return nil }
+                        let point = view.convert(chip.convert(CGPoint.zero, to: self), from: self)
+                        return ["id": kind.rawValue, "x": Double(point.x), "y": Double(point.y)]
+                    }
+                }
+            }
+            sample["mixedOwnedCards"] = upgradeManager.allCards.compactMap { card -> [String: Any]? in
+                let tier = upgradeManager.tier(of: card.id)
+                return tier > 0 ? ["id": card.id, "tier": tier] : nil
             }
         }
         if roomSignalerFixtureEnabled {
@@ -19396,7 +19430,8 @@ extension GameScene {
         debugRoomIntegration?.isSixRoom == true && !debugArena9Traversal
             && GameRunPreferences.isIsolated
             && (ProcessInfo.processInfo.arguments.contains("--arena8-carrier-fixture")
-                || ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture"))
+                || ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture")
+                || roomMixedPressureEnabled)
     }
 
     private func setRoomCarrierNavigation(_ actor: EnemyNode, to point: CGPoint?) {
@@ -19410,6 +19445,8 @@ extension GameScene {
         for name in ["roomCarrierSpawn", "roomCarrierMigrate", "roomCarrierFire", "roomCarrierStatus", "roomSignalerSpawn", "roomSignalerSignal"] {
             camera.childNode(withName: name)?.removeFromParent()
         }
+        camera.childNode(withName: "roomMixedStatus")?.removeFromParent()
+        camera.childNode(withName: "roomMixedLive")?.removeFromParent()
         for (name, text, x, y) in [
             ("roomCarrierSpawn", "SPAWN PACKET", CGFloat(-95), CGFloat(80)),
             ("roomCarrierMigrate", "MIGRATE", CGFloat(95), CGFloat(80)),
@@ -19431,6 +19468,17 @@ extension GameScene {
             }
         }
         roomCarrierFireEnabled = true
+        if roomMixedPressureEnabled {
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.name = "roomMixedStatus"; label.fontSize = 9; label.fontColor = .yellow
+            label.position = CGPoint(x: 0, y: -size.height / 2 + 220); label.zPosition = 300
+            camera.addChild(label)
+            let live = SKLabelNode(fontNamed: "Menlo-Bold")
+            live.name = "roomMixedLive"; live.fontSize = 9; live.fontColor = .yellow
+            live.position = CGPoint(x: 0, y: -size.height / 2 + 240); live.zPosition = 300
+            camera.addChild(live); refreshRoomMixedHUD()
+            (camera.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIXED / SPECIAL ACTORS MANUAL"
+        }
     }
 
     private func clearRoomCarrierCommand() {
@@ -19443,6 +19491,7 @@ extension GameScene {
 
     private func resetRoomCarrierFixture() {
         clearRoomCarrierCommand()
+        resetRoomMixedPressure()
         roomCarrierPackets.reset()
         roomCarrierActors.removeAll(); roomCarrierIDs.removeAll()
         roomCarrierMembership.removeAll(); roomCarrierOrder.removeAll()
@@ -19484,6 +19533,7 @@ extension GameScene {
         for actor in Array(roomCarrierActors.values) where actor.isDying || actor.parent == nil {
             removeRoomCarrierActor(actor)
         }
+        if roomMixedPressureEnabled { roomMixedManual.packetAttempts += 1 }
         // A controlled group must be cleared before another is injected. Owner
         // death releases escorts, but does not quietly despawn or reward them.
         guard roomCarrierActors.isEmpty,
@@ -19523,11 +19573,17 @@ extension GameScene {
             var chosen: [CGPoint] = []
             for actor in actors {
                 guard let point = map.spawn(candidates: candidates.filter { point in
+                    if roomMixedPressureEnabled {
+                        guard roomMixedPositionClear(point, radius: actor.geometryFootprintRadius) else { return false }
+                        return !zip(chosen, actors.prefix(chosen.count)).contains { previous, node in
+                            roomMixedStored(previous).distance(to: roomMixedStored(point)) < node.geometryFootprintRadius + actor.geometryFootprintRadius
+                        }
+                    }
                     guard roomSignalerFixtureEnabled, let signaler = roomSignaler, !signaler.isDying else { return true }
                     return point.distance(to: signaler.position) >= actor.geometryFootprintRadius + signaler.geometryFootprintRadius
                 }, radius: actor.geometryFootprintRadius,
                     avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { break }
-                chosen.append(point)
+                chosen.append(roomMixedPressureEnabled ? roomMixedStored(point) : point)
                 candidates.removeAll { $0 == point }
             }
             if chosen.count == actors.count { positions = chosen; break }
@@ -19545,6 +19601,7 @@ extension GameScene {
             enemies.append(actor); worldNode.addChild(actor)
         }
         roomCarrierOrder = ids; roomCarrierPacketID = packetID
+        if roomMixedPressureEnabled { roomMixedManual.packets += 1; refreshRoomMixedHUD() }
         (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "PACKET READY / MANUAL MIGRATION"
     }
 
@@ -19597,6 +19654,7 @@ extension GameScene {
     private func updateRoomCarrierFixture(_ dt: TimeInterval) {
         guard roomCarrierFixtureEnabled, dt.isFinite, dt >= 0,
               let map = debugRoomIntegration else { return }
+        if roomMixedPressureEnabled { refreshRoomMixedHUD() }
         if let signaler = roomSignaler,
            signaler.isDying || signaler.parent == nil || !enemies.contains(where: { $0 === signaler }) {
             removeRoomCarrierActor(signaler)
@@ -20553,7 +20611,7 @@ extension GameScene {
 #if DEBUG
 extension GameScene {
     private var roomSignalerFixtureEnabled: Bool {
-        roomCarrierFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture")
+        roomCarrierFixtureEnabled && (ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture") || roomMixedPressureEnabled)
     }
     private func roomSignalerStrictRoom(_ point: CGPoint, map: Arena8GameMap) -> Int? {
         map.rooms.first { point.x > $0.rect.minX && point.x < $0.rect.maxX
@@ -20581,6 +20639,7 @@ extension GameScene {
            source.isDying || source.parent == nil || !enemies.contains(where: { $0 === source }) {
             removeRoomCarrierActor(source)
         }
+        if roomMixedPressureEnabled { roomMixedManual.signalerAttempts += 1 }
         guard roomSignaler == nil else { return }
         var profile: (health: Int, xp: Int)?
         spawnBasicMelee(elapsed: waveManager.elapsedTime, placement: { _ in nil }, observeBaseProfile: { profile = ($0, $1) })
@@ -20592,14 +20651,18 @@ extension GameScene {
         guard let room = map.rooms.first(where: { $0.id == preferred }) else { return }
         let distance = GameConfig.Arena8Game.spawnClearance + source.geometryFootprintRadius
         let candidates = [CGPoint(x: -distance, y: 0), CGPoint(x: distance, y: 0), CGPoint(x: 0, y: distance), CGPoint(x: 0, y: -distance)].map { room.center + $0 }
-            .filter { point in !enemies.contains { !$0.isDying && $0.position.distance(to: point) < $0.geometryFootprintRadius + source.geometryFootprintRadius } }
+            .filter { point in
+                if roomMixedPressureEnabled { return roomMixedPositionClear(point, radius: source.geometryFootprintRadius) }
+                return !enemies.contains { !$0.isDying && $0.position.distance(to: point) < $0.geometryFootprintRadius + source.geometryFootprintRadius }
+            }
         guard let point = map.spawn(candidates: candidates, radius: source.geometryFootprintRadius,
                                    avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else {
             roomSignalerLastResult = "NO SAFE SOURCE FLOOR"; return
         }
-        source.position = point; source.name = "arena8Signaler"
+        source.position = roomMixedPressureEnabled ? roomMixedStored(point) : point; source.name = "arena8Signaler"
         roomSignaler = source; roomSignalerID = UUID()
         enemies.append(source); worldNode.addChild(source)
+        if roomMixedPressureEnabled { roomMixedManual.signalers += 1; refreshRoomMixedHUD() }
         roomSignalerLastResult = "SOURCE READY / SAME ROOM IDLE ONLY"
         (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = roomSignalerLastResult
     }
@@ -21051,6 +21114,372 @@ extension GameScene {
             run(SKAction.sequence([.wait(forDuration: 0.05), .run { observe(attempts - 1) }]))
         }
         observe(120)
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private var roomMixedPressureRequested: Bool { ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure") }
+    private var roomMixedPressureEnabled: Bool {
+        Arena8MixedPressureMode.enabled(arguments: ProcessInfo.processInfo.arguments,
+            sixRoom: debugRoomIntegration?.isSixRoom == true,
+            isolated: GameRunPreferences.isIsolated, arena9: debugArena9Traversal)
+    }
+    private var roomMixedProfile: Arena8PreviewSpawnClock.Profile {
+        Arena8MixedPressureMode.profile(arguments: ProcessInfo.processInfo.arguments)
+    }
+    private func resetRoomMixedPressure() {
+        roomMixedClock = Arena8PreviewSpawnClock(profile: roomMixedProfile)
+        roomMixedOrdinary = (0, 0, 0, 0, 0)
+        roomMixedManual = (0, 0, 0, 0)
+        roomMixedSuppressed = 0
+        roomMixedLastWaveElapsed = nil
+    }
+    /// Use the exact Float-stored root and current fully scaled enemy bodies.
+    /// No extra spacing dial, across-wall fallback or crowd-clearing side effect.
+    private func roomMixedStored(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: CGFloat(Float(point.x)), y: CGFloat(Float(point.y)))
+    }
+    private func roomMixedPositionClear(_ point: CGPoint, radius: CGFloat) -> Bool {
+        guard let map = debugRoomIntegration else { return false }
+        let stored = roomMixedStored(point)
+        return map.valid(stored, radius: radius)
+            && stored.distance(to: player.position) >= GameConfig.Arena8Game.spawnClearance + radius
+            && !enemies.contains { !$0.isDying && $0.parent != nil
+                && $0.position.distance(to: stored) < $0.geometryFootprintRadius + radius }
+    }
+    private func roomMixedOrdinaryPosition(for enemy: EnemyNode) -> CGPoint? {
+        guard let map = debugRoomIntegration else { return nil }
+        let points = roomSpawnCandidates
+        guard !points.isEmpty else { return nil }
+        let offset = roomSpawnIndex % points.count
+        let ordered = (Array(points[offset...]) + Array(points[..<offset])).map { roomMixedStored($0) }
+            .filter { roomMixedPositionClear($0, radius: enemy.geometryFootprintRadius) }
+        guard let point = map.spawn(candidates: ordered, radius: enemy.geometryFootprintRadius,
+                                   avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { return nil }
+        roomSpawnIndex += 1
+        return roomMixedStored(point)
+    }
+    private func spawnRoomMixedOrdinary(startup: Bool) {
+        guard roomMixedPressureEnabled, gameState == .playing else { return }
+        if startup {
+            // Scene construction may occur during Title's paused transition.
+            // Preserve the existing single initial attempt, never duplicate it.
+            guard roomMixedOrdinary.startup == 0 else { return }
+            roomMixedOrdinary.startup += 1
+        } else {
+            guard !samuraiBackgroundHold, !isPaused else { return }
+            roomMixedOrdinary.timed += 1
+        }
+        let before = enemies.count
+        var placementRequested = false
+        // Real existing composition/constructors; no extra RNG draws or mirrored stats.
+        spawnOrdinaryEnemy(elapsed: waveManager.elapsedTime, placement: { [weak self] enemy in
+            placementRequested = true
+            return self?.roomMixedOrdinaryPosition(for: enemy)
+        })
+        if enemies.count > before { roomMixedOrdinary.placed += 1 }
+        else if placementRequested { roomMixedOrdinary.blocked += 1 }
+        else { roomMixedOrdinary.thinned += 1 }
+        refreshRoomMixedHUD()
+    }
+    private func updateRoomMixedPressure(_ dt: TimeInterval) {
+        guard roomMixedPressureEnabled else { return }
+        let held = gameState != .playing || samuraiBackgroundHold || isPaused
+        guard !held, dt.isFinite, dt >= 0 else { return }
+        let elapsed = waveManager.elapsedTime
+        guard elapsed.isFinite, roomMixedLastWaveElapsed != elapsed else { return }
+        roomMixedLastWaveElapsed = elapsed
+        // WaveManager was already advanced exactly once using real game dt.
+        // Consume this one preview emission even when an ability suppresses it.
+        if roomMixedClock.advance(dt: dt, baseInterval: waveManager.currentSpawnInterval, held: held) {
+            if eventHorizonVoided || falseEndingActive { roomMixedSuppressed += 1 }
+            else { spawnRoomMixedOrdinary(startup: false) }
+        }
+        refreshRoomMixedHUD()
+    }
+    private func refreshRoomMixedHUD() {
+        guard roomMixedPressureEnabled, let label = camera?.childNode(withName: "roomMixedStatus") as? SKLabelNode else { return }
+        let interval = roomMixedClock.interval(base: waveManager.currentSpawnInterval) ?? 0
+        let attempts = roomMixedOrdinary.startup + roomMixedOrdinary.timed
+        let text = "\(roomMixedClock.profile.label) i\(String(format: "%.2f", interval)) A\(attempts) P\(roomMixedOrdinary.placed) T\(roomMixedOrdinary.thinned) B\(roomMixedOrdinary.blocked) Q\(roomMixedManual.packets) S\(roomMixedManual.signalers)"
+        if label.text != text { label.text = text }
+        if label.frame.width > size.width - 20 { label.fontSize *= (size.width - 20) / label.frame.width }
+        if let row = camera?.childNode(withName: "roomMixedLive") as? SKLabelNode {
+            let counts = roomMixedLiveCounts(live: roomMixedLiveActors)
+            let value = "t\(String(format: "%.1f", waveManager.elapsedTime)) LIVE a\(counts.ambient) p\(counts.packet) s\(counts.signaler) SUP\(roomMixedSuppressed)"
+            if row.text != value { row.text = value }
+            if row.frame.width > size.width - 20 { row.fontSize *= (size.width - 20) / row.frame.width }
+        }
+    }
+    private var roomMixedLiveActors: [EnemyNode] { enemies.filter { !$0.isDying && $0.parent != nil } }
+    private func roomMixedLiveCounts(live: [EnemyNode]) -> (ambient: Int, packet: Int, signaler: Int) {
+        let ids = Set(roomCarrierActors.values.map { ObjectIdentifier($0) })
+        let packet = live.filter { ids.contains(ObjectIdentifier($0)) }.count
+        let signaler = live.contains { $0 === roomSignaler } ? 1 : 0
+        return (live.count - packet - signaler, packet, signaler)
+    }
+    private var roomMixedTelemetry: [String: Any] {
+        let live = roomMixedLiveActors
+        let counts = roomMixedLiveCounts(live: live)
+        return ["mixedPressure": true, "pressureProfile": roomMixedClock.profile.rawValue,
+            "pressureIntervalScale": roomMixedClock.profile.intervalScale,
+            "pressureBaseInterval": waveManager.currentSpawnInterval,
+            "pressureInterval": roomMixedClock.interval(base: waveManager.currentSpawnInterval) ?? -1,
+            "pressureAccumulated": roomMixedClock.accumulated, "pressureClockAttempts": roomMixedClock.attempts,
+            "pressureLastWaveElapsed": roomMixedLastWaveElapsed ?? -1,
+            "pressureSuppressed": roomMixedSuppressed,
+            "ordinaryStartupAttempts": roomMixedOrdinary.startup, "ordinaryTimedAttempts": roomMixedOrdinary.timed,
+            "ordinaryPlaced": roomMixedOrdinary.placed, "ordinaryThinned": roomMixedOrdinary.thinned,
+            "ordinaryBlocked": roomMixedOrdinary.blocked,
+            "manualPacketAttempts": roomMixedManual.packetAttempts, "manualPacketsPlaced": roomMixedManual.packets,
+            "manualSignalerAttempts": roomMixedManual.signalerAttempts, "manualSignalersPlaced": roomMixedManual.signalers,
+            "ambientLive": counts.ambient,
+            "mixedXPOrbs": xpOrbs.map { ["x": Double($0.position.x), "y": Double($0.position.y), "value": $0.xpValue] as [String: Any] },
+            "packetLive": counts.packet, "signalerLive": counts.signaler,
+            "liveEnemyBodies": live.map { ["x": Double($0.position.x), "y": Double($0.position.y),
+                "radius": Double($0.geometryFootprintRadius), "kind": String(describing: type(of: $0)),
+                "safe": debugRoomIntegration?.valid($0.position, radius: $0.geometryFootprintRadius) ?? false] as [String: Any] }]
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// Actual Scene API proof: controlled placement and clock/AI stepping.
+    /// Native input, physics/rewards and measured performance are separate.
+    private func runRoomMixedPressureChecks() {
+        guard roomMixedPressureEnabled, let map = debugRoomIntegration else { return }
+        roomCarrierChecksRunning = true; physicsWorld.speed = 0
+        var checks: [[String: Any]] = [], metrics: [[String: Any]] = [], routes: [[String: Any]] = []
+        func check(_ id: String, _ yes: Bool) { checks.append(["id": id, "pass": yes]) }
+        let profile = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        check("real-Title-startup-exactly-once", debugRoomEntryFromTitle && roomMixedOrdinary.startup == 1)
+        check("real-selected-profile", roomMixedClock.profile == roomMixedProfile)
+        check("real-entry-isolated-six-only", GameRunPreferences.isIsolated && map.rooms.count == 6 && ArenaConfig.all.count == 7 && !isGauntlet && !debugArena9Traversal)
+        func clear(_ selected: Arena8PreviewSpawnClock.Profile = .baseline) {
+            clearRoomCarrierCommand()
+            enemies.forEach { $0.removeAllActions(); $0.removeFromParent() }; enemies.removeAll()
+            xpOrbs.forEach { $0.removeAllActions(); $0.removeFromParent() }; xpOrbs.removeAll()
+            projectiles.forEach { $0.removeAllActions(); $0.removeFromParent() }; projectiles.removeAll()
+            enemyProjectiles.forEach { $0.removeAllActions(); $0.removeFromParent() }; enemyProjectiles.removeAll()
+            repulseFlights.removeAll(); resetRoomCarrierFixture()
+            roomMixedClock = Arena8PreviewSpawnClock(profile: selected)
+            waveManager.reset(); playerStats.currentHP = playerStats.maxHP
+            player.position = map.player; gameState = .playing; samuraiBackgroundHold = false; isPaused = false
+        }
+        func step(_ dt: TimeInterval) {
+            _ = waveManager.update(deltaTime: dt)
+            updateRoomMixedPressure(dt)
+        }
+        func partitioned() -> Bool {
+            roomMixedOrdinary.startup + roomMixedOrdinary.timed == roomMixedOrdinary.placed + roomMixedOrdinary.thinned + roomMixedOrdinary.blocked
+                && roomMixedClock.attempts == roomMixedOrdinary.timed + roomMixedSuppressed
+        }
+        func addBody(_ point: CGPoint, scale: CGFloat = 1) -> EnemyNode {
+            let actor = EnemyNode(health: 5, moveSpeed: 0, xpValue: 6)
+            actor.setScale(scale); actor.position = roomMixedStored(point)
+            enemies.append(actor); worldNode.addChild(actor); return actor
+        }
+        // Real WaveManager supplies both time and current interval. Startup is
+        // separately counted; the paired control does not construct enemies.
+        for selected in Arena8PreviewSpawnClock.Profile.allCases {
+            clear(selected); spawnRoomFixtureEnemy(); spawnRoomFixtureEnemy()
+            check("one-startup-\(selected)", roomMixedOrdinary.startup == 1 && roomMixedOrdinary.placed == 1 && enemies.count == 1)
+            let control = WaveManager(); control.bellTime = waveManager.bellTime; var expectedAttempts = 0, expectedAccumulated: TimeInterval = 0
+            var timeOK = true, clockOK = true, duplicateOK = true, bodiesOK = true
+            for _ in 0..<7500 {
+                let dt = 1.0 / 60
+                let old = control.update(deltaTime: dt)
+                expectedAccumulated += dt
+                let interval = control.currentSpawnInterval * (selected == .trial ? 0.8 : 1)
+                let expected = expectedAccumulated >= interval
+                if expected { expectedAttempts += 1; expectedAccumulated = 0 }
+                step(dt)
+                timeOK = timeOK && waveManager.elapsedTime == control.elapsedTime && waveManager.miniBossSpawned == control.miniBossSpawned
+                clockOK = clockOK && roomMixedClock.attempts == expectedAttempts && roomMixedClock.accumulated == expectedAccumulated
+                if selected == .baseline { clockOK = clockOK && old.shouldSpawnEnemy == expected }
+                let before = roomMixedClock.attempts, accumulator = roomMixedClock.accumulated, count = enemies.count
+                updateRoomMixedPressure(dt) // Deliberate same-wave duplicate is inert.
+                duplicateOK = duplicateOK && before == roomMixedClock.attempts && accumulator == roomMixedClock.accumulated && count == enemies.count
+                bodiesOK = bodiesOK && enemies.allSatisfy { map.valid($0.position, radius: $0.geometryFootprintRadius) }
+            }
+            check("actual-time-bell-unchanged-\(selected)", timeOK && waveManager.elapsedTime > 124)
+            check("actual-scheduler-paired-\(selected)", clockOK && expectedAttempts > 0)
+            check("no-duplicate-frame-dispatch-\(selected)", duplicateOK)
+            check("all-produced-roots-safe-\(selected)", bodiesOK && !enemies.isEmpty)
+            check("one-ordinary-node-per-recorded-placement-\(selected)", enemies.count == roomMixedOrdinary.placed)
+            check("actual-outcomes-partition-\(selected)", partitioned())
+            metrics.append(roomMixedTelemetry)
+        }
+        for selected in Arena8PreviewSpawnClock.Profile.allCases {
+            clear(selected); spawnRoomFixtureEnemy(); step(0.1)
+            let remaining = roomMixedClock.accumulated, attempts = roomMixedClock.attempts
+            for state in [GameState.paused, GameState.levelUp, GameState.reviving, GameState.dead] {
+                gameState = state; updateRoomMixedPressure(100)
+                check("hold-preserves-clock-\(selected)-\(state)", roomMixedClock.accumulated == remaining && roomMixedClock.attempts == attempts)
+            }
+            gameState = .playing; appDidEnterBackground(); updateRoomMixedPressure(100)
+            check("background-preserves-clock-\(selected)", roomMixedClock.accumulated == remaining && roomMixedClock.attempts == attempts)
+            let oldTime = waveManager.elapsedTime; appWillEnterForeground(); step(0.1)
+            check("foreground-only-supplied-active-time-\(selected)", abs(waveManager.elapsedTime - oldTime - 0.1) < 1e-12 && roomMixedClock.attempts - attempts <= 1)
+            for kind in ["EventHorizon", "FalseEnding"] {
+                clear(selected); spawnRoomFixtureEnemy()
+                let live = enemies.count
+                if kind == "EventHorizon" { eventHorizonVoided = true } else { falseEndingActive = true }
+                step(2)
+                check("ability-consumes-suppressed-attempt-\(kind)-\(selected)", roomMixedClock.attempts == 1 && roomMixedSuppressed == 1 && enemies.count == live && roomMixedOrdinary.timed == 0 && partitioned())
+                eventHorizonVoided = false; falseEndingActive = false
+                step(0.01)
+                check("ability-no-replay-burst-\(kind)-\(selected)", roomMixedClock.attempts == 1 && enemies.count == live)
+            }
+        }
+        // Exact body/player rejection, including current late ordinary maximum
+        // (raw HP5 -> scale1.24). These are explicit adversarial setup bodies.
+        for room in map.rooms {
+            clear(); player.position = map.rooms.max { $0.center.distance(to: room.center) < $1.center.distance(to: room.center) }!.center
+            check("empty-center-safe-\(room.id)", roomMixedPositionClear(room.center, radius: 14))
+            let blocker = addBody(room.center, scale: 1.24)
+            check("live-scaled-body-blocks-\(room.id)", !roomMixedPositionClear(room.center + CGPoint(x: 20, y: 0), radius: 14))
+            check("corner-full-body-reject-\(room.id)", !roomMixedPositionClear(CGPoint(x: room.rect.minX + 7, y: room.rect.minY + 7), radius: 14))
+            _ = blocker.takeDamage(blocker.health)
+            check("dying-body-not-reserved-\(room.id)", roomMixedPositionClear(room.center, radius: 14))
+            check("player-clearance-reject-\(room.id)", !roomMixedPositionClear(player.position + CGPoint(x: 100, y: 0), radius: 14))
+        }
+        clear()
+        for point in roomSpawnCandidates { _ = addBody(point) }
+        let count = enemies.count, rotation = roomSpawnIndex
+        spawnRoomMixedOrdinary(startup: false)
+        check("crowded-ordinary-defers-no-fallback", enemies.count == count && roomMixedOrdinary.blocked == 1 && roomMixedOrdinary.placed == 0 && roomSpawnIndex == rotation)
+        clear()
+        var blockers: [EnemyNode] = []
+        let distance = GameConfig.Arena8Game.spawnClearance + GameConfig.Arena8CarrierFixture.geometryRadius
+        for room in map.rooms {
+            for offset in [CGPoint(x: -distance, y: 0), CGPoint(x: distance, y: 0), CGPoint(x: 0, y: distance), CGPoint(x: 0, y: -distance)] { blockers.append(addBody(room.center + offset)) }
+        }
+        let all = enemies.count
+        spawnRoomCarrierPacket()
+        check("atomic-full-blockage-no-partial-packet", enemies.count == all && roomCarrierActors.isEmpty && roomCarrierPackets.packets.isEmpty && roomMixedManual.packetAttempts == 1 && roomMixedManual.packets == 0)
+        blockers[0].removeFromParent(); enemies.removeAll { $0 === blockers[0] }
+        let oneFree = enemies.count
+        spawnRoomCarrierPacket()
+        check("atomic-one-free-slot-still-no-packet", enemies.count == oneFree && roomCarrierActors.isEmpty && roomMixedManual.packets == 0)
+        for actor in [blockers[1], blockers[2]] { actor.removeFromParent(); enemies.removeAll { $0 === actor } }
+        let threeFree = enemies.count
+        spawnRoomCarrierPacket()
+        check("atomic-three-free-slots-register-once", enemies.count == threeFree + 3 && roomCarrierActors.count == 3 && roomCarrierPackets.packets.count == 1 && roomMixedManual.packets == 1)
+        check("atomic-final-stored-roots-safe", roomCarrierActors.values.allSatisfy { actor in
+            map.valid(actor.position, radius: actor.geometryFootprintRadius)
+                && enemies.filter { $0 !== actor && !$0.isDying }.allSatisfy { $0.position.distance(to: actor.position) >= $0.geometryFootprintRadius + actor.geometryFootprintRadius }
+        })
+        spawnRoomSignaler()
+        check("blocked-signaler-no-overlap-or-free-replacement", roomSignaler == nil && roomMixedManual.signalers == 0)
+        for selected in Arena8PreviewSpawnClock.Profile.allCases {
+            clear(selected); spawnRoomFixtureEnemy(); let ambient = enemies
+            spawnRoomCarrierPacket(); spawnRoomSignaler()
+            guard let source = roomSignaler else { check("mixed-actor-setup-\(selected)", false); continue }
+            check("mixed-five-real-actors-\(selected)", enemies.count == 5 && ambient.count == 1 && roomCarrierActors.count == 3 && roomMixedManual.packets == 1 && roomMixedManual.signalers == 1)
+            requestRoomSignalerCommand()
+            guard let ticket = roomCarrierCommand else { check("mixed-signal-positive-setup", false); continue }
+            let goals = roomCarrierDestinations; requestRoomCarrierMigration()
+            check("ambient-does-not-enter-or-preempt-packet-\(selected)", roomCarrierCommand == ticket && roomCarrierDestinations == goals && roomCarrierPackets.packets[ticket.packetID]?.members.count == 3 && ambient.allSatisfy { roomCarrierIDs[ObjectIdentifier($0)] == nil })
+            source.applyStun(1)
+            for _ in 0..<13 { step(0.1); updateRoomCarrierFixture(0.1) }
+            check("ambient-continues-while-source-controlled-\(selected)", roomMixedClock.attempts > 0 && roomMixedOrdinary.timed > 0 && roomCarrierPackets.remaining(ticket) == 1 && roomSignalerCommitCount == 0)
+            _ = source.updateStatusEffects(deltaTime: 1.1, openWounds: 0)
+            updateRoomCarrierFixture(0.999)
+            check("mixed-warning-not-rate-scaled-\(selected)", roomSignalerCommitCount == 0 && roomCarrierPackets.navigation(ticket) == nil)
+            updateRoomCarrierFixture(0.002)
+            check("mixed-warning-one-commit-\(selected)", roomSignalerCommitCount == 1 && roomCarrierPackets.navigation(ticket) != nil)
+            if let ordinary = ambient.first {
+                _ = ordinary.takeDamage(ordinary.health); onEnemyKilled(at: ordinary.position, xpValue: ordinary.xpValue, enemy: ordinary, source: .sweep)
+                check("ordinary-loss-keeps-active-group-\(selected)", roomCarrierCommand == ticket && roomCarrierActors.count == 3 && roomSignaler === source)
+            }
+            _ = source.takeDamage(source.health); onEnemyKilled(at: source.position, xpValue: source.xpValue, enemy: source, source: .sweep)
+            let rewards = xpOrbs.reduce(0) { $0 + $1.xpValue }
+            check("source-loss-keeps-group-and-ambient-\(selected)", roomCarrierCommand == nil && roomCarrierActors.count == 3 && roomCarrierPackets.packets.count == 1 && roomSignaler == nil)
+            onEnemyKilled(at: source.position, xpValue: source.xpValue, enemy: source, source: .sweep)
+            check("mixed-rewards-not-duplicated-\(selected)", source.killCredited && xpOrbs.reduce(0) { $0 + $1.xpValue } == rewards)
+        }
+        // Actual AI/resolver marching under ambient scheduling. This is not
+        // native traversal. Actors may crowd after spawning; walls stay solid.
+        for connectionID in map.connections.indices {
+            let edge = map.connections[connectionID]
+            for roomID in [edge.from, edge.to] {
+                clear(roomMixedProfile); spawnRoomFixtureEnemy(); spawnRoomCarrierPacket(); spawnRoomSignaler()
+                guard let source = roomSignaler,
+                      let from = map.rooms.first(where: { $0.id == roomID }),
+                      let to = map.rooms.first(where: { $0.id == (edge.from == roomID ? edge.to : edge.from) }) else { check("mixed-route-setup", false); continue }
+                for (i, id) in roomCarrierOrder.enumerated() { roomCarrierActors[id]?.position = from.center + [CGPoint(x: -100, y: -100), CGPoint(x: 100, y: -100), CGPoint(x: 0, y: 100)][i] }
+                source.position = from.center + CGPoint(x: 100, y: 100)
+                let midpoint = (from.center + to.center) * 0.5
+                player.position = map.rooms.max { $0.center.distance(to: midpoint) < $1.center.distance(to: midpoint) }!.center
+                requestRoomSignalerCommand(connection: connectionID)
+                guard let ticket = roomCarrierCommand else { check("mixed-route-ticket-setup", false); continue }
+                updateRoomCarrierFixture(1)
+                check("mixed-route-committed", roomCarrierPackets.navigation(ticket) != nil && roomSignalerCommitCount == 1)
+                let goals = roomCarrierDestinations
+                var safe = true, completed = false, bodySamples = 0
+                for _ in 0..<1500 {
+                    roomEnemyStarts = Dictionary(uniqueKeysWithValues: enemies.map { (ObjectIdentifier($0), $0.position) })
+                    updateRoomCarrierFixture(1.0 / 60)
+                    if roomCarrierCommand == nil { completed = true; break }
+                    updateEnemies(1.0 / 60); step(1.0 / 60)
+                    for actor in enemies where !actor.isDying { bodySamples += 1; safe = safe && map.valid(actor.position, radius: actor.geometryFootprintRadius) }
+                    if !safe { break }
+                }
+                check("mixed-route-all-body-frames-safe-\(connectionID)-\(roomID)", safe && bodySamples > 0)
+                check("mixed-route-group-arrives-under-ambient-\(connectionID)-\(roomID)", completed && goals.count == 3 && goals.allSatisfy { id, goal in roomCarrierActors[id].map { $0.position.distance(to: goal) <= GameConfig.Arena8CarrierFixture.arrivalTolerance } == true })
+                check("mixed-route-natural-pressure-really-running", roomMixedClock.attempts > 0 && roomMixedOrdinary.timed > 0 && partitioned())
+                routes.append(["connection": connectionID, "source": roomID, "samples": bodySamples, "safe": safe, "completed": completed])
+            }
+        }
+        clear(roomMixedProfile); spawnRoomFixtureEnemy(); step(0.1)
+        let beforeLevelTime = waveManager.elapsedTime, beforeLevelAttempts = roomMixedClock.attempts
+        spawnXPOrb(at: player.position, value: 5)
+        if let body = xpOrbs.last?.physicsBody { handleXPCollection(orbBody: body) }
+        check("mixed-real-XP-opens-level-hold", gameState == .levelUp && player.currentLevel == 2)
+        updateRoomMixedPressure(100)
+        check("mixed-real-level-holds-attempts", roomMixedClock.attempts == beforeLevelAttempts && waveManager.elapsedTime == beforeLevelTime)
+        if let swift = upgradeManager.allCards.first(where: { $0.id == "neutral_1" }) {
+            showCardSelection([swift])
+            if let card = displayedCards.first {
+                selectLevelCard(card)
+                check("mixed-controlled-card-awaits-stat", upgradeManager.tier(of: swift.id) == 0 && gameState == .levelUp)
+                selectStat(.hp)
+                check("mixed-real-upgrade-acquired-once", upgradeManager.tier(of: swift.id) == 1 && roomMixedClock.attempts == beforeLevelAttempts)
+            } else { check("mixed-upgrade-node-setup", false) }
+        } else { check("mixed-supported-card-setup", false) }
+        restartGame() // Cancels the actual modal callbacks before the next case.
+        clear(roomMixedProfile); spawnRoomFixtureEnemy(); spawnRoomCarrierPacket(); spawnRoomSignaler()
+        if let source = roomSignaler {
+            requestRoomSignalerCommand()
+            check("revive-command-positive-setup", roomCarrierCommand != nil && source.isSignaling)
+            step(0.1); let accumulated = roomMixedClock.accumulated, time = waveManager.elapsedTime
+            check("revive-bodies-outside-clear-bubble", enemies.allSatisfy { $0.position.distance(to: player.position) > 100 })
+            playerStats.currentHP = 0; playerDied()
+            check("death-cancels-command-not-clock", roomCarrierCommand == nil && roomMixedClock.accumulated == accumulated && waveManager.elapsedTime == time)
+            gameState = .reviving; executeRevive(); resumeFromRevive()
+            check("actual-revive-retains-mixed-population", gameState == .playing && roomSignaler === source && roomCarrierActors.count == 3 && roomMixedClock.accumulated == accumulated)
+            spawnRoomFixtureEnemy()
+            check("revive-does-not-repeat-startup", roomMixedOrdinary.startup == 1)
+        } else { check("revive-source-setup", false) }
+        restartGame()
+        check("actual-restart-resets-profile-clock-and-manuals", roomMixedClock.profile == roomMixedProfile && roomMixedClock.attempts == 0 && roomMixedClock.accumulated == 0 && waveManager.elapsedTime == 0 && roomMixedOrdinary.startup == 1 && roomMixedManual.packets == 0 && roomMixedManual.signalers == 0 && roomCarrierActors.isEmpty && roomSignaler == nil && roomCarrierFireEnabled)
+        check("actual-restart-one-ordinary-actor", enemies.count == 1 && roomMixedOrdinary.placed == 1)
+        returnToTitle()
+        check("actual-Title-cancels-mixed-state", roomMixedClock.attempts == 0 && roomMixedOrdinary.startup == 0 && roomCarrierActors.isEmpty && roomSignaler == nil && roomCarrierCommand == nil)
+        let now = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        check("standard-profile-unchanged", NSDictionary(dictionary: profile).isEqual(to: now))
+        let report: [String: Any] = ["passed": checks.filter { $0["pass"] as? Bool == true }.count,
+            "failed": checks.filter { $0["pass"] as? Bool == false }.count,
+            "checks": checks, "profileMetrics": metrics, "routes": routes,
+            "launchProfile": roomMixedProfile.rawValue,
+            "scope": "Actual Scene/Node APIs, controlled clocks/placement/AI/resolver and kill handlers; native input, physics kills/XP and performance are distinct qualifications."]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]), let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? data.write(to: dir.appendingPathComponent("arena8-mixed-pressure-checks.json"), options: .atomic)
+        }
     }
 }
 #endif
