@@ -28,7 +28,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     private(set) var gameState: GameState = .playing {
-        didSet { syncSamuraiStrikes(); syncAvalancheEntrances() }
+        didSet {
+            syncSamuraiStrikes(); syncAvalancheEntrances()
+            #if DEBUG
+            if roomNaturalWavesEnabled { refreshRoomNaturalVisibility() }
+            #endif
+        }
     }
     private var samuraiBackgroundHold = false
     private var avalancheBackgroundHold = false
@@ -68,6 +73,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomMixedManual = (packetAttempts: 0, packets: 0, signalerAttempts: 0, signalers: 0)
     private var roomMixedSuppressed = 0
     private var roomMixedLastWaveElapsed: TimeInterval?
+    private var roomNaturalRun = Arena8NaturalWaveRun()
+    private var roomNaturalDispatching = false
 
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
     private var roomInputLastTime: TimeInterval = -1
@@ -700,7 +707,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Technical fixtures must start after Title's 0.3 s incoming
             // transition restores scene pause state. Ordinary Play is not delayed.
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
-            if roomMixedPressureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure-checks") {
+            if roomNaturalWavesEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-natural-wave-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomNaturalWaveChecks() }
+            } else if roomMixedPressureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomMixedPressureChecks() }
             } else if roomSignalerFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-signaler-projectile-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomSignalerProjectileChecks() }
@@ -844,6 +853,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if gameState == .playing {
             isPaused = true
         }
+        #if DEBUG
+        if roomNaturalWavesEnabled { refreshRoomNaturalVisibility() }
+        #endif
     }
     
     @objc private func appWillEnterForeground() {
@@ -859,6 +871,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if gameState == .playing {
             isPaused = false
         }
+        #if DEBUG
+        if roomNaturalWavesEnabled { refreshRoomNaturalVisibility() }
+        #endif
     }
     
     // MARK: - Setup (gameplay objects go into worldNode)
@@ -2416,7 +2431,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if roomCarrierFixtureEnabled, gameState == .playing,
            let cam = camera {
             let point = touch.location(in: cam)
-            if roomSignalerFixtureEnabled {
+            if roomSignalerFixtureEnabled && !roomNaturalWavesEnabled {
                 if cam.childNode(withName: "roomSignalerSpawn")?.frame.insetBy(dx: -10, dy: -12).contains(point) == true {
                     spawnRoomSignaler(); return
                 }
@@ -2424,10 +2439,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     requestRoomSignalerCommand(); return
                 }
             }
-            if cam.childNode(withName: "roomCarrierSpawn")?.frame.insetBy(dx: -10, dy: -12).contains(point) == true {
+            if !roomNaturalWavesEnabled, cam.childNode(withName: "roomCarrierSpawn")?.frame.insetBy(dx: -10, dy: -12).contains(point) == true {
                 spawnRoomCarrierPacket(); return
             }
-            if cam.childNode(withName: "roomCarrierMigrate")?.frame.insetBy(dx: -10, dy: -12).contains(point) == true {
+            if !roomNaturalWavesEnabled, cam.childNode(withName: "roomCarrierMigrate")?.frame.insetBy(dx: -10, dy: -12).contains(point) == true {
                 requestRoomCarrierMigration(); return
             }
             if let fire = cam.childNode(withName: "roomCarrierFire"), fire.frame.insetBy(dx: -10, dy: -12).contains(point) {
@@ -16324,6 +16339,7 @@ extension GameScene {
         }
         if roomMixedPressureEnabled {
             for (key, value) in roomMixedTelemetry { sample[key] = value }
+            if roomNaturalWavesEnabled { for (key, value) in roomNaturalTelemetry { sample[key] = value } }
             if gameState == .levelUp, let view {
                 sample["mixedNeedsStat"] = levelNeedsStat
                 sample["mixedCardChoices"] = displayedCards.filter { $0.xScale > 0.1 }.map { node in
@@ -19447,6 +19463,7 @@ extension GameScene {
         }
         camera.childNode(withName: "roomMixedStatus")?.removeFromParent()
         camera.childNode(withName: "roomMixedLive")?.removeFromParent()
+        camera.childNode(withName: "roomNaturalStatus")?.removeFromParent()
         for (name, text, x, y) in [
             ("roomCarrierSpawn", "SPAWN PACKET", CGFloat(-95), CGFloat(80)),
             ("roomCarrierMigrate", "MIGRATE", CGFloat(95), CGFloat(80)),
@@ -19478,6 +19495,17 @@ extension GameScene {
             live.position = CGPoint(x: 0, y: -size.height / 2 + 240); live.zPosition = 300
             camera.addChild(live); refreshRoomMixedHUD()
             (camera.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIXED / SPECIAL ACTORS MANUAL"
+        }
+        if roomNaturalWavesEnabled {
+            for name in ["roomCarrierSpawn", "roomCarrierMigrate", "roomSignalerSpawn", "roomSignalerSignal"] {
+                camera.childNode(withName: name)?.removeFromParent()
+            }
+            let status = SKLabelNode(fontNamed: "Menlo-Bold")
+            status.name = "roomNaturalStatus"; status.fontSize = 9; status.fontColor = .cyan
+            status.position = CGPoint(x: 0, y: -size.height / 2 + 260); status.zPosition = 300
+            camera.addChild(status)
+            (camera.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "NATURAL / ONE PACKET + ONE SIGNALER"
+            refreshRoomNaturalHUD()
         }
     }
 
@@ -19533,7 +19561,7 @@ extension GameScene {
         for actor in Array(roomCarrierActors.values) where actor.isDying || actor.parent == nil {
             removeRoomCarrierActor(actor)
         }
-        if roomMixedPressureEnabled { roomMixedManual.packetAttempts += 1 }
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.packetAttempts += 1 }
         // A controlled group must be cleared before another is injected. Owner
         // death releases escorts, but does not quietly despawn or reward them.
         guard roomCarrierActors.isEmpty,
@@ -19601,7 +19629,7 @@ extension GameScene {
             enemies.append(actor); worldNode.addChild(actor)
         }
         roomCarrierOrder = ids; roomCarrierPacketID = packetID
-        if roomMixedPressureEnabled { roomMixedManual.packets += 1; refreshRoomMixedHUD() }
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.packets += 1; refreshRoomMixedHUD() }
         (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "PACKET READY / MANUAL MIGRATION"
     }
 
@@ -20639,7 +20667,7 @@ extension GameScene {
            source.isDying || source.parent == nil || !enemies.contains(where: { $0 === source }) {
             removeRoomCarrierActor(source)
         }
-        if roomMixedPressureEnabled { roomMixedManual.signalerAttempts += 1 }
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.signalerAttempts += 1 }
         guard roomSignaler == nil else { return }
         var profile: (health: Int, xp: Int)?
         spawnBasicMelee(elapsed: waveManager.elapsedTime, placement: { _ in nil }, observeBaseProfile: { profile = ($0, $1) })
@@ -20662,7 +20690,7 @@ extension GameScene {
         source.position = roomMixedPressureEnabled ? roomMixedStored(point) : point; source.name = "arena8Signaler"
         roomSignaler = source; roomSignalerID = UUID()
         enemies.append(source); worldNode.addChild(source)
-        if roomMixedPressureEnabled { roomMixedManual.signalers += 1; refreshRoomMixedHUD() }
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.signalers += 1; refreshRoomMixedHUD() }
         roomSignalerLastResult = "SOURCE READY / SAME ROOM IDLE ONLY"
         (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = roomSignalerLastResult
     }
@@ -21120,14 +21148,17 @@ extension GameScene {
 
 #if DEBUG
 extension GameScene {
-    private var roomMixedPressureRequested: Bool { ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure") }
+    private var roomMixedPressureRequested: Bool {
+        ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure")
+            || ProcessInfo.processInfo.arguments.contains("--arena8-natural-waves")
+    }
     private var roomMixedPressureEnabled: Bool {
-        Arena8MixedPressureMode.enabled(arguments: ProcessInfo.processInfo.arguments,
+        roomNaturalWavesEnabled || Arena8MixedPressureMode.enabled(arguments: ProcessInfo.processInfo.arguments,
             sixRoom: debugRoomIntegration?.isSixRoom == true,
             isolated: GameRunPreferences.isIsolated, arena9: debugArena9Traversal)
     }
     private var roomMixedProfile: Arena8PreviewSpawnClock.Profile {
-        Arena8MixedPressureMode.profile(arguments: ProcessInfo.processInfo.arguments)
+        roomNaturalWavesEnabled ? .trial : Arena8MixedPressureMode.profile(arguments: ProcessInfo.processInfo.arguments)
     }
     private func resetRoomMixedPressure() {
         roomMixedClock = Arena8PreviewSpawnClock(profile: roomMixedProfile)
@@ -21135,6 +21166,8 @@ extension GameScene {
         roomMixedManual = (0, 0, 0, 0)
         roomMixedSuppressed = 0
         roomMixedLastWaveElapsed = nil
+        roomNaturalRun = Arena8NaturalWaveRun()
+        roomNaturalDispatching = false
     }
     /// Use the exact Float-stored root and current fully scaled enemy bodies.
     /// No extra spacing dial, across-wall fallback or crowd-clearing side effect.
@@ -21195,15 +21228,19 @@ extension GameScene {
         // Consume this one preview emission even when an ability suppresses it.
         if roomMixedClock.advance(dt: dt, baseInterval: waveManager.currentSpawnInterval, held: held) {
             if eventHorizonVoided || falseEndingActive { roomMixedSuppressed += 1 }
+            else if roomNaturalWavesEnabled { dispatchRoomNaturalEmission(elapsed: elapsed) }
             else { spawnRoomMixedOrdinary(startup: false) }
         }
+        if roomNaturalWavesEnabled { updateRoomNaturalCommand(); refreshRoomNaturalHUD() }
         refreshRoomMixedHUD()
     }
     private func refreshRoomMixedHUD() {
         guard roomMixedPressureEnabled, let label = camera?.childNode(withName: "roomMixedStatus") as? SKLabelNode else { return }
         let interval = roomMixedClock.interval(base: waveManager.currentSpawnInterval) ?? 0
         let attempts = roomMixedOrdinary.startup + roomMixedOrdinary.timed
-        let text = "\(roomMixedClock.profile.label) i\(String(format: "%.2f", interval)) A\(attempts) P\(roomMixedOrdinary.placed) T\(roomMixedOrdinary.thinned) B\(roomMixedOrdinary.blocked) Q\(roomMixedManual.packets) S\(roomMixedManual.signalers)"
+        let packets = roomNaturalWavesEnabled ? (roomNaturalRun.packetIntroduced ? 1 : 0) : roomMixedManual.packets
+        let sources = roomNaturalWavesEnabled ? (roomNaturalRun.signalerIntroduced ? 1 : 0) : roomMixedManual.signalers
+        let text = "\(roomMixedClock.profile.label) i\(String(format: "%.2f", interval)) A\(attempts) P\(roomMixedOrdinary.placed) T\(roomMixedOrdinary.thinned) B\(roomMixedOrdinary.blocked) Q\(packets) S\(sources)"
         if label.text != text { label.text = text }
         if label.frame.width > size.width - 20 { label.fontSize *= (size.width - 20) / label.frame.width }
         if let row = camera?.childNode(withName: "roomMixedLive") as? SKLabelNode {
@@ -21479,6 +21516,290 @@ extension GameScene {
             "scope": "Actual Scene/Node APIs, controlled clocks/placement/AI/resolver and kill handlers; native input, physics kills/XP and performance are distinct qualifications."]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]), let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             try? data.write(to: dir.appendingPathComponent("arena8-mixed-pressure-checks.json"), options: .atomic)
+        }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private var roomNaturalWavesEnabled: Bool {
+        Arena8NaturalWaveMode.enabled(arguments: ProcessInfo.processInfo.arguments,
+            sixRoom: debugRoomIntegration?.isSixRoom == true,
+            isolated: GameRunPreferences.isIsolated, arena9: debugArena9Traversal)
+    }
+    private var roomNaturalCarrierAlive: Bool {
+        guard let packetID = roomCarrierPacketID,
+              let packet = roomCarrierPackets.packets[packetID],
+              let carrier = roomCarrierActors[packet.owner] else { return false }
+        return !carrier.isDying && !carrier.killCredited && carrier.parent != nil
+            && enemies.contains(where: { $0 === carrier })
+    }
+    private func dispatchRoomNaturalEmission(elapsed: TimeInterval) {
+        guard roomNaturalWavesEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
+              let ticket = roomNaturalRun.begin(elapsed: elapsed, carrierAlive: roomNaturalCarrierAlive) else { return }
+        var placed = false
+        switch ticket.action {
+        case .packet:
+            let before = roomCarrierActors.count
+            roomNaturalDispatching = true
+            spawnRoomCarrierPacket()
+            roomNaturalDispatching = false
+            placed = roomCarrierActors.count - before == GameConfig.Arena8NaturalWaveFixture.packetCost
+                && roomNaturalCarrierAlive
+            if placed {
+                (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "NATURAL PACKET / ONE INTRODUCTION"
+            }
+        case .signaler:
+            let hadSource = roomSignaler != nil
+            roomNaturalDispatching = true
+            spawnRoomSignaler()
+            roomNaturalDispatching = false
+            placed = !hadSource && roomSignaler != nil
+        case .ordinary, .reservePacket: break
+        }
+        if roomNaturalRun.finish(ticket, placed: placed) == true {
+            spawnRoomMixedOrdinary(startup: false)
+        }
+    }
+    private func updateRoomNaturalCommand() {
+        guard roomNaturalWavesEnabled, roomNaturalRun.signalerIntroduced,
+              !roomNaturalRun.commandPrepared, gameState == .playing,
+              !samuraiBackgroundHold, !isPaused else { return }
+        let before = roomSignalerAcceptedCount
+        requestRoomSignalerCommand()
+        if roomSignalerAcceptedCount > before { roomNaturalRun.recordPreparedCommand() }
+    }
+    private var roomNaturalTelemetry: [String: Any] {
+        ["naturalWaves": true, "naturalEmissions": roomNaturalRun.emissions,
+         "naturalOrdinarySlots": roomNaturalRun.ordinarySlots,
+         "naturalReservedSlots": roomNaturalRun.reservedSlots,
+         "naturalPacketSlots": roomNaturalRun.packetSlots,
+         "naturalSignalerSlots": roomNaturalRun.signalerSlots,
+         "naturalAccountedSlots": roomNaturalRun.accountedSlots,
+         "naturalPacketAttempts": roomNaturalRun.packetAttempts,
+         "naturalSignalerAttempts": roomNaturalRun.signalerAttempts,
+         "naturalPacketIntroduced": roomNaturalRun.packetIntroduced,
+         "naturalSignalerIntroduced": roomNaturalRun.signalerIntroduced,
+         "naturalSignalerSkipped": roomNaturalRun.signalerSkipped,
+         "naturalCommandPrepared": roomNaturalRun.commandPrepared,
+         "naturalPending": roomNaturalRun.pending != nil,
+         "naturalGeneration": roomNaturalRun.generation.uuidString,
+         "naturalHUDVisible": camera?.childNode(withName: "roomNaturalStatus")?.isHidden == false]
+    }
+    private func refreshRoomNaturalVisibility() {
+        guard roomNaturalWavesEnabled else { return }
+        let hidden = gameState != .playing || samuraiBackgroundHold || isPaused
+        for name in ["roomNaturalStatus", "roomMixedStatus", "roomMixedLive", "roomCarrierStatus", "roomCarrierFire"] {
+            camera?.childNode(withName: name)?.isHidden = hidden
+        }
+    }
+    private func refreshRoomNaturalHUD() {
+        refreshRoomNaturalVisibility()
+        guard roomNaturalWavesEnabled,
+              let label = camera?.childNode(withName: "roomNaturalStatus") as? SKLabelNode else { return }
+        let source = roomNaturalRun.signalerSkipped ? "SKIP" : (roomNaturalRun.signalerIntroduced ? "1" : "0")
+        label.text = "NAT30/34 E\(roomNaturalRun.emissions) R\(roomNaturalRun.reservedSlots) Q\(roomNaturalRun.packetIntroduced ? 1 : 0) S\(source) CMD\(roomNaturalRun.commandPrepared ? 1 : 0)"
+        label.fontSize = 9
+        if label.frame.width > size.width - 20 { label.fontSize *= (size.width - 20) / label.frame.width }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    /// Controlled actual-Scene API proof. Native natural play and physics
+    /// rewards remain separate; this proof explicitly freezes outer frames.
+    private func runRoomNaturalWaveChecks() {
+        guard roomNaturalWavesEnabled, let map = debugRoomIntegration else { return }
+        roomCarrierChecksRunning = true; physicsWorld.speed = 0
+        var checks: [[String: Any]] = [], metrics: [[String: Any]] = []
+        func check(_ id: String, _ yes: Bool) { checks.append(["id": id, "pass": yes]) }
+        let profile = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        check("natural-real-Title-one-startup", debugRoomEntryFromTitle && roomMixedOrdinary.startup == 1)
+        check("natural-real-trial-profile", roomMixedClock.profile == .trial && roomMixedProfile == .trial)
+        check("natural-isolated-six-seven-registered", GameRunPreferences.isIsolated && map.rooms.count == 6 && ArenaConfig.all.count == 7 && !debugArena9Traversal && !isGauntlet)
+        check("natural-manual-controls-absent", ["roomCarrierSpawn", "roomCarrierMigrate", "roomSignalerSpawn", "roomSignalerSignal"].allSatisfy { camera?.childNode(withName: $0) == nil })
+        func clear() {
+            clearRoomCarrierCommand()
+            enemies.forEach { $0.removeAllActions(); $0.removeFromParent() }; enemies.removeAll()
+            xpOrbs.forEach { $0.removeAllActions(); $0.removeFromParent() }; xpOrbs.removeAll()
+            projectiles.forEach { $0.removeAllActions(); $0.removeFromParent() }; projectiles.removeAll()
+            enemyProjectiles.forEach { $0.removeAllActions(); $0.removeFromParent() }; enemyProjectiles.removeAll()
+            repulseFlights.removeAll(); resetRoomCarrierFixture(); waveManager.reset()
+            playerStats.currentHP = playerStats.maxHP; player.position = map.player
+            gameState = .playing; samuraiBackgroundHold = false; isPaused = false
+            refreshRoomNaturalHUD()
+        }
+        func emit(_ time: TimeInterval) {
+            if time > waveManager.elapsedTime { _ = waveManager.update(deltaTime: time - waveManager.elapsedTime) }
+            dispatchRoomNaturalEmission(elapsed: time)
+        }
+        func accounted() -> Bool {
+            roomNaturalRun.accountedSlots == roomNaturalRun.emissions && roomNaturalRun.pending == nil
+                && roomNaturalRun.ordinarySlots == roomMixedOrdinary.timed
+                && roomMixedManual.packetAttempts == 0 && roomMixedManual.signalerAttempts == 0
+                && roomMixedManual.packets == 0 && roomMixedManual.signalers == 0
+                && roomMixedOrdinary.startup + roomMixedOrdinary.timed == roomMixedOrdinary.placed + roomMixedOrdinary.thinned + roomMixedOrdinary.blocked
+        }
+        func blocker(_ point: CGPoint) -> EnemyNode {
+            let actor = EnemyNode(health: 9, moveSpeed: 0, xpValue: 1)
+            actor.position = roomMixedStored(point); enemies.append(actor); worldNode.addChild(actor)
+            return actor
+        }
+        func kill(_ actor: EnemyNode) {
+            _ = actor.takeDamage(actor.health)
+            onEnemyKilled(at: actor.position, xpValue: actor.xpValue, enemy: actor, source: .sweep)
+        }
+        // Continuous actual WaveManager/clock stepping; static actor positions
+        // and no attacks are deliberate setup, not native gameplay evidence.
+        clear(); spawnRoomFixtureEnemy()
+        let control = WaveManager(); control.bellTime = waveManager.bellTime
+        var timeOK = true, accountingOK = true, floorOK = true
+        for _ in 0..<7500 {
+            let dt = 1.0 / 60
+            updateRoomCarrierFixture(dt)
+            _ = waveManager.update(deltaTime: dt); _ = control.update(deltaTime: dt)
+            updateRoomMixedPressure(dt)
+            timeOK = timeOK && waveManager.elapsedTime == control.elapsedTime && waveManager.currentSpawnInterval == control.currentSpawnInterval
+            accountingOK = accountingOK && accounted() && roomMixedClock.attempts == roomNaturalRun.emissions + roomMixedSuppressed
+            floorOK = floorOK && roomMixedLiveActors.allSatisfy { map.valid($0.position, radius: $0.geometryFootprintRadius) }
+        }
+        check("natural-continuous-time-unchanged", timeOK)
+        check("natural-continuous-accounting", accountingOK && roomNaturalRun.emissions > 100)
+        check("natural-continuous-stored-safe-bodies", floorOK)
+        check("natural-continuous-packet-cost-three", roomNaturalRun.packetIntroduced && roomNaturalRun.packetSlots == 3 && roomCarrierActors.count == 3)
+        check("natural-continuous-source-cost-one", roomNaturalRun.signalerIntroduced && roomNaturalRun.signalerSlots == 1 && roomSignaler != nil)
+        check("natural-continuous-one-auto-order", roomNaturalRun.commandPrepared && roomSignalerAcceptedCount == 1 && roomSignalerCommitCount == 1)
+        metrics.append(roomNaturalTelemetry.merging(roomMixedTelemetry) { _, new in new })
+        // The actual driver must consume suppressed emissions without
+        // funding natural reservations or producing due actors. No catch-up.
+        for kind in ["EventHorizon", "FalseEnding"] {
+            for phase in ["packet", "source"] {
+                clear()
+                if phase == "source" { emit(30); emit(31); emit(32) }
+                let targetTime: TimeInterval = phase == "packet" ? 30 : 34
+                if waveManager.elapsedTime < targetTime { _ = waveManager.update(deltaTime: targetTime - waveManager.elapsedTime) }
+                let before = roomNaturalRun.emissions, reserved = roomNaturalRun.reservedSlots
+                let actorCount = enemies.count
+                eventHorizonVoided = kind == "EventHorizon"; falseEndingActive = kind == "FalseEnding"
+                let attempts = roomMixedClock.attempts, suppressed = roomMixedSuppressed
+                for _ in 0..<180 {
+                    _ = waveManager.update(deltaTime: 1.0 / 60)
+                    updateRoomMixedPressure(1.0 / 60)
+                }
+                check("natural-suppression-consumes-clock-\(kind)-\(phase)", roomMixedClock.attempts > attempts && roomMixedSuppressed - suppressed == roomMixedClock.attempts - attempts)
+                check("natural-suppression-no-reserve-or-actors-\(kind)-\(phase)", roomNaturalRun.emissions == before && roomNaturalRun.reservedSlots == reserved && enemies.count == actorCount && !roomNaturalRun.signalerIntroduced)
+                eventHorizonVoided = false; falseEndingActive = false
+                let emittedBeforeResume = roomNaturalRun.emissions
+                _ = waveManager.update(deltaTime: 1.0 / 60); updateRoomMixedPressure(1.0 / 60)
+                check("natural-suppression-no-backlog-\(kind)-\(phase)", roomNaturalRun.emissions - emittedBeforeResume <= 1 && accounted())
+            }
+        }
+        // Explicit adversarial occupancy at every packet candidate, then free
+        // floor. A failed packet falls back without losing its two reservations.
+        clear()
+        let distance = GameConfig.Arena8Game.spawnClearance + GameConfig.Arena8CarrierFixture.geometryRadius
+        var blockers: [EnemyNode] = []
+        for room in map.rooms {
+            for offset in [CGPoint(x: -distance,y: 0), CGPoint(x: distance,y: 0), CGPoint(x: 0,y: distance), CGPoint(x: 0,y: -distance)] {
+                blockers.append(blocker(room.center + offset))
+            }
+        }
+        emit(29.999); check("natural-before30-ordinary", roomNaturalRun.ordinarySlots == 1)
+        emit(30); emit(31)
+        check("natural-two-funded-reservations", roomNaturalRun.reservedSlots == 2 && roomCarrierActors.isEmpty)
+        emit(32)
+        check("natural-blocked-packet-falls-back", !roomNaturalRun.packetIntroduced && roomNaturalRun.reservedSlots == 2 && roomNaturalRun.ordinarySlots == 2 && accounted())
+        blockers.forEach { $0.removeFromParent() }; enemies.removeAll { actor in blockers.contains { $0 === actor } }
+        emit(33)
+        check("natural-atomic-packet-placement", roomNaturalRun.packetSlots == 3 && roomNaturalRun.reservedSlots == 0 && roomCarrierActors.count == 3 && accounted())
+        check("natural-packet-final-body-safety", roomCarrierActors.values.allSatisfy { map.valid($0.position, radius: $0.geometryFootprintRadius) && $0.position.distance(to: player.position) >= GameConfig.Arena8Game.spawnClearance + $0.geometryFootprintRadius })
+        if let ownerID = roomCarrierPacketID.flatMap({ roomCarrierPackets.packets[$0]?.owner }),
+           let owner = roomCarrierActors[ownerID], let roomID = roomSignalerStrictRoom(owner.position, map: map),
+           let room = map.rooms.first(where: { $0.id == roomID }) {
+            let sourceBlockers = [CGPoint(x: -distance,y: 0), CGPoint(x: distance,y: 0), CGPoint(x: 0,y: distance), CGPoint(x: 0,y: -distance)].map { blocker(room.center + $0) }
+            emit(33.999); check("natural-before34-no-source", roomSignaler == nil)
+            emit(34)
+            check("natural-source-blocked-falls-back", roomSignaler == nil && !roomNaturalRun.signalerIntroduced && accounted())
+            sourceBlockers.forEach { $0.removeFromParent() }; enemies.removeAll { actor in sourceBlockers.contains { $0 === actor } }
+        } else { check("natural-source-blocker-setup", false) }
+        emit(35); updateRoomNaturalCommand()
+        check("natural-source-real-atomic-introduction", roomNaturalRun.signalerIntroduced && roomSignaler != nil && accounted())
+        check("natural-auto-prepared-once", roomNaturalRun.commandPrepared && roomSignalerAcceptedCount == 1 && roomCarrierCommand != nil)
+        if let ticket = roomCarrierCommand {
+            let remaining = roomCarrierPackets.remaining(ticket)
+            check("natural-positive-warning-before-hold", (remaining ?? 0) > 0)
+            for hold in [GameState.paused, .levelUp, .dead, .reviving, .removeAdsPrompt, .synergyReveal, .placingZone, .bossReveal] {
+                gameState = hold
+                let count = roomNaturalRun.emissions
+                dispatchRoomNaturalEmission(elapsed: 200); updateRoomNaturalCommand(); updateRoomCarrierFixture(100)
+                check("natural-held-no-work-\(hold)", roomNaturalRun.emissions == count && roomSignalerAcceptedCount == 1 && roomCarrierPackets.remaining(ticket) == remaining)
+                check("natural-held-diagnostics-hidden-\(hold)", camera?.childNode(withName: "roomNaturalStatus")?.isHidden == true)
+            }
+            gameState = .playing; refreshRoomNaturalHUD()
+            check("natural-active-diagnostics-restored", camera?.childNode(withName: "roomNaturalStatus")?.isHidden == false)
+            appDidEnterBackground(); dispatchRoomNaturalEmission(elapsed: 200); updateRoomCarrierFixture(100)
+            check("natural-background-no-work-or-HUD", roomCarrierPackets.remaining(ticket) == remaining && camera?.childNode(withName: "roomNaturalStatus")?.isHidden == true)
+            appWillEnterForeground()
+            updateRoomCarrierFixture(0.5) // First foreground step cannot spend a stale warning gap.
+            check("natural-first-foreground-warning-fresh", roomCarrierPackets.remaining(ticket) == remaining)
+            updateRoomCarrierFixture(0.999)
+            check("natural-warning-not-rate-scaled", roomSignalerCommitCount == 0)
+            updateRoomCarrierFixture(0.002)
+            check("natural-one-second-one-commit", roomSignalerCommitCount == 1)
+            clearRoomCarrierCommand(); updateRoomNaturalCommand()
+            check("natural-no-reissue-after-cancellation", roomCarrierCommand == nil && roomSignalerAcceptedCount == 1)
+        } else { check("natural-command-ticket-setup", false) }
+        if let source = roomSignaler {
+            let beforeXP = xpOrbs.reduce(0) { $0 + $1.xpValue }
+            kill(source); let afterXP = xpOrbs.reduce(0) { $0 + $1.xpValue }
+            onEnemyKilled(at: source.position, xpValue: source.xpValue, enemy: source, source: .sweep)
+            check("natural-source-reward-once", afterXP == beforeXP + source.xpValue && xpOrbs.reduce(0) { $0 + $1.xpValue } == afterXP)
+            emit(47); updateRoomNaturalCommand()
+            check("natural-source-no-replacement", roomSignaler == nil && roomNaturalRun.signalerIntroduced && roomSignalerAcceptedCount == 1 && accounted())
+        } else { check("natural-source-reward-setup", false) }
+        // A positive pending AUTOMATIC order must survive neither death nor
+        // revive as a command, while its one-use budget remains consumed.
+        clear(); emit(30); emit(31); emit(32); emit(34); updateRoomNaturalCommand()
+        if let pending = roomCarrierCommand, roomNaturalRun.commandPrepared {
+            let generation = roomNaturalRun.generation, used = roomNaturalRun.emissions
+            check("natural-death-pending-positive-setup", roomSignalerAcceptedCount == 1 && roomSignalerCommitCount == 0 && (roomCarrierPackets.remaining(pending) ?? 0) > 0)
+            check("natural-revive-clear-bubble-setup", enemies.allSatisfy { $0.position.distance(to: player.position) > 100 })
+            playerStats.currentHP = 0; playerDied()
+            check("natural-death-cancels-actual-pending-order", roomCarrierCommand == nil && roomCarrierPackets.remaining(pending) == nil)
+            check("natural-death-retains-command-allocation", roomNaturalRun.generation == generation && roomNaturalRun.emissions == used && roomNaturalRun.commandPrepared && roomNaturalRun.packetIntroduced && roomNaturalRun.signalerIntroduced)
+            gameState = .reviving; executeRevive(); resumeFromRevive(); updateRoomNaturalCommand()
+            check("natural-revive-cannot-reissue-used-order", gameState == .playing && roomCarrierCommand == nil && roomSignalerAcceptedCount == 1 && roomSignalerCommitCount == 0 && roomNaturalRun.commandPrepared && roomNaturalRun.generation == generation && roomNaturalRun.emissions == used)
+        } else { check("natural-pending-death-setup", false) }
+        // Carrier killed before34: source is deliberately skipped, not replaced.
+        clear(); emit(30); emit(31); emit(32)
+        if let ownerID = roomCarrierPacketID.flatMap({ roomCarrierPackets.packets[$0]?.owner }), let owner = roomCarrierActors[ownerID] {
+            kill(owner); emit(34)
+            check("natural-killed-carrier-skips-source", roomNaturalRun.signalerSkipped && roomSignaler == nil && roomCarrierPackets.packets.isEmpty)
+            check("natural-released-escorts-retained", roomCarrierActors.count == 2 && roomCarrierActors.values.allSatisfy { $0.parent != nil && !$0.isDying })
+            for time in 46...50 { emit(TimeInterval(time)) }
+            check("natural-no-packet-or-source-replacement", roomNaturalRun.packetSlots == 3 && roomNaturalRun.signalerSlots == 0 && roomCarrierActors.count == 2 && accounted())
+        } else { check("natural-owner-loss-setup", false) }
+        // Actual death/revive retains introduction ownership; reset invalidates it.
+        let generation = roomNaturalRun.generation, used = roomNaturalRun.emissions
+        playerStats.currentHP = 0; playerDied()
+        check("natural-actual-death-retains-budget", roomNaturalRun.generation == generation && roomNaturalRun.emissions == used)
+        gameState = .reviving; executeRevive(); resumeFromRevive()
+        check("natural-revive-no-new-budget", roomNaturalRun.generation == generation && roomNaturalRun.emissions == used && roomNaturalRun.packetIntroduced)
+        restartGame()
+        check("natural-restart-fresh-budget", roomNaturalRun.generation != generation && roomNaturalRun.emissions == 0 && !roomNaturalRun.packetIntroduced && !roomNaturalRun.commandPrepared && roomMixedClock.profile == .trial && roomMixedOrdinary.startup == 1)
+        returnToTitle()
+        check("natural-Title-clears-budget-and-actors", roomNaturalRun.emissions == 0 && roomCarrierCommand == nil && roomCarrierActors.isEmpty && roomSignaler == nil)
+        let now = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
+        check("standard-profile-unchanged", NSDictionary(dictionary: profile).isEqual(to: now))
+        let report: [String: Any] = ["passed": checks.filter { $0["pass"] as? Bool == true }.count,
+            "failed": checks.filter { $0["pass"] as? Bool == false }.count, "checks": checks,
+            "profileMetrics": metrics, "launchProfile": "natural-trial",
+            "scope": "Actual Scene APIs with controlled clocks/static actor placements/direct kill handlers; not native gameplay, physics rewards, feel or performance."]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys,.prettyPrinted]),
+           let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? data.write(to: dir.appendingPathComponent("arena8-natural-wave-checks.json"), options: .atomic)
         }
     }
 }
