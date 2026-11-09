@@ -32,6 +32,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             syncSamuraiStrikes(); syncAvalancheEntrances()
             #if DEBUG
             if roomNaturalWavesEnabled { refreshRoomNaturalVisibility() }
+            if gameState != .playing {roomLockmarshalNeedsFreshStep=true}
             #endif
         }
     }
@@ -61,6 +62,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomCarrierConnectionCursor = 0
     private var roomCarrierCommitCount = 0
     private var roomCarrierFireEnabled = true
+    private var roomLockmarshalDeaths = 0
+    private var roomLockmarshalNeedsFreshStep = true
     private var roomCarrierChecksRunning = false
     private var roomCarrierNeedsFreshStep = false
     private var roomSignaler: LatchSignalerNode?
@@ -701,7 +704,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.position = CGPoint(x: 0, y: -size.height / 2 + 32)
             label.zPosition = 300; camera?.addChild(label)
             resetRoomMixedPressure()
-            spawnRoomFixtureEnemy()
+            if !roomLockmarshalRequested { spawnRoomFixtureEnemy() }
+            if roomLockmarshalEnabled { setupRoomLockmarshal() }
             if roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") && !roomMixedPressureRequested { pauseGame() }
             // Technical fixtures must start after Title's 0.3 s incoming
@@ -709,6 +713,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
             if roomNaturalWavesEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-natural-wave-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomNaturalWaveChecks() }
+            } else if roomLockmarshalEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-lockmarshal-checks") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomLockmarshalChecks() }
             } else if roomMixedPressureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomMixedPressureChecks() }
             } else if roomSignalerFixtureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-signaler-projectile-checks") {
@@ -845,6 +851,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             arena9BackgroundWave=waveManager.elapsedTime;arena9BackgroundCount += 1
         }
         if roomCarrierFixtureEnabled { roomCarrierNeedsFreshStep = true }
+        #endif
+        #if DEBUG
+        roomLockmarshalNeedsFreshStep=true
         #endif
         samuraiBackgroundHold = true
         avalancheBackgroundHold = true
@@ -2428,7 +2437,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         #if DEBUG
-        if roomCarrierFixtureEnabled, gameState == .playing,
+        if (roomCarrierFixtureEnabled || roomLockmarshalEnabled), gameState == .playing,
            let cam = camera {
             let point = touch.location(in: cam)
             if roomSignalerFixtureEnabled && !roomNaturalWavesEnabled {
@@ -2628,6 +2637,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func returnToTitle() {
         #if DEBUG
         resetRoomCarrierFixture()
+        (boss as? LockmarshalNode)?.cancelAttack()
         #endif
         cancelSamuraiStrikes()
         cancelAvalancheEntrances()
@@ -3910,6 +3920,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     override func willMove(from view: SKView) {
         #if DEBUG
+        (boss as? LockmarshalNode)?.cancelAttack()
         arena9Run?.cancel()
         #endif
         cancelSamuraiStrikes()
@@ -5937,7 +5948,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #if DEBUG
         if !(debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-kiting") && !roomMixedPressureRequested)
             && !(debugArena9Traversal && ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") && !arena9FixtureFireEnabled)
-            && !(roomCarrierFixtureEnabled && !roomCarrierFireEnabled) { updateAutoAttack(dt) }
+            && !((roomCarrierFixtureEnabled || roomLockmarshalEnabled) && !roomCarrierFireEnabled) { updateAutoAttack(dt) }
         #else
         updateAutoAttack(dt)
         #endif
@@ -6013,6 +6024,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         #if DEBUG
         let roomFixture = debugRoomIntegration != nil
         if debugArena9Traversal { updateArena9Traversal() }
+        else if roomLockmarshalRequested { /* Isolated boss duel: no ordinary/packet spawns. */ }
         else if roomMixedPressureEnabled { updateRoomMixedPressure(dt) }
         else if roomFixture && !eventHorizonVoided && !falseEndingActive && spawnEvent.shouldSpawnEnemy { spawnRoomFixtureEnemy() }
         #else
@@ -15286,6 +15298,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Same-run revive retains enemies. Cancel the old order without
         // forgetting its surviving group and admitting a duplicate packet.
         clearRoomCarrierCommand()
+        (boss as? LockmarshalNode)?.interruptAttack()
         arena9Run?.cancel()
         #endif
         gameState = .dead
@@ -15676,6 +15689,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func restartGame() {
         #if DEBUG
+        (boss as? LockmarshalNode)?.cancelAttack()
         resetRoomCarrierFixture()
         arena9Run?.cancel()
         #endif
@@ -15905,7 +15919,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if let rooms = debugRoomIntegration {
             roomEnemyStarts.removeAll(); roomFearAccepted.removeAll(); roomSpawnIndex = 0; roomPlayerLastSafe = rooms.player
             player.position = rooms.player; camera?.position = player.position
-            spawnRoomFixtureEnemy()
+            if !roomLockmarshalRequested { spawnRoomFixtureEnemy() }
+            if roomLockmarshalEnabled { setupRoomLockmarshal() }
             if roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
         }
         #endif
@@ -15999,6 +16014,8 @@ extension GameScene {
     }
     private var roomsBadgeText: String {
         guard let map = debugRoomIntegration else { return "" }
+        if roomLockmarshalRequested && !roomLockmarshalEnabled {return "ARENA8 LAB FLAG CONFLICT / BOSS OFF"}
+        if roomLockmarshalEnabled {return "ARENA8 LOCKMARSHAL · TWO VERBS · MEMORY"}
         if roomMixedPressureRequested && !roomMixedPressureEnabled { return "ARENA8 LAB FLAG CONFLICT / MIXED OFF" }
         if debugArena9Traversal {
             let control = ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") ? " • SWIFT\(upgradeManager.tier(of: "neutral_1")) / HP1000" : ""
@@ -16373,6 +16390,21 @@ extension GameScene {
             }
         }
         if ProcessInfo.processInfo.arguments.contains("--arena8-magnet-checks") {sample["magnetDone"] = !roomMagnetReport.isEmpty;sample["magnetPassed"] = roomMagnetReport["passed"] ?? -1;sample["magnetFailed"] = roomMagnetReport["failed"] ?? -1}
+        if roomLockmarshalEnabled {
+            sample["lockmarshal"] = (boss as? LockmarshalNode).map { ["id":$0.encounterID,"phase":$0.model.phase.rawValue,"remaining":$0.model.remaining,"x":Double($0.position.x),"y":Double($0.position.y),"safe":rooms.valid($0.position,radius:$0.geometryFootprintRadius),"hp":$0.health,"commits":$0.commitments,"hazardAttempts":$0.hazardAttempts,"tell":$0.hasPaintedTell] as [String:Any] } ?? [:]
+            if let view {
+                for name in ["resumeButton","pauseMenuButton","quitConfirmYes"] {
+                    if let node=pauseMenu.childNode(withName:"//"+name) {let point=view.convert(node.convert(CGPoint.zero,to:self),from:self);sample[name+"X"]=Double(point.x);sample[name+"Y"]=Double(point.y)}
+                }
+                for name in ["restartButton","menuButton"] {if let node=deathOverlay.childNode(withName:name){let point=view.convert(node.convert(CGPoint.zero,to:self),from:self);sample[name+"X"]=Double(point.x);sample[name+"Y"]=Double(point.y)}}
+            }
+            sample["lockmarshalDeaths"]=roomLockmarshalDeaths
+            sample["lockmarshalFire"]=roomCarrierFireEnabled
+            if let fire=camera?.childNode(withName:"roomCarrierFire"),let view {
+                let point=view.convert(fire.convert(CGPoint.zero,to:self),from:self)
+                sample["lockmarshalFireX"]=Double(point.x);sample["lockmarshalFireY"]=Double(point.y)
+            }
+        }
         sample["bossMode"] = isGauntlet
         if debugArena9Traversal {
             sample["arena9Traversal"] = true
@@ -19444,7 +19476,7 @@ extension GameScene {
 extension GameScene {
     private var roomCarrierFixtureEnabled: Bool {
         debugRoomIntegration?.isSixRoom == true && !debugArena9Traversal
-            && GameRunPreferences.isIsolated
+            && !roomLockmarshalRequested && GameRunPreferences.isIsolated
             && (ProcessInfo.processInfo.arguments.contains("--arena8-carrier-fixture")
                 || ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture")
                 || roomMixedPressureEnabled)
@@ -21801,6 +21833,154 @@ extension GameScene {
            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             try? data.write(to: dir.appendingPathComponent("arena8-natural-wave-checks.json"), options: .atomic)
         }
+    }
+}
+#endif
+
+#if DEBUG
+extension GameScene {
+    private var roomLockmarshalRequested: Bool {ProcessInfo.processInfo.arguments.contains("--arena8-lockmarshal")}
+    private var roomLockmarshalEnabled: Bool {
+        let args=ProcessInfo.processInfo.arguments
+        return args.contains("--arena8-lockmarshal") && debugRoomIntegration?.isSixRoom == true
+            && GameRunPreferences.isIsolated && !debugArena9Traversal && !isGauntlet
+            && args.filter{$0.hasPrefix("--arena8-")}.allSatisfy {
+                ["--arena8-six","--arena8-title","--arena8-lockmarshal","--arena8-lockmarshal-checks","--arena8-title-input","--arena8-title-autoplay","--arena8-six-input"].contains($0)
+            }
+    }
+    private func setupRoomLockmarshal(){
+        guard roomLockmarshalEnabled,let map=debugRoomIntegration,let room=map.rooms.first else{return}
+        let root=room.center+CGPoint(x:180,y:0)
+        guard map.valid(root,radius:GameConfig.LockmarshalFixture.bodyRadius) else{return}
+        let actor=LockmarshalNode(map:map,at:root)
+        actor.canAdvance={ [weak self] in
+            guard let self,self.roomLockmarshalEnabled,self.gameState == .playing,!self.samuraiBackgroundHold,!self.isPaused else{return false}
+            if self.roomLockmarshalNeedsFreshStep {self.roomLockmarshalNeedsFreshStep=false;return false}
+            return true
+        }
+        actor.onHazardDamage={ [weak self] damage in
+            self?.applyBossHazardDamage(damage,shakeIntensity:4)
+        }
+        actor.onDeath={ [weak self,weak actor] in
+            guard let self,let actor,self.boss === actor else{return}
+            self.roomLockmarshalDeaths += 1
+            self.boss=nil // Common lethal reward seam ran first; no campaign victory/unlock.
+        }
+        boss=actor;worldNode.addChild(actor);roomLockmarshalDeaths=0;roomCarrierFireEnabled=true;roomLockmarshalNeedsFreshStep=true
+        camera?.childNode(withName:"roomCarrierFire")?.removeFromParent()
+        let fire=SKLabelNode(fontNamed:"Menlo-Bold");fire.name="roomCarrierFire";fire.text="TEST FIRE: ON";fire.fontSize=12;fire.fontColor = .cyan
+        fire.position=CGPoint(x:0,y:-size.height/2+65);fire.zPosition=300;camera?.addChild(fire)
+    }
+    private func updateRoomLockmarshal(_ dt:TimeInterval){
+        guard roomLockmarshalEnabled,let actor=boss as? LockmarshalNode else{return}
+        actor.playerHitRadius=playerStats.effectiveCollisionRadius
+        actor.update(deltaTime:dt,playerPosition:player.position)
+    }
+    private func runRoomLockmarshalChecks(){
+        guard roomLockmarshalEnabled,gameState == .playing,view?.scene === self,let map=debugRoomIntegration,let initial=boss as? LockmarshalNode else{return}
+        let profile=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        var passed=0,failed=0,checks:[[String:Any]]=[]
+        func check(_ name:String,_ yes:Bool){if yes{passed+=1}else{failed+=1};checks.append(["name":name,"pass":yes])}
+        check("isolated-sixroom-real-boss-slot",GameRunPreferences.isIsolated && map.rooms.count==6 && ArenaConfig.all.count==7 && !isGauntlet && enemies.isEmpty)
+        check("body-art-hit-clearance-equal",initial.hitBodyRadius==26 && initial.geometryFootprintRadius==initial.hitBodyRadius && initial.physicsBody?.categoryBitMask==GameConfig.Physics.enemy)
+        for room in map.rooms {
+            let node=LockmarshalNode(map:map,at:room.center);worldNode.addChild(node)
+            let aim=room.center+CGPoint(x:160,y:0)
+            for _ in 0..<24{node.update(deltaTime:0.1,playerPosition:aim)}
+            check("threshold-tell-\(room.id)",node.model.phase == .thresholdWarning && node.hasPaintedTell)
+            let frozen=node.model.goal
+            for _ in 0..<11{node.update(deltaTime:0.1,playerPosition:room.center+CGPoint(x:0,y:180))}
+            check("locked-direction-\(room.id)",node.model.goal==frozen)
+            for _ in 0..<8{node.update(deltaTime:0.1,playerPosition:room.center)}
+            check("swept-safe-\(room.id)",map.valid(node.position,radius:node.geometryFootprintRadius))
+            check("recover-no-damaging-tell-\(room.id)",node.model.phase == .recovery && !node.hasPaintedTell)
+            var paintedAtImpact=false
+            node.onHazardDamage={ _ in if node.model.stampFlash>0 {paintedAtImpact=node.hasPaintedTell} }
+            for _ in 0..<100 where node.commitments<2 {node.update(deltaTime:0.1,playerPosition:node.position)}
+            check("stamp-impact-paint-before-damage-\(room.id)",node.commitments==2 && paintedAtImpact)
+            node.cancelAttack();node.removeFromParent()
+        }
+        for room in map.rooms {
+            for signX:CGFloat in [-1,1] {for signY:CGFloat in [-1,1] {
+                let root=room.center+CGPoint(x:signX*243.5,y:signY*243.5)
+                for heading in [CGPoint(x:1,y:1),CGPoint(x:-1,y:1),CGPoint(x:1,y:-1),CGPoint(x:-1,y:-1)] {
+                    let node=LockmarshalNode(map:map,at:root);worldNode.addChild(node)
+                    let aim=root+heading.normalized*240
+                    for _ in 0..<44 {
+                        let from=node.position;node.update(deltaTime:0.1,playerPosition:aim)
+                        check("actual-corner-body-sweep-safe",map.valid(node.position,radius:26) && !map.geometry.segmentBlockedExact(from,node.position,travelRadius:26))
+                    }
+                    node.cancelAttack();node.removeFromParent()
+                }
+            }}
+        }
+        let savedPlayer=player.position,savedHP=playerStats.currentHP
+        for hidden in [true,false] {
+            let root=CGPoint(x:-536.5,y:500)
+            let node=LockmarshalNode(map:map,at:root);worldNode.addChild(node)
+            for _ in 0..<120 where node.model.phase != .stampWarning {node.update(deltaTime:0.1,playerPosition:node.position)}
+            let target=hidden ? CGPoint(x:-460,y:465):CGPoint(x:-460,y:430)
+            check("actual-shadow-target-body-valid",map.valid(target,radius:14) && map.valid(node.position,radius:26))
+            check("actual-shadow-line-control",map.geometry.segmentBlockedExact(node.position,target)==hidden)
+            check("actual-rendered-shadow-matches",node.model.phase == .stampWarning && node.paints(target) == !hidden)
+            let count=node.hazardAttempts
+            player.position=target;playerStats.currentHP=playerStats.maxHP;damageCooldownTimer=0;invulnerableTimer=0
+            node.playerHitRadius=playerStats.effectiveCollisionRadius
+            node.onHazardDamage={ [weak self] damage in self?.applyBossHazardDamage(damage,shakeIntensity:0) }
+            let hp=playerStats.currentHP
+            for _ in 0..<12 where node.model.phase == .stampWarning {node.update(deltaTime:0.1,playerPosition:player.position)}
+            check("actual-shadow-real-damage-outcome",hidden ? playerStats.currentHP==hp:playerStats.currentHP<hp)
+            check("actual-shadow-attempt-count",node.hazardAttempts==count+(hidden ? 0:1))
+            node.cancelAttack();node.removeFromParent()
+        }
+        player.position=savedPlayer;playerStats.currentHP=savedHP;damageCooldownTimer=0;invulnerableTimer=0
+        let before=initial.model.position, remaining=initial.model.remaining
+        pauseGame();updateRoomLockmarshal(8)
+        check("actual-manual-pause-freezes",initial.model.position==before && initial.model.remaining==remaining)
+        appDidEnterBackground();resumeGame();updateRoomLockmarshal(8)
+        check("manual-resume-cannot-release-background",initial.model.position==before && initial.model.remaining==remaining)
+        appWillEnterForeground();updateRoomLockmarshal(9)
+        check("foreground-first-frame-no-catchup",initial.model.remaining==remaining && initial.model.position==before)
+        updateRoomLockmarshal(0.05)
+        check("active-resumes-bounded",initial.model.remaining<remaining && initial.model.remaining>=remaining-0.051)
+        let zeroHP=initial.health
+        check("true-zero-direct-stays-zero",!initial.takeDamage(0,ignoresChallengeDEF:false,resolved:0) && initial.health==zeroHP)
+        initial.challengeFlatReduction=3
+        initial.takeDamage(10,ignoresChallengeDEF:false,resolved:10)
+        check("real-boss-flat-defense",initial.health==zeroHP-7)
+        // The real common player damage pipeline, not a mock health subtraction.
+        damageCooldownTimer=0;invulnerableTimer=0
+        let hpBefore=playerStats.currentHP
+        initial.onHazardDamage?(GameConfig.LockmarshalFixture.damage)
+        check("real-hazard-pipeline-removes-HP",playerStats.currentHP<hpBefore && damageCooldownTimer>0)
+        let after=playerStats.currentHP
+        initial.onHazardDamage?(GameConfig.LockmarshalFixture.damage)
+        check("shared-cooldown-prevents-repeat",playerStats.currentHP==after)
+        initial.interruptAttack()
+        check("death-interrupt-clears-old-footprint",initial.model.phase == .pursuit && !initial.hasPaintedTell)
+        let killsBefore=combatLedger.bossKills
+        initial.takeDamage(99999,ignoresChallengeDEF:true,resolved:nil)
+        check("real-lethal-clears-slot-once",initial.isDead && boss==nil && roomLockmarshalDeaths==1 && initial.parent==nil)
+        initial.takeDamage(99999,ignoresChallengeDEF:true,resolved:nil)
+        check("no-duplicate-lethal",roomLockmarshalDeaths==1 && combatLedger.bossKills==killsBefore+1)
+        initial.update(deltaTime:10,playerPosition:player.position)
+        check("dead-cannot-hazard",initial.model.phase == .cancelled && !initial.hasPaintedTell)
+        check("no-campaign-registration",ArenaConfig.all.count==7 && BossRegistry.shared.all.count==7)
+        setupRoomLockmarshal()
+        let replacement=boss
+        let stale=LockmarshalNode(map:map,at:map.player)
+        stale.onDeath={ [weak self] in self?.boss=nil }
+        stale.cancelAttack();stale.takeDamage(99999,ignoresChallengeDEF:true,resolved:nil)
+        check("retired-node-cannot-clear-new-boss",boss === replacement && !stale.isDead && stale.retired)
+        let old=boss as? LockmarshalNode
+        restartGame()
+        check("actual-restart-fresh-duel-no-ordinary",boss is LockmarshalNode && boss !== old && enemies.isEmpty && roomLockmarshalDeaths==0 && roomCarrierFireEnabled)
+        old?.takeDamage(99999,ignoresChallengeDEF:true,resolved:nil)
+        check("actual-old-node-after-restart-inert",boss is LockmarshalNode && roomLockmarshalDeaths==0 && old?.retired == true)
+        let now=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        check("standard-profile-unchanged",NSDictionary(dictionary:profile).isEqual(to:now))
+        let report:[String:Any]=["passed":passed,"failed":failed,"checks":checks,"scope":"Actual Scene/Node damage and lifecycle handlers; direct deterministic stepping/static placements. Native movement and fresh Release/physical performance evidence are separate."]
+        if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first{try? data.write(to:dir.appendingPathComponent("arena8-lockmarshal-checks.json"))}
     }
 }
 #endif

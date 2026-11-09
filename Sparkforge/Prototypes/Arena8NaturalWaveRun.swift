@@ -14,7 +14,7 @@ enum Arena8NaturalWaveMode {
     static func enabled(arguments: [String], sixRoom: Bool, isolated: Bool, arena9: Bool) -> Bool {
         let args = Set(arguments)
         return sixRoom && isolated && !arena9 && args.contains("--arena8-natural-waves")
-            && args.isDisjoint(with: ["--arena8-mixed-pressure", "--arena8-pressure-trial",
+            && args.isDisjoint(with: ["--arena8-lockmarshal", "--arena8-mixed-pressure", "--arena8-pressure-trial",
                 "--arena8-carrier-fixture", "--arena8-signaler-fixture", "--arena8-six-traversal",
                 "--arena8-pressure-kiting", "--arena8-pressure-late"])
     }

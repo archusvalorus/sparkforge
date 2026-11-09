@@ -1711,10 +1711,12 @@ do {
         flatApp.compactMapValues { text in let n = text.components(separatedBy: needle).count - 1; return n > 0 ? n : nil }
     }
     let channelsFile = "Systems/VulnerabilityChannels.swift"
+    // Lockmarshal isolated fixture: extend only the exact body census for its
+    // DEBUG body. The same exact single-consumer expression is required.
     // A7-4: extend the exact body census for the DEBUG Switchwarden. Every
     // existing body, consumer count and channel-write predicate stays required.
     let bodies = ["Nodes/EnemyNode.swift", "Nodes/BossNode.swift", "Nodes/QuenchWardenNode.swift", "Nodes/DynamoChoirNode.swift",
-                  "Nodes/FacetedLieNode.swift", "Nodes/MonumentBossNode.swift", "Nodes/MarchwardenNode.swift", "Nodes/SwitchwardenNode.swift"]
+                  "Nodes/FacetedLieNode.swift", "Nodes/MonumentBossNode.swift", "Nodes/MarchwardenNode.swift", "Nodes/SwitchwardenNode.swift", "Nodes/LockmarshalNode.swift"]
     // CONTRACT CHANGE, A7b S8 (CL-114c; authorized): each body takes a DIRECT hit's
     // post-vulnerability amount as is (`resolved`), else applies the in-node rounding.
     let consume = "let scaled = resolved ?? (vulnerabilityMultiplier == 1.0 ? amount : Int((CGFloat(amount) * vulnerabilityMultiplier).rounded()))"

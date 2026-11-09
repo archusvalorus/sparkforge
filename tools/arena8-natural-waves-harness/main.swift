@@ -19,12 +19,13 @@ check("natural-gate", Arena8NaturalWaveMode.enabled(arguments: arguments, sixRoo
 for combination in [(false,true,false),(true,false,false),(true,true,true)] {
     check("natural-isolation", !Arena8NaturalWaveMode.enabled(arguments: arguments, sixRoom: combination.0, isolated: combination.1, arena9: combination.2))
 }
-for conflict in ["--arena8-mixed-pressure","--arena8-pressure-trial","--arena8-carrier-fixture","--arena8-signaler-fixture","--arena8-six-traversal","--arena8-pressure-kiting","--arena8-pressure-late"] {
+for conflict in ["--arena8-lockmarshal","--arena8-mixed-pressure","--arena8-pressure-trial","--arena8-carrier-fixture","--arena8-signaler-fixture","--arena8-six-traversal","--arena8-pressure-kiting","--arena8-pressure-late"] {
     check("natural-conflict-" + conflict, !Arena8NaturalWaveMode.enabled(arguments: arguments + [conflict], sixRoom: true, isolated: true, arena9: false))
 }
 check("baseline-comparison-kept", Arena8MixedPressureMode.enabled(arguments: ["--arena8-mixed-pressure"], sixRoom: true, isolated: true, arena9: false))
 check("trial-comparison-kept", Arena8MixedPressureMode.profile(arguments: ["--arena8-pressure-trial"]) == .trial)
 check("comparison-natural-conflict", !Arena8MixedPressureMode.enabled(arguments: arguments + ["--arena8-mixed-pressure"], sixRoom: true, isolated: true, arena9: false))
+check("comparison-lock-conflict", !Arena8MixedPressureMode.enabled(arguments: ["--arena8-mixed-pressure","--arena8-lockmarshal"], sixRoom: true, isolated: true, arena9: false))
 check("accepted-rate", Arena8PreviewSpawnClock.Profile.trial.intervalScale == 0.8)
 var run = Arena8NaturalWaveRun()
 for invalid in [Double.nan, Double.infinity, -1] { check("invalid-time", run.begin(elapsed: invalid, carrierAlive: true) == nil) }
