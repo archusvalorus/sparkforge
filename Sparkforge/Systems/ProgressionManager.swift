@@ -391,6 +391,7 @@ final class ProgressionManager {
         defaults.removeObject(forKey: Keys.mirrorwoundKills)
         defaults.removeObject(forKey: Keys.currentArena)
         defaults.removeObject(forKey: Keys.arenasUnlocked)
+        defaults.removeObject(forKey: Keys.defeatedBosses)
         ForgePathManager.shared.resetAll()
     }
 
