@@ -1,5 +1,4 @@
 // Panda health drops reuse the existing 12-point room-health placement policy.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -30,4 +29,3 @@ struct Arena8PandaPickupPlacement {
     }
 
 }
-#endif

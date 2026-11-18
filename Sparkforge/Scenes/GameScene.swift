@@ -30,9 +30,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private(set) var gameState: GameState = .playing {
         didSet {
             syncSamuraiStrikes(); syncAvalancheEntrances()
+            syncRainbowHolds()
+            if gameState != .playing { roomLockmarshalNeedsFreshStep = true }
             #if DEBUG
             if roomNaturalWavesEnabled { refreshRoomNaturalVisibility() }
-            if gameState != .playing {roomLockmarshalNeedsFreshStep=true}
             #endif
         }
     }
@@ -41,15 +42,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // MARK: - Core Systems
 
-    #if DEBUG
-    var debugRoomIntegration: Arena8GameMap?
-    var debugRoomEntryFromTitle = false
+    // Scene-owned room context follows actual Arena 8 selection; isolated DEBUG labs can select it separately.
+    private var roomRuntimeMap: Arena8GameMap?
     private let roomEntryEpoch = UUID().uuidString
     private var roomEnemyStarts: [ObjectIdentifier: CGPoint] = [:]
-    /// Only this update's certified fear step. Later pulls/pushes invalidate
-    /// equality and retain their existing resolution path.
     private var roomFearAccepted: [ObjectIdentifier: CGPoint] = [:]
-    private static var roomChecksAlreadyRun = false
     private var roomSpawnIndex = 0
     private let roomCarrierPackets = Arena8PacketCommands()
     private var roomCarrierActors: [UUID: EnemyNode] = [:]
@@ -64,7 +61,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomCarrierFireEnabled = true
     private var roomLockmarshalDeaths = 0
     private var roomLockmarshalNeedsFreshStep = true
-    private var roomCarrierChecksRunning = false
     private var roomCarrierNeedsFreshStep = false
     private var roomSignaler: LatchSignalerNode?
     private var roomSignalerID: UUID?
@@ -78,8 +74,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomMixedLastWaveElapsed: TimeInterval?
     private var roomNaturalRun = Arena8NaturalWaveRun()
     private var roomNaturalDispatching = false
-
     private var roomPlayerLastSafe = CGPoint(x: -280, y: 150)
+    private var roomPandaPickupGeneration: UInt64 = 0
+    #if DEBUG
+    // Compatibility adapter for existing preview consumers and checks.
+    var debugRoomIntegration: Arena8GameMap? {
+        get { roomRuntimeMap }
+        set { roomRuntimeMap = newValue }
+    }
+    var debugRoomEntryFromTitle = false
+    /// Only this update's certified fear step. Later pulls/pushes invalidate
+    /// equality and retain their existing resolution path.
+    private static var roomChecksAlreadyRun = false
+    private var roomCarrierChecksRunning = false
+
     private var roomInputLastTime: TimeInterval = -1
     private var roomInputSamples: [[String: Any]] = []
     private var roomMagnetReport: [String:Any] = [:]
@@ -102,7 +110,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var roomSentryChecksRunning = false
     private var roomRiftChecksRunning = false
     private var roomPandaDestChecksRunning = false
-    private var roomPandaPickupGeneration: UInt64 = 0
     private var roomAvalancheAuditRunning = false
     private var roomAvalancheAuditLastTime: TimeInterval = 0
     private var avalancheFrameSamples: [[String:Any]] = []
@@ -168,7 +175,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     #endif
 
     private let playerStats = PlayerStats()
-    private let upgradeManager = UpgradeManager(excludedFamilies: Arena9DraftPolicy.launchExclusions)
+    private var rainbow = RainbowSweep()
+    private lazy var rainbowArt = RainbowSweepNode()
+    private var rainbowBackgroundHold = false
+    private var rainbowNeedsFreshFrame = true
+    private var rainbowRetired = false
+    private var rainbowRunGeneration = UUID()
+    private struct RainbowPending {
+        let dt:TimeInterval
+        let viewport:CGRect
+        let origin:CGPoint
+        let starts:[String:CGPoint]
+    }
+    private var rainbowPending:RainbowPending?
+    #if DEBUG
+    private var rainbowChecksRunning = false
+    #endif
+    private let upgradeManager = UpgradeManager(excludedFamilies: Arena9DraftPolicy.launchExclusions,
+                                                rainbowRuntimeEnabled: RainbowRuntimeGate.enabled)
     private let adReviveManager = AdReviveManager()
 
     // v1.6: Selected arena's visual identity (resolved at scene creation)
@@ -287,6 +311,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// then, but the scene refuses to start a zero-boss run regardless).
     @discardableResult
     func configureAsGauntlet(order: GauntletRun.Order, draftOpener: Bool = true) -> Bool {
+        guard roomRuntimeMap == nil else { return false }
         guard let run = GauntletRun(order: order) else { return false }
         gauntlet = run
         gauntletDraftOpener = draftOpener
@@ -614,11 +639,56 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// v2.1 A1b: the helper-text modal opened from a level-up card's MORE chip.
     private var levelCardDetail: CardDetailNode?
     
+    // MARK: - Run-owned movement context
+
+    private var movementContextMap: Arena8GameMap?
+    private var movementContextBinding: UUID?
+
+    /// Only explicit callers opt in. Ordinary and Release entry leave this unset.
+    private func bindMovementContext(_ map: Arena8GameMap?) {
+        retireMovementContext()
+        guard let map = map else { return }
+        let binding = UUID()
+        movementContextMap = map
+        movementContextBinding = binding
+        player.bindMovementContext(binding, walking: { [weak self] from, desired, radius in
+            guard let self = self, self.movementContextBinding == binding,
+                  let current = self.movementContextMap else { return from }
+            return current.move(from: from, toward: desired, radius: radius)
+        }, kaiju: map.isSixRoom ? { [weak self] from, desired, radius in
+            guard let self = self, self.movementContextBinding == binding,
+                  let current = self.movementContextMap else { return from }
+            return Arena8KaijuLunge(map: current).step(from: from, toward: desired, radius: radius)
+        } : nil)
+    }
+
+    private func retireMovementContext() {
+        guard let binding = movementContextBinding else { return }
+        // Cancel only this binding's constrained action before dropping its hooks.
+        player.retireMovementContext(binding)
+        movementContextBinding = nil
+        movementContextMap = nil
+    }
+
+    #if DEBUG
+    /// Select the existing authored floor before setup; no live-scene reconfiguration.
+    /// Ordinary Arena 8 selection resolves its authored floor independently of this DEBUG selector.
+    @discardableResult
+    func configureArena8Rooms(sixRoom: Bool) -> Bool {
+        guard GameRunPreferences.isIsolated, !isGauntlet, view == nil,
+              worldNode.parent == nil, player.parent == nil, movementContextBinding == nil else { return false }
+        roomRuntimeMap = sixRoom ? .sixRoom : .twoRoom
+        return true
+    }
+    #endif
+
     // MARK: - Scene Lifecycle
     
     override func didMove(to view: SKView) {
         samuraiBackgroundHold = UIApplication.shared.applicationState == .background
         avalancheBackgroundHold = samuraiBackgroundHold
+        rainbowBackgroundHold = samuraiBackgroundHold
+        syncRainbowHolds()
 
         MusicManager.shared.setContext(.run)
         backgroundColor = .black
@@ -645,7 +715,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v2.0 (B2a): arena visuals get their own swappable container.
         worldNode.addChild(arenaLayer)
+        if RainbowRuntimeGate.enabled {worldNode.addChild(rainbowArt)}
 
+        selectProductionRoomMap()
         setupArena()
         // v2.1 geometry Unit 4 (design lock §9): the Splitworks opens with one
         // distant signal horn — and nothing answers it.
@@ -661,15 +733,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + (debugRoomEntryFromTitle ? 0.4 : 0)) { [weak self] in self?.runArena9TraversalChecks() }
             }
         }
-        if let rooms = debugRoomIntegration {
-            player.debugMovementConstraint = { from, desired, radius in rooms.move(from: from, toward: desired, radius: radius) }
-            if rooms.isSixRoom {
-                player.debugKaijuLungeConstraint = { from, desired, radius in
-                    Arena8KaijuLunge(map: rooms).step(from: from, toward: desired, radius: radius)
-                }
-            }
-        }
         #endif
+        bindMovementContext(roomRuntimeMap)
         setupJoystick()
         setupHUD()
         setupDeathOverlay()
@@ -689,7 +754,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         #if DEBUG
         recordRoomTitleEntry()
-        if debugRoomIntegration != nil {
+        if debugRoomIntegration != nil && !isProductionArena8 {
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") && !roomMixedPressureRequested {
                 _ = waveManager.update(deltaTime: 120) // explicit native late-pressure fixture
             }
@@ -705,7 +770,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             label.zPosition = 300; camera?.addChild(label)
             resetRoomMixedPressure()
             if !roomLockmarshalRequested { spawnRoomFixtureEnemy() }
-            if roomLockmarshalEnabled { setupRoomLockmarshal() }
+            if roomLockmarshalRequested && roomLockmarshalEnabled { setupRoomLockmarshal() }
             if roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
             if debugRoomIntegration?.isSixRoom == true && ProcessInfo.processInfo.arguments.contains("--arena8-pressure-late") && !roomMixedPressureRequested { pauseGame() }
             // Technical fixtures must start after Title's 0.3 s incoming
@@ -713,7 +778,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let roomProofDelay: TimeInterval = debugRoomEntryFromTitle ? 0.4 : 0
             if roomNaturalWavesEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-natural-wave-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomNaturalWaveChecks() }
-            } else if roomLockmarshalEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-lockmarshal-checks") {
+            } else if roomLockmarshalRequested && roomLockmarshalEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-lockmarshal-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomLockmarshalChecks() }
             } else if roomMixedPressureEnabled && ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure-checks") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + roomProofDelay) { [weak self] in self?.runRoomMixedPressureChecks() }
@@ -822,6 +887,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // Show tutorial hint on first run — never in Boss Mode, which is by
         // definition reached only by players who have already felled a boss.
+        if isProductionArena8 {
+            resetRoomCarrierFixture()
+            roomPlayerLastSafe = player.position; camera?.position = player.position
+            if !isGauntlet { spawnRoomMixedOrdinary(startup: true) }
+        }
         if !isGauntlet && !GameRunPreferences.isIsolated { showTutorialHintIfNeeded() }
 
         showActiveFamilyReveal()
@@ -839,6 +909,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             self, selector: #selector(appWillEnterForeground),
             name: UIApplication.willEnterForegroundNotification, object: nil
         )
+        #if DEBUG
+        if GameRunPreferences.isIsolated && RainbowRuntimeGate.enabled && ProcessInfo.processInfo.arguments.contains("--rainbow-runtime-checks") {
+            rainbowChecksRunning=true
+            DispatchQueue.main.asyncAfter(deadline:.now()+0.4) { [weak self] in self?.runRainbowRuntimeChecks() }
+        }
+        #endif
     }
     
     deinit {
@@ -850,12 +926,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if debugArena9Traversal {
             arena9BackgroundWave=waveManager.elapsedTime;arena9BackgroundCount += 1
         }
-        if roomCarrierFixtureEnabled { roomCarrierNeedsFreshStep = true }
         #endif
-        #if DEBUG
         roomLockmarshalNeedsFreshStep=true
-        #endif
+        if roomCarrierFixtureEnabled { roomCarrierNeedsFreshStep = true }
+        roomLockmarshalNeedsFreshStep = true
         samuraiBackgroundHold = true
+        rainbowBackgroundHold = true
+        syncRainbowHolds()
         avalancheBackgroundHold = true
         syncSamuraiStrikes()
         syncAvalancheEntrances()
@@ -874,6 +951,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         #endif
         samuraiBackgroundHold = false
+        rainbowBackgroundHold = false
+        syncRainbowHolds()
         avalancheBackgroundHold = false
         syncSamuraiStrikes()
         syncAvalancheEntrances()
@@ -900,8 +979,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func setupArena() {
-        #if DEBUG
-        if let rooms = debugRoomIntegration {
+        if let rooms = roomRuntimeMap {
             arenaGeometry = rooms.geometry
             let rect = rooms.world
             arenaFloor.path = CGPath(rect: rect, transform: nil)
@@ -919,7 +997,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             return
         }
-        #endif
         // v1.6: colors + motif come from the selected arena's config
         let radius = GameConfig.Arena.radius
         // v2.1 (Geometry 1A): materialize this arena's geometry once, here —
@@ -1592,12 +1669,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 (Geometry 1A): the origin may be INSIDE an arena's solid
         // geometry (the Fallen Carrier is near-centre). Enter at the authored
         // safe anchor when the arena has one; open arenas keep the origin.
-        #if DEBUG
-        if let rooms = debugRoomIntegration { player.position = rooms.player; roomPlayerLastSafe = rooms.player }
-        else { player.position = arenaGeometry.anchor("player_spawn") ?? .zero }
-        #else
-        player.position = arenaGeometry.anchor("player_spawn") ?? .zero
-        #endif
+        if let rooms = roomRuntimeMap {
+            player.position = rooms.player
+            roomPlayerLastSafe = rooms.player
+        } else { player.position = arenaGeometry.anchor("player_spawn") ?? .zero }
         worldNode.addChild(player)
     }
     
@@ -2635,17 +2710,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Return to Title
     
     private func returnToTitle() {
-        #if DEBUG
+        retireMovementContext()
+        cancelRainbowAttack(clearOwnership:true)
         resetRoomCarrierFixture()
         (boss as? LockmarshalNode)?.cancelAttack()
-        #endif
         cancelSamuraiStrikes()
         cancelAvalancheEntrances()
         guard let view = view else { return }
-        #if DEBUG
-        if debugRoomIntegration != nil { removeAllActions() }
+        if roomRuntimeMap != nil { removeAllActions() }
         cancelRoomPandaPickupFalls()
-        #endif
 
         // v2.0 (B2a): the gauntlet's arena override is transient run state. It
         // must not survive back to the title, or the player's own arena choice
@@ -2951,6 +3024,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func tryCommitLevelUp() {
         guard let card = pendingLevelCard else { return }
         if levelNeedsStat, levelStatPick == nil { return }
+        // Validate before the irreversible stat award or modal consumption.
+        upgradeManager.setRainbowOwedPicks(1 + extraPicksRemaining)
+        guard upgradeManager.isSelectable(card.card, atLevel: player.currentLevel) else {
+            pendingLevelCard = nil
+            return
+        }
 
         if let stat = levelStatPick {
             playerStats.applyStatBonus(stat)
@@ -2988,8 +3067,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let tierBefore = upgradeManager.tier(of: card.id)
         // v2.1 A7a corrective (F1): eligibility is enforced at ACQUISITION, not
         // only when the spread was drawn — a stale choice is refused, never taken.
+        upgradeManager.setRainbowOwedPicks(1 + extraPicksRemaining)
         guard upgradeManager.acquire(card, stats: playerStats, level: player.currentLevel) else { return }
         AudioManager.shared.play(.cardSelect)
+        if card.isBreadthReward {
+            rainbow.select();rainbowPending=nil;rainbowNeedsFreshFrame=true
+            syncRainbowHolds()
+            pendingCapstones.append(CardMaxReveal(tag:.neutral,cardName:card.name,
+                effect:"Primary shots ×2. SUPER! every20s. Rapid Fire T5 / Polar Vortex T4 closed.",isCapstone:false,isBreadthReward:true))
+        }
 
         // v2.0 Phase C: Growth's territory logic on a chosen pick.
         //   • Terra (the first Growth card, zones still empty) — DEFER to the
@@ -3059,6 +3145,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // for the second selection
         if extraPicksRemaining > 0, displayedCards.count > 1 {
             extraPicksRemaining -= 1
+            upgradeManager.setRainbowOwedPicks(1 + extraPicksRemaining)
             if let index = displayedCards.firstIndex(where: { $0 === selectedNode }) {
                 displayedCards.remove(at: index)
             }
@@ -3215,6 +3302,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func finishLevelUp(synergies: [UpgradeManager.SynergyUnlock]) {
+        upgradeManager.closeRainbowOrdinaryChoice(level: player.currentLevel)
         extraPicksRemaining = 0  // v1.7: safety — banked picks never outlive the spread
 
         // v1.8 Unit 5b: Barrier Pulse dropped from Guard (Repulse card owns
@@ -3359,8 +3447,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// reconciliation's "persistent state is always valid" principle: no
     /// frame may end with Spark inside the Fallen Carrier.
     private func resolvePlayerAgainstGeometry(cause: GeometryDebug.Cause) {
-        #if DEBUG
-        if let rooms = debugRoomIntegration {
+        if let rooms = roomRuntimeMap {
             let r = playerStats.effectiveCollisionRadius
             if cause != .movement || !rooms.valid(player.position, radius: r) {
                 // External displacements stop on the straight segment from the
@@ -3370,7 +3457,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             roomPlayerLastSafe = player.position
             return
         }
-        #endif
         guard arenaGeometry.hasBlockedGeometry else { return }
         let r = playerStats.effectiveCollisionRadius
         let before = player.position
@@ -3393,8 +3479,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// §7.2). Ground-bound only; flying/phasing exemptions ride
     /// `geometryFootprintRadius <= 0`.
     private func resolveEnemiesAgainstGeometry() {
-        #if DEBUG
-        if let rooms = debugRoomIntegration {
+        if let rooms = roomRuntimeMap {
             for enemy in enemies where !enemy.isDying {
                 let from = roomEnemyStarts[ObjectIdentifier(enemy)] ?? enemy.position
                 let desired = enemy.position
@@ -3409,7 +3494,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             return
         }
-        #endif
         guard arenaGeometry.hasBlockedGeometry else { return }
         for enemy in enemies where !enemy.isDying {
             let r = enemy.geometryFootprintRadius
@@ -3596,7 +3680,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                         panda.destination = live.position
                     } else {
                         panda.samuraiMark = nil
-                        #if DEBUG
                         guard prepareSamuraiHandoff(&panda) else {
                             // Invalid state cannot become a stationary bow or
                             // strike. Cancel only this visitor, without reward.
@@ -3605,7 +3688,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                             pandas.remove(at: i)
                             continue
                         }
-                        #endif
                         panda.node.bow()
                         panda.phase = .lingering
                         panda.timer = 1.0
@@ -3616,6 +3698,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 if panda.node.waddle(toward: panda.destination, speed: speed, dt: dt) {
                     #if DEBUG
                     let beforeArrival = panda.node.position
+                    #endif
                     guard preparePandaArrival(&panda) else {
                         // No safe handoff: retain approach state and do not
                         // start an act/timer or choose another destination.
@@ -3628,14 +3711,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                         pandas.remove(at: i)
                         continue
                     }
-                    if debugRoomIntegration?.isSixRoom == true, panda.act != .samurai {
+                    #if DEBUG
+if roomRuntimeMap?.isSixRoom == true, panda.act != .samurai {
                         roomPandaArrivalHandoffs += 1
                         roomPandaArrivalLastHandoff = ["beforeX":Double(beforeArrival.x),"beforeY":Double(beforeArrival.y),
                             "afterX":Double(panda.node.position.x),"afterY":Double(panda.node.position.y),
                             "phaseBefore":String(describing:panda.phase),"timerBefore":panda.timer,
                             "act":String(describing:panda.act)]
                     }
-                    #endif
+#endif
                     panda.phase = .acting
                     panda.timer = GameConfig.Panda.lingerDuration
                     beginPandaAct(&panda)
@@ -3649,6 +3733,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 if done || panda.timer <= 0 {
                     #if DEBUG
                     let beforeRest = panda.node.position
+                    #endif
                     guard preparePandaRollRest(&panda), preparePandaMovingRest(&panda) else {
                         // Invalid/impossible state cannot linger or repeat an
                         // expired roll's damage. Cancel only this visitor.
@@ -3658,14 +3743,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                         pandas.remove(at: i)
                         continue
                     }
-                    if debugRoomIntegration?.isSixRoom == true, panda.act == .roll {
+                    #if DEBUG
+if roomRuntimeMap?.isSixRoom == true, panda.act == .roll {
                         roomPandaRollRests += 1
                         roomPandaRollLastRest = ["beforeX":Double(beforeRest.x),"beforeY":Double(beforeRest.y),
                             "afterX":Double(panda.node.position.x),"afterY":Double(panda.node.position.y),
                             "travelled":Double(panda.rollTravelled),"timerBefore":panda.timer,"done":done,
-                            "wasSafe":debugRoomIntegration?.valid(beforeRest,radius:20) ?? false]
+                            "wasSafe":roomRuntimeMap?.valid(beforeRest,radius:20) ?? false]
                     }
-                    if debugRoomIntegration?.isSixRoom == true,
+#endif
+                    #if DEBUG
+if roomRuntimeMap?.isSixRoom == true,
                        panda.act == .bodyCheck || panda.act == .follow || panda.act == .pin {
                         roomPandaMovingRests += 1
                         roomPandaMovingLastRest = ["act":String(describing:panda.act),
@@ -3673,7 +3761,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                             "afterX":Double(panda.node.position.x),"afterY":Double(panda.node.position.y),
                             "timerBefore":panda.timer,"done":done]
                     }
-                    #endif
+#endif
                     endPandaAct(&panda)
                     panda.phase = .lingering
                     panda.timer = TimeInterval.random(in: 0.8...2.0)
@@ -3693,50 +3781,42 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    #if DEBUG
     /// One boundary only: validate the ACTUAL resting point after ordinary
     /// waddle completion and before its first act. Valid roots stay exact.
     /// This does not alter travel, tolerance, destination or any later act.
     private func preparePandaArrival(_ panda: inout Panda) -> Bool {
-        guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act != .samurai else { return true }
+        guard let rooms = roomRuntimeMap, rooms.isSixRoom, panda.act != .samurai else { return true }
         guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
         panda.node.position = safe
         return true
     }
-    #endif
 
-    #if DEBUG
     /// Samurai travel and live target tracking are untouched. Resolve only
     /// its ACTUAL root before stationary strike or lost-mark bow.
     private func prepareSamuraiHandoff(_ panda: inout Panda) -> Bool {
-        guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act == .samurai else { return true }
+        guard let rooms = roomRuntimeMap, rooms.isSixRoom, panda.act == .samurai else { return true }
         guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
         panda.node.position = safe
         return true
     }
-    #endif
 
-    #if DEBUG
     /// Resolve only a roll's terminal resting root, never its active travel.
     private func preparePandaRollRest(_ panda: inout Panda) -> Bool {
-        guard let rooms = debugRoomIntegration, rooms.isSixRoom, panda.act == .roll else { return true }
+        guard let rooms = roomRuntimeMap, rooms.isSixRoom, panda.act == .roll else { return true }
         guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
         panda.node.position = safe
         return true
     }
-    #endif
 
-    #if DEBUG
     /// Active scripted movement stays untouched. Only a completed moving act
     /// must hand a valid persistent root to the existing lingering phase.
     private func preparePandaMovingRest(_ panda: inout Panda) -> Bool {
-        guard let rooms = debugRoomIntegration, rooms.isSixRoom,
+        guard let rooms = roomRuntimeMap, rooms.isSixRoom,
               panda.act == .bodyCheck || panda.act == .follow || panda.act == .pin else { return true }
         guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: panda.node.position) else { return false }
         panda.node.position = safe
         return true
     }
-    #endif
 
     /// A panda wanders in from off the rim and heads roughly toward the action —
     /// "roughly" being load-bearing.
@@ -3745,15 +3825,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let angle = CGFloat.random(in: 0..<(2 * .pi))
         var entry = CGPoint(x: cos(angle), y: sin(angle)) * (GameConfig.Arena.radius * 0.98)
-        #if DEBUG
-        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+        if let rooms = roomRuntimeMap, rooms.isSixRoom {
             // Preserve the one existing angular draw and 98% rim inset.
             // Entrance travel may cross walls; this is not a floor resolver.
             guard let rimEntry = Arena8PandaEntry.entry(in: rooms.world, angle: angle,
                                                        rimFraction: 0.98) else { return }
             entry = rimEntry
         }
-        #endif
 
         // Somewhere near something. Not the nearest threat, not the biggest — a
         // random enemy if any exist, otherwise a spot near Spark.
@@ -3761,8 +3839,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let jitter = CGPoint(x: CGFloat.random(in: -70...70), y: CGFloat.random(in: -70...70))
             * DeviceScale.gameplay
         var destination = anchor + jitter
-        #if DEBUG
-        if debugRoomIntegration?.isSixRoom != true {
+        if roomRuntimeMap?.isSixRoom != true {
         let limit = GameConfig.Arena.radius * 0.9
         if destination.length > limit { destination = destination.normalized * limit }
         // v2.1 (1A, Ruling 6): pandas may violate geometry as SPECTACLE, not as
@@ -3770,14 +3847,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // may not settle inside it.
         destination = arenaGeometry.resolve(destination, actorRadius: 20)
         }
-        #else
-        let limit = GameConfig.Arena.radius * 0.9
-        if destination.length > limit { destination = destination.normalized * limit }
-        // v2.1 (1A, Ruling 6): pandas may violate geometry as SPECTACLE, not as
-        // save-state corruption — the waddle may cross the Carrier, the panda
-        // may not settle inside it.
-        destination = arenaGeometry.resolve(destination, actorRadius: 20)
-        #endif
 
         // The samurai. It is 5%. That is the entire trigger, and it is never
         // going to be anything else — the community can theorise for as long as
@@ -3801,20 +3870,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             act = PandaAct.allCases.filter { $0.minTier <= tier }.randomElement() ?? .pleased
         }
 
-        #if DEBUG
-        if let rooms = debugRoomIntegration, rooms.isSixRoom, act != .samurai {
+        if let rooms = roomRuntimeMap, rooms.isSixRoom, act != .samurai {
             // Select the act as before. Only ordinary destinations use the raw
             // anchor+jitter instead of the old origin circle. Samurai's chosen
             // mark/override and subsequent tracking are deliberately untouched.
             guard let safe = Arena8PandaDestination(map: rooms)?.destination(at: destination) else { return }
             destination = safe
+            #if DEBUG
             roomPandaDestLastSpawn = ["anchorX":Double(anchor.x),"anchorY":Double(anchor.y),
                 "jitterX":Double(jitter.x),"jitterY":Double(jitter.y),
                 "rawX":Double(anchor.x+jitter.x),"rawY":Double(anchor.y+jitter.y),
                 "destinationX":Double(destination.x),"destinationY":Double(destination.y),
                 "entryX":Double(entry.x),"entryY":Double(entry.y),"act":String(describing:act)]
+            #endif
         }
-        #endif
         #if DEBUG
         if debugRoomIntegration?.isSixRoom == true {
             roomPandaRimLastSpawn = ["angle":Double(angle),"x":Double(entry.x),"y":Double(entry.y),
@@ -3919,8 +3988,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     override func willMove(from view: SKView) {
-        #if DEBUG
+        retireMovementContext()
+        cancelRainbowAttack(clearOwnership:true)
         (boss as? LockmarshalNode)?.cancelAttack()
+        resetRoomCarrierFixture()
+        cancelRoomPandaPickupFalls()
+        #if DEBUG
         arena9Run?.cancel()
         #endif
         cancelSamuraiStrikes()
@@ -3932,10 +4005,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// walking-over part entirely.
     private func spawnStackedPanda(on base: PandaNode) {
         guard pandas.count < GameConfig.Panda.maxPandas else { return }
-        #if DEBUG
         let requested = base.position + CGPoint(x: 0, y: 16 * DeviceScale.gameplay)
         guard let stationaryRoot = roomStationaryPandaRoot(at: requested) else { return }
-        #endif
         let node = PandaNode()
         node.setBodyScale(PandaNode.baseScale * 0.85)   // the one on top is smaller
         #if DEBUG
@@ -4368,7 +4439,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // And the arena is left with pandas doing vaguely supportive things.
         // One of them is eating bamboo and will not be acknowledging any of this.
-        #if DEBUG
         func placeWitness() {
             let requested = player.position + CGPoint(x: CGFloat.random(in: 40...70)
                                                       * (Bool.random() ? 1 : -1), y: -10)
@@ -4386,37 +4456,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             dropBamboo(at: witness.position + CGPoint(x: 14, y: 0))
         }
         placeWitness()
-        #else
-        let witness = PandaNode()
-        witness.position = player.position + CGPoint(x: CGFloat.random(in: 40...70)
-                                                     * (Bool.random() ? 1 : -1), y: -10)
-        worldNode.addChild(witness)
-        witness.sit()
-        witness.bounce()
-        var chewing = Panda(node: witness, act: .pleased, phase: .lingering,
-                            timer: GameConfig.Panda.witnessLinger,
-                            destination: witness.position)
-        chewing.followMark = nil
-        pandas.append(chewing)
-        dropBamboo(at: witness.position + CGPoint(x: 14, y: 0))
-
-        #endif
 
         for _ in 0..<GameConfig.Panda.afterKaijuPandas { spawnPanda() }
     }
 
-    #if DEBUG
     /// Cancel only real pickup falls at a run/scene boundary. Cosmetic rain
     /// remains outside this adapter and normal active-run timing is unchanged.
     private func cancelRoomPandaPickupFalls() {
-        guard debugRoomIntegration?.isSixRoom == true else { return }
+        guard roomRuntimeMap?.isSixRoom == true else { return }
         roomPandaPickupGeneration &+= 1
         for stalk in worldNode.children where stalk.name == "arena8-panda-health-stalk" {
             stalk.removeAllActions()
             stalk.removeFromParent()
         }
     }
-    #endif
 
     #if DEBUG
     private func beginRoomAvalancheRoll(_ node: PandaNode) {
@@ -4424,24 +4477,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let entry = avalancheEntrances[ObjectIdentifier(node)], entry.ready else { return }
         deliverAvalancheEntrance(node, token: entry.token)
     }
-    private func roomStationaryPandaRoot(at requested: CGPoint) -> CGPoint? {
-        guard let map = debugRoomIntegration, map.isSixRoom else { return requested }
-        return Arena8PandaDestination(map: map)?.destination(at: requested)
-    }
+
     #endif
 
     /// A bamboo pickup. Rides HealthOrbNode, so it stays non-magnetized — walking
     /// over to it is still a positioning decision (design canon).
     private func dropBamboo(at point: CGPoint) {
-        #if DEBUG
         let pickupPoint: CGPoint
-        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+        if let rooms = roomRuntimeMap, rooms.isSixRoom {
             guard let safe = Arena8PandaPickupPlacement(map: rooms)?.pickup(at: point) else { return }
             pickupPoint = safe
         } else { pickupPoint = point }
-        #else
-        let pickupPoint = point
-        #endif
         let orb = HealthOrbNode()
         orb.position = pickupPoint
         orb.zPosition = 4
@@ -4452,10 +4498,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// A stalk falling from off-screen. `isPickup` decides whether anything is
     /// actually there when it lands.
     private func dropFallingBamboo(at landing: CGPoint, isPickup: Bool) {
-        #if DEBUG
         let targetLanding: CGPoint
         let pickupGeneration: UInt64?
-        if isPickup, let rooms = debugRoomIntegration, rooms.isSixRoom {
+        if isPickup, let rooms = roomRuntimeMap, rooms.isSixRoom {
             guard let safe = Arena8PandaPickupPlacement(map: rooms)?.pickup(at: landing) else { return }
             targetLanding = safe
             pickupGeneration = roomPandaPickupGeneration
@@ -4463,9 +4508,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             targetLanding = landing
             pickupGeneration = nil
         }
-        #else
-        let targetLanding = landing
-        #endif
         let s = DeviceScale.gameplay
         let stalk = SKShapeNode(rectOf: CGSize(width: 3 * s, height: 22 * s), cornerRadius: 1.5 * s)
         stalk.fillColor = SKColor(hex: 0x6FA83C)
@@ -4474,9 +4516,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         stalk.position = targetLanding + CGPoint(x: 0, y: 220 * s)
         stalk.zPosition = 6
         stalk.zRotation = CGFloat.random(in: -0.4...0.4)
-        #if DEBUG
         if pickupGeneration != nil { stalk.name = "arena8-panda-health-stalk" }
-        #endif
         worldNode.addChild(stalk)
 
         let fall = SKAction.move(to: targetLanding, duration: TimeInterval.random(in: 0.45...0.75))
@@ -4484,12 +4524,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         stalk.run(SKAction.sequence([
             fall,
             SKAction.run { [weak self] in
-                #if DEBUG
                 if let generation = pickupGeneration {
                     guard let self, self.roomPandaPickupGeneration == generation,
                           self.view?.scene === self else { return }
                 }
-                #endif
                 if isPickup { self?.dropBamboo(at: targetLanding) }
             },
             SKAction.group([SKAction.fadeOut(withDuration: 0.25),
@@ -4529,13 +4567,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             // Rolling out of the arena is not a panda's problem, but it is ours.
             let out: Bool
-            #if DEBUG
-            if let rooms = debugRoomIntegration, rooms.isSixRoom {
+            if let rooms = roomRuntimeMap, rooms.isSixRoom {
                 out = Arena8PandaRollBounds.outside(panda.node.position, world: rooms.world, fraction: 0.95)
             } else { out = panda.node.position.length > GameConfig.Arena.radius * 0.95 }
-            #else
-            out = panda.node.position.length > GameConfig.Arena.radius * 0.95
-            #endif
             return panda.rollTravelled >= GameConfig.Panda.rollDistance || out
 
         case .sit:
@@ -4556,16 +4590,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 && e.position.distance(to: here) < GameConfig.Panda.aggroRadius {
                 let pull = (here - e.position).normalized * GameConfig.Panda.aggroPull * CGFloat(dt)
                 let desired = e.position + pull
-                #if DEBUG
-                if let rooms = debugRoomIntegration, rooms.isSixRoom, e.geometryFootprintRadius > 0 {
+                if let rooms = roomRuntimeMap, rooms.isSixRoom, e.geometryFootprintRadius > 0 {
                     e.position = Arena8PandaEndpoints(map: rooms)?.resolved(from: e.position, toward: desired,
                                                                           radius: e.geometryFootprintRadius) ?? e.position
+                    #if DEBUG
                     if ProcessInfo.processInfo.arguments.contains("--arena8-panda-endpoints-input"),
                        e.position.distance(to: desired) > 0.001 { roomPandaInputCorrections += 1 }
+                    #endif
                 } else { e.position = desired }
-                #else
-                e.position = desired
-                #endif
             }
             return false
 
@@ -4586,18 +4618,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             victim.applyStun(0.3)
             // v2.1 (1A, Ruling 6): the pin may cross geometry; the pinned
             // actor's resolved destination must be outside the footprint.
-            #if DEBUG
-            if let rooms = debugRoomIntegration, rooms.isSixRoom, victim.geometryFootprintRadius > 0 {
+            if let rooms = roomRuntimeMap, rooms.isSixRoom, victim.geometryFootprintRadius > 0 {
                 victim.position = Arena8PandaEndpoints(map: rooms)?.resolved(from: victim.position,
                     toward: panda.node.position, radius: victim.geometryFootprintRadius) ?? victim.position
             } else {
                 victim.position = arenaGeometry.resolve(panda.node.position,
                                                         actorRadius: victim.geometryFootprintRadius)
             }
-            #else
-            victim.position = arenaGeometry.resolve(panda.node.position,
-                                                    actorRadius: victim.geometryFootprintRadius)
-            #endif
             return false
 
         case .nap:
@@ -4951,21 +4978,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         /// Who it has already gored, so one charge can't grind a single enemy
         /// down frame after frame.
         var struck: Set<ObjectIdentifier> = []
-        #if DEBUG
         var roomEntry: Arena8SummonRules.PayloadFlight? = nil
-        #endif
     }
 
     private func appendNatureMissile(_ missile: NatureMissile) {
-        #if DEBUG
-        if let map = debugRoomIntegration, let rules = Arena8SummonRules(map: map) {
+        if let map = roomRuntimeMap, let rules = Arena8SummonRules(map: map) {
             var captured = missile
             let allowance = GameConfig.Arena.radius * 1.2 - GameConfig.Arena.radius
             captured.roomEntry = rules.payloadFlight(from: missile.body.position, allowance: allowance)
             natureMissiles.append(captured)
             return
         }
-        #endif
         natureMissiles.append(missile)
     }
 
@@ -5059,7 +5082,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Preserve the legacy cleanup for circles and the two-room control.
     private func natureMissileOutsideRunBounds(_ missile: inout NatureMissile, legacyLimit: CGFloat? = nil) -> Bool {
-        #if DEBUG
         if var entry = missile.roomEntry {
             let outside = entry.outsideAfterAdvance(to: missile.body.position)
             missile.roomEntry = entry
@@ -5067,8 +5089,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         // An invalid capture refuses a six-room payload, never reinitializes
         // from a later Tree/player position or falls back to the world circle.
-        if debugRoomIntegration?.isSixRoom == true { return true }
-        #endif
+        if roomRuntimeMap?.isSixRoom == true { return true }
         return missile.body.position.length > (legacyLimit ?? GameConfig.Arena.radius * 1.2)
     }
 
@@ -5490,13 +5511,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let root = treeNode?.position ?? player.position
         let canopyOffset = (treeNode?.crownHeight ?? 24) * 0.8
         var birth = root + CGPoint(x: 0, y: canopyOffset)
-        #if DEBUG
-        if let map = debugRoomIntegration, let rules = Arena8SummonRules(map: map) {
+        if let map = roomRuntimeMap, let rules = Arena8SummonRules(map: map) {
             guard let safe = rules.lionSpawn(near: root, canopyOffset: canopyOffset,
                                             bodyRadius: GameConfig.Tree.lionFootprintRadius) else { return }
             birth = safe
         }
-        #endif
         let lion = LionNode()
         lion.position = birth
         lion.zPosition = 9
@@ -5730,8 +5749,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let ghost = CultivatedZoneNode(radius: playerStats.terraZoneRadius)
         ghost.alpha = 0.55
         ghost.position = player.position     // start under Spark; drag to move
-        #if DEBUG
-        if let map = debugRoomIntegration, map.isSixRoom {
+        if let map = roomRuntimeMap, map.isSixRoom {
             guard let root = Arena8GardenFootprint.placementRoot(in: map, toward: player.position,
                         clearance: max(GameConfig.Growth.flowerRootMargin, ghost.radius * 0.5)),
                   let footprint = Arena8GardenFootprint(map: map, root: root, startingRadius: ghost.radius) else {
@@ -5741,7 +5759,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             ghost.setRoomGardenFootprint(footprint)
         }
-        #endif
         worldNode.addChild(ghost)
         terraGhost = ghost
 
@@ -5774,15 +5791,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// can never be planted where the player can't stand.
     private func moveTerraGhost(to worldPoint: CGPoint) {
         guard let ghost = terraGhost else { return }
-        #if DEBUG
-        if let map = debugRoomIntegration, map.isSixRoom {
+        if let map = roomRuntimeMap, map.isSixRoom {
             guard let root = Arena8GardenFootprint.placementRoot(in: map, toward: worldPoint,
                         clearance: max(GameConfig.Growth.flowerRootMargin, ghost.radius * 0.5)),
                   let footprint = Arena8GardenFootprint(map: map, root: root, startingRadius: ghost.radius) else { return }
             ghost.setRoomGardenFootprint(footprint)
             return
         }
-        #endif
         let maxDist = GameConfig.Arena.radius - ghost.radius
         var p = worldPoint
         if p.length > maxDist { p = p.normalized * maxDist }
@@ -5856,6 +5871,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         syncSamuraiStrikes()
         syncAvalancheEntrances()
         #if DEBUG
+        if rainbowChecksRunning {return}
         if roomAvalancheAuditRunning {
             if roomAvalancheAuditLastTime > 0, gameState == .playing { updatePandas(min(0.1,max(0,currentTime-roomAvalancheAuditLastTime))) }
             roomAvalancheAuditLastTime=currentTime
@@ -5880,7 +5896,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         defer { recordSixRoomInput(currentTime) }
         #endif
 
-        guard gameState == .playing else { return }
+        guard gameState == .playing else { rainbowPending=nil;return }
+        beginRainbowFrame(dt)
 
         // v2.1 BGM: the boss context ends when the boss does (the song carries on).
         if MusicManager.shared.context == .boss, boss == nil {
@@ -5937,10 +5954,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             lastMoveDirection = joystick.direction.normalized
         }
         updateRepulseFlights(dt) // v2.1 A5 (CL-63) — before the chase, which fliers skip
-        #if DEBUG
-        if debugRoomIntegration != nil { roomEnemyStarts = Dictionary(uniqueKeysWithValues: enemies.map { (ObjectIdentifier($0), $0.position) }) }
+        if roomRuntimeMap != nil { roomEnemyStarts = Dictionary(uniqueKeysWithValues: enemies.map { (ObjectIdentifier($0), $0.position) }) }
         if roomCarrierFixtureEnabled { updateRoomCarrierFixture(dt) }
-        #endif
         updateEnemies(dt)
         updateActiveCombat(dt)   // v2.1 A4c (CL-33) — after this frame's DoT deaths
         updateGuardStance(dt)    // v2.1 A5 — Fortify + Grounded Core read THIS frame's combat
@@ -6022,14 +6037,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // entirely. (Boss-summoned minions still arrive; those come from the
         // boss, not the wave manager, and are part of the fight.)
         #if DEBUG
-        let roomFixture = debugRoomIntegration != nil
+        if !isProductionArena8 {
         if debugArena9Traversal { updateArena9Traversal() }
         else if roomLockmarshalRequested { /* Isolated boss duel: no ordinary/packet spawns. */ }
         else if roomMixedPressureEnabled { updateRoomMixedPressure(dt) }
-        else if roomFixture && !eventHorizonVoided && !falseEndingActive && spawnEvent.shouldSpawnEnemy { spawnRoomFixtureEnemy() }
-        #else
-        let roomFixture = false
+        else if roomRuntimeMap != nil && !eventHorizonVoided && !falseEndingActive && spawnEvent.shouldSpawnEnemy { spawnRoomFixtureEnemy() }
+        // Finish this frame's natural ticket before considering the boss slot.
+        if roomNaturalWavesEnabled { admitRoomNaturalBossIfEligible() }
+        }
         #endif
+        if isProductionArena8 && !isGauntlet {
+            updateRoomMixedPressure(dt)
+            admitRoomNaturalBossIfEligible()
+        }
+        let roomFixture = roomRuntimeMap != nil
         if !roomFixture && !eventHorizonVoided && !falseEndingActive && !isGauntlet {
         updateSwitchwardenArrival()
         if spawnEvent.shouldSpawnEnemy && boss == nil { spawnEnemy() }
@@ -6119,12 +6140,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             nextHealthOrbSpawn = TimeInterval.random(in: GameConfig.HealthOrb.minSpawnInterval...GameConfig.HealthOrb.maxSpawnInterval)
             let orb = HealthOrbNode()
             orb.position = HealthOrbNode.randomArenaPosition()
-            #if DEBUG
-            if let rooms = debugRoomIntegration {
+            if let rooms = roomRuntimeMap {
                 guard let safe = rooms.spawn(candidates: rooms.pickupCandidates(near: player.position), radius: 12, avoiding: player.position, clearance: 0) else { return }
                 orb.position = safe
             }
-            #endif
             orb.zPosition = 4
             healthOrbs.append(orb)
             worldNode.addChild(orb)
@@ -6141,12 +6160,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             nextMagnetOrbSpawn = TimeInterval.random(in: GameConfig.MagnetOrb.minSpawnInterval...GameConfig.MagnetOrb.maxSpawnInterval)
             let orb = MagnetOrbNode()
             orb.position = MagnetOrbNode.randomArenaPosition()
-            #if DEBUG
-            if let rooms = debugRoomIntegration {
+            if let rooms = roomRuntimeMap {
                 guard let safe = rooms.spawn(candidates: rooms.pickupCandidates(near: player.position), radius: 12, avoiding: player.position, clearance: 0) else { return }
                 orb.position = safe
             }
-            #endif
             orb.zPosition = 4
             magnetOrbs.append(orb)
             worldNode.addChild(orb)
@@ -6187,9 +6204,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Enemy Updates
     
     private func updateEnemies(_ dt: TimeInterval) {
-        #if DEBUG
         roomFearAccepted.removeAll(keepingCapacity: true)
-        #endif
         updateChannelAttacks(dt)
         var diedFromDOT: [EnemyNode] = []
         // v2.1 A5 (CL-52) Ironhide: qualifying hostiles within 150pt of Spark.
@@ -6243,18 +6258,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // a face-slide is the step's own doing, not the resolve's.
                 let solid = arenaGeometry.hasBlockedGeometry
                 let margin = max(0, enemy.geometryFootprintRadius - 0.5)
-                #if DEBUG
-                if let rooms = debugRoomIntegration, rooms.isSixRoom {
+                if let rooms = roomRuntimeMap, rooms.isSixRoom {
                     enemy.position = Arena8RoomFear(map: rooms).step(from: enemy.position,
                         spark: player.position, preferred: fleeTo == nil ? nil : steerTarget,
                         moveSpeed: enemy.moveSpeed, slow: enemy.currentSlow + playerStats.globalEnemySlow,
                         dt: dt, radius: enemy.geometryFootprintRadius)
                     if rooms.valid(enemy.position, radius: enemy.geometryFootprintRadius) {
                         roomFearAccepted[ObjectIdentifier(enemy)] = enemy.position
+                        #if DEBUG
                         if ProcessInfo.processInfo.arguments.contains("--arena8-void-fear-input") {
                             roomFearInputSteps += 1
                             roomFearInputSafe = roomFearInputSafe && rooms.valid(enemy.position, radius: enemy.geometryFootprintRadius)
                         }
+                        #endif
                     }
                 } else {
                 enemy.flee(from: player.position, preferred: fleeTo == nil ? nil : steerTarget,
@@ -6262,12 +6278,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     solid && arenaGeometry.isBlocked(q, margin: margin)
                 }
                 }
-                #else
-                enemy.flee(from: player.position, preferred: fleeTo == nil ? nil : steerTarget,
-                           deltaTime: dt, globalSlow: playerStats.globalEnemySlow) { [arenaGeometry] q in
-                    solid && arenaGeometry.isBlocked(q, margin: margin)
-                }
-                #endif
             } else if let ranged = enemy as? RangedEnemyNode {
                 if enemy.voidHeldLastFrame { enemy.geometryDisplacedThisFrame = false }   // A6: not its own wall hit
                 // v2.1 (Unit 2, Ruling 4): a shooter denied line of sight keeps
@@ -6449,28 +6459,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Room dividers can be wider than a short corner ray. The legacy
     /// sampled query tests only endpoints there; room firing needs exact cover.
     private func rangedHasLineOfSight(from origin: CGPoint, to target: CGPoint) -> Bool {
-        #if DEBUG
-        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+        if let rooms = roomRuntimeMap, rooms.isSixRoom {
             return !rooms.geometry.segmentBlockedExact(origin, target,
                 travelRadius: GameConfig.Geometry.projectileTravelRadius)
         }
-        #endif
         return !arenaGeometry.segmentBlocked(origin, target,
             travelRadius: GameConfig.Geometry.projectileTravelRadius)
     }
 
     private func routeSteerTarget(for enemy: EnemyNode, toward goal: CGPoint,
                                   dt: TimeInterval) -> CGPoint {
-        #if DEBUG
-        if let rooms = debugRoomIntegration {
+        if let rooms = roomRuntimeMap {
             guard let fitted = rooms.approach(goal, radius: enemy.geometryFootprintRadius) else { return enemy.position }
             enemy.goalPosition = fitted
             let blocked = rooms.geometry.segmentBlockedExact(enemy.position, fitted, travelRadius: enemy.geometryFootprintRadius)
             enemy.isOccludedFromGoal = blocked
             return blocked ? (rooms.geometry.graphWaypoint(from: enemy.position, toward: fitted, travelRadius: enemy.geometryFootprintRadius,
-                arriveRadius: GameConfig.Arena8Prototype.arrival)?.position ?? enemy.position) : fitted
+                arriveRadius: GameConfig.Arena8Game.mapArrival)?.position ?? enemy.position) : fitted
         }
-        #endif
         enemy.goalPosition = goal   // v2.1 (2c): the real goal, whatever we hand `chase`
         let geo = arenaGeometry
         guard geo.hasBlockedGeometry, !geo.routeNodes.isEmpty else { return goal }
@@ -6875,6 +6881,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             fireProjectile(direction: CGPoint(x: cos(angle), y: sin(angle)),
                            originOffset: perp * branch.originOffset,
                            allowModifiers: branch.isCenter,
+                           inheritedRainbowFactor: playerStats.rainbowPrimaryMultiplier,
                            fractureShare: branch.share)
         }
     }
@@ -6948,6 +6955,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// (echoes, splits, shards, backwash) is `.fragment`.
     private func fireProjectile(direction: CGPoint, originOffset: CGPoint = .zero,
                                 damageScale: CGFloat = 1.0, allowModifiers: Bool = true,
+                                inheritedRainbowFactor: CGFloat = 1,
                                 rollsCrit: Bool = true,
                                 source: KillSource? = nil,
                                 fractureShare: CGFloat = 1,          // v2.2 N3: this branch's share of its parent's damage
@@ -6968,6 +6976,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // v2.1 A7b S8 (CL-114a): Overcharge leaves the shot's integer base and
         // rides the direct-hit block as a factor (never below today's floor).
+        let rainbowFactor = allowModifiers ? playerStats.rainbowPrimaryMultiplier : inheritedRainbowFactor
         let overcharge = OverchargeSplit(playerStats.overchargeParts(scale: damageScale))
         let projectile = ProjectileNode(
             direction: direction,
@@ -6987,6 +6996,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             passesTerrain: playerStats.projectilePassesTerrain
         )
         projectile.overchargeFactor = overcharge.factor
+        projectile.rainbowDamageFactor = rainbowFactor
         projectile.fractureShare = fractureShare
         projectile.killSource = source ?? (allowModifiers ? .primary : .fragment)
         // Every caller but the volley passes allowModifiers: false, so this is
@@ -7011,24 +7021,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // Mirror Edge (Void): a shot can echo once, later, for less damage.
         if playerStats.echoChance > 0 && CGFloat.random(in: 0...1) < playerStats.echoChance {
+            let scheduledRainbowGeneration=rainbowRunGeneration
             run(SKAction.sequence([
                 SKAction.wait(forDuration: playerStats.echoDelay),
                 SKAction.run { [weak self] in
                     guard let self = self, self.gameState == .playing, !self.player.isDead else { return }
+                    guard rainbowFactor == 1 || self.rainbowRunGeneration == scheduledRainbowGeneration else {return}
                     self.fireProjectile(direction: direction, originOffset: originOffset,
                                         damageScale: damageScale * self.playerStats.echoDamageMultiplier,
-                                        allowModifiers: false)
+                                        allowModifiers: false, inheritedRainbowFactor: rainbowFactor)
                 }
             ]))
         }
     }
     
     private func erasureEchoOrigin() -> CGPoint? {
-        #if DEBUG
-        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+        if let rooms = roomRuntimeMap, rooms.isSixRoom {
             return rooms.echoOrigin(near: player.position, perimeterUnit: CGFloat.random(in: 0...1))
         }
-        #endif
         return PlacementSampler.randomPoint(
             in: arenaGeometry,
             minRadius: GameConfig.Arena.radius * 0.85,
@@ -7049,17 +7059,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// scene itself is paused (app background).
     private func scheduleErasureEcho(direction: CGPoint) {
         let echoDir = direction
+        let rainbowFactor = playerStats.rainbowPrimaryMultiplier
+        let scheduledRainbowGeneration=rainbowRunGeneration
         run(SKAction.sequence([
             SKAction.wait(forDuration: GameConfig.Erasure.echoDelay),
             SKAction.run { [weak self] in
                 guard let self = self, self.gameState == .playing else { return }
+                guard rainbowFactor == 1 || self.rainbowRunGeneration == scheduledRainbowGeneration else {return}
                 // v2.1 (1A, Ruling 3): a Void origin must be valid; the
                 // beam/shot itself pierces reality afterwards.
                 guard let edge = self.erasureEchoOrigin() else { return }
                 self.fireProjectile(direction: echoDir,
                                     originOffset: edge - self.player.position,
                                     damageScale: GameConfig.Erasure.echoFraction,
-                                    allowModifiers: false)
+                                    allowModifiers: false, inheritedRainbowFactor: rainbowFactor)
                 #if DEBUG
                 if let shot = self.projectiles.last { self.roomEchoObserver?(shot) }
                 #endif
@@ -7164,8 +7177,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for orb in xpOrbs {
             let from = orb.position
             orb.updateMagnet(playerPosition: player.position, pickupRadius: pickupRadius, deltaTime: dt)
-            #if DEBUG
-            if let rooms = debugRoomIntegration {
+            if let rooms = roomRuntimeMap {
                 // The blue magnet's full vacuum intentionally crosses internal
                 // walls. Keep the outer body bounds and cap at the live target
                 // on long frames; ordinary passive pickup routing is unchanged.
@@ -7179,12 +7191,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 }
                 if rooms.geometry.segmentBlockedExact(from, desired, travelRadius: XPOrbNode.visualRadius),
                    let next = rooms.geometry.graphWaypoint(from: from, toward: player.position,
-                       travelRadius: XPOrbNode.visualRadius, arriveRadius: GameConfig.Arena8Prototype.arrival) {
+                       travelRadius: XPOrbNode.visualRadius, arriveRadius: GameConfig.Arena8Game.mapArrival) {
                     let step = min(from.distance(to: desired), from.distance(to: next.position))
                     orb.position = rooms.move(from: from, toward: from + (next.position - from).normalized * step, radius: XPOrbNode.visualRadius) ?? from
                 } else { orb.position = rooms.move(from: from, toward: desired, radius: XPOrbNode.visualRadius) ?? from }
             }
-            #endif
         }
     }
     
@@ -7680,12 +7691,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func shove(_ enemy: EnemyNode, along direction: CGPoint, by distance: CGFloat) {
         guard distance > 0 else { return }
         let from = enemy.position
-        #if DEBUG
-        if let rooms = debugRoomIntegration {
+        if let rooms = roomRuntimeMap {
             enemy.position = rooms.shove(from: from, toward: from + direction.normalized * distance, radius: enemy.geometryFootprintRadius) ?? from
             return
         }
-        #endif
         enemy.position = arenaGeometry.pathShove(from: from, to: from + direction.normalized * distance,
                                                  radius: enemy.hitBodyRadius)
     }
@@ -8993,16 +9002,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let sampledOrigin = PlacementSampler.randomPoint(in: arenaGeometry, minRadius: 0,
                                                   maxRadius: arenaR * 0.6, margin: 16)
         let origin: CGPoint
-        #if DEBUG
-        if let map = debugRoomIntegration, map.isSixRoom {
+        if let map = roomRuntimeMap, map.isSixRoom {
             // Keep the sampler and its RNG draws. Only repair its unsafe final
             // result; do not invent whole-floor or Spark-local distribution.
-            guard let safe = Arena8RiftGeometry(map: map)?.origin(at: roomRiftTestOrigin ?? sampledOrigin) else { return }
+            let requestedOrigin: CGPoint
+            #if DEBUG
+            requestedOrigin = roomRiftTestOrigin ?? sampledOrigin
+            #else
+            requestedOrigin = sampledOrigin
+            #endif
+            guard let safe = Arena8RiftGeometry(map: map)?.origin(at: requestedOrigin) else { return }
             origin = safe
         } else { origin = sampledOrigin }
-        #else
-        origin = sampledOrigin
-        #endif
         let vAng = CGFloat.random(in: 0..<(2 * .pi))
         let sampledDirection = CGPoint(x: cos(vAng), y: sin(vAng))
         let dir: CGPoint
@@ -9040,13 +9051,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func showRiftBeam(origin: CGPoint, dir: CGPoint) {
         let legacySpan = GameConfig.Arena.radius * 2.2
         let span: CGFloat
-        #if DEBUG
-        if let map = debugRoomIntegration, map.isSixRoom,
+        if let map = roomRuntimeMap, map.isSixRoom,
            let roomSpan = Arena8RiftGeometry(map: map)?.visualSpan(from: origin, legacySpan: legacySpan) { span = roomSpan }
         else { span = legacySpan }
-        #else
-        span = legacySpan
-        #endif
         let path = CGMutablePath()
         path.move(to: origin - dir * span)
         path.addLine(to: origin + dir * span)
@@ -9365,15 +9372,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .nullBloom: radius = V.blackholeRadius * V.nullBloomRadiusFraction; lifetime = V.nullBloomLifetime
         case .blackhole: radius = V.blackholeRadius; lifetime = V.blackholeLifetime
         }
-        #if DEBUG
         let roomCenter: CGPoint?
-        if let map = debugRoomIntegration, map.isSixRoom {
+        if let map = roomRuntimeMap, map.isSixRoom {
             // Reject a failed birth before cap eviction, ID allocation or node
             // creation. No circle/origin fallback for this room context.
             guard let center = Arena8VoidWellPlacement(map: map)?.center(at: point, wellRadius: radius) else { return }
             roomCenter = center
         } else { roomCenter = nil }
-        #endif
         if let evict = VoidWellCap.evictionIndex(presets: voidWells.map { $0.state.preset },
                                                  live: voidWells.map { $0.state.isLive },
                                                  cap: V.maxLiveWells) {
@@ -9917,12 +9922,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Where a frightened enemy runs: away from Spark, inside the wall, never
     /// INTO solid geometry — the route steer takes it round the Carrier.
     private func fleeGoal(for enemy: EnemyNode) -> CGPoint? {
-        #if DEBUG
-        if let rooms = debugRoomIntegration, rooms.isSixRoom {
+        if let rooms = roomRuntimeMap, rooms.isSixRoom {
             return Arena8RoomFear(map: rooms).goal(from: enemy.position, spark: player.position,
                 lookahead: GameConfig.VoidTree.fleeLookahead, radius: enemy.geometryFootprintRadius)
         }
-        #endif
         guard let goal = FleeRule.goal(from: enemy.position, awayFrom: player.position,
                                        lookahead: GameConfig.VoidTree.fleeLookahead,
                                        arenaRadius: GameConfig.Arena.radius,
@@ -10072,22 +10075,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             sentryCoils.forEach { $0.node.removeFromParent() }
             sentryCoils.removeAll()
             let centre: CGPoint
-            #if DEBUG
-            if let map = debugRoomIntegration, map.isSixRoom {
+            if let map = roomRuntimeMap, map.isSixRoom {
                 guard let safe = Arena8SentryPlacement(map: map)?.center(at: .zero, clearance: 22) else { return }
                 centre = safe
             } else { centre = arenaGeometry.resolve(.zero, actorRadius: 22) }
-            #else
-            centre = arenaGeometry.resolve(.zero, actorRadius: 22)
-            #endif
             geometryDebug.recordResolve(actor: "coil", cause: .teleport)
             addSentryCoil(at: centre, network: true)
             showRingPulse(at: centre, radius: 120, colorHex: 0xFFE066)
             return
         }
         while sentryCoils.count < tier {
-            #if DEBUG
-            if let map = debugRoomIntegration, map.isSixRoom {
+            if let map = roomRuntimeMap, map.isSixRoom {
                 let S = GameConfig.Shock.self
                 guard let safe = Arena8SentryPlacement(map: map)?.nearSpark(
                     existing: sentryCoils.map { $0.node.position }, spacing: S.sentrySpacing,
@@ -10098,9 +10096,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     }) else { break }
                 addSentryCoil(at: safe, network: false)
             } else { addSentryCoil(at: sentryPlacement(), network: false) }
-            #else
-            addSentryCoil(at: sentryPlacement(), network: false)
-            #endif
         }
     }
 
@@ -10238,15 +10233,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Placeholder Ice Rink floor (A9 art): the whole arena glazes over.
     private func showIceRinkFloor() {
-        #if DEBUG
         let rink: SKShapeNode
-        if let rooms = debugRoomIntegration, rooms.isSixRoom,
+        if let rooms = roomRuntimeMap, rooms.isSixRoom,
            let path = Arena8RinkFootprint.path(in: rooms) {
             rink = SKShapeNode(path: path)
         } else { rink = SKShapeNode(circleOfRadius: GameConfig.Arena.radius) }
-        #else
-        let rink = SKShapeNode(circleOfRadius: GameConfig.Arena.radius)
-        #endif
         rink.fillColor = SKColor(hex: 0x88CCFF, alpha: 0.10)
         rink.strokeColor = SKColor(hex: 0xCCF2FF, alpha: 0.55)
         rink.lineWidth = 3
@@ -10541,14 +10532,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let zone = CultivatedZoneNode(radius: r)
         zone.position = position ?? player.position
-        #if DEBUG
-        if let map = debugRoomIntegration, map.isSixRoom {
+        if let map = roomRuntimeMap, map.isSixRoom {
             guard let root = Arena8GardenFootprint.placementRoot(in: map, toward: zone.position,
                         clearance: max(GameConfig.Growth.flowerRootMargin, r * 0.5)),
                   let footprint = Arena8GardenFootprint(map: map, root: root, startingRadius: r) else { return nil }
             zone.setRoomGardenFootprint(footprint)
         }
-        #endif
         if playerStats.vineWallActive { zone.setVineWall(true) }   // C1.5: inherit the hedge
         worldNode.addChild(zone)
         cultivatedZones.append(zone)
@@ -11047,6 +11036,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case "unmade_star":    spawnUnmadeStar()
         case "marchwarden":    spawnMarchwarden()   // v2.1 geometry Unit 4
         case "switchwarden":   spawnSwitchwarden()
+        case "lockmarshal":    setupRoomLockmarshal(forGauntlet: true)
         default:
             // An entry the scene has no wired spawner for. Skipping is the only
             // safe move — a stage that can never end would soft-lock the run.
@@ -11088,8 +11078,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // Draw one at a time: each pick changes what's eligible next, so a
             // single batch draw could hand out a card the previous grant just
             // made redundant.
-            guard let card = upgradeManager.drawCards(count: 1, level: player.currentLevel,
-                                                      allowSecret: false).first
+            guard let card = upgradeManager.drawRandomOpenerCard(level: player.currentLevel)
             else { break }
             let tierBefore = upgradeManager.tier(of: card.id)
             guard upgradeManager.acquire(card, stats: playerStats, level: player.currentLevel) else { break }
@@ -11230,6 +11219,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for _ in 0..<count {
             let orb = HealthOrbNode()
             orb.position = HealthOrbNode.randomArenaPosition()
+            if let rooms = roomRuntimeMap {
+                guard let safe = rooms.spawn(candidates: rooms.pickupCandidates(near: player.position),
+                    radius: 12, avoiding: player.position, clearance: 0) else { continue }
+                orb.position = safe
+            }
             orb.zPosition = 4
             healthOrbs.append(orb)
             worldNode.addChild(orb)
@@ -11239,9 +11233,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Tear the current arena down and build another in its place, then put the
     /// player back at a legal position for the new field.
     private func swapArena(to arenaID: Int) {
+        // A room encounter cannot outlive its map authority.
+        if let roomBoss = boss as? LockmarshalNode {
+            roomBoss.cancelAttack()
+            roomBoss.removeFromParent()
+            boss = nil
+        }
+        resetRoomCarrierFixture()
+        cancelRoomPandaPickupFalls()
+        retireMovementContext()
+        // An ordinary arena swap ends the room selection before rebuilding geometry.
+        roomRuntimeMap = nil
+        if RainbowRuntimeGate.enabled {
+            rainbowRunGeneration=UUID()
+            rainbow.boardHandoff();rainbowPending=nil;rainbowNeedsFreshFrame=true;rainbowArt.clear()
+        }
         resetChannelEncounter()
         ArenaConfig.overrideID = arenaID
         arenaConfig = GameScene.resolveArenaConfig()
+        selectProductionRoomMap()
 
         teardownArena()
         setupArena()
@@ -11256,7 +11266,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // v2.1 (1A): (0,0) may sit INSIDE an arena's blocked geometry (the
         // Fallen Carrier is near-centre). Enter at the authored safe anchor
         // when there is one; open arenas keep the origin.
-        player.position = arenaGeometry.anchor("player_spawn") ?? .zero
+        player.position = roomRuntimeMap?.player ?? arenaGeometry.anchor("player_spawn") ?? .zero
+        roomPlayerLastSafe = player.position
+        bindMovementContext(roomRuntimeMap)
         camera?.position = player.position
         clampLooseNodesToArena()
     }
@@ -11269,6 +11281,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let maxDist = GameConfig.Arena.radius - 24
         let geo = arenaGeometry
         func clamp(_ node: SKNode) {
+            if let rooms = roomRuntimeMap {
+                node.position = Arena8GardenFootprint.placementRoot(in: rooms, toward: node.position, clearance: 12) ?? rooms.player
+                return
+            }
             if node.position.length > maxDist {
                 node.position = node.position.normalized * maxDist
             }
@@ -11283,7 +11299,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // flowers' always-valid fallback), its flowers and the Tree may not sit
         // in the new arena's solid geometry or past its wall. (Boss Mode can now
         // carry a garden from an open arena into the Splitworks.)
-        cultivatedZones.forEach(clamp)
+        cultivatedZones.forEach { zone in
+            zone.clearRoomGardenFootprint()
+            clamp(zone)
+            if let rooms = roomRuntimeMap, rooms.isSixRoom,
+               let footprint = Arena8GardenFootprint(map: rooms, root: zone.position, startingRadius: zone.radius) {
+                zone.setRoomGardenFootprint(footprint)
+            }
+        }
         flowers.forEach(clamp)
         if let tree = treeNode { clamp(tree) }
     }
@@ -11799,15 +11822,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for k in order {
             let a = base + CGFloat(k) * C.anchorAngleStep
             let cand = goal + CGPoint(x: cos(a), y: sin(a)) * C.standoff
-            #if DEBUG
-            if debugArena9Traversal || roomCarrierFixtureEnabled, let map = debugRoomIntegration {
+            if let map = roomRuntimeMap {
                 guard map.valid(cand, radius: bodyR) else { continue }
             } else if cand.length > limit { continue }
-            #else
-            guard cand.length <= limit else { continue }
-            #endif
             guard !geo.isBlocked(cand, margin: bodyR) else { continue }
-            #if DEBUG
             if roomCarrierFixtureEnabled {
                 guard !geo.segmentBlockedExact(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius),
                       !geo.segmentBlockedExact(p, cand, travelRadius: bodyR * 0.8) else { continue }
@@ -11815,10 +11833,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 guard !geo.segmentBlocked(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius),
                       !geo.segmentBlocked(p, cand, travelRadius: bodyR * 0.8) else { continue }
             }
-            #else
-            guard !geo.segmentBlocked(cand, goal, travelRadius: GameConfig.Geometry.projectileTravelRadius),
-                  !geo.segmentBlocked(p, cand, travelRadius: bodyR * 0.8) else { continue }
-            #endif
             return cand
         }
         return nil
@@ -13118,6 +13132,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 "safe":rooms.valid(player.position,radius:playerStats.effectiveCollisionRadius)])
         }
         #endif
+        finishRainbowFrame()
         drainChainReactions()
         processTollkeeperPulses()
         processRailspikeLaunches()
@@ -13728,7 +13743,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             brittleCold: playerStats.brittleCold, brittleColdFactor: GameConfig.PolarVortex.brittleColdVuln,
             frozen: enemyNode.isFrozen, stunned: enemyNode.isStunned,
             openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: enemyNode.isBleeding),
-            overcharge: projectileNode.overchargeFactor, vulnerability: enemyNode.vulnerabilityMultiplier,
+            overcharge: projectileNode.overchargeFactor * projectileNode.rainbowDamageFactor, vulnerability: enemyNode.vulnerabilityMultiplier,
             rounding: projectileNode.hitRounding)
 
         // v1.6: shield reduction applies after all bonuses — flanking doubles output.
@@ -13942,8 +13957,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let perp = CGPoint(x: -aim.y, y: aim.x)
         let geometry = arenaGeometry
         let blocked: ((CGPoint, CGPoint) -> Bool)?
-        #if DEBUG
-        if let map = debugRoomIntegration, map.isSixRoom {
+        if let map = roomRuntimeMap, map.isSixRoom {
             // Short room corners can fall between sampled points. Preserve
             // the existing first-solid rule with the exact room query.
             blocked = geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain
@@ -13954,18 +13968,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 ? { a, b in geometry.segmentBlocked(a, b, travelRadius: GameConfig.Geometry.projectileTravelRadius) }
                 : nil
         }
-        #else
-        blocked = geometry.hasBlockedGeometry && !playerStats.projectilePassesTerrain
-            ? { a, b in geometry.segmentBlocked(a, b, travelRadius: GameConfig.Geometry.projectileTravelRadius) }
-            : nil
-        #endif
         return branches.map { branch in
             let angle = aimAngle + branch.heading
             let direction = CGPoint(x: cos(angle), y: sin(angle))
             let origin = player.position + perp * branch.originOffset
             let length: CGFloat
-            #if DEBUG
-            if let map = debugRoomIntegration, map.isSixRoom {
+            if let map = roomRuntimeMap, map.isSixRoom {
                 length = BeamTick.length(origin: origin, direction: direction,
                     maxLength: playerStats.effectiveProjectileRange, arenaRect: map.world,
                     blocked: blocked, steps: GameConfig.Neutral.beamTerrainBisectionSteps)
@@ -13974,11 +13982,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     maxLength: playerStats.effectiveProjectileRange, arenaRadius: GameConfig.Arena.radius,
                     blocked: blocked, steps: GameConfig.Neutral.beamTerrainBisectionSteps)
             }
-            #else
-            length = BeamTick.length(origin: origin, direction: direction,
-                maxLength: playerStats.effectiveProjectileRange, arenaRadius: GameConfig.Arena.radius,
-                blocked: blocked, steps: GameConfig.Neutral.beamTerrainBisectionSteps)
-            #endif
             return BeamLine(branch: branch, origin: origin, direction: direction, length: length)
         }
     }
@@ -14373,7 +14376,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // vulnerability join the same rounding (CL-114b).
         let hit = DirectHitDamage.resolve(damage, .onBoss(
             openWoundsBonus: playerStats.bleedingEnemyDamageTaken, bleeding: bossStatus.bleed.isBleeding),
-            overcharge: projectileNode.overchargeFactor, vulnerability: bossNode.vulnerabilityMultiplier,
+            overcharge: projectileNode.overchargeFactor * projectileNode.rainbowDamageFactor, vulnerability: bossNode.vulnerabilityMultiplier,
             rounding: projectileNode.hitRounding)
 
         // v2.1 A4a: bosses take DoTs (Brandon, Sep 17) — the same Kindle hit
@@ -15294,11 +15297,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     
     private func playerDied() {
         guard gameState == .playing else { return }
-        #if DEBUG
-        // Same-run revive retains enemies. Cancel the old order without
-        // forgetting its surviving group and admitting a duplicate packet.
+        cancelRainbowAttack()
+        // Same-run revive keeps membership, but cancels obsolete warning/navigation.
         clearRoomCarrierCommand()
         (boss as? LockmarshalNode)?.interruptAttack()
+        #if DEBUG
         arena9Run?.cancel()
         #endif
         gameState = .dead
@@ -15688,17 +15691,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // MARK: - Restart
     
     private func restartGame() {
-        #if DEBUG
+        let restartingMovementMap = movementContextMap
+        retireMovementContext()
+        cancelRainbowAttack(clearOwnership:true)
+        rainbowRetired=false
         (boss as? LockmarshalNode)?.cancelAttack()
         resetRoomCarrierFixture()
+        roomEnemyStarts.removeAll(); roomFearAccepted.removeAll(); roomSpawnIndex = 0
+        #if DEBUG
         arena9Run?.cancel()
         #endif
         cancelSamuraiStrikes()
         cancelAvalancheEntrances()
-        #if DEBUG
-        if debugRoomIntegration != nil { removeAllActions() }
+        if roomRuntimeMap != nil { removeAllActions() }
         cancelRoomPandaPickupFalls()
-        #endif
         for enemy in enemies { enemy.removeFromParent() }
         enemies.removeAll()
         chainReactions.reset()   // v2.2 N5 (Q6): no burst outlives its run
@@ -15778,6 +15784,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         chillTrailDropTimer = 0
 
         player.reset()
+        bindMovementContext(restartingMovementMap)
         player.stats = playerStats
         playerStats.reset()
         upgradeManager.reset()
@@ -15915,15 +15922,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         camera?.position = .zero
 
         gameState = .playing
-        #if DEBUG
-        if let rooms = debugRoomIntegration {
-            roomEnemyStarts.removeAll(); roomFearAccepted.removeAll(); roomSpawnIndex = 0; roomPlayerLastSafe = rooms.player
+        if let rooms = roomRuntimeMap {
             player.position = rooms.player; camera?.position = player.position
-            if !roomLockmarshalRequested { spawnRoomFixtureEnemy() }
-            if roomLockmarshalEnabled { setupRoomLockmarshal() }
-            if roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
+            #if DEBUG
+            roomEnemyStarts.removeAll(); roomFearAccepted.removeAll(); roomSpawnIndex = 0; roomPlayerLastSafe = rooms.player
+            if !isProductionArena8 && !roomLockmarshalRequested { spawnRoomFixtureEnemy() }
+            if roomLockmarshalRequested && roomLockmarshalEnabled { setupRoomLockmarshal() }
+            if !isProductionArena8 && roomCarrierFixtureEnabled { setupRoomCarrierFixture() }
+            #endif
+            roomPlayerLastSafe = rooms.player
+            if isProductionArena8 && !isGauntlet { spawnRoomMixedOrdinary(startup: true) }
         }
-        #endif
 
         // A restart is a NEW run, so it rolled a new palette — show it again.
         #if DEBUG
@@ -15970,30 +15979,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 // original paths. The accepted P0 map is reused unchanged, not registered.
 extension GameScene {
     private func roomProjectileOutsideBounds(_ point: CGPoint) -> Bool {
-        #if DEBUG
-        if let rooms = debugRoomIntegration {
+        if let rooms = roomRuntimeMap {
             return !Arena8P0Bounds.rectangle(rooms.world.insetBy(
                 dx: -GameConfig.Neutral.projectileCleanupMargin, dy: -GameConfig.Neutral.projectileCleanupMargin)).contains(point)
         }
-        #endif
         return false
     }
     private func roomFlightStop(from: CGPoint, desired: CGPoint, radius: CGFloat) -> CGPoint? {
-        #if DEBUG
-        if let rooms = debugRoomIntegration { return rooms.shove(from: from, toward: desired, radius: radius) ?? from }
-        #endif
+        if let rooms = roomRuntimeMap { return rooms.shove(from: from, toward: desired, radius: radius) ?? from }
         return nil
     }
     private func roomPrimaryOutsideBounds(_ point: CGPoint) -> Bool? {
-        #if DEBUG
-        if debugRoomIntegration != nil { return roomProjectileOutsideBounds(point) }
-        #endif
+        if roomRuntimeMap != nil { return roomProjectileOutsideBounds(point) }
         return nil
     }
     private func primaryOutsideRunBounds(_ point: CGPoint) -> Bool {
-        #if DEBUG
-        if debugRoomIntegration != nil { return roomProjectileOutsideBounds(point) }
-        #endif
+        if roomRuntimeMap != nil { return roomProjectileOutsideBounds(point) }
         return point.length > GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin
     }
     #if DEBUG
@@ -16015,7 +16016,7 @@ extension GameScene {
     private var roomsBadgeText: String {
         guard let map = debugRoomIntegration else { return "" }
         if roomLockmarshalRequested && !roomLockmarshalEnabled {return "ARENA8 LAB FLAG CONFLICT / BOSS OFF"}
-        if roomLockmarshalEnabled {return "ARENA8 LOCKMARSHAL · TWO VERBS · MEMORY"}
+        if roomLockmarshalRequested && roomLockmarshalEnabled {return "ARENA8 LOCKMARSHAL · TWO VERBS · MEMORY"}
         if roomMixedPressureRequested && !roomMixedPressureEnabled { return "ARENA8 LAB FLAG CONFLICT / MIXED OFF" }
         if debugArena9Traversal {
             let control = ProcessInfo.processInfo.arguments.contains("--arena9-controlled-loadout") ? " • SWIFT\(upgradeManager.tier(of: "neutral_1")) / HP1000" : ""
@@ -16028,9 +16029,7 @@ extension GameScene {
         }
         return "ARENA 8 GAME • TWO ROOMS • MEMORY PROFILE"
     }
-    private var roomSpawnCandidates: [CGPoint] {
-        debugRoomIntegration?.spawnCandidates(near: player.position) ?? []
-    }
+
     /// Selection failure defers this attempt; never use the circle fallback.
     /// Advance anchor rotation only after an actual safe spawn is selected.
     private func roomEncounterSpawnPoint(for enemy: EnemyNode) -> CGPoint? {
@@ -16092,7 +16091,7 @@ extension GameScene {
         let saved = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
         let analyticsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("sparkforge_runs.json")
         let analyticsBefore = try? Data(contentsOf: analyticsURL)
-        check("actual-scene-context", GameRunPreferences.isIsolated && !isGauntlet && player.debugMovementConstraint != nil)
+        check("actual-scene-context", GameRunPreferences.isIsolated && !isGauntlet && movementContextBinding != nil && movementContextMap != nil)
         check("isolated-profile-not-read", ProgressionManager.shared.currentArena == 0 && ProgressionManager.shared.arenasUnlocked == 1 && HighScoreManager.shared.totalRuns == 0 && !IAPManager.shared.hasRemovedAds)
         check("isolated-codex-not-read", !(GameRunPreferences.shared.stringArray(forKey: "sf_cards_offered") ?? []).contains("owner-profile-sentinel"))
         check("isolated-analytics-not-read", AnalyticsTracker.shared.totalRuns == 0)
@@ -16275,7 +16274,7 @@ extension GameScene {
             normal.player.position = CGPoint(x: 10000, y: 10000)
             normal.player.move(direction: .zero, deltaTime: 0)
             let edge = GameConfig.Arena.radius - normal.playerStats.effectiveCollisionRadius
-            check("circle-movement-arena-\(index+1)", normal.player.debugMovementConstraint == nil && abs(normal.player.position.length - edge) < 0.001)
+            check("circle-movement-arena-\(index+1)", normal.movementContextBinding == nil && normal.movementContextMap == nil && normal.player.debugMovementConstraint == nil && abs(normal.player.position.length - edge) < 0.001)
             check("circle-cleanup-arena-\(index+1)", normal.primaryOutsideRunBounds(CGPoint(x: GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin + 1, y: 0)) && !normal.roomProjectileOutsideBounds(CGPoint(x: 9999, y: 0)))
         }
         for entry in BossRegistry.shared.all { ProgressionManager.shared.recordBossDefeat(entry.id) }
@@ -16283,7 +16282,7 @@ extension GameScene {
         check("boss-mode-configures-without-room-context", bossMode.configureAsGauntlet(order: .sequential) && bossMode.debugRoomIntegration == nil && bossMode.isGauntlet)
         for index in ArenaConfig.all.indices {
             bossMode.swapArena(to: index)
-            check("boss-mode-home-circle-" + String(index + 1), bossMode.arenaConfig.id == ArenaConfig.all[index].id && bossMode.roomPrimaryOutsideBounds(CGPoint(x: 500, y: 0)) == nil && bossMode.player.debugMovementConstraint == nil)
+            check("boss-mode-home-circle-" + String(index + 1), bossMode.arenaConfig.id == ArenaConfig.all[index].id && bossMode.roomPrimaryOutsideBounds(CGPoint(x: 500, y: 0)) == nil && bossMode.movementContextBinding == nil && bossMode.movementContextMap == nil && bossMode.player.debugMovementConstraint == nil)
         }
         ArenaConfig.overrideID = oldOverride
         let after = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
@@ -16602,7 +16601,7 @@ extension GameScene {
         let saved = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
         let analyticsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("sparkforge_runs.json")
         let analyticsBefore = try? Data(contentsOf: analyticsURL)
-        check("six-context-and-memory", GameRunPreferences.isIsolated && !isGauntlet && rooms.rooms.count == 6 && rooms.connections.count == 7 && player.debugMovementConstraint != nil)
+        check("six-context-and-memory", GameRunPreferences.isIsolated && !isGauntlet && rooms.rooms.count == 6 && rooms.connections.count == 7 && movementContextBinding != nil && movementContextMap != nil)
         check("isolated-profile-not-read", ProgressionManager.shared.currentArena == 0 && ProgressionManager.shared.arenasUnlocked == 1 && HighScoreManager.shared.totalRuns == 0 && !IAPManager.shared.hasRemovedAds && AnalyticsTracker.shared.totalRuns == 0)
         let startDiagnostic: [String:Any] = ["playerX":Double(player.position.x),"playerY":Double(player.position.y),"cameraX":Double(camera?.position.x ?? 99999),"cameraY":Double(camera?.position.y ?? 99999),"expectedX":Double(rooms.player.x),"expectedY":Double(rooms.player.y)]
         if let data=try? JSONSerialization.data(withJSONObject:startDiagnostic,options:[.prettyPrinted,.sortedKeys]),let dir=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first {try? data.write(to:dir.appendingPathComponent("arena8-six-start-diagnostics.json"))}
@@ -16756,7 +16755,7 @@ extension GameScene {
             normal.player.position = CGPoint(x: 10000, y: 10000)
             normal.player.move(direction: .zero, deltaTime: 0)
             let edge = GameConfig.Arena.radius - normal.playerStats.effectiveCollisionRadius
-            check("circle-movement-arena-\(index+1)", normal.player.debugMovementConstraint == nil && abs(normal.player.position.length - edge) < 0.001)
+            check("circle-movement-arena-\(index+1)", normal.movementContextBinding == nil && normal.movementContextMap == nil && normal.player.debugMovementConstraint == nil && abs(normal.player.position.length - edge) < 0.001)
             check("circle-cleanup-arena-\(index+1)", normal.primaryOutsideRunBounds(CGPoint(x: GameConfig.Arena.radius + GameConfig.Neutral.projectileCleanupMargin + 1, y: 0)) && !normal.roomProjectileOutsideBounds(CGPoint(x: 9999, y: 0)))
         }
         for entry in BossRegistry.shared.all { ProgressionManager.shared.recordBossDefeat(entry.id) }
@@ -16764,7 +16763,7 @@ extension GameScene {
         check("boss-mode-configures-without-room-context", bossMode.configureAsGauntlet(order: .sequential) && bossMode.debugRoomIntegration == nil && bossMode.isGauntlet)
         for index in ArenaConfig.all.indices {
             bossMode.swapArena(to: index)
-            check("boss-mode-home-circle-" + String(index + 1), bossMode.arenaConfig.id == ArenaConfig.all[index].id && bossMode.roomPrimaryOutsideBounds(CGPoint(x: 500, y: 0)) == nil && bossMode.player.debugMovementConstraint == nil)
+            check("boss-mode-home-circle-" + String(index + 1), bossMode.arenaConfig.id == ArenaConfig.all[index].id && bossMode.roomPrimaryOutsideBounds(CGPoint(x: 500, y: 0)) == nil && bossMode.movementContextBinding == nil && bossMode.movementContextMap == nil && bossMode.player.debugMovementConstraint == nil)
         }
         ArenaConfig.overrideID = oldOverride
         let after = UserDefaults.standard.dictionaryRepresentation().filter { $0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_") }
@@ -19474,19 +19473,9 @@ extension GameScene {
 
 #if DEBUG
 extension GameScene {
-    private var roomCarrierFixtureEnabled: Bool {
-        debugRoomIntegration?.isSixRoom == true && !debugArena9Traversal
-            && !roomLockmarshalRequested && GameRunPreferences.isIsolated
-            && (ProcessInfo.processInfo.arguments.contains("--arena8-carrier-fixture")
-                || ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture")
-                || roomMixedPressureEnabled)
-    }
 
-    private func setRoomCarrierNavigation(_ actor: EnemyNode, to point: CGPoint?) {
-        (actor as? CinderCarrierNode)?.packetNavigationTarget = point
-        (actor as? SpurhoundNode)?.packetNavigationTarget = point
-        (actor as? LinekeeperNode)?.packetNavigationTarget = point
-    }
+
+
 
     private func setupRoomCarrierFixture() {
         guard roomCarrierFixtureEnabled, let camera else { return }
@@ -19541,261 +19530,17 @@ extension GameScene {
         }
     }
 
-    private func clearRoomCarrierCommand() {
-        if let command = roomCarrierCommand { _ = roomCarrierPackets.cancel(command) }
-        roomSignaler?.setSignaling(false)
-        roomCarrierCommand = nil; roomCarrierDestinations.removeAll()
-        for actor in roomCarrierActors.values { setRoomCarrierNavigation(actor, to: nil) }
-        worldNode.childNode(withName: "roomCarrierWarning")?.removeFromParent()
-    }
 
-    private func resetRoomCarrierFixture() {
-        clearRoomCarrierCommand()
-        resetRoomMixedPressure()
-        roomCarrierPackets.reset()
-        roomCarrierActors.removeAll(); roomCarrierIDs.removeAll()
-        roomCarrierMembership.removeAll(); roomCarrierOrder.removeAll()
-        roomCarrierPacketID = nil; roomCarrierCommitCount = 0
-        roomCarrierConnectionCursor = 0; roomCarrierFireEnabled = true
-        roomCarrierNeedsFreshStep = false
-        roomSignaler?.setSignaling(false); roomSignaler = nil; roomSignalerID = nil
-        roomSignalerAcceptedCount = 0; roomSignalerCommitCount = 0; roomSignalerLastResult = "READY"
-    }
 
-    private func removeRoomCarrierActor(_ actor: EnemyNode) {
-        if actor === roomSignaler {
-            if let source = roomSignalerID, roomCarrierCommand?.source == source {
-                clearRoomCarrierCommand(); roomSignalerLastResult = "SOURCE LOST / PACKET RETAINED"
-            }
-            roomSignaler?.setSignaling(false); roomSignaler = nil; roomSignalerID = nil
-            return
-        }
-        guard let id = roomCarrierIDs.removeValue(forKey: ObjectIdentifier(actor)) else { return }
-        setRoomCarrierNavigation(actor, to: nil)
-        if let membership = roomCarrierMembership.removeValue(forKey: id) {
-            let released = roomCarrierPackets.remove(membership)
-            for survivor in released {
-                if let node = roomCarrierActors[survivor] { setRoomCarrierNavigation(node, to: nil) }
-            }
-        }
-        roomCarrierActors.removeValue(forKey: id)
-        roomCarrierOrder.removeAll { $0 == id }
-        if let packetID = roomCarrierPacketID, roomCarrierPackets.packets[packetID] == nil {
-            clearRoomCarrierCommand(); roomCarrierPacketID = nil
-        } else if let command = roomCarrierCommand, roomCarrierPackets.remaining(command) == nil {
-            clearRoomCarrierCommand()
-        }
-    }
 
-    private func spawnRoomCarrierPacket() {
-        guard roomCarrierFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
-              let map = debugRoomIntegration else { return }
-        for actor in Array(roomCarrierActors.values) where actor.isDying || actor.parent == nil {
-            removeRoomCarrierActor(actor)
-        }
-        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.packetAttempts += 1 }
-        // A controlled group must be cleared before another is injected. Owner
-        // death releases escorts, but does not quietly despawn or reward them.
-        guard roomCarrierActors.isEmpty,
-              roomCarrierPackets.packets.count < GameConfig.Arena8CarrierFixture.maxPackets else { return }
-        var profile: (health: Int, xp: Int)?
-        spawnBasicMelee(elapsed: waveManager.elapsedTime, placement: { _ in nil },
-                        observeBaseProfile: { health, xp in profile = (health, xp) })
-        guard let profile else { return }
-        let carrier = CinderCarrierNode(health: profile.health, xpValue: profile.xp)
-        let hound = SpurhoundNode(health: profile.health, xpValue: profile.xp)
-        let keeper = LinekeeperNode(health: profile.health, xpValue: profile.xp)
-        keeper.onFireProjectile = { [weak self] point, direction in
-            self?.spawnEnemyProjectile(at: point, direction: direction,
-                speed: GameConfig.Linekeeper.boltSpeed, range: GameConfig.Linekeeper.boltRange,
-                colorHex: GameConfig.Linekeeper.boltColorHex, elongated: true)
-        }
-        keeper.resolveFiringAnchor = { [weak self] from, goal in
-            self?.findFiringAnchor(from: from, toward: goal)
-        }
-        let actors: [EnemyNode] = [carrier, hound, keeper]
-        let offset = GameConfig.Arena8Game.spawnAnchorOffset
-        var positions: [CGPoint]?
-        let orderedRooms = map.rooms.sorted {
-            let left = $0.center.distance(to: player.position), right = $1.center.distance(to: player.position)
-            return left == right ? $0.id < $1.id : left < right
-        }
-        for room in orderedRooms {
-            var candidates = [CGPoint(x: -offset, y: -offset), CGPoint(x: offset, y: -offset),
-                              CGPoint(x: 0, y: offset), .zero].map { room.center + $0 }
-            if roomSignalerFixtureEnabled {
-                // Controlled acquisition proof only: keep the manual packet
-                // in this room when body-clear floor at normal clearance fits.
-                // Old carrier and natural spawn policies are unchanged.
-                let distance = GameConfig.Arena8Game.spawnClearance + (actors.map { $0.geometryFootprintRadius }.max() ?? 0)
-                candidates = [CGPoint(x: -distance, y: 0), CGPoint(x: distance, y: 0), CGPoint(x: 0, y: distance), CGPoint(x: 0, y: -distance)].map { room.center + $0 }
-            }
-            var chosen: [CGPoint] = []
-            for actor in actors {
-                guard let point = map.spawn(candidates: candidates.filter { point in
-                    if roomMixedPressureEnabled {
-                        guard roomMixedPositionClear(point, radius: actor.geometryFootprintRadius) else { return false }
-                        return !zip(chosen, actors.prefix(chosen.count)).contains { previous, node in
-                            roomMixedStored(previous).distance(to: roomMixedStored(point)) < node.geometryFootprintRadius + actor.geometryFootprintRadius
-                        }
-                    }
-                    guard roomSignalerFixtureEnabled, let signaler = roomSignaler, !signaler.isDying else { return true }
-                    return point.distance(to: signaler.position) >= actor.geometryFootprintRadius + signaler.geometryFootprintRadius
-                }, radius: actor.geometryFootprintRadius,
-                    avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { break }
-                chosen.append(roomMixedPressureEnabled ? roomMixedStored(point) : point)
-                candidates.removeAll { $0 == point }
-            }
-            if chosen.count == actors.count { positions = chosen; break }
-        }
-        guard let positions else { return }
-        let ids = actors.map { _ in UUID() }, packetID = UUID()
-        guard let owner = ids.first,
-              roomCarrierPackets.register(id: packetID, owner: owner, escorts: Array(ids.dropFirst())) else { return }
-        for (index, actor) in actors.enumerated() {
-            let id = ids[index]
-            actor.position = positions[index]
-            actor.name = index == 0 ? "arena8Carrier" : "arena8CarrierEscort"
-            roomCarrierActors[id] = actor; roomCarrierIDs[ObjectIdentifier(actor)] = id
-            roomCarrierMembership[id] = roomCarrierPackets.membershipTicket(for: id)
-            enemies.append(actor); worldNode.addChild(actor)
-        }
-        roomCarrierOrder = ids; roomCarrierPacketID = packetID
-        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.packets += 1; refreshRoomMixedHUD() }
-        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "PACKET READY / MANUAL MIGRATION"
-    }
 
-    private func requestRoomCarrierMigration(connection forcedConnection: Int? = nil, signalSource: UUID? = nil) {
-        guard roomCarrierFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
-              roomCarrierCommand == nil, let map = debugRoomIntegration,
-              let packetID = roomCarrierPacketID, let packet = roomCarrierPackets.packets[packetID],
-              let carrier = roomCarrierActors[packet.owner], !carrier.isDying else { return }
-        if let signalSource, roomSignalerAuthorization(for: packet) != signalSource { return }
-        let room = map.roomID(near: carrier.position)
-        let options = map.connections.indices.filter { map.connections[$0].from == room || map.connections[$0].to == room }
-        guard !options.isEmpty else { return }
-        let connectionID: Int
-        if let forcedConnection {
-            guard options.contains(forcedConnection) else { return }
-            connectionID = forcedConnection
-        } else {
-            connectionID = options[roomCarrierConnectionCursor % options.count]
-        }
-        let connection = map.connections[connectionID]
-        let destinationID = connection.from == room ? connection.to : connection.from
-        guard let destination = map.rooms.first(where: { $0.id == destinationID }) else { return }
-        let offset = GameConfig.Arena8Game.spawnAnchorOffset
-        let offsets = [CGPoint(x: -offset, y: -offset), CGPoint(x: offset, y: -offset), CGPoint(x: 0, y: offset)]
-        var targets: [UUID: CGPoint] = [:]
-        let members = roomCarrierOrder.filter { packet.members.contains($0) }
-        for (index, id) in members.enumerated() {
-            guard let actor = roomCarrierActors[id], !actor.isDying, index < offsets.count else { return }
-            let requested = destination.center + offsets[index]
-            let stored = CGPoint(x: CGFloat(Float(requested.x)), y: CGFloat(Float(requested.y)))
-            guard map.valid(stored, radius: actor.geometryFootprintRadius) else { return }
-            targets[id] = stored
-        }
-        let live = Set(roomCarrierActors.filter { !$0.value.isDying && $0.value.parent != nil }.map { $0.key })
-        guard let ticket = roomCarrierPackets.prepare(packetID: packetID, expectedRevision: packet.revision,
-            source: signalSource ?? packet.owner, authorizedSignaler: signalSource, connectionID: connectionID,
-            telegraphDuration: signalSource == nil ? GameConfig.Arena8CarrierFixture.warningDuration : GameConfig.Arena8SignalerFixture.warningDuration,
-            live: live.union(signalSource.map { [$0] } ?? []),
-            destinationValid: { !targets.isEmpty && Set(targets.keys) == packet.members }) else { return }
-        roomCarrierDestinations = targets; roomCarrierCommand = ticket
-        if signalSource != nil { roomSignalerAcceptedCount += 1; roomSignaler?.setSignaling(true); roomSignalerLastResult = "WARNING" }
-        roomCarrierConnectionCursor += 1
-        let marker = SKShapeNode(rect: connection.corridor)
-        marker.name = "roomCarrierWarning"; marker.strokeColor = .orange
-        marker.fillColor = SKColor.orange.withAlphaComponent(0.12); marker.lineWidth = 3; marker.zPosition = 2
-        worldNode.addChild(marker)
-        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = signalSource == nil ? "DOOR WARNING / 1 ACTIVE SECOND" : "AMBER SIGNAL / 1 ACTIVE SECOND"
-    }
 
-    private func updateRoomCarrierFixture(_ dt: TimeInterval) {
-        guard roomCarrierFixtureEnabled, dt.isFinite, dt >= 0,
-              let map = debugRoomIntegration else { return }
-        if roomMixedPressureEnabled { refreshRoomMixedHUD() }
-        if let signaler = roomSignaler,
-           signaler.isDying || signaler.parent == nil || !enemies.contains(where: { $0 === signaler }) {
-            removeRoomCarrierActor(signaler)
-        }
-        for actor in Array(roomCarrierActors.values)
-            where actor.isDying || actor.parent == nil || !enemies.contains(where: { $0 === actor }) {
-            removeRoomCarrierActor(actor)
-        }
-        for actor in roomCarrierActors.values { setRoomCarrierNavigation(actor, to: nil) }
-        let held = gameState != .playing || samuraiBackgroundHold || isPaused
-        // Consume the first fresh active frame even when no order is pending,
-        // so a later manual trigger cannot inherit an obsolete background gap.
-        let warningDT = !held && roomCarrierNeedsFreshStep ? 0 : dt
-        if !held { roomCarrierNeedsFreshStep = false }
-        guard let command = roomCarrierCommand else { return }
-        if command.sourceRole == .signaler {
-            guard roomSignalerID == command.source, let source = roomSignaler,
-                  !source.isDying, source.parent != nil, enemies.contains(where: { $0 === source }) else {
-                clearRoomCarrierCommand(); roomSignalerLastResult = "SOURCE LOST / CANCELLED"; return
-            }
-        }
-        let pendingSignal = command.sourceRole == .signaler && roomCarrierPackets.navigation(command) == nil
-        let sourceControlHold = pendingSignal && (roomSignaler?.signalingSafePhase != true
-            || roomSignaler.map { repulseFlights[ObjectIdentifier($0)] != nil } == true)
-        _ = roomCarrierPackets.advance(command, dt: warningDT, held: held || sourceControlHold)
-        guard roomCarrierPackets.remaining(command) != nil else { clearRoomCarrierCommand(); return }
-        guard !held, !sourceControlHold else { return }
-        if pendingSignal, roomCarrierPackets.remaining(command) == 0,
-           let packet = roomCarrierPackets.packets[command.packetID], roomSignalerAuthorization(for: packet) != command.source {
-            clearRoomCarrierCommand(); roomSignalerLastResult = "ELIGIBILITY LOST / CANCELLED"; return
-        }
-        var live = Set(roomCarrierActors.filter { !$0.value.isDying && $0.value.parent != nil }.map { $0.key })
-        if let signaler = roomSignaler, let id = roomSignalerID, !signaler.isDying,
-           signaler.parent != nil, enemies.contains(where: { $0 === signaler }) { live.insert(id) }
-        let authorized = roomCarrierPackets.packets[command.packetID].flatMap { roomSignalerAuthorization(for: $0) }
-        if roomCarrierPackets.navigation(command) == nil,
-           roomCarrierPackets.commit(command, held: false, live: live, authorizedSignaler: authorized, destinationValid: {
-               !self.roomCarrierDestinations.isEmpty && self.roomCarrierDestinations.allSatisfy { id, point in
-                   self.roomCarrierActors[id].map { map.valid(point, radius: $0.geometryFootprintRadius) } == true
-               }
-           }) != nil {
-            roomCarrierCommitCount += 1
-            if command.sourceRole == .signaler { roomSignalerCommitCount += 1; roomSignaler?.setSignaling(false); roomSignalerLastResult = "COMMITTED" }
-            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIGRATING / SPARK REMAINS TARGET"
-        }
-        guard let navigation = roomCarrierPackets.navigation(command) else { return }
-        var arrived = true
-        for id in navigation.members {
-            guard let actor = roomCarrierActors[id], let destination = roomCarrierDestinations[id] else {
-                arrived = false; continue
-            }
-            if actor.position.distance(to: destination) <= GameConfig.Arena8CarrierFixture.arrivalTolerance {
-                // Hold completed navigation without interrupting an attack.
-                // Otherwise an early arrival would immediately chase away
-                // before its slower escort could finish the same command.
-                setRoomCarrierNavigation(actor, to: actor.position)
-                continue
-            }
-            arrived = false
-            guard !actor.isStunned, !actor.isFrozen, !actor.isFeared, !actor.isVoidTrapped,
-                  repulseFlights[ObjectIdentifier(actor)] == nil,
-                  map.valid(actor.position, radius: actor.geometryFootprintRadius) else { continue }
-            let safePhase = (actor as? CinderCarrierNode)?.packetNavigationSafePhase
-                ?? (actor as? SpurhoundNode)?.packetNavigationSafePhase
-                ?? (actor as? LinekeeperNode)?.packetNavigationSafePhase ?? false
-            guard safePhase else { continue }
-            let blocked = map.geometry.segmentBlockedExact(actor.position, destination, travelRadius: actor.geometryFootprintRadius)
-            // Final destinations use the approved 12-point tolerance. Route
-            // nodes retain the existing routing handoff radius, which is
-            // larger than the keeper's stop radius and avoids a <=12 / <12
-            // waypoint boundary deadlock. Exact successor visibility remains.
-            let waypoint = blocked ? map.geometry.graphWaypoint(from: actor.position, toward: destination,
-                travelRadius: actor.geometryFootprintRadius,
-                arriveRadius: GameConfig.Routing.arriveRadius)?.position : destination
-            if let waypoint { setRoomCarrierNavigation(actor, to: waypoint) }
-        }
-        if arrived {
-            clearRoomCarrierCommand()
-            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIGRATION DONE / NO AUTO REPEAT"
-        }
-    }
+
+
+
+
+
+
 }
 #endif
 
@@ -20670,74 +20415,11 @@ extension GameScene {
 
 #if DEBUG
 extension GameScene {
-    private var roomSignalerFixtureEnabled: Bool {
-        roomCarrierFixtureEnabled && (ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture") || roomMixedPressureEnabled)
-    }
-    private func roomSignalerStrictRoom(_ point: CGPoint, map: Arena8GameMap) -> Int? {
-        map.rooms.first { point.x > $0.rect.minX && point.x < $0.rect.maxX
-            && point.y > $0.rect.minY && point.y < $0.rect.maxY }?.id
-    }
-    private func roomSignalerAuthorization(for packet: Arena8PacketCommands.Packet) -> UUID? {
-        guard roomSignalerFixtureEnabled, let map = debugRoomIntegration,
-              let source = roomSignaler, let id = roomSignalerID,
-              !source.isDying, !source.killCredited, source.parent != nil,
-              enemies.contains(where: { $0 === source }), source.signalingSafePhase,
-              repulseFlights[ObjectIdentifier(source)] == nil,
-              id != packet.owner, !packet.members.contains(id),
-              let owner = roomCarrierActors[packet.owner], !owner.isDying,
-              owner.parent != nil, enemies.contains(where: { $0 === owner }),
-              map.valid(source.position, radius: source.geometryFootprintRadius),
-              map.valid(owner.position, radius: owner.geometryFootprintRadius),
-              let sourceRoom = roomSignalerStrictRoom(source.position, map: map),
-              roomSignalerStrictRoom(owner.position, map: map) == sourceRoom else { return nil }
-        return id
-    }
-    private func spawnRoomSignaler() {
-        guard roomSignalerFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
-              let map = debugRoomIntegration else { return }
-        if let source = roomSignaler,
-           source.isDying || source.parent == nil || !enemies.contains(where: { $0 === source }) {
-            removeRoomCarrierActor(source)
-        }
-        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.signalerAttempts += 1 }
-        guard roomSignaler == nil else { return }
-        var profile: (health: Int, xp: Int)?
-        spawnBasicMelee(elapsed: waveManager.elapsedTime, placement: { _ in nil }, observeBaseProfile: { profile = ($0, $1) })
-        guard let profile else { return }
-        let source = LatchSignalerNode(health: profile.health, xpValue: profile.xp)
-        let ownerRoom = roomCarrierPacketID.flatMap { roomCarrierPackets.packets[$0] }
-            .flatMap { roomCarrierActors[$0.owner] }.flatMap { roomSignalerStrictRoom($0.position, map: map) }
-        let preferred = ownerRoom ?? roomSignalerStrictRoom(player.position, map: map) ?? map.roomID(near: player.position)
-        guard let room = map.rooms.first(where: { $0.id == preferred }) else { return }
-        let distance = GameConfig.Arena8Game.spawnClearance + source.geometryFootprintRadius
-        let candidates = [CGPoint(x: -distance, y: 0), CGPoint(x: distance, y: 0), CGPoint(x: 0, y: distance), CGPoint(x: 0, y: -distance)].map { room.center + $0 }
-            .filter { point in
-                if roomMixedPressureEnabled { return roomMixedPositionClear(point, radius: source.geometryFootprintRadius) }
-                return !enemies.contains { !$0.isDying && $0.position.distance(to: point) < $0.geometryFootprintRadius + source.geometryFootprintRadius }
-            }
-        guard let point = map.spawn(candidates: candidates, radius: source.geometryFootprintRadius,
-                                   avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else {
-            roomSignalerLastResult = "NO SAFE SOURCE FLOOR"; return
-        }
-        source.position = roomMixedPressureEnabled ? roomMixedStored(point) : point; source.name = "arena8Signaler"
-        roomSignaler = source; roomSignalerID = UUID()
-        enemies.append(source); worldNode.addChild(source)
-        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.signalers += 1; refreshRoomMixedHUD() }
-        roomSignalerLastResult = "SOURCE READY / SAME ROOM IDLE ONLY"
-        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = roomSignalerLastResult
-    }
-    private func requestRoomSignalerCommand(connection forcedConnection: Int? = nil) {
-        guard roomSignalerFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused else { return }
-        guard roomCarrierCommand == nil else { roomSignalerLastResult = "BUSY / CURRENT ORDER RETAINED"; return }
-        guard let packetID = roomCarrierPacketID, let packet = roomCarrierPackets.packets[packetID],
-              let sourceID = roomSignalerAuthorization(for: packet) else {
-            roomSignalerLastResult = "NO ELIGIBLE SAME-ROOM PACKET"
-            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = roomSignalerLastResult
-            return
-        }
-        requestRoomCarrierMigration(connection: forcedConnection, signalSource: sourceID)
-        if roomCarrierCommand == nil { roomSignalerLastResult = "ORDER REJECTED / NO SAFE DOOR" }
-    }
+
+
+
+
+
 }
 #endif
 
@@ -21184,104 +20866,17 @@ extension GameScene {
         ProcessInfo.processInfo.arguments.contains("--arena8-mixed-pressure")
             || ProcessInfo.processInfo.arguments.contains("--arena8-natural-waves")
     }
-    private var roomMixedPressureEnabled: Bool {
-        roomNaturalWavesEnabled || Arena8MixedPressureMode.enabled(arguments: ProcessInfo.processInfo.arguments,
-            sixRoom: debugRoomIntegration?.isSixRoom == true,
-            isolated: GameRunPreferences.isIsolated, arena9: debugArena9Traversal)
-    }
-    private var roomMixedProfile: Arena8PreviewSpawnClock.Profile {
-        roomNaturalWavesEnabled ? .trial : Arena8MixedPressureMode.profile(arguments: ProcessInfo.processInfo.arguments)
-    }
-    private func resetRoomMixedPressure() {
-        roomMixedClock = Arena8PreviewSpawnClock(profile: roomMixedProfile)
-        roomMixedOrdinary = (0, 0, 0, 0, 0)
-        roomMixedManual = (0, 0, 0, 0)
-        roomMixedSuppressed = 0
-        roomMixedLastWaveElapsed = nil
-        roomNaturalRun = Arena8NaturalWaveRun()
-        roomNaturalDispatching = false
-    }
+
+
+
     /// Use the exact Float-stored root and current fully scaled enemy bodies.
     /// No extra spacing dial, across-wall fallback or crowd-clearing side effect.
-    private func roomMixedStored(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: CGFloat(Float(point.x)), y: CGFloat(Float(point.y)))
-    }
-    private func roomMixedPositionClear(_ point: CGPoint, radius: CGFloat) -> Bool {
-        guard let map = debugRoomIntegration else { return false }
-        let stored = roomMixedStored(point)
-        return map.valid(stored, radius: radius)
-            && stored.distance(to: player.position) >= GameConfig.Arena8Game.spawnClearance + radius
-            && !enemies.contains { !$0.isDying && $0.parent != nil
-                && $0.position.distance(to: stored) < $0.geometryFootprintRadius + radius }
-    }
-    private func roomMixedOrdinaryPosition(for enemy: EnemyNode) -> CGPoint? {
-        guard let map = debugRoomIntegration else { return nil }
-        let points = roomSpawnCandidates
-        guard !points.isEmpty else { return nil }
-        let offset = roomSpawnIndex % points.count
-        let ordered = (Array(points[offset...]) + Array(points[..<offset])).map { roomMixedStored($0) }
-            .filter { roomMixedPositionClear($0, radius: enemy.geometryFootprintRadius) }
-        guard let point = map.spawn(candidates: ordered, radius: enemy.geometryFootprintRadius,
-                                   avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { return nil }
-        roomSpawnIndex += 1
-        return roomMixedStored(point)
-    }
-    private func spawnRoomMixedOrdinary(startup: Bool) {
-        guard roomMixedPressureEnabled, gameState == .playing else { return }
-        if startup {
-            // Scene construction may occur during Title's paused transition.
-            // Preserve the existing single initial attempt, never duplicate it.
-            guard roomMixedOrdinary.startup == 0 else { return }
-            roomMixedOrdinary.startup += 1
-        } else {
-            guard !samuraiBackgroundHold, !isPaused else { return }
-            roomMixedOrdinary.timed += 1
-        }
-        let before = enemies.count
-        var placementRequested = false
-        // Real existing composition/constructors; no extra RNG draws or mirrored stats.
-        spawnOrdinaryEnemy(elapsed: waveManager.elapsedTime, placement: { [weak self] enemy in
-            placementRequested = true
-            return self?.roomMixedOrdinaryPosition(for: enemy)
-        })
-        if enemies.count > before { roomMixedOrdinary.placed += 1 }
-        else if placementRequested { roomMixedOrdinary.blocked += 1 }
-        else { roomMixedOrdinary.thinned += 1 }
-        refreshRoomMixedHUD()
-    }
-    private func updateRoomMixedPressure(_ dt: TimeInterval) {
-        guard roomMixedPressureEnabled else { return }
-        let held = gameState != .playing || samuraiBackgroundHold || isPaused
-        guard !held, dt.isFinite, dt >= 0 else { return }
-        let elapsed = waveManager.elapsedTime
-        guard elapsed.isFinite, roomMixedLastWaveElapsed != elapsed else { return }
-        roomMixedLastWaveElapsed = elapsed
-        // WaveManager was already advanced exactly once using real game dt.
-        // Consume this one preview emission even when an ability suppresses it.
-        if roomMixedClock.advance(dt: dt, baseInterval: waveManager.currentSpawnInterval, held: held) {
-            if eventHorizonVoided || falseEndingActive { roomMixedSuppressed += 1 }
-            else if roomNaturalWavesEnabled { dispatchRoomNaturalEmission(elapsed: elapsed) }
-            else { spawnRoomMixedOrdinary(startup: false) }
-        }
-        if roomNaturalWavesEnabled { updateRoomNaturalCommand(); refreshRoomNaturalHUD() }
-        refreshRoomMixedHUD()
-    }
-    private func refreshRoomMixedHUD() {
-        guard roomMixedPressureEnabled, let label = camera?.childNode(withName: "roomMixedStatus") as? SKLabelNode else { return }
-        let interval = roomMixedClock.interval(base: waveManager.currentSpawnInterval) ?? 0
-        let attempts = roomMixedOrdinary.startup + roomMixedOrdinary.timed
-        let packets = roomNaturalWavesEnabled ? (roomNaturalRun.packetIntroduced ? 1 : 0) : roomMixedManual.packets
-        let sources = roomNaturalWavesEnabled ? (roomNaturalRun.signalerIntroduced ? 1 : 0) : roomMixedManual.signalers
-        let text = "\(roomMixedClock.profile.label) i\(String(format: "%.2f", interval)) A\(attempts) P\(roomMixedOrdinary.placed) T\(roomMixedOrdinary.thinned) B\(roomMixedOrdinary.blocked) Q\(packets) S\(sources)"
-        if label.text != text { label.text = text }
-        if label.frame.width > size.width - 20 { label.fontSize *= (size.width - 20) / label.frame.width }
-        if let row = camera?.childNode(withName: "roomMixedLive") as? SKLabelNode {
-            let counts = roomMixedLiveCounts(live: roomMixedLiveActors)
-            let value = "t\(String(format: "%.1f", waveManager.elapsedTime)) LIVE a\(counts.ambient) p\(counts.packet) s\(counts.signaler) SUP\(roomMixedSuppressed)"
-            if row.text != value { row.text = value }
-            if row.frame.width > size.width - 20 { row.fontSize *= (size.width - 20) / row.frame.width }
-        }
-    }
+
+
+
+
+
+
     private var roomMixedLiveActors: [EnemyNode] { enemies.filter { !$0.isDying && $0.parent != nil } }
     private func roomMixedLiveCounts(live: [EnemyNode]) -> (ambient: Int, packet: Int, signaler: Int) {
         let ids = Set(roomCarrierActors.values.map { ObjectIdentifier($0) })
@@ -21555,53 +21150,10 @@ extension GameScene {
 
 #if DEBUG
 extension GameScene {
-    private var roomNaturalWavesEnabled: Bool {
-        Arena8NaturalWaveMode.enabled(arguments: ProcessInfo.processInfo.arguments,
-            sixRoom: debugRoomIntegration?.isSixRoom == true,
-            isolated: GameRunPreferences.isIsolated, arena9: debugArena9Traversal)
-    }
-    private var roomNaturalCarrierAlive: Bool {
-        guard let packetID = roomCarrierPacketID,
-              let packet = roomCarrierPackets.packets[packetID],
-              let carrier = roomCarrierActors[packet.owner] else { return false }
-        return !carrier.isDying && !carrier.killCredited && carrier.parent != nil
-            && enemies.contains(where: { $0 === carrier })
-    }
-    private func dispatchRoomNaturalEmission(elapsed: TimeInterval) {
-        guard roomNaturalWavesEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
-              let ticket = roomNaturalRun.begin(elapsed: elapsed, carrierAlive: roomNaturalCarrierAlive) else { return }
-        var placed = false
-        switch ticket.action {
-        case .packet:
-            let before = roomCarrierActors.count
-            roomNaturalDispatching = true
-            spawnRoomCarrierPacket()
-            roomNaturalDispatching = false
-            placed = roomCarrierActors.count - before == GameConfig.Arena8NaturalWaveFixture.packetCost
-                && roomNaturalCarrierAlive
-            if placed {
-                (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "NATURAL PACKET / ONE INTRODUCTION"
-            }
-        case .signaler:
-            let hadSource = roomSignaler != nil
-            roomNaturalDispatching = true
-            spawnRoomSignaler()
-            roomNaturalDispatching = false
-            placed = !hadSource && roomSignaler != nil
-        case .ordinary, .reservePacket: break
-        }
-        if roomNaturalRun.finish(ticket, placed: placed) == true {
-            spawnRoomMixedOrdinary(startup: false)
-        }
-    }
-    private func updateRoomNaturalCommand() {
-        guard roomNaturalWavesEnabled, roomNaturalRun.signalerIntroduced,
-              !roomNaturalRun.commandPrepared, gameState == .playing,
-              !samuraiBackgroundHold, !isPaused else { return }
-        let before = roomSignalerAcceptedCount
-        requestRoomSignalerCommand()
-        if roomSignalerAcceptedCount > before { roomNaturalRun.recordPreparedCommand() }
-    }
+
+
+
+
     private var roomNaturalTelemetry: [String: Any] {
         ["naturalWaves": true, "naturalEmissions": roomNaturalRun.emissions,
          "naturalOrdinarySlots": roomNaturalRun.ordinarySlots,
@@ -21619,22 +21171,8 @@ extension GameScene {
          "naturalGeneration": roomNaturalRun.generation.uuidString,
          "naturalHUDVisible": camera?.childNode(withName: "roomNaturalStatus")?.isHidden == false]
     }
-    private func refreshRoomNaturalVisibility() {
-        guard roomNaturalWavesEnabled else { return }
-        let hidden = gameState != .playing || samuraiBackgroundHold || isPaused
-        for name in ["roomNaturalStatus", "roomMixedStatus", "roomMixedLive", "roomCarrierStatus", "roomCarrierFire"] {
-            camera?.childNode(withName: name)?.isHidden = hidden
-        }
-    }
-    private func refreshRoomNaturalHUD() {
-        refreshRoomNaturalVisibility()
-        guard roomNaturalWavesEnabled,
-              let label = camera?.childNode(withName: "roomNaturalStatus") as? SKLabelNode else { return }
-        let source = roomNaturalRun.signalerSkipped ? "SKIP" : (roomNaturalRun.signalerIntroduced ? "1" : "0")
-        label.text = "NAT30/34 E\(roomNaturalRun.emissions) R\(roomNaturalRun.reservedSlots) Q\(roomNaturalRun.packetIntroduced ? 1 : 0) S\(source) CMD\(roomNaturalRun.commandPrepared ? 1 : 0)"
-        label.fontSize = 9
-        if label.frame.width > size.width - 20 { label.fontSize *= (size.width - 20) / label.frame.width }
-    }
+
+
 }
 #endif
 
@@ -21839,38 +21377,12 @@ extension GameScene {
 
 #if DEBUG
 extension GameScene {
-    private var roomLockmarshalRequested: Bool {ProcessInfo.processInfo.arguments.contains("--arena8-lockmarshal")}
-    private var roomLockmarshalEnabled: Bool {
-        let args=ProcessInfo.processInfo.arguments
-        return args.contains("--arena8-lockmarshal") && debugRoomIntegration?.isSixRoom == true
-            && GameRunPreferences.isIsolated && !debugArena9Traversal && !isGauntlet
-            && args.filter{$0.hasPrefix("--arena8-")}.allSatisfy {
-                ["--arena8-six","--arena8-title","--arena8-lockmarshal","--arena8-lockmarshal-checks","--arena8-title-input","--arena8-title-autoplay","--arena8-six-input"].contains($0)
-            }
-    }
-    private func setupRoomLockmarshal(){
-        guard roomLockmarshalEnabled,let map=debugRoomIntegration,let room=map.rooms.first else{return}
-        let root=room.center+CGPoint(x:180,y:0)
-        guard map.valid(root,radius:GameConfig.LockmarshalFixture.bodyRadius) else{return}
-        let actor=LockmarshalNode(map:map,at:root)
-        actor.canAdvance={ [weak self] in
-            guard let self,self.roomLockmarshalEnabled,self.gameState == .playing,!self.samuraiBackgroundHold,!self.isPaused else{return false}
-            if self.roomLockmarshalNeedsFreshStep {self.roomLockmarshalNeedsFreshStep=false;return false}
-            return true
-        }
-        actor.onHazardDamage={ [weak self] damage in
-            self?.applyBossHazardDamage(damage,shakeIntensity:4)
-        }
-        actor.onDeath={ [weak self,weak actor] in
-            guard let self,let actor,self.boss === actor else{return}
-            self.roomLockmarshalDeaths += 1
-            self.boss=nil // Common lethal reward seam ran first; no campaign victory/unlock.
-        }
-        boss=actor;worldNode.addChild(actor);roomLockmarshalDeaths=0;roomCarrierFireEnabled=true;roomLockmarshalNeedsFreshStep=true
-        camera?.childNode(withName:"roomCarrierFire")?.removeFromParent()
-        let fire=SKLabelNode(fontNamed:"Menlo-Bold");fire.name="roomCarrierFire";fire.text="TEST FIRE: ON";fire.fontSize=12;fire.fontColor = .cyan
-        fire.position=CGPoint(x:0,y:-size.height/2+65);fire.zPosition=300;camera?.addChild(fire)
-    }
+
+
+    /// Uses the shared mobile-boss gate, never the saved ordinary arena grammar.
+
+
+
     private func updateRoomLockmarshal(_ dt:TimeInterval){
         guard roomLockmarshalEnabled,let actor=boss as? LockmarshalNode else{return}
         actor.playerHitRadius=playerStats.effectiveCollisionRadius
@@ -21984,3 +21496,1062 @@ extension GameScene {
     }
 }
 #endif
+
+
+// Rainbow R1: real runtime adapters. Kept in this file to share the Scene's
+// private combat chokepoints, not a parallel projectile/reward implementation.
+extension GameScene {
+    private func rainbowIdentity(_ node:SKNode)->String {
+        if let id=node.userData?["rainbow.runtime.identity"] as? String {return id}
+        let id=UUID().uuidString
+        if node.userData == nil {node.userData=NSMutableDictionary()}
+        node.userData?["rainbow.runtime.identity"]=id
+        return id
+    }
+    private func rainbowTargets()->[String:SKNode] {
+        var result:[String:SKNode]=[:]
+        for enemy in enemies where isHittable(enemy) {result[rainbowIdentity(enemy)]=enemy}
+        if let b=boss,isHittable(b) {result[rainbowIdentity(b)]=b}
+        return result
+    }
+    private func rainbowRadius(_ node:SKNode)->CGFloat {
+        if let enemy=node as? EnemyNode{return enemy.hitBodyRadius}
+        if let b=node as? (any ArenaBossNode){return b.hitBodyRadius}
+        return 0
+    }
+    private var rainbowBoard:CGRect {
+        if let rooms=roomRuntimeMap {return rooms.world}
+        let radius=GameConfig.Arena.radius
+        return CGRect(x:-radius,y:-radius,width:radius*2,height:radius*2)
+    }
+    private func rainbowInBoard(_ node:SKNode)->Bool {
+        let radius=rainbowRadius(node)
+        if let rooms=roomRuntimeMap {return rooms.world.insetBy(dx:-radius,dy:-radius).contains(node.position)}
+        return node.position.length<=GameConfig.Arena.radius+radius
+    }
+    private func rainbowViewport()->CGRect {
+        guard let view else{return .null}
+        let corners=[CGPoint.zero,CGPoint(x:view.bounds.width,y:0),
+                     CGPoint(x:0,y:view.bounds.height),CGPoint(x:view.bounds.width,y:view.bounds.height)]
+            .map{worldNode.convert(convertPoint(fromView:$0),from:self)}
+        guard let left=corners.map(\.x).min(),let right=corners.map(\.x).max(),
+              let bottom=corners.map(\.y).min(),let top=corners.map(\.y).max() else{return .null}
+        return CGRect(x:left,y:bottom,width:right-left,height:top-bottom)
+    }
+    private func syncRainbowHolds() {
+        guard RainbowRuntimeGate.enabled else{return}
+        let before=rainbow.holds
+        if (gameState == .dead || gameState == .reviving) && !before.contains(.death) {cancelRainbowAttack()}
+        rainbow.setHold(.background,rainbowBackgroundHold)
+        rainbow.setHold(.pause,gameState == .paused || gameState == .removeAdsPrompt)
+        rainbow.setHold(.levelUp,gameState == .levelUp)
+        rainbow.setHold(.placement,gameState == .placingZone)
+        rainbow.setHold(.reveal,gameState == .synergyReveal || gameState == .bossReveal)
+        rainbow.setHold(.death,gameState == .dead || gameState == .reviving)
+        if before != rainbow.holds {rainbowPending=nil;rainbowNeedsFreshFrame=true}
+        refreshRainbowPresentation()
+    }
+    private func cancelRainbowAttack(clearOwnership:Bool=false) {
+        guard RainbowRuntimeGate.enabled else{return}
+        rainbowRunGeneration=UUID()
+        if clearOwnership {rainbow.newRun();rainbowRetired=true} else {rainbow.cancelSweep()}
+        rainbowPending=nil;rainbowNeedsFreshFrame=true;rainbowArt.clear()
+        if clearOwnership {capstoneTimers.clear("rainbow")}
+    }
+    private func beginRainbowFrame(_ dt:TimeInterval) {
+        rainbowPending=nil
+        guard RainbowRuntimeGate.enabled,!rainbowRetired,playerStats.rainbowOwned,gameState == .playing,rainbow.holds.isEmpty else{return}
+        if !rainbow.owned {rainbow.select();rainbowNeedsFreshFrame=true}
+        if rainbowNeedsFreshFrame {rainbowNeedsFreshFrame=false;return}
+        let starts=rainbowTargets().filter{rainbowInBoard($0.value)}.mapValues{$0.position}
+        rainbowPending=RainbowPending(dt:dt,viewport:rainbowViewport(),origin:player.position,starts:starts)
+    }
+    private func snapshotRainbowAttacker()->RainbowSweep.Attacker {
+        let split=OverchargeSplit(playerStats.overchargeParts(scale:1))
+        var snapshot=RainbowSweep.Attacker(ordinaryBasis:CGFloat(split.base)*split.factor,
+            critChance:playerStats.critChance,critMultiplier:playerStats.critMultiplier,
+            luckyBreak:playerStats.forgeLuckyBreak,longShotT4:playerStats.projectilePassesTerrain)
+        // Passive offense only. Never call forgeOffense here: it consumes
+        // primary charges and mutates Relentless/Warpath hit counters.
+        if playerStats.forgeBerserker && playerStats.hpPercent<0.5 {snapshot.forgeBaseBonus += 0.05}
+        if playerStats.forgeCleaver && nearbyEnemyCount(GameConfig.ForgePath.holdLineRadius)>=4 {snapshot.forgeBaseBonus += 0.08}
+        if playerStats.forgeRisingHeat {snapshot.forgeBaseBonus += CGFloat(forgeRisingHeatStacks)*0.01}
+        if playerStats.forgeWarpath && forgeWarpathDamageTime>=6 {snapshot.forgeBaseBonus += 0.10}
+        snapshot.headsmanBonus=playerStats.forgeHeadsman ? 0.10:0
+        snapshot.openingBonus=playerStats.forgeOpeningBlow ? 0.10:0
+        snapshot.opportunistBonus=playerStats.forgeOpportunist ? 0.05:0
+        if playerStats.forgeRelentless,let target=forgeRelentlessTarget {
+            snapshot.relentlessID=rainbowIdentity(target);snapshot.relentlessBonus=CGFloat(forgeRelentlessStacks)*0.01
+        }
+        snapshot.executionThreshold=playerStats.executionThreshold
+        snapshot.executionMultiplier=GameConfig.Bleed.exsanguinateMultiplier
+        snapshot.protocolThreshold=playerStats.executionProtocolThreshold
+        snapshot.protocolMultiplier=playerStats.executionProtocolMultiplier
+        snapshot.permafrostBonus=playerStats.slowedDamageBonus
+        snapshot.brittleCold=playerStats.brittleCold
+        snapshot.brittleColdFactor=GameConfig.PolarVortex.brittleColdVuln
+        snapshot.openWoundsBonus=playerStats.bleedingEnemyDamageTaken
+        return snapshot
+    }
+    private func finishRainbowFrame() {
+        defer{rainbowPending=nil;refreshRainbowPresentation()}
+        guard let frame=rainbowPending,gameState == .playing,!player.isDead,rainbow.holds.isEmpty else{return}
+        let live=rainbowTargets()
+        let targets=live.compactMap{ id,node -> RainbowSweep.Target? in
+            // A newly spawned/materialized target has no certified motion
+            // interval: first observe it, never retroactively strike its birth.
+            guard let previous=frame.starts[id],rainbowInBoard(node) else{return nil}
+            return .init(id:id,previous:previous,position:node.position,radius:rainbowRadius(node))
+        }
+        let contacts=rainbow.advance(frame.dt,fromViewport:frame.viewport,toViewport:rainbowViewport(),
+            fromOrigin:frame.origin,toOrigin:player.position,board:rainbowBoard,
+            attacker:snapshotRainbowAttacker(),targets:targets,geometry:arenaGeometry)
+        for contact in contacts {
+            guard gameState == .playing,!player.isDead,rainbow.accepts(contact) else{break}
+            guard let node=rainbowTargets()[contact.id],rainbowInBoard(node),isHittableTarget(node) else{continue}
+            // Read live mitigation immediately before each target entry. Earlier
+            // kills may already have removed/replaced another candidate.
+            if let enemy=node as? EnemyNode {
+                let impaired=enemy.isSlowed || enemy.isFrozen || enemy.isStunned
+                let shielded=(enemy as? BraceguardNode)?.blocksHit(from:contact.origin) ?? false
+                let hit=rainbowHit(contact,health:enemy.healthPercent,bossClass:enemy.isMiniBoss,
+                    impaired:impaired,bleeding:enemy.isBleeding,slowed:enemy.isSlowed,
+                    frozen:enemy.isFrozen,stunned:enemy.isStunned,vulnerability:enemy.vulnerabilityMultiplier,
+                    defense:shielded ? BraceguardNode.shieldDamageMultiplier:1)
+                rainbow.recordHit(contact)
+                if shielded {(enemy as? BraceguardNode)?.flashShield()}
+                if enemy.takeDirectHit(hit.targetEntry) {
+                    onEnemyKilled(at:enemy.position,xpValue:enemy.xpValue,enemy:enemy,source:.capstone)
+                }
+            } else if let b=node as? (any ArenaBossNode),isHittable(b) {
+                let hit=rainbowHit(contact,health:b.healthPercent,bossClass:true,arenaBoss:true,impaired:false,
+                    bleeding:bossStatus.bleed.isBleeding,slowed:false,frozen:false,stunned:false,
+                    vulnerability:b.vulnerabilityMultiplier,defense:1)
+                rainbow.recordHit(contact)
+                // The boss's existing onLethalHit latch owns every reward.
+                b.takeDirectHit(hit.targetEntry)
+            }
+        }
+    }
+    private func rainbowHit(_ contact:RainbowSweep.Contact,health:CGFloat,bossClass:Bool,arenaBoss:Bool=false,impaired:Bool,
+                            bleeding:Bool,slowed:Bool,frozen:Bool,stunned:Bool,
+                            vulnerability:CGFloat,defense:CGFloat)->DirectHit {
+        let a=contact.attacker
+        var prefix=max(0,a.ordinaryBasis)*GameConfig.RainbowRuntime.sweepMultiplier
+        if CGFloat.random(in:0..<1)<a.critChance {
+            prefix *= a.critMultiplier
+            if a.luckyBreak && CGFloat.random(in:0..<1)<GameConfig.RainbowRuntime.luckyBreakChance {
+                prefix *= GameConfig.RainbowRuntime.luckyBreakMultiplier
+            }
+        }
+        var execute:CGFloat=1
+        if a.executionThreshold>0 && health<a.executionThreshold {execute=max(execute,a.executionMultiplier)}
+        if a.protocolThreshold>0 && health<a.protocolThreshold {execute=max(execute,a.protocolMultiplier)}
+        let forge = (1 + a.forgeBaseBonus
+                     + (bossClass ? a.headsmanBonus : 0)
+                     + (health > 0.9 ? a.openingBonus : 0)
+                     + (impaired ? a.opportunistBonus : 0)
+                     + (a.relentlessID == contact.id ? a.relentlessBonus : 0))
+        prefix *= execute*forge
+        let amplifiers:DirectHitAmplifiers=arenaBoss
+            ? .onBoss(openWoundsBonus:a.openWoundsBonus,bleeding:bleeding)
+            : .onEnemy(permafrostBonus:a.permafrostBonus,slowed:slowed,arenaSlowed:playerStats.globalEnemySlow>0,
+                       brittleCold:a.brittleCold,brittleColdFactor:a.brittleColdFactor,
+                       frozen:frozen,stunned:stunned,openWoundsBonus:a.openWoundsBonus,bleeding:bleeding)
+        return DirectHitDamage.resolveExact(prefix,amplifiers,overcharge:1,vulnerability:vulnerability,
+                                           extra:defense,rounding:DirectHitRounding())
+    }
+    private func refreshRainbowPresentation() {
+        guard RainbowRuntimeGate.enabled else{return}
+        guard !rainbowRetired,rainbow.owned else {rainbowArt.clear();capstoneTimers.clear("rainbow");return}
+        capstoneTimers.set("rainbow",label:"🌈 SUPER!",colorHex:0xFFE88E,remaining:rainbow.remaining,pulses:rainbow.holds.isEmpty)
+        rainbowArt.render(rainbow,viewport:rainbowViewport(),origin:player.position,board:rainbowBoard,geometry:arenaGeometry)
+    }
+}
+
+
+#if DEBUG
+extension GameScene {
+    /// Controlled actual-Scene/API coverage. This advances only the Rainbow
+    /// clock with explicit test deltas and invokes real handlers. It is NOT
+    /// natural drafting, wall-clock play, native input, performance or billing proof.
+    private func runRainbowRuntimeChecks() {
+        guard GameRunPreferences.isIsolated else { return }
+        var checks:[[String:Any]]=[]
+        var observations:[String:Any]=[:]
+        func check(_ name:String,_ ok:Bool) {checks.append(["name":name,"pass":ok])}
+        let before=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+        func finish() {
+            let after=UserDefaults.standard.dictionaryRepresentation().filter{$0.key.hasPrefix("sf_") || $0.key.hasPrefix("sparkforge_")}
+            check("standard-profile-unchanged",NSDictionary(dictionary:before).isEqual(to:after))
+            let report:[String:Any]=["passed":checks.filter{($0["pass"] as? Bool)==true}.count,
+                "failed":checks.filter{($0["pass"] as? Bool)==false}.count,"checks":checks,
+                "observations":observations,
+                "scope":"Controlled actual Scene/API handlers and explicit Rainbow time steps. Not native input or natural acquisition frequency."]
+            if let directory=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask).first,
+               let data=try? JSONSerialization.data(withJSONObject:report,options:[.sortedKeys,.prettyPrinted]) {
+                try? data.write(to:directory.appendingPathComponent("rainbow-runtime-checks.json"))
+            }
+        }
+        check("explicit-isolated-gate",RainbowRuntimeGate.enabled && GameRunPreferences.isIsolated)
+        guard RainbowRuntimeGate.enabled else {finish();return}
+        // Controlled actual damage-adapter regression. Oversized integer test
+        // bonuses isolate branch inclusion, not shipped balance or native play.
+        var passiveAttacker = RainbowSweep.Attacker(ordinaryBasis: 10, critChance: 0,
+            critMultiplier: 1, luckyBreak: false, longShotT4: false)
+        passiveAttacker.opportunistBonus = 1
+        passiveAttacker.relentlessID = "passive-target"
+        passiveAttacker.relentlessBonus = 2
+        func passiveDamage(target: String, impaired: Bool) -> Int {
+            let contact = RainbowSweep.Contact(id: target, position: .zero, cycle: 0,
+                generation: 0, origin: .zero, attacker: passiveAttacker)
+            return rainbowHit(contact, health: 0.5, bossClass: false, impaired: impaired,
+                bleeding: false, slowed: false, frozen: false, stunned: false,
+                vulnerability: 1, defense: 1).dealt
+        }
+        check("real-passive-neither", passiveDamage(target: "other", impaired: false) == 35)
+        check("real-passive-opportunist", passiveDamage(target: "other", impaired: true) == 70)
+        check("real-passive-relentless", passiveDamage(target: "passive-target", impaired: false) == 105)
+        check("real-passive-both", passiveDamage(target: "passive-target", impaired: true) == 140)
+        passiveAttacker.ordinaryBasis = 0
+        check("real-passive-zero-preserved", passiveDamage(target: "passive-target", impaired: true) == 0)
+        gameState = .playing
+        // Controlled real-acquisition fixture, not a claim that these grants
+        // occurred naturally at this level. The palette itself is never changed.
+        for (i,signature) in upgradeManager.allCards.filter({$0.isSignature && upgradeManager.activeFamilies.contains($0.tag)}).enumerated() {
+            check("real-signature-acquisition-\(i)",upgradeManager.acquire(signature,stats:playerStats,level:100+i))
+        }
+        player.grantLevel()
+        let staleSpread=upgradeManager.drawCards(level:player.currentLevel)
+        guard let stale=staleSpread.first(where:{$0.isBreadthReward}) else {check("qualified-special-offered",false);finish();return}
+        let staleNode=UpgradeCardNode(card:stale)
+        pendingLevelCard=staleNode;levelNeedsStat=true;levelStatPick = .hp
+        let hpBefore=playerStats.maxHP
+        _=upgradeManager.drawCards(count:0,level:player.currentLevel)
+        tryCommitLevelUp()
+        check("stale-before-stat-consumption",playerStats.maxHP==hpBefore && levelNeedsStat && levelStatPick != nil && !playerStats.rainbowOwned)
+        player.grantLevel()
+        let spread=upgradeManager.drawCards(level:player.currentLevel)
+        gameState = .levelUp;levelNeedsStat=false;levelStatPick=nil
+        showCardSelection(spread)
+        guard let rewardNode=displayedCards.first(where:{$0.card.isBreadthReward}) else {check("fresh-special-offered",false);finish();return}
+        pendingLevelCard=rewardNode
+        let levelBefore=player.currentLevel
+        tryCommitLevelUp()
+        // Do not wait for an animation in a synchronous API fixture. Exercise
+        // its actual completion handler explicitly, once; native timing is separate.
+        rewardNode.removeAllActions()
+        check("real-special-acquisition-one-level",playerStats.rainbowOwned && rainbow.owned && player.currentLevel==levelBefore && upgradeManager.tier(of:stale.id)==1)
+        finishLevelUp(synergies:[])
+        for _ in 0..<10 {if synergyModal != nil {advanceSynergy()}}
+        check("real-reveal-hold-completion",gameState == .playing && rainbow.remaining==20 && rainbow.holds.isEmpty)
+
+        // Independent clean combat fixture using the real acquired effect;
+        // these explicit stats are test inputs, never native gameplay evidence.
+        for enemy in enemies {enemy.removeFromParent()};enemies.removeAll()
+        for shot in projectiles {shot.removeFromParent()};projectiles.removeAll()
+        playerStats.reset();UpgradeManager.rainbowCard.apply(playerStats)
+        playerStats.damageMultiplier=1.5;player.position=CGPoint(x:0,y:420);camera?.position=player.position
+        let victim=EnemyNode(health:100,moveSpeed:0,xpValue:2)
+        // EnemyNode applies the shipped health scale at construction. Assert
+        // real damage deltas against actual HP; never assume input100 is HP100.
+        let primaryInitialHP=victim.health
+        victim.position=player.position+CGPoint(x:50,y:0);enemies.append(victim);worldNode.addChild(victim)
+        fireProjectile(direction:CGPoint(x:1,y:0),rollsCrit:false)
+        if let shot=projectiles.last,let projectileBody=shot.physicsBody,let targetBody=victim.physicsBody {
+            check("primary-captured-factor",shot.rainbowDamageFactor==2 && shot.damageMultiplier==1.5)
+            handleProjectileHit(projectileBody:projectileBody,enemyBody:targetBody)
+            observations["primary"]=["initialHP":primaryInitialHP,"afterHP":victim.health,
+                "delta":primaryInitialHP-victim.health,"expectedDelta":2,
+                "factor":Double(shot.rainbowDamageFactor),"ordinaryMultiplier":Double(shot.damageMultiplier)]
+            check("primary-preserves-integer-prefix",primaryInitialHP-victim.health==2)
+        } else {check("primary-preserves-integer-prefix",false)}
+        victim.removeFromParent();enemies.removeAll()
+        let sweepVictim=EnemyNode(health:100,moveSpeed:0,xpValue:2)
+        let sweepInitialHP=sweepVictim.health
+        sweepVictim.position=player.position+CGPoint(x:50,y:0);enemies.append(sweepVictim);worldNode.addChild(sweepVictim)
+        rainbow.newRun();rainbow.select();rainbowNeedsFreshFrame=false
+        for _ in 0..<210 {beginRainbowFrame(0.1);didFinishUpdate()}
+        let lost=sweepInitialHP-sweepVictim.health
+        observations["sweep"]=["initialHP":sweepInitialHP,"afterHP":sweepVictim.health,
+            "delta":lost,"expectedDeltas":[3,4],"launches":rainbow.launches]
+        check("actual-sweep-three-point-five-not-seven",lost==3 || lost==4)
+        for _ in 0..<10 {beginRainbowFrame(0.1);didFinishUpdate()}
+        check("actual-one-hit-per-cycle",sweepInitialHP-sweepVictim.health==lost)
+        check("real-countdown-row-present",!capstoneTimers.children.isEmpty)
+
+        // A real lethal entry uses the ordinary reward chokepoint. Preserve
+        // its deferred XP action and inspect it after genuine action evaluation.
+        sweepVictim.removeFromParent();enemies.removeAll()
+        if let chain=upgradeManager.allCards.first(where:{$0.name=="Chain Reaction"}) {chain.apply(playerStats)}
+        let upper=RainbowSweep.laneFootprint(viewport:rainbowViewport(),origin:player.position,board:rainbowBoard).maxY
+        let rewardVictim=EnemyNode(health:1,moveSpeed:0,xpValue:2)
+        rewardVictim.position=CGPoint(x:player.position.x+50,y:upper-5)
+        enemies.append(rewardVictim);worldNode.addChild(rewardVictim)
+        let chainVictim=EnemyNode(health:1,moveSpeed:0,xpValue:2)
+        chainVictim.position=CGPoint(x:rewardVictim.position.x,y:upper+18)
+        enemies.append(chainVictim);worldNode.addChild(chainVictim)
+        let killsBefore=killCount,orbsBefore=xpOrbs.count
+        rainbow.boardHandoff();rainbowNeedsFreshFrame=false
+        for _ in 0..<210 {beginRainbowFrame(0.1);didFinishUpdate()}
+        check("real-capstone-kill-credit-once",rewardVictim.killCredited && killCount==killsBefore+1)
+        check("real-Chain-Reaction-reward-recorded",playerStats.chainReactionExplode && chainVictim.killCredited && killCount==killsBefore+1)
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.5) { [weak self] in
+            guard let self else{return}
+            check("real-deferred-XP-paid",self.xpOrbs.count>orbsBefore)
+            let targetBoss=BossNode(config:BossNode.slagTitan)
+            targetBoss.position=self.player.position+CGPoint(x:50,y:0)
+            targetBoss.challengeFlatReduction=2
+            self.boss=targetBoss;self.worldNode.addChild(targetBoss);self.resetBossStatus()
+            let bossHP=targetBoss.health
+            self.rainbow.boardHandoff();self.rainbowNeedsFreshFrame=false
+            for _ in 0..<210 {self.beginRainbowFrame(0.1);self.didFinishUpdate()}
+            let bossLost=bossHP-targetBoss.health
+            check("actual-boss-direct-defense",bossLost==1 || bossLost==2)
+            self.playerStats.forgeRisingHeat=true;self.forgeRisingHeatStacks=0
+            self.playerStats.damageMultiplier=10000
+            self.rainbow.boardHandoff();self.rainbowNeedsFreshFrame=false
+            for _ in 0..<210 {self.beginRainbowFrame(0.1);self.didFinishUpdate()}
+            check("actual-boss-kill-chokepoint",targetBoss.isDead && self.bossKillLatch.credited && self.forgeRisingHeatStacks==1)
+            let duplicate=self.bossLethalHit
+            duplicate(ObjectIdentifier(targetBoss),10000)
+            check("boss-reward-not-duplicated",self.forgeRisingHeatStacks==1)
+            targetBoss.removeFromParent();self.boss=nil;self.resetBossStatus()
+            self.rainbow.boardHandoff();self.rainbowNeedsFreshFrame=false
+            for _ in 0..<201 {self.beginRainbowFrame(0.1);self.didFinishUpdate()}
+            let elapsed=self.rainbow.elapsed,age=self.rainbow.sweep?.age
+            self.gameState = .paused;self.appDidEnterBackground()
+            self.beginRainbowFrame(0.1);self.didFinishUpdate()
+            check("actual-overlapping-holds",self.rainbow.elapsed==elapsed && self.rainbow.sweep?.age==age && self.rainbow.holds.contains(.background))
+            self.resumeGame();self.beginRainbowFrame(0.1);self.didFinishUpdate()
+            check("manual-resume-keeps-background-hold",self.rainbow.elapsed==elapsed && self.rainbow.holds.contains(.background))
+            self.appWillEnterForeground();self.beginRainbowFrame(0.1);self.didFinishUpdate()
+            check("foreground-first-step-no-catchup",self.rainbow.elapsed==elapsed)
+            self.beginRainbowFrame(0.1);self.didFinishUpdate()
+            check("foreground-later-step-resumes",self.rainbow.elapsed>elapsed)
+            self.playerDied()
+            check("death-cancels-front-keeps-ownership",self.rainbow.sweep==nil && self.rainbow.owned && self.playerStats.rainbowOwned)
+            self.executeRevive();self.resumeFromRevive()
+            check("actual-revive-keeps-ownership",self.gameState == .playing && self.rainbow.owned && self.playerStats.rainbowOwned)
+            self.swapArena(to:self.arenaConfig.id)
+            check("actual-board-handoff-twenty",self.rainbow.owned && self.rainbow.remaining==20 && self.rainbow.sweep==nil)
+            self.restartGame()
+            check("actual-restart-clears-owned",!self.rainbow.owned && !self.playerStats.rainbowOwned && self.upgradeManager.tier(of:RainbowPolicy.reward.id)==0)
+            self.returnToTitle()
+            check("actual-title-retires",self.rainbowRetired && !self.rainbow.owned && self.rainbow.sweep==nil)
+            finish()
+        }
+    }
+}
+#endif
+
+// Shared authored room runtime; DEBUG selectors and controlled checks remain above.
+extension GameScene {
+    private var isProductionArena8: Bool { !GameRunPreferences.isIsolated && arenaConfig.id == 7 }
+    private var roomCarrierFixtureEnabled: Bool {
+        if isProductionArena8 { return !isGauntlet }
+        #if DEBUG
+        return roomRuntimeMap?.isSixRoom == true && !debugArena9Traversal && !roomLockmarshalRequested && GameRunPreferences.isIsolated && (ProcessInfo.processInfo.arguments.contains("--arena8-carrier-fixture") || ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture") || roomMixedPressureEnabled)
+        #else
+        return false
+        #endif
+    }
+    private var roomSignalerFixtureEnabled: Bool {
+        if isProductionArena8 { return !isGauntlet }
+        #if DEBUG
+        return roomCarrierFixtureEnabled && (ProcessInfo.processInfo.arguments.contains("--arena8-signaler-fixture") || roomMixedPressureEnabled)
+        #else
+        return false
+        #endif
+    }
+    private var roomMixedPressureEnabled: Bool {
+        if roomNaturalWavesEnabled { return true }
+        #if DEBUG
+        return Arena8MixedPressureMode.enabled(arguments: ProcessInfo.processInfo.arguments, sixRoom: roomRuntimeMap?.isSixRoom == true, isolated: GameRunPreferences.isIsolated, arena9: debugArena9Traversal)
+        #else
+        return false
+        #endif
+    }
+    private var roomMixedProfile: Arena8PreviewSpawnClock.Profile {
+        if roomNaturalWavesEnabled { return .trial }
+        #if DEBUG
+        return Arena8MixedPressureMode.profile(arguments: ProcessInfo.processInfo.arguments)
+        #else
+        return .baseline
+        #endif
+    }
+    private var roomNaturalWavesEnabled: Bool {
+        if isProductionArena8 { return !isGauntlet }
+        #if DEBUG
+        return Arena8NaturalWaveMode.enabled(arguments: ProcessInfo.processInfo.arguments, sixRoom: roomRuntimeMap?.isSixRoom == true, isolated: GameRunPreferences.isIsolated, arena9: debugArena9Traversal)
+        #else
+        return false
+        #endif
+    }
+    private var roomLockmarshalRequested: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("--arena8-lockmarshal")
+        #else
+        return false
+        #endif
+    }
+    private var roomLockmarshalContextEnabled: Bool {
+        guard roomRuntimeMap?.isSixRoom == true else { return false }
+        if isProductionArena8 { return true }
+        #if DEBUG
+        return RoomBossID.lockmarshal.isEnabled && !debugArena9Traversal && !isGauntlet
+        #else
+        return false
+        #endif
+    }
+    private var roomLockmarshalEnabled: Bool { roomLockmarshalContextEnabled && !isGauntlet }
+
+    private func setRoomCarrierNavigation(_ actor: EnemyNode, to point: CGPoint?) {
+        (actor as? CinderCarrierNode)?.packetNavigationTarget = point
+        (actor as? SpurhoundNode)?.packetNavigationTarget = point
+        (actor as? LinekeeperNode)?.packetNavigationTarget = point
+    }
+
+    private func clearRoomCarrierCommand() {
+        if let command = roomCarrierCommand { _ = roomCarrierPackets.cancel(command) }
+        roomSignaler?.setSignaling(false)
+        roomCarrierCommand = nil; roomCarrierDestinations.removeAll()
+        for actor in roomCarrierActors.values { setRoomCarrierNavigation(actor, to: nil) }
+        worldNode.childNode(withName: "roomCarrierWarning")?.removeFromParent()
+    }
+
+    private func resetRoomCarrierFixture() {
+        clearRoomCarrierCommand()
+        resetRoomMixedPressure()
+        roomCarrierPackets.reset()
+        roomCarrierActors.removeAll(); roomCarrierIDs.removeAll()
+        roomCarrierMembership.removeAll(); roomCarrierOrder.removeAll()
+        roomCarrierPacketID = nil; roomCarrierCommitCount = 0
+        roomCarrierConnectionCursor = 0; roomCarrierFireEnabled = true
+        roomCarrierNeedsFreshStep = false
+        roomSignaler?.setSignaling(false); roomSignaler = nil; roomSignalerID = nil
+        roomSignalerAcceptedCount = 0; roomSignalerCommitCount = 0; roomSignalerLastResult = "READY"
+    }
+
+    private func removeRoomCarrierActor(_ actor: EnemyNode) {
+        if actor === roomSignaler {
+            if let source = roomSignalerID, roomCarrierCommand?.source == source {
+                clearRoomCarrierCommand(); roomSignalerLastResult = "SOURCE LOST / PACKET RETAINED"
+            }
+            roomSignaler?.setSignaling(false); roomSignaler = nil; roomSignalerID = nil
+            return
+        }
+        guard let id = roomCarrierIDs.removeValue(forKey: ObjectIdentifier(actor)) else { return }
+        setRoomCarrierNavigation(actor, to: nil)
+        if let membership = roomCarrierMembership.removeValue(forKey: id) {
+            let released = roomCarrierPackets.remove(membership)
+            for survivor in released {
+                if let node = roomCarrierActors[survivor] { setRoomCarrierNavigation(node, to: nil) }
+            }
+        }
+        roomCarrierActors.removeValue(forKey: id)
+        roomCarrierOrder.removeAll { $0 == id }
+        if let packetID = roomCarrierPacketID, roomCarrierPackets.packets[packetID] == nil {
+            clearRoomCarrierCommand(); roomCarrierPacketID = nil
+        } else if let command = roomCarrierCommand, roomCarrierPackets.remaining(command) == nil {
+            clearRoomCarrierCommand()
+        }
+    }
+
+    private func spawnRoomCarrierPacket() {
+        guard roomCarrierFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
+              let map = roomRuntimeMap else { return }
+        for actor in Array(roomCarrierActors.values) where actor.isDying || actor.parent == nil {
+            removeRoomCarrierActor(actor)
+        }
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.packetAttempts += 1 }
+        // A controlled group must be cleared before another is injected. Owner
+        // death releases escorts, but does not quietly despawn or reward them.
+        guard roomCarrierActors.isEmpty,
+              roomCarrierPackets.packets.count < GameConfig.Arena8CarrierFixture.maxPackets else { return }
+        var profile: (health: Int, xp: Int)?
+        spawnBasicMelee(elapsed: waveManager.elapsedTime, placement: { _ in nil },
+                        observeBaseProfile: { health, xp in profile = (health, xp) })
+        guard let profile else { return }
+        let carrier = CinderCarrierNode(health: profile.health, xpValue: profile.xp)
+        let hound = SpurhoundNode(health: profile.health, xpValue: profile.xp)
+        let keeper = LinekeeperNode(health: profile.health, xpValue: profile.xp)
+        keeper.onFireProjectile = { [weak self] point, direction in
+            self?.spawnEnemyProjectile(at: point, direction: direction,
+                speed: GameConfig.Linekeeper.boltSpeed, range: GameConfig.Linekeeper.boltRange,
+                colorHex: GameConfig.Linekeeper.boltColorHex, elongated: true)
+        }
+        keeper.resolveFiringAnchor = { [weak self] from, goal in
+            self?.findFiringAnchor(from: from, toward: goal)
+        }
+        let actors: [EnemyNode] = [carrier, hound, keeper]
+        let offset = GameConfig.Arena8Game.spawnAnchorOffset
+        var positions: [CGPoint]?
+        let orderedRooms = map.rooms.sorted {
+            let left = $0.center.distance(to: player.position), right = $1.center.distance(to: player.position)
+            return left == right ? $0.id < $1.id : left < right
+        }
+        for room in orderedRooms {
+            var candidates = [CGPoint(x: -offset, y: -offset), CGPoint(x: offset, y: -offset),
+                              CGPoint(x: 0, y: offset), .zero].map { room.center + $0 }
+            if roomSignalerFixtureEnabled {
+                // Controlled acquisition proof only: keep the manual packet
+                // in this room when body-clear floor at normal clearance fits.
+                // Old carrier and natural spawn policies are unchanged.
+                let distance = GameConfig.Arena8Game.spawnClearance + (actors.map { $0.geometryFootprintRadius }.max() ?? 0)
+                candidates = [CGPoint(x: -distance, y: 0), CGPoint(x: distance, y: 0), CGPoint(x: 0, y: distance), CGPoint(x: 0, y: -distance)].map { room.center + $0 }
+            }
+            var chosen: [CGPoint] = []
+            for actor in actors {
+                guard let point = map.spawn(candidates: candidates.filter { point in
+                    if roomMixedPressureEnabled {
+                        guard roomMixedPositionClear(point, radius: actor.geometryFootprintRadius) else { return false }
+                        return !zip(chosen, actors.prefix(chosen.count)).contains { previous, node in
+                            roomMixedStored(previous).distance(to: roomMixedStored(point)) < node.geometryFootprintRadius + actor.geometryFootprintRadius
+                        }
+                    }
+                    guard roomSignalerFixtureEnabled, let signaler = roomSignaler, !signaler.isDying else { return true }
+                    return point.distance(to: signaler.position) >= actor.geometryFootprintRadius + signaler.geometryFootprintRadius
+                }, radius: actor.geometryFootprintRadius,
+                    avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { break }
+                chosen.append(roomMixedPressureEnabled ? roomMixedStored(point) : point)
+                candidates.removeAll { $0 == point }
+            }
+            if chosen.count == actors.count { positions = chosen; break }
+        }
+        guard let positions else { return }
+        let ids = actors.map { _ in UUID() }, packetID = UUID()
+        guard let owner = ids.first,
+              roomCarrierPackets.register(id: packetID, owner: owner, escorts: Array(ids.dropFirst())) else { return }
+        for (index, actor) in actors.enumerated() {
+            let id = ids[index]
+            actor.position = positions[index]
+            actor.name = index == 0 ? "arena8Carrier" : "arena8CarrierEscort"
+            roomCarrierActors[id] = actor; roomCarrierIDs[ObjectIdentifier(actor)] = id
+            roomCarrierMembership[id] = roomCarrierPackets.membershipTicket(for: id)
+            enemies.append(actor); worldNode.addChild(actor)
+        }
+        roomCarrierOrder = ids; roomCarrierPacketID = packetID
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.packets += 1; refreshRoomMixedHUD() }
+        #if DEBUG
+        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "PACKET READY / MANUAL MIGRATION"
+        #endif
+    }
+
+    private func requestRoomCarrierMigration(connection forcedConnection: Int? = nil, signalSource: UUID? = nil) {
+        guard roomCarrierFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
+              roomCarrierCommand == nil, let map = roomRuntimeMap,
+              let packetID = roomCarrierPacketID, let packet = roomCarrierPackets.packets[packetID],
+              let carrier = roomCarrierActors[packet.owner], !carrier.isDying else { return }
+        if let signalSource, roomSignalerAuthorization(for: packet) != signalSource { return }
+        let room = map.roomID(near: carrier.position)
+        let options = map.connections.indices.filter { map.connections[$0].from == room || map.connections[$0].to == room }
+        guard !options.isEmpty else { return }
+        let connectionID: Int
+        if let forcedConnection {
+            guard options.contains(forcedConnection) else { return }
+            connectionID = forcedConnection
+        } else {
+            connectionID = options[roomCarrierConnectionCursor % options.count]
+        }
+        let connection = map.connections[connectionID]
+        let destinationID = connection.from == room ? connection.to : connection.from
+        guard let destination = map.rooms.first(where: { $0.id == destinationID }) else { return }
+        let offset = GameConfig.Arena8Game.spawnAnchorOffset
+        let offsets = [CGPoint(x: -offset, y: -offset), CGPoint(x: offset, y: -offset), CGPoint(x: 0, y: offset)]
+        var targets: [UUID: CGPoint] = [:]
+        let members = roomCarrierOrder.filter { packet.members.contains($0) }
+        for (index, id) in members.enumerated() {
+            guard let actor = roomCarrierActors[id], !actor.isDying, index < offsets.count else { return }
+            let requested = destination.center + offsets[index]
+            let stored = CGPoint(x: CGFloat(Float(requested.x)), y: CGFloat(Float(requested.y)))
+            guard map.valid(stored, radius: actor.geometryFootprintRadius) else { return }
+            targets[id] = stored
+        }
+        let live = Set(roomCarrierActors.filter { !$0.value.isDying && $0.value.parent != nil }.map { $0.key })
+        guard let ticket = roomCarrierPackets.prepare(packetID: packetID, expectedRevision: packet.revision,
+            source: signalSource ?? packet.owner, authorizedSignaler: signalSource, connectionID: connectionID,
+            telegraphDuration: signalSource == nil ? GameConfig.Arena8CarrierFixture.warningDuration : GameConfig.Arena8SignalerFixture.warningDuration,
+            live: live.union(signalSource.map { [$0] } ?? []),
+            destinationValid: { !targets.isEmpty && Set(targets.keys) == packet.members }) else { return }
+        roomCarrierDestinations = targets; roomCarrierCommand = ticket
+        if signalSource != nil { roomSignalerAcceptedCount += 1; roomSignaler?.setSignaling(true); roomSignalerLastResult = "WARNING" }
+        roomCarrierConnectionCursor += 1
+        let marker = SKShapeNode(rect: connection.corridor)
+        marker.name = "roomCarrierWarning"; marker.strokeColor = .orange
+        marker.fillColor = SKColor.orange.withAlphaComponent(0.12); marker.lineWidth = 3; marker.zPosition = 2
+        worldNode.addChild(marker)
+        #if DEBUG
+        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = signalSource == nil ? "DOOR WARNING / 1 ACTIVE SECOND" : "AMBER SIGNAL / 1 ACTIVE SECOND"
+        #endif
+    }
+
+    private func updateRoomCarrierFixture(_ dt: TimeInterval) {
+        guard roomCarrierFixtureEnabled, dt.isFinite, dt >= 0,
+              let map = roomRuntimeMap else { return }
+        if roomMixedPressureEnabled { refreshRoomMixedHUD() }
+        if let signaler = roomSignaler,
+           signaler.isDying || signaler.parent == nil || !enemies.contains(where: { $0 === signaler }) {
+            removeRoomCarrierActor(signaler)
+        }
+        for actor in Array(roomCarrierActors.values)
+            where actor.isDying || actor.parent == nil || !enemies.contains(where: { $0 === actor }) {
+            removeRoomCarrierActor(actor)
+        }
+        for actor in roomCarrierActors.values { setRoomCarrierNavigation(actor, to: nil) }
+        let held = gameState != .playing || samuraiBackgroundHold || isPaused
+        // Consume the first fresh active frame even when no order is pending,
+        // so a later manual trigger cannot inherit an obsolete background gap.
+        let warningDT = !held && roomCarrierNeedsFreshStep ? 0 : dt
+        if !held { roomCarrierNeedsFreshStep = false }
+        guard let command = roomCarrierCommand else { return }
+        if command.sourceRole == .signaler {
+            guard roomSignalerID == command.source, let source = roomSignaler,
+                  !source.isDying, source.parent != nil, enemies.contains(where: { $0 === source }) else {
+                clearRoomCarrierCommand(); roomSignalerLastResult = "SOURCE LOST / CANCELLED"; return
+            }
+        }
+        let pendingSignal = command.sourceRole == .signaler && roomCarrierPackets.navigation(command) == nil
+        let sourceControlHold = pendingSignal && (roomSignaler?.signalingSafePhase != true
+            || roomSignaler.map { repulseFlights[ObjectIdentifier($0)] != nil } == true)
+        _ = roomCarrierPackets.advance(command, dt: warningDT, held: held || sourceControlHold)
+        guard roomCarrierPackets.remaining(command) != nil else { clearRoomCarrierCommand(); return }
+        guard !held, !sourceControlHold else { return }
+        if pendingSignal, roomCarrierPackets.remaining(command) == 0,
+           let packet = roomCarrierPackets.packets[command.packetID], roomSignalerAuthorization(for: packet) != command.source {
+            clearRoomCarrierCommand(); roomSignalerLastResult = "ELIGIBILITY LOST / CANCELLED"; return
+        }
+        var live = Set(roomCarrierActors.filter { !$0.value.isDying && $0.value.parent != nil }.map { $0.key })
+        if let signaler = roomSignaler, let id = roomSignalerID, !signaler.isDying,
+           signaler.parent != nil, enemies.contains(where: { $0 === signaler }) { live.insert(id) }
+        let authorized = roomCarrierPackets.packets[command.packetID].flatMap { roomSignalerAuthorization(for: $0) }
+        if roomCarrierPackets.navigation(command) == nil,
+           roomCarrierPackets.commit(command, held: false, live: live, authorizedSignaler: authorized, destinationValid: {
+               !self.roomCarrierDestinations.isEmpty && self.roomCarrierDestinations.allSatisfy { id, point in
+                   self.roomCarrierActors[id].map { map.valid(point, radius: $0.geometryFootprintRadius) } == true
+               }
+           }) != nil {
+            roomCarrierCommitCount += 1
+            if command.sourceRole == .signaler { roomSignalerCommitCount += 1; roomSignaler?.setSignaling(false); roomSignalerLastResult = "COMMITTED" }
+        #if DEBUG
+            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIGRATING / SPARK REMAINS TARGET"
+        #endif
+        }
+        guard let navigation = roomCarrierPackets.navigation(command) else { return }
+        var arrived = true
+        for id in navigation.members {
+            guard let actor = roomCarrierActors[id], let destination = roomCarrierDestinations[id] else {
+                arrived = false; continue
+            }
+            if actor.position.distance(to: destination) <= GameConfig.Arena8CarrierFixture.arrivalTolerance {
+                // Hold completed navigation without interrupting an attack.
+                // Otherwise an early arrival would immediately chase away
+                // before its slower escort could finish the same command.
+                setRoomCarrierNavigation(actor, to: actor.position)
+                continue
+            }
+            arrived = false
+            guard !actor.isStunned, !actor.isFrozen, !actor.isFeared, !actor.isVoidTrapped,
+                  repulseFlights[ObjectIdentifier(actor)] == nil,
+                  map.valid(actor.position, radius: actor.geometryFootprintRadius) else { continue }
+            let safePhase = (actor as? CinderCarrierNode)?.packetNavigationSafePhase
+                ?? (actor as? SpurhoundNode)?.packetNavigationSafePhase
+                ?? (actor as? LinekeeperNode)?.packetNavigationSafePhase ?? false
+            guard safePhase else { continue }
+            let blocked = map.geometry.segmentBlockedExact(actor.position, destination, travelRadius: actor.geometryFootprintRadius)
+            // Final destinations use the approved 12-point tolerance. Route
+            // nodes retain the existing routing handoff radius, which is
+            // larger than the keeper's stop radius and avoids a <=12 / <12
+            // waypoint boundary deadlock. Exact successor visibility remains.
+            let waypoint = blocked ? map.geometry.graphWaypoint(from: actor.position, toward: destination,
+                travelRadius: actor.geometryFootprintRadius,
+                arriveRadius: GameConfig.Routing.arriveRadius)?.position : destination
+            if let waypoint { setRoomCarrierNavigation(actor, to: waypoint) }
+        }
+        if arrived {
+            clearRoomCarrierCommand()
+        #if DEBUG
+            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "MIGRATION DONE / NO AUTO REPEAT"
+        #endif
+        }
+    }
+
+    private func roomSignalerStrictRoom(_ point: CGPoint, map: Arena8GameMap) -> Int? {
+        map.rooms.first { point.x > $0.rect.minX && point.x < $0.rect.maxX
+            && point.y > $0.rect.minY && point.y < $0.rect.maxY }?.id
+    }
+
+    private func roomSignalerAuthorization(for packet: Arena8PacketCommands.Packet) -> UUID? {
+        guard roomSignalerFixtureEnabled, let map = roomRuntimeMap,
+              let source = roomSignaler, let id = roomSignalerID,
+              !source.isDying, !source.killCredited, source.parent != nil,
+              enemies.contains(where: { $0 === source }), source.signalingSafePhase,
+              repulseFlights[ObjectIdentifier(source)] == nil,
+              id != packet.owner, !packet.members.contains(id),
+              let owner = roomCarrierActors[packet.owner], !owner.isDying,
+              owner.parent != nil, enemies.contains(where: { $0 === owner }),
+              map.valid(source.position, radius: source.geometryFootprintRadius),
+              map.valid(owner.position, radius: owner.geometryFootprintRadius),
+              let sourceRoom = roomSignalerStrictRoom(source.position, map: map),
+              roomSignalerStrictRoom(owner.position, map: map) == sourceRoom else { return nil }
+        return id
+    }
+
+    private func spawnRoomSignaler() {
+        guard roomSignalerFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused,
+              let map = roomRuntimeMap else { return }
+        if let source = roomSignaler,
+           source.isDying || source.parent == nil || !enemies.contains(where: { $0 === source }) {
+            removeRoomCarrierActor(source)
+        }
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.signalerAttempts += 1 }
+        guard roomSignaler == nil else { return }
+        var profile: (health: Int, xp: Int)?
+        spawnBasicMelee(elapsed: waveManager.elapsedTime, placement: { _ in nil }, observeBaseProfile: { profile = ($0, $1) })
+        guard let profile else { return }
+        let source = LatchSignalerNode(health: profile.health, xpValue: profile.xp)
+        let ownerRoom = roomCarrierPacketID.flatMap { roomCarrierPackets.packets[$0] }
+            .flatMap { roomCarrierActors[$0.owner] }.flatMap { roomSignalerStrictRoom($0.position, map: map) }
+        let preferred = ownerRoom ?? roomSignalerStrictRoom(player.position, map: map) ?? map.roomID(near: player.position)
+        guard let room = map.rooms.first(where: { $0.id == preferred }) else { return }
+        let distance = GameConfig.Arena8Game.spawnClearance + source.geometryFootprintRadius
+        let candidates = [CGPoint(x: -distance, y: 0), CGPoint(x: distance, y: 0), CGPoint(x: 0, y: distance), CGPoint(x: 0, y: -distance)].map { room.center + $0 }
+            .filter { point in
+                if roomMixedPressureEnabled { return roomMixedPositionClear(point, radius: source.geometryFootprintRadius) }
+                return !enemies.contains { !$0.isDying && $0.position.distance(to: point) < $0.geometryFootprintRadius + source.geometryFootprintRadius }
+            }
+        guard let point = map.spawn(candidates: candidates, radius: source.geometryFootprintRadius,
+                                   avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else {
+            roomSignalerLastResult = "NO SAFE SOURCE FLOOR"; return
+        }
+        source.position = roomMixedPressureEnabled ? roomMixedStored(point) : point; source.name = "arena8Signaler"
+        roomSignaler = source; roomSignalerID = UUID()
+        enemies.append(source); worldNode.addChild(source)
+        if roomMixedPressureEnabled && !roomNaturalDispatching { roomMixedManual.signalers += 1; refreshRoomMixedHUD() }
+        roomSignalerLastResult = "SOURCE READY / SAME ROOM IDLE ONLY"
+        #if DEBUG
+        (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = roomSignalerLastResult
+        #endif
+    }
+
+    private func requestRoomSignalerCommand(connection forcedConnection: Int? = nil) {
+        guard roomSignalerFixtureEnabled, gameState == .playing, !samuraiBackgroundHold, !isPaused else { return }
+        guard roomCarrierCommand == nil else { roomSignalerLastResult = "BUSY / CURRENT ORDER RETAINED"; return }
+        guard let packetID = roomCarrierPacketID, let packet = roomCarrierPackets.packets[packetID],
+              let sourceID = roomSignalerAuthorization(for: packet) else {
+            roomSignalerLastResult = "NO ELIGIBLE SAME-ROOM PACKET"
+        #if DEBUG
+            (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = roomSignalerLastResult
+        #endif
+            return
+        }
+        requestRoomCarrierMigration(connection: forcedConnection, signalSource: sourceID)
+        if roomCarrierCommand == nil { roomSignalerLastResult = "ORDER REJECTED / NO SAFE DOOR" }
+    }
+
+    private func resetRoomMixedPressure() {
+        roomMixedClock = Arena8PreviewSpawnClock(profile: roomMixedProfile)
+        roomMixedOrdinary = (0, 0, 0, 0, 0)
+        roomMixedManual = (0, 0, 0, 0)
+        roomMixedSuppressed = 0
+        roomMixedLastWaveElapsed = nil
+        roomNaturalRun = Arena8NaturalWaveRun()
+        roomNaturalDispatching = false
+    }
+
+    private func roomMixedStored(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: CGFloat(Float(point.x)), y: CGFloat(Float(point.y)))
+    }
+
+    private func roomMixedPositionClear(_ point: CGPoint, radius: CGFloat) -> Bool {
+        guard let map = roomRuntimeMap else { return false }
+        let stored = roomMixedStored(point)
+        return map.valid(stored, radius: radius)
+            && stored.distance(to: player.position) >= GameConfig.Arena8Game.spawnClearance + radius
+            && !enemies.contains { !$0.isDying && $0.parent != nil
+                && $0.position.distance(to: stored) < $0.geometryFootprintRadius + radius }
+    }
+
+    private func roomMixedOrdinaryPosition(for enemy: EnemyNode) -> CGPoint? {
+        guard let map = roomRuntimeMap else { return nil }
+        let points = roomSpawnCandidates
+        guard !points.isEmpty else { return nil }
+        let offset = roomSpawnIndex % points.count
+        let ordered = (Array(points[offset...]) + Array(points[..<offset])).map { roomMixedStored($0) }
+            .filter { roomMixedPositionClear($0, radius: enemy.geometryFootprintRadius) }
+        guard let point = map.spawn(candidates: ordered, radius: enemy.geometryFootprintRadius,
+                                   avoiding: player.position, clearance: GameConfig.Arena8Game.spawnClearance) else { return nil }
+        roomSpawnIndex += 1
+        return roomMixedStored(point)
+    }
+
+    private func spawnRoomMixedOrdinary(startup: Bool) {
+        guard roomMixedPressureEnabled, gameState == .playing else { return }
+        if startup {
+            // Scene construction may occur during Title's paused transition.
+            // Preserve the existing single initial attempt, never duplicate it.
+            guard roomMixedOrdinary.startup == 0 else { return }
+            roomMixedOrdinary.startup += 1
+        } else {
+            guard !samuraiBackgroundHold, !isPaused else { return }
+            roomMixedOrdinary.timed += 1
+        }
+        let before = enemies.count
+        var placementRequested = false
+        // Real existing composition/constructors; no extra RNG draws or mirrored stats.
+        spawnOrdinaryEnemy(elapsed: waveManager.elapsedTime, placement: { [weak self] enemy in
+            placementRequested = true
+            return self?.roomMixedOrdinaryPosition(for: enemy)
+        })
+        if enemies.count > before { roomMixedOrdinary.placed += 1 }
+        else if placementRequested { roomMixedOrdinary.blocked += 1 }
+        else { roomMixedOrdinary.thinned += 1 }
+        refreshRoomMixedHUD()
+    }
+
+    private func updateRoomMixedPressure(_ dt: TimeInterval) {
+        guard roomMixedPressureEnabled else { return }
+        let held = gameState != .playing || samuraiBackgroundHold || isPaused
+        guard !held, dt.isFinite, dt >= 0 else { return }
+        let elapsed = waveManager.elapsedTime
+        guard elapsed.isFinite, roomMixedLastWaveElapsed != elapsed else { return }
+        roomMixedLastWaveElapsed = elapsed
+        // WaveManager was already advanced exactly once using real game dt.
+        // Consume this one preview emission even when an ability suppresses it.
+        if roomMixedClock.advance(dt: dt, baseInterval: waveManager.currentSpawnInterval, held: held) {
+            if eventHorizonVoided || falseEndingActive || (roomNaturalWavesEnabled && boss != nil) { roomMixedSuppressed += 1 }
+            else if roomNaturalWavesEnabled { dispatchRoomNaturalEmission(elapsed: elapsed) }
+            else { spawnRoomMixedOrdinary(startup: false) }
+        }
+        if roomNaturalWavesEnabled { updateRoomNaturalCommand(); refreshRoomNaturalHUD() }
+        refreshRoomMixedHUD()
+    }
+
+    private func dispatchRoomNaturalEmission(elapsed: TimeInterval) {
+        guard roomNaturalWavesEnabled, boss == nil, gameState == .playing, !samuraiBackgroundHold, !isPaused,
+              let ticket = roomNaturalRun.begin(elapsed: elapsed, carrierAlive: roomNaturalCarrierAlive) else { return }
+        var placed = false
+        switch ticket.action {
+        case .packet:
+            let before = roomCarrierActors.count
+            roomNaturalDispatching = true
+            spawnRoomCarrierPacket()
+            roomNaturalDispatching = false
+            placed = roomCarrierActors.count - before == GameConfig.Arena8NaturalWaveFixture.packetCost
+                && roomNaturalCarrierAlive
+            if placed {
+        #if DEBUG
+                (camera?.childNode(withName: "roomCarrierStatus") as? SKLabelNode)?.text = "NATURAL PACKET / ONE INTRODUCTION"
+        #endif
+            }
+        case .signaler:
+            let hadSource = roomSignaler != nil
+            roomNaturalDispatching = true
+            spawnRoomSignaler()
+            roomNaturalDispatching = false
+            placed = !hadSource && roomSignaler != nil
+        case .ordinary, .reservePacket: break
+        }
+        if roomNaturalRun.finish(ticket, placed: placed) == true {
+            spawnRoomMixedOrdinary(startup: false)
+        }
+    }
+
+    private func updateRoomNaturalCommand() {
+        guard roomNaturalWavesEnabled, roomNaturalRun.signalerIntroduced,
+              !roomNaturalRun.commandPrepared, gameState == .playing,
+              !samuraiBackgroundHold, !isPaused else { return }
+        let before = roomSignalerAcceptedCount
+        requestRoomSignalerCommand()
+        if roomSignalerAcceptedCount > before { roomNaturalRun.recordPreparedCommand() }
+    }
+
+    private func roomStationaryPandaRoot(at requested: CGPoint) -> CGPoint? {
+        guard let map = roomRuntimeMap, map.isSixRoom else { return requested }
+        return Arena8PandaDestination(map: map)?.destination(at: requested)
+    }
+
+    private var roomSpawnCandidates: [CGPoint] {
+        roomRuntimeMap?.spawnCandidates(near: player.position) ?? []
+    }
+
+    private var roomNaturalCarrierAlive: Bool {
+        guard let packetID = roomCarrierPacketID,
+              let packet = roomCarrierPackets.packets[packetID],
+              let carrier = roomCarrierActors[packet.owner] else { return false }
+        return !carrier.isDying && !carrier.killCredited && carrier.parent != nil
+            && enemies.contains(where: { $0 === carrier })
+    }
+
+    private func refreshRoomMixedHUD() {
+        #if DEBUG
+        guard GameRunPreferences.isIsolated else { return }
+
+        guard roomMixedPressureEnabled, let label = camera?.childNode(withName: "roomMixedStatus") as? SKLabelNode else { return }
+        let interval = roomMixedClock.interval(base: waveManager.currentSpawnInterval) ?? 0
+        let attempts = roomMixedOrdinary.startup + roomMixedOrdinary.timed
+        let packets = roomNaturalWavesEnabled ? (roomNaturalRun.packetIntroduced ? 1 : 0) : roomMixedManual.packets
+        let sources = roomNaturalWavesEnabled ? (roomNaturalRun.signalerIntroduced ? 1 : 0) : roomMixedManual.signalers
+        let text = "\(roomMixedClock.profile.label) i\(String(format: "%.2f", interval)) A\(attempts) P\(roomMixedOrdinary.placed) T\(roomMixedOrdinary.thinned) B\(roomMixedOrdinary.blocked) Q\(packets) S\(sources)"
+        if label.text != text { label.text = text }
+        if label.frame.width > size.width - 20 { label.fontSize *= (size.width - 20) / label.frame.width }
+        if let row = camera?.childNode(withName: "roomMixedLive") as? SKLabelNode {
+            let counts = roomMixedLiveCounts(live: roomMixedLiveActors)
+            let value = "t\(String(format: "%.1f", waveManager.elapsedTime)) LIVE a\(counts.ambient) p\(counts.packet) s\(counts.signaler) SUP\(roomMixedSuppressed)"
+            if row.text != value { row.text = value }
+            if row.frame.width > size.width - 20 { row.fontSize *= (size.width - 20) / row.frame.width }
+        }
+    
+        #endif
+    }
+
+    private func refreshRoomNaturalVisibility() {
+        #if DEBUG
+        guard GameRunPreferences.isIsolated else { return }
+
+        guard roomNaturalWavesEnabled else { return }
+        let hidden = gameState != .playing || samuraiBackgroundHold || isPaused
+        for name in ["roomNaturalStatus", "roomMixedStatus", "roomMixedLive", "roomCarrierStatus", "roomCarrierFire"] {
+            camera?.childNode(withName: name)?.isHidden = hidden
+        }
+    
+        #endif
+    }
+
+    private func refreshRoomNaturalHUD() {
+        #if DEBUG
+        guard GameRunPreferences.isIsolated else { return }
+
+        refreshRoomNaturalVisibility()
+        guard roomNaturalWavesEnabled,
+              let label = camera?.childNode(withName: "roomNaturalStatus") as? SKLabelNode else { return }
+        let source = roomNaturalRun.signalerSkipped ? "SKIP" : (roomNaturalRun.signalerIntroduced ? "1" : "0")
+        label.text = "NAT30/34 E\(roomNaturalRun.emissions) R\(roomNaturalRun.reservedSlots) Q\(roomNaturalRun.packetIntroduced ? 1 : 0) S\(source) CMD\(roomNaturalRun.commandPrepared ? 1 : 0)"
+        label.fontSize = 9
+        if label.frame.width > size.width - 20 { label.fontSize *= (size.width - 20) / label.frame.width }
+    
+        #endif
+    }
+}
+
+extension GameScene {
+    private var roomNaturalBossEligible: Bool {
+        roomNaturalWavesEnabled && roomLockmarshalEnabled && view?.scene === self
+            && gameState == .playing && !samuraiBackgroundHold && !isPaused
+            && !eventHorizonVoided && !falseEndingActive
+            && !arenaBossSpawnedThisRun && boss == nil
+            && !enemies.contains(where: { $0.isMiniBoss && !$0.isDying })
+            && roomNaturalRun.pending == nil && !roomNaturalDispatching
+            && waveManager.elapsedTime.isFinite
+            && killCount >= GameConfig.Wave.bossSpawnKills
+            && waveManager.elapsedTime >= GameConfig.Wave.bossTimeFloor(for: .arena)
+    }
+
+    private func admitRoomNaturalBossIfEligible() {
+        guard roomNaturalBossEligible else { return }
+        setupRoomLockmarshal()
+        // Failed/occupied placement leaves the gate available, without debt.
+        if let actor = boss as? LockmarshalNode, actor.parent === worldNode, !actor.isDead {
+            arenaBossSpawnedThisRun = true
+        }
+    }
+
+    private func setupRoomLockmarshal(forGauntlet: Bool = false){
+        guard boss == nil, roomLockmarshalContextEnabled, let map = roomRuntimeMap,
+              let room = map.rooms.first, forGauntlet == isGauntlet else { return }
+        let root = forGauntlet ? map.rooms[5].center : room.center + CGPoint(x:180,y:0)
+        guard map.valid(root,radius:GameConfig.LockmarshalFixture.bodyRadius) else { return }
+        guard !roomNaturalWavesEnabled || roomMixedPositionClear(root,radius:GameConfig.LockmarshalFixture.bodyRadius) else { return }
+        let actor: LockmarshalNode
+        if forGauntlet {
+            guard let entry = BossRegistry.shared.entry("lockmarshal"), entry.arenaID == 7,
+                  let made = entry.make(GameConfig.Arena.radius, bossHPScalingOverride ?? 0) as? LockmarshalNode,
+                  made.relocate(to: root) else { return }
+            actor = made
+        } else {
+            guard let entry = BossRegistry.shared.roomEntry(.lockmarshal,map:map), let made = entry.make(at:root) else { return }
+            actor = made
+        }
+        // Establish a reachable fallback before this encounter can earn lethal credit.
+        guard let rewardFallback=LockmarshalModel.rewardPosition(map:map,from:root,toward:root,
+            player:player.position,playerRadius:playerStats.effectiveCollisionRadius,
+            pickupRadius:GameConfig.ForgeCoin.pickupRadius) else{return}
+        let encounter=actor.encounterID
+        var outcomeClaimed=false
+        actor.canAdvance={ [weak self] in
+            guard let self,self.roomLockmarshalContextEnabled,self.gameState == .playing,!self.samuraiBackgroundHold,!self.isPaused else{return false}
+            if self.roomLockmarshalNeedsFreshStep {self.roomLockmarshalNeedsFreshStep=false;return false}
+            return true
+        }
+        actor.onHazardDamage={ [weak self] damage in
+            self?.applyBossHazardDamage(damage,shakeIntensity:4)
+        }
+        actor.onDeath={ [weak self,weak actor] in
+            guard let self,let actor,self.view?.scene === self,self.roomLockmarshalContextEnabled,
+                  self.boss === actor,actor.parent === self.worldNode,actor.isDead,
+                  actor.encounterID == encounter,
+                  self.bossKillLatch.armedID == ObjectIdentifier(actor),self.bossKillLatch.credited,
+                  !outcomeClaimed else{return}
+            // takeDamage has already retired the dying actor and paid common
+            // on-kill/death-burst/end-run credit. Do not claim that latch again.
+            let position=actor.position
+            let radius=self.playerStats.effectiveCollisionRadius
+            let pickup=GameConfig.ForgeCoin.pickupRadius
+            let xpRoots=(0..<GameConfig.LockmarshalFixture.xpShowerCount).map { _ in
+                LockmarshalModel.rewardPosition(map:map,from:position,
+                    toward:position+CGPoint(x:CGFloat.random(in:-GameConfig.LockmarshalFixture.xpShowerSpread...GameConfig.LockmarshalFixture.xpShowerSpread),
+                                            y:CGFloat.random(in:-GameConfig.LockmarshalFixture.xpShowerSpread...GameConfig.LockmarshalFixture.xpShowerSpread)),
+                    player:self.player.position,playerRadius:radius,pickupRadius:pickup) ?? rewardFallback
+            }
+            let anchors=map.pickupCandidates(near:position)
+            let coinDrops=(0..<GameConfig.ForgeCoin.scatterCount).map { _ -> (start:CGPoint,goal:CGPoint) in
+                if let goal=LockmarshalModel.rewardPosition(map:map,from:position,toward:anchors.randomElement() ?? position,
+                    player:self.player.position,playerRadius:radius,pickupRadius:pickup) {
+                    return (position,goal)
+                }
+                // A rejected trajectory still creates the full normal-value coin
+                // on admitted reachable floor, with no wall-crossing toss or auto-bank.
+                return (rewardFallback,rewardFallback)
+            }
+            // Claim before side effects, including callbacks caused by reward work.
+            outcomeClaimed=true
+            self.checkBossCredited()
+            self.roomLockmarshalDeaths += 1
+            self.boss=nil
+            ProgressionManager.shared.registerRoomBossDefeat(.lockmarshal)
+            ProgressionManager.shared.recordKill(.boss)
+            CodexManager.shared.recordDefeat(.lockmarshal)
+            for root in xpRoots {
+                self.spawnXPOrb(at:root,value:GameConfig.LockmarshalFixture.xpReward / GameConfig.LockmarshalFixture.xpShowerCount)
+            }
+            for drop in coinDrops {
+                let coin=ForgeCoinNode();coin.position=drop.start;coin.zPosition=4
+                self.forgeCoins.append(coin);self.worldNode.addChild(coin)
+                let toss=SKAction.move(to:drop.goal,duration:TimeInterval.random(in:0.35...0.6));toss.timingMode = .easeOut
+                coin.run(toss)
+            }
+            // Ordinary defeat registration and pickups remain the reward path.
+            // Survival continues; Boss Mode advances through its existing boss-nil transition.
+            // No forced ending, heal or automatic coin banking.
+            self.worldNode.shake(intensity:15,duration:0.5)
+        }
+        boss=actor;worldNode.addChild(actor);roomLockmarshalDeaths=0;roomLockmarshalNeedsFreshStep=true
+        // Keep the natural route's existing fire choice and controls intact.
+        if isProductionArena8 {
+            showBossEntrance(name: "THE LOCKMARSHAL", colorHex: 0xD4C49B)
+            return
+        }
+        #if DEBUG
+        guard roomLockmarshalRequested else { return }
+        roomCarrierFireEnabled=true
+        camera?.childNode(withName:"roomCarrierFire")?.removeFromParent()
+        let fire=SKLabelNode(fontNamed:"Menlo-Bold");fire.name="roomCarrierFire";fire.text="TEST FIRE: ON";fire.fontSize=12;fire.fontColor = .cyan
+        fire.position=CGPoint(x:0,y:-size.height/2+65);fire.zPosition=300;camera?.addChild(fire)
+        #endif
+    }
+    /// Ordinary selection and every BossMode home swap resolve the same full map.
+    private func selectProductionRoomMap() {
+        if isProductionArena8 { roomRuntimeMap = .sixRoom }
+        else if !GameRunPreferences.isIsolated { roomRuntimeMap = nil }
+    }
+}

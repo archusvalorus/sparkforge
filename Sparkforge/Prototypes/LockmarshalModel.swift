@@ -1,5 +1,4 @@
 // Isolated first Lockmarshal unit. No registry, progression or group commands.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -18,11 +17,32 @@ extension GameConfig {
         static let stampHalfSide: CGFloat = 82
         static let maximumStep: TimeInterval = 0.1
         static let stampImpactFlash: TimeInterval = 0.15
+        // Reuse the current mobile-boss suite, not new balance. Ten integer
+        // shares of nominal96 produce90 actual XP, as with Switchwarden.
+        static let xpReward = GameConfig.Marchwarden.xpReward
+        static let xpShowerCount = 10
+        static let xpShowerSpread: CGFloat = 40
     }
 }
 
 struct LockmarshalModel {
     typealias C = GameConfig.LockmarshalFixture
+    /// Clip reward landings through the existing Float-safe first-solid sweep.
+    /// A real walking route, not a circular scatter fallback, must reach them.
+    static func rewardPosition(map: Arena8GameMap, from origin: CGPoint, toward proposed: CGPoint,
+                               player: CGPoint, playerRadius: CGFloat, pickupRadius: CGFloat) -> CGPoint? {
+        guard map.isSixRoom, map.rooms.count == 6,
+              playerRadius.isFinite, playerRadius > 0, pickupRadius.isFinite, pickupRadius > 0,
+              proposed.x.isFinite, proposed.y.isFinite,
+              map.valid(origin, radius: pickupRadius), map.valid(player, radius: playerRadius),
+              let goal = map.shove(from: origin, toward: proposed, radius: pickupRadius),
+              map.valid(goal, radius: playerRadius) else { return nil }
+        let direct = !map.geometry.segmentBlockedExact(player, goal, travelRadius: playerRadius)
+        guard direct || map.geometry.graphWaypoint(from: player, toward: goal,
+            travelRadius: playerRadius, arriveRadius: GameConfig.Arena8Game.mapArrival) != nil else { return nil }
+        return goal
+    }
+
     enum Phase: String { case pursuit, thresholdWarning, advance, stampWarning, recovery, cancelled }
     enum Verb { case threshold, stamp }
     struct Frame { var damage = false; var committed = false }
@@ -40,6 +60,11 @@ struct LockmarshalModel {
     init(map: Arena8GameMap, position: CGPoint) {
         self.map = map; self.position = position; start = position; goal = position
     }
+    /// Rebind an externally selected legal spawn without retaining an old tell.
+    @discardableResult mutating func relocate(to point: CGPoint) -> Bool {
+        guard map.valid(point, radius: C.bodyRadius) else { return false }
+        position = point; start = point; goal = point; interrupt(); return true
+    }
     mutating func interrupt(){phase = .pursuit;remaining = C.pursuitDuration;stamp = [];stampFlash = 0;lastPlayer = nil}
     mutating func cancel() { phase = .cancelled; remaining = 0; stamp = []; stampFlash = 0; lastPlayer = nil }
     // Explicit scene-driven active delta only. No SKAction or wall-clock callback.
@@ -56,7 +81,7 @@ struct LockmarshalModel {
             let fitted = map.approach(player, radius: C.bodyRadius) ?? position
             let blocked = map.geometry.segmentBlockedExact(position, fitted, travelRadius: C.bodyRadius)
             let waypoint = blocked ? (map.geometry.graphWaypoint(from: position, toward: fitted,
-                travelRadius: C.bodyRadius, arriveRadius: GameConfig.Arena8Prototype.arrival)?.position ?? position) : fitted
+                travelRadius: C.bodyRadius, arriveRadius: GameConfig.Arena8Game.mapArrival)?.position ?? position) : fitted
             let delta = waypoint - position
             let travel = min(delta.length, C.pursuitSpeed * CGFloat(dt))
             position = Arena8KaijuLunge(map: map).step(from: position,
@@ -174,4 +199,3 @@ struct LockmarshalModel {
         return p.distance(to: a+d*t)
     }
 }
-#endif

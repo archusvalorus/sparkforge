@@ -1,4 +1,3 @@
-#if DEBUG
 import Foundation
 
 extension GameConfig {
@@ -10,6 +9,7 @@ extension GameConfig {
     }
 }
 
+#if DEBUG
 enum Arena8NaturalWaveMode {
     static func enabled(arguments: [String], sixRoom: Bool, isolated: Bool, arena9: Bool) -> Bool {
         let args = Set(arguments)
@@ -19,6 +19,7 @@ enum Arena8NaturalWaveMode {
                 "--arena8-pressure-kiting", "--arena8-pressure-late"])
     }
 }
+#endif
 
 /// A run-owned accounting ledger, not a second clock or an enemy factory.
 /// The caller supplies only unsuppressed emissions of the accepted trial clock.
@@ -97,4 +98,3 @@ struct Arena8NaturalWaveRun {
     }
     var accountedSlots: Int { ordinarySlots + reservedSlots + packetSlots + signalerSlots }
 }
-#endif

@@ -25,6 +25,10 @@ final class ProjectileNode: SKNode {
     /// never floored to 1, so the parent's processed damage is conserved
     /// across its branches (N3 corrective, Oct 13).
     var fractureShare: CGFloat = 1
+    /// Captured Rainbow ownership factor. Applied once in the ordinary
+    /// direct-hit block after the legacy integer/crit/Forge prefix, before
+    /// existing shields/DEF/Fracture. Never folds into global ability ATK.
+    var rainbowDamageFactor: CGFloat = 1
     /// The share's OWN launch-time threshold: independent of CL-70's Warp /
     /// Riftline one (`a6Rounding`) and of the block's (`hitRounding`), because
     /// reusing a spent threshold for a second rounding is biased (CL-114(e)).

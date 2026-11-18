@@ -1,5 +1,4 @@
-// Opt-in DEBUG proof only. No live arena bounds consumer changes.
-#if DEBUG
+// Shared pure bounds operations. Exposure remains owned by the scene route.
 import Foundation
 import CoreGraphics
 
@@ -7,7 +6,10 @@ enum Arena8P0Bounds {
     case circle(center: CGPoint, radius: CGFloat)
     case rectangle(CGRect)
 
+    #if DEBUG
+    // Legacy two-room proof convenience; production callers supply explicit bounds.
     init() { self = .circle(center: .zero, radius: GameConfig.Arena8Prototype.defaultCircleRadius) }
+    #endif
 
     func clamped(_ point: CGPoint, bodyRadius: CGFloat) -> CGPoint? {
         guard point.x.isFinite, point.y.isFinite, bodyRadius.isFinite, bodyRadius >= 0 else { return nil }
@@ -32,4 +34,3 @@ enum Arena8P0Bounds {
         return clamped.distance(to: point) < 0.000001
     }
 }
-#endif

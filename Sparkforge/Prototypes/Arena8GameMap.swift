@@ -1,6 +1,5 @@
-// Authored Debug floor. The committed two-room model remains an exact
-// delegated control; six rooms use the same demonstrated bounds/geometry APIs.
-#if DEBUG
+// Shared authored room map. The historical two-room simulation remains
+// DEBUG-only; runtime construction does not enable a scene or arena route.
 import Foundation
 import CoreGraphics
 
@@ -16,15 +15,24 @@ struct Arena8GameMap {
         let corridor: CGRect
         var center: CGPoint { CGPoint(x: corridor.midX, y: corridor.midY) }
     }
-    private let control: Arena8P0Model?
+    #if DEBUG
+    private var control: Arena8P0Model? = nil
+    #endif
     let world: CGRect
     let rooms: [Room]
     let connections: [Connection]
     let geometry: ArenaGeometry
     let player: CGPoint
-    var isSixRoom: Bool { control == nil }
+    var isSixRoom: Bool {
+        #if DEBUG
+        return control == nil
+        #else
+        return true
+        #endif
+    }
     var bounds: Arena8P0Bounds { .rectangle(world) }
 
+    #if DEBUG
     static var twoRoom: Self {
         let old = Arena8P0Model()
         return Self(control: old, world: GameConfig.Arena8Prototype.world,
@@ -33,6 +41,7 @@ struct Arena8GameMap {
             connections: [Connection(from: 0, to: 1, corridor: CGRect(x: -100, y: -60, width: 200, height: 120))],
             geometry: old.geometry, player: old.player)
     }
+    #endif
     static var sixRoom: Self {
         typealias C = GameConfig.Arena8Game
         let half = C.roomSide / 2
@@ -66,14 +75,14 @@ struct Arena8GameMap {
         let start = rooms[0].center
         let geo = ArenaGeometry(blockedFootprints: walls, routeNodes: nodes, routeEdges: edges,
             safeAnchors: [SafeAnchor(position: start, label: "player_fixture")], usesRouteGraph: true)
-        return Self(control: nil, world: world, rooms: rooms, connections: corridors, geometry: geo, player: start)
+        return Self(world: world, rooms: rooms, connections: corridors, geometry: geo, player: start)
     }
 
     /// Transitional shared rectangular adapters; a single open stage, no
     /// room cells or invented internal-wall layout. Ability coverage is gated
     /// separately from traversal and must not be inferred from this adapter.
     static func openStage(world rect: CGRect, start: CGPoint) -> Self {
-        Self(control: nil, world: rect, rooms: [Room(id: 0, rect: rect)],
+        Self(world: rect, rooms: [Room(id: 0, rect: rect)],
              connections: [], geometry: ArenaGeometry(), player: start)
     }
 
@@ -154,7 +163,9 @@ struct Arena8GameMap {
         return anchors(in: roomID(near: point)).sorted { $0.distance(to: point) > $1.distance(to: point) }
     }
     func valid(_ point: CGPoint, radius: CGFloat) -> Bool {
+        #if DEBUG
         if let control { return control.valid(point, radius: radius) }
+        #endif
         return bounds.contains(point, bodyRadius: radius) && !geometry.isBlocked(point, margin: radius)
     }
     private func walkingSweep(from: CGPoint, to: CGPoint, radius: CGFloat) -> CGPoint {
@@ -189,7 +200,9 @@ struct Arena8GameMap {
     }
 
     func move(from: CGPoint, toward desired: CGPoint, radius: CGFloat) -> CGPoint? {
+        #if DEBUG
         if let control { return control.move(from: from, toward: desired, radius: radius) }
+        #endif
         guard valid(from, radius: radius), let end = bounds.clamped(desired, bodyRadius: radius) else { return nil }
         let x = walkingSweep(from: from, to: CGPoint(x: end.x, y: from.y), radius: radius)
         let result = walkingSweep(from: x, to: CGPoint(x: x.x, y: end.y), radius: radius)
@@ -202,7 +215,9 @@ struct Arena8GameMap {
         }
     }
     func shove(from: CGPoint, toward desired: CGPoint, radius: CGFloat) -> CGPoint? {
+        #if DEBUG
         if let control { return control.shove(from: from, toward: desired, radius: radius) }
+        #endif
         guard valid(from, radius: radius), let end = bounds.clamped(desired, bodyRadius: radius) else { return nil }
         let stopped = geometry.pathShove(from: from, to: end, radius: radius)
         return storedSafeEnd(stopped, radius: radius) { q in
@@ -210,17 +225,20 @@ struct Arena8GameMap {
         }
     }
     func approach(_ goal: CGPoint, radius: CGFloat) -> CGPoint? {
+        #if DEBUG
         if let control { return control.approach(goal, radius: radius) }
+        #endif
         guard bounds.contains(goal), !geometry.isBlocked(goal) else { return nil }
         if valid(goal, radius: radius) { return goal }
-        let margin = radius + GameConfig.Arena8Prototype.approachClearance
+        let margin = radius + GameConfig.Arena8Game.approachClearance
         guard let contained = bounds.clamped(goal, bodyRadius: margin) else { return nil }
         let q = geometry.resolve(contained, actorRadius: margin)
         return valid(q, radius: radius) ? q : nil
     }
     func spawn(candidates: [CGPoint], radius: CGFloat, avoiding point: CGPoint, clearance: CGFloat) -> CGPoint? {
+        #if DEBUG
         if let control { return control.spawn(candidates: candidates, radius: radius, avoiding: point, clearance: clearance) }
+        #endif
         return candidates.first { valid($0, radius: radius) && $0.distance(to: point) >= clearance + radius }
     }
 }
-#endif

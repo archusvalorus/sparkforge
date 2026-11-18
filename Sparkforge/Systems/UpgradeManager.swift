@@ -181,6 +181,9 @@ final class UpgradeManager {
         /// legible — but the flag itself is generic, so any future "this isn't in
         /// the taxonomy" card rides it rather than growing a second path.
         var isSecret: Bool = false
+        /// A manually chosen one-rank breadth reward, outside the regular
+        /// Neutral pool and its taxonomy. Never inserted by bonus/opener draws.
+        var isBreadthReward: Bool = false
 
         /// Per-tier NAME, index i = tier i+1. nil → `name` at every tier.
         ///
@@ -240,6 +243,53 @@ final class UpgradeManager {
     /// The level the last draw was for, so a REROLL of the same level doesn't
     /// tick the pity counter (a reroll is one offer, not two).
     private var lastDrawLevel: Int = -1
+
+    // Run-owned qualification, offers and commit are active in ordinary play.
+    // Isolated diagnostic constructors may explicitly keep the runtime disabled.
+    private let rainbowRuntimeEnabled: Bool
+    private var rainbowPolicy: RainbowPolicy?
+    private var rainbowDisplayedOffer: RainbowPolicy.Offer?
+    private var rainbowDrawSource: RainbowPolicy.Source = .ordinaryLevelUp
+    private var rainbowSeatProtections: [String: Set<RainbowPolicy.Protection>] = [:]
+    private var rainbowOwedPicks = 1
+
+    static var rainbowCard: UpgradeCard {
+        UpgradeCard(id: RainbowPolicy.reward.id, name: "Variegated Rainbow", tag: .neutral,
+                    description: "Primary shots ×2.\nPrismatic SUPER!\nEvery 20 seconds.",
+                    apply: { $0.rainbowOwned = true },
+                    detail: "A one-rank breadth reward. Doubles ordinary primary shots. Every 20 active seconds a 0.75-second prismatic front crosses a Spark-centered lane one third of the captured visible height. The sweep uses 3.5× ordinary-shot damage without the primary ×2, per-target crits and full kill credit. Walls block from the captured firing origin unless Long Shot T4 permits passage. Conflicts only with Rapid Fire T5 and Polar Vortex T4; lower tiers remain.",
+                    isBreadthReward: true)
+    }
+
+    func setRainbowOwedPicks(_ count: Int) { rainbowOwedPicks = max(0, count) }
+    func closeRainbowOrdinaryChoice(level: Int) {
+        rainbowPolicy?.decline(level: level)
+        rainbowDisplayedOffer = nil
+        rainbowOwedPicks = 1
+    }
+
+    /// Automatic draft opener grants never create or retain a Rainbow offer.
+    func drawRandomOpenerCard(level: Int) -> UpgradeCard? {
+        let previous = rainbowDrawSource
+        rainbowDrawSource = .randomOpener
+        defer { rainbowDrawSource = previous }
+        return drawCards(count: 1, level: level, allowSecret: false).first
+    }
+
+    private func rainbowAllowsTier(_ card: UpgradeCard) -> Bool {
+        rainbowPolicy?.permitsNextTier(card, manager: self) ?? true
+    }
+    private func refreshRainbowLedger() {
+        guard var policy = rainbowPolicy else { return }
+        policy.refresh(RainbowPolicy.Snapshot(manager: self))
+        rainbowPolicy = policy
+    }
+    private func canSelectRainbow(level: Int) -> Bool {
+        guard var policy = rainbowPolicy, let offer = rainbowDisplayedOffer,
+              offer.level == level, !takenAt(level).contains(Self.rainbowCard.id) else { return false }
+        return policy.commit(offer, source: rainbowDrawSource, owedPicks: rainbowOwedPicks,
+                             snapshot: RainbowPolicy.Snapshot(manager: self)) != nil
+    }
 
     /// Level-ups a gateway has waited unseen. Read-only; the catalog harness
     /// uses it to prove a gateway the +1 Card shows counts as offered (CL-89).
@@ -303,7 +353,10 @@ final class UpgradeManager {
 
     /// v1.7: Picked cards in pick order, for the pause build viewer
     var pickedCards: [UpgradeCard] {
-        pickedCardIDs.compactMap { id in allCards.first { $0.id == id } }
+        pickedCardIDs.compactMap { id in
+            if rainbowRuntimeEnabled && id == Self.rainbowCard.id { return Self.rainbowCard }
+            return allCards.first { $0.id == id }
+        }
     }
 
     // MARK: - v2.0 (C2) — the Panda run mutation
@@ -413,13 +466,15 @@ final class UpgradeManager {
     // MARK: - Init
     
     /// `seed` is for the catalog harness only (CL-90); the game never passes one.
-    init(seed: UInt64? = nil, excludedFamilies: Set<Tag> = []) {
+    init(seed: UInt64? = nil, excludedFamilies: Set<Tag> = [], rainbowRuntimeEnabled: Bool = RainbowRuntimeGate.enabled) {
         self.excludedFamilies = excludedFamilies
+        self.rainbowRuntimeEnabled = rainbowRuntimeEnabled
         // v1.9 Unit 3: signature ladders now live in the release pool
         // (buildCardPool); the Unit 1 DEBUG proof ladder is retired.
         rng = DrawRandom(seed: seed)
         allCards = AbilityCatalog.current.cards
         rollRunMutations()
+        if rainbowRuntimeEnabled { rainbowPolicy = RainbowPolicy(snapshot: .init(manager: self)) }
     }
     
     // MARK: - Draw
@@ -471,7 +526,7 @@ final class UpgradeManager {
     /// (`tierBlockedBy`, e.g. Polar Vortex T4 after a pellet card).
     private func nextTierOpen(_ card: UpgradeCard,
                               additionalTierGate: (UpgradeCard) -> Bool = { _ in true }) -> Bool {
-        guard additionalTierGate(card) else { return false }
+        guard rainbowAllowsTier(card), additionalTierGate(card) else { return false }
         let next = tier(of: card.id) + 1
         if let need = card.tierRequires[next], !need.isSubset(of: capabilities) { return false }
         if let block = card.tierBlockedBy[next], !block.isDisjoint(with: capabilities) { return false }
@@ -516,6 +571,9 @@ final class UpgradeManager {
     /// TAKE the first card — being handed one is not taking it — so the secret
     /// scheduler stands down for granted draws.
     func drawCards(count: Int = 3, level: Int = 0, allowSecret: Bool = true) -> [UpgradeCard] {
+        rainbowSeatProtections.removeAll()
+        // Even an empty reroll invalidates the older displayed receipt.
+        rainbowDisplayedOffer = nil
         // v1.9 capstone offering rules (Brandon, Jul 20) — "focus & finish":
         //  • A committed-but-unmaxed capstone is the ONLY capstone offered, and
         //    only via the guarantee below — no OTHER capstone appears until it
@@ -649,6 +707,7 @@ final class UpgradeManager {
         }
         if let claimant = pityClaimant, !drawn.isEmpty, !signatureSpread {
             drawn[0] = claimant              // front slot; capstones take the back
+            rainbowSeatProtections[claimant.id, default: []].insert(.gateway)
         }
         // Counters reset from the FINAL spread, at the bottom of this function
         // — a gateway only counts as offered if the player actually sees it.
@@ -662,11 +721,15 @@ final class UpgradeManager {
         // one slot each from the back and leaving the rest as normal cards.
         var forcedSlot = drawn.count - 1
         for (i, cap) in inProgress.enumerated() where (level + i) % 2 == 0 {
+            if drawn.contains(where: { $0.id == cap.id }) {
+                rainbowSeatProtections[cap.id, default: []].insert(.capstone)
+            }
             if drawn.contains(where: { $0.id == cap.id }) { continue }
             // Corrective F2: taken during this level-up → not re-seated by a reroll.
             if takenAt(level).contains(cap.id) { continue }
             if forcedSlot >= 0 { drawn[forcedSlot] = cap; forcedSlot -= 1 }
             else { drawn.append(cap) }
+            rainbowSeatProtections[cap.id, default: []].insert(.capstone)
         }
 
         // v2.0 (C2): the panda takes its slot LAST, so nothing can displace it —
@@ -709,6 +772,21 @@ final class UpgradeManager {
             drawn[0] = forced
         }
         #endif
+
+        // Capture authoritative guarantees after their seating decisions, then
+        // plan Rainbow before the final gateway counters are reset. No extra seat.
+        for card in drawn {
+            if signatureSpread { rainbowSeatProtections[card.id, default: []].insert(.signatureOpening) }
+            if card.isSecret { rainbowSeatProtections[card.id, default: []].insert(.secret) }
+        }
+        if var policy = rainbowPolicy {
+            let seats = drawn.map { RainbowPolicy.Seat($0.id, protectedBy: rainbowSeatProtections[$0.id] ?? []) }
+            let offer = policy.plan(level: level, source: rainbowDrawSource, owedPicks: rainbowOwedPicks,
+                                    seats: seats, snapshot: .init(manager: self))
+            rainbowPolicy = policy
+            rainbowDisplayedOffer = offer
+            if let offer, drawn.indices.contains(offer.seat) { drawn[offer.seat] = Self.rainbowCard }
+        }
 
         // Gateway-pity bookkeeping, from the FINAL spread (see the pity block
         // above): whatever gateways survived every seating rule are what the
@@ -794,6 +872,7 @@ final class UpgradeManager {
     /// rules and never route through the ordinary offer rule: the panda by its
     /// schedule, an active capstone by its guarantee.
     func isSelectable(_ card: UpgradeCard, atLevel level: Int) -> Bool {
+        if card.id == Self.rainbowCard.id { return rainbowRuntimeEnabled && canSelectRainbow(level: level) }
         guard !takenAt(level).contains(card.id) else { return false }
         if card.isSecret { return pandaOffer(atLevel: level)?.id == card.id }
         if activeCapstones.contains(where: { $0.id == card.id }) { return true }
@@ -802,9 +881,12 @@ final class UpgradeManager {
 
     /// Off-live-path R0 admission proof. Shares ordinary prerequisites, taken
     /// set, secret scheduling and focus rules; supplies only an additional tier
-    /// closure. No production draw or acquisition passes a Rainbow gate yet.
+    /// closure. Ordinary and isolated runtimes use the same internal Rainbow gate on every path.
     func isSelectable(_ card: UpgradeCard, atLevel level: Int,
                       additionalTierGate: (UpgradeCard) -> Bool) -> Bool {
+        if card.id == Self.rainbowCard.id {
+            return rainbowRuntimeEnabled && additionalTierGate(card) && canSelectRainbow(level: level)
+        }
         guard !takenAt(level).contains(card.id), additionalTierGate(card) else { return false }
         if card.isSecret { return pandaOffer(atLevel: level)?.id == card.id }
         let inProgress = activeCapstones(additionalTierGate: additionalTierGate)
@@ -824,6 +906,13 @@ final class UpgradeManager {
     @discardableResult
     func acquire(_ card: UpgradeCard, stats: PlayerStats, level: Int) -> Bool {
         guard isSelectable(card, atLevel: level) else { return false }
+        if card.id == Self.rainbowCard.id {
+            guard var policy = rainbowPolicy, let offer = rainbowDisplayedOffer,
+                  policy.commit(offer, source: rainbowDrawSource, owedPicks: rainbowOwedPicks,
+                                snapshot: .init(manager: self)) != nil else { return false }
+            rainbowPolicy = policy
+            rainbowDisplayedOffer = nil
+        }
         pickCard(card, stats: stats, level: level)
         return true
     }
@@ -834,6 +923,7 @@ final class UpgradeManager {
     func acquire(_ card: UpgradeCard, stats: PlayerStats, level: Int,
                  additionalTierGate: (UpgradeCard) -> Bool) -> Bool {
         guard isSelectable(card, atLevel: level, additionalTierGate: additionalTierGate) else { return false }
+        if card.id == Self.rainbowCard.id { return acquire(card, stats: stats, level: level) }
         pickCard(card, stats: stats, level: level)
         return true
     }
@@ -851,6 +941,12 @@ final class UpgradeManager {
     /// pick only. Leveling a card never feeds synergies — breadth (distinct
     /// cards per tree) and depth (card tiers) stay separate axes.
     func pickCard(_ card: UpgradeCard, stats: PlayerStats, level: Int = 0) {
+        // Even raw/granted acquisition cannot bypass the narrow form gate.
+        guard rainbowAllowsTier(card) else { return }
+        if card.id == Self.rainbowCard.id {
+            guard rainbowRuntimeEnabled, rainbowPolicy?.selectedLevel == level,
+                  tier(of: card.id) == 0 else { return }
+        }
         let current = tier(of: card.id)
 
         // Capabilities are granted on the FIRST pick — re-picking to level a
@@ -897,6 +993,7 @@ final class UpgradeManager {
         }
 
         cardTiers[card.id] = current + 1
+        refreshRainbowLedger()
 
         // v2.0: PANDA. (T5) is the capstone, and its keepsake is the panda skin.
         // Granted at PICK time rather than run end — reaching the capstone earns
@@ -1010,6 +1107,11 @@ final class UpgradeManager {
         cardsTakenThisLevel.removeAll()
 
         rollRunMutations()
+        rainbowDisplayedOffer = nil
+        rainbowSeatProtections.removeAll()
+        rainbowOwedPicks = 1
+        rainbowDrawSource = .ordinaryLevelUp
+        rainbowPolicy = rainbowRuntimeEnabled ? RainbowPolicy(snapshot: .init(manager: self)) : nil
     }
 
     /// v2.0 (C2): decide what this run IS, before a single card is drawn.

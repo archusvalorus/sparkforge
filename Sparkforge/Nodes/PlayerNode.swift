@@ -621,14 +621,50 @@ final class PlayerNode: SKNode {
 
     // MARK: - Movement
 
-    #if DEBUG
-    // Opt-in isolated Arena 8 bridge. Unset in every normal game and P0/P1 lab.
+    // Optional run-owned movement constraints. Legacy names retain preview compatibility.
+    // Unset hooks preserve the ordinary circle path; no scene route is enabled here.
     var debugMovementConstraint: ((CGPoint, CGPoint, CGFloat) -> CGPoint?)?
     // G21: only installed by the six-room preview; forced action steps use a
     // straight sweep rather than ordinary walking's axis-slide resolver.
     var debugKaijuLungeConstraint: ((CGPoint, CGPoint, CGFloat) -> CGPoint)?
 
-    private func constrainedKaijuMove(by delta: CGPoint, duration: TimeInterval) -> SKAction {
+    // Scene-owned hooks are separate from legacy preview/test hooks. Retiring a
+    // scene binding must not erase constraints installed by another caller.
+    private var movementContextOwner: UUID?
+    private var ownedWalkingConstraint: ((CGPoint, CGPoint, CGFloat) -> CGPoint?)?
+    private var ownedKaijuConstraint: ((CGPoint, CGPoint, CGFloat) -> CGPoint)?
+    private var kaijuLungeOwner: UUID?
+
+    func bindMovementContext(_ owner: UUID,
+                             walking: @escaping (CGPoint, CGPoint, CGFloat) -> CGPoint?,
+                             kaiju: ((CGPoint, CGPoint, CGFloat) -> CGPoint)?) {
+        if let previous = movementContextOwner { retireMovementContext(previous) }
+        movementContextOwner = owner
+        ownedWalkingConstraint = { [weak self] from, desired, radius in
+            guard self?.movementContextOwner == owner else { return from }
+            return walking(from, desired, radius)
+        }
+        ownedKaijuConstraint = kaiju.map { constraint in
+            { [weak self] from, desired, radius in
+                guard self?.movementContextOwner == owner else { return from }
+                return constraint(from, desired, radius)
+            }
+        }
+    }
+
+    func retireMovementContext(_ owner: UUID) {
+        guard movementContextOwner == owner else { return }
+        if kaijuLungeOwner == owner {
+            removeAction(forKey: "kaijuLunge")
+            kaijuLungeOwner = nil
+        }
+        ownedWalkingConstraint = nil
+        ownedKaijuConstraint = nil
+        movementContextOwner = nil
+    }
+
+    private func constrainedKaijuMove(by delta: CGPoint, duration: TimeInterval,
+                                      constraint: @escaping (CGPoint, CGPoint, CGFloat) -> CGPoint) -> SKAction {
         var previous: CGFloat = 0
         return .customAction(withDuration: duration) { node, elapsed in
             guard let player = node as? PlayerNode else { return }
@@ -638,10 +674,9 @@ final class PlayerNode: SKNode {
             previous = fraction
             let from = player.position, desired = from + increment
             let radius = player.stats?.effectiveCollisionRadius ?? GameConfig.Player.collisionRadius
-            player.position = player.debugKaijuLungeConstraint?(from, desired, radius) ?? from
+            player.position = constraint(from, desired, radius)
         }
     }
-    #endif
 
     func move(direction: CGPoint, deltaTime: TimeInterval) {
         updateTrail(direction: direction)
@@ -650,20 +685,14 @@ final class PlayerNode: SKNode {
 
         let speed = stats?.effectiveMoveSpeed ?? GameConfig.Player.speed
         let displacement = direction * speed * CGFloat(deltaTime)
-        #if DEBUG
         let movementStart = position
-        #endif
         position += displacement
 
-        #if DEBUG
-        if let constraint = debugMovementConstraint {
+        if let constraint = ownedWalkingConstraint ?? debugMovementConstraint {
             position = constraint(movementStart, position, stats?.effectiveCollisionRadius ?? GameConfig.Player.collisionRadius) ?? movementStart
         } else {
             clampToArena()
         }
-        #else
-        clampToArena()
-        #endif
         updateKaijuGait(direction: direction, deltaTime: deltaTime)
     }
 
@@ -1412,15 +1441,21 @@ final class PlayerNode: SKNode {
         if abs(heading.x) > 0.05 { kaijuBody?.xScale = heading.x < 0 ? -1 : 1 }
         kaijuPlayAttack()
 
-        #if DEBUG
         let lunge: SKAction
-        if debugKaijuLungeConstraint != nil {
+        if ownedKaijuConstraint != nil || debugKaijuLungeConstraint != nil {
+            // Owned actions retain their binding. Legacy actions retain their
+            // original per-frame lookup behavior when callers change the hook.
+            let constraint: (CGPoint, CGPoint, CGFloat) -> CGPoint = ownedKaijuConstraint ?? { [weak self] from, desired, radius in
+                self?.debugKaijuLungeConstraint?(from, desired, radius) ?? from
+            }
+            kaijuLungeOwner = ownedKaijuConstraint == nil ? nil : movementContextOwner
             lunge = .sequence([
-                constrainedKaijuMove(by: heading * (-R * 0.25), duration: 0.08),
-                constrainedKaijuMove(by: heading * (R * 0.55), duration: 0.07),
-                constrainedKaijuMove(by: heading * (-R * 0.30), duration: 0.14)
+                constrainedKaijuMove(by: heading * (-R * 0.25), duration: 0.08, constraint: constraint),
+                constrainedKaijuMove(by: heading * (R * 0.55), duration: 0.07, constraint: constraint),
+                constrainedKaijuMove(by: heading * (-R * 0.30), duration: 0.14, constraint: constraint)
             ])
         } else {
+            kaijuLungeOwner = nil
             lunge = SKAction.sequence([
             SKAction.move(by: CGVector(dx: -heading.x * R * 0.25,
                                        dy: -heading.y * R * 0.25), duration: 0.08),
@@ -1430,16 +1465,6 @@ final class PlayerNode: SKNode {
                                        dy: -heading.y * R * 0.30), duration: 0.14)
         ])
         }
-        #else
-        let lunge = SKAction.sequence([
-            SKAction.move(by: CGVector(dx: -heading.x * R * 0.25,
-                                       dy: -heading.y * R * 0.25), duration: 0.08),
-            SKAction.move(by: CGVector(dx: heading.x * R * 0.55,
-                                       dy: heading.y * R * 0.55), duration: 0.07),
-            SKAction.move(by: CGVector(dx: -heading.x * R * 0.30,
-                                       dy: -heading.y * R * 0.30), duration: 0.14)
-        ])
-        #endif
         run(lunge, withKey: "kaijuLunge")
 
         // Claw arc — three raking lines fanned across the swing.

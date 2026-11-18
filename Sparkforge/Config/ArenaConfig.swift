@@ -213,7 +213,18 @@ struct ArenaConfig {
         finalFelledLine: "★ THE CROSSING IS YOURS ★",
         geometryBuilder: { ArenaGeometry.twinChannels })
 
-    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks, twinChannels]
+    /// Arena 8 uses the accepted authored six-room floor. Appending its stable
+    /// identity lets the existing registry reconciliation open it after Arena 7.
+    static let lockworks = ArenaConfig(
+        id: 7, name: "The Lockworks", displayName: "ARENA 8: THE LOCKWORKS",
+        flavorLine: "the pressure moves before you do",
+        floorColorHex: 0x161F2B, boundaryColorHex: 0x8399AA,
+        dangerGlowHex: 0x394655, detailLineHex: 0x9EB2C6, accentColorHex: 0xD4C49B,
+        radiusScale: 1.0, bellTime: GameConfig.Wave.miniBossSpawnTime,
+        bossID: "lockmarshal", bossName: "Lockmarshal", bossFelledAccentHex: 0xD4C49B,
+        geometryBuilder: { Arena8GameMap.sixRoom.geometry })
+
+    static let all: [ArenaConfig] = [crucible, quench, coilworks, mirrorwound, starAnvil, splitworks, twinChannels, lockworks]
 
     /// v2.0 (B2a): a TRANSIENT arena override for Boss Mode.
     ///

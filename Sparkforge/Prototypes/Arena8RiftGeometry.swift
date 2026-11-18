@@ -1,5 +1,4 @@
 // Six-room Rift origin/visual reach only. Sampling and combat stay unchanged.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -43,4 +42,3 @@ struct Arena8RiftGeometry {
     }
 
 }
-#endif

@@ -1,5 +1,4 @@
 // Six-room Growth contract only. No circle, two-room or production registration changes.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -140,4 +139,3 @@ struct Arena8GardenFootprint {
         return inside
     }
 }
-#endif

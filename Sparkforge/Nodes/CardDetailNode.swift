@@ -55,6 +55,7 @@ final class CardDetailNode: SKNode {
         /// is already useless by construction (every rung's effect is `???`),
         /// which is the intended state, not an oversight.
         var masked: Bool = false
+        var isBreadthReward: Bool = false
     }
 
     /// v2.1 A1b: the ONE way an in-run surface builds a card's detail — the
@@ -76,7 +77,7 @@ final class CardDetailNode: SKNode {
         return Content(name: card.name, tag: card.tag, secondaryTag: card.secondaryTag,
                        effect: card.description, tiers: tiers,
                        cardTierLine: card.maxTier > 1 && ownedTier > 0 ? "TIER \(ownedTier) / \(card.maxTier)" : nil,
-                       cardLadder: ladder, detail: card.detail, masked: card.isSecret)
+                       cardLadder: ladder, detail: card.detail, masked: card.isSecret, isBreadthReward: card.isBreadthReward)
     }
 
     // MARK: - Layout constants
@@ -95,7 +96,7 @@ final class CardDetailNode: SKNode {
         super.init()
         zPosition = 350
 
-        let colorHex = UpgradeCardNode.color(for: content.tag)
+        let colorHex: UInt32 = content.isBreadthReward ? 0xA837EE : UpgradeCardNode.color(for: content.tag)
 
         let dim = SKShapeNode(rectOf: CGSize(width: 4000, height: 4000))
         dim.fillColor = SKColor(hex: 0x000000, alpha: 0.75)
@@ -122,7 +123,7 @@ final class CardDetailNode: SKNode {
         // Tag chip(s) — primary, plus secondary for dual-tag bridge cards.
         var tags: [UpgradeManager.Tag] = [content.tag]
         if let second = content.secondaryTag { tags.append(second) }
-        let chipW: CGFloat = 78
+        let chipW: CGFloat = content.isBreadthReward ? 128 : 78
         let chipH: CGFloat = 20
         let gap: CGFloat = 8
         let totalW = CGFloat(tags.count) * chipW + CGFloat(tags.count - 1) * gap
@@ -130,7 +131,9 @@ final class CardDetailNode: SKNode {
         for tag in tags {
             let chip = Self.tagChip(tag: tag, at: CGPoint(x: chipX, y: y - chipH / 2),
                                     size: CGSize(width: chipW, height: chipH))
-            if content.masked {
+            if content.isBreadthReward {
+                (chip.childNode(withName: "tagName") as? SKLabelNode)?.text = "BREADTH REWARD"
+            } else if content.masked {
                 (chip.childNode(withName: "tagName") as? SKLabelNode)?.text = "???"
             }
             body.addChild(chip)

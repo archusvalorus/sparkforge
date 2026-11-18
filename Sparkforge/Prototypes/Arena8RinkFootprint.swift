@@ -1,5 +1,4 @@
 // Render-only union of the already-authored room floor. No damage geometry.
-#if DEBUG
 import CoreGraphics
 
 struct Arena8RinkFootprint {
@@ -12,4 +11,3 @@ struct Arena8RinkFootprint {
         return path.normalized(using: .winding)
     }
 }
-#endif

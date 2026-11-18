@@ -1,4 +1,3 @@
-#if DEBUG
 import SpriteKit
 
 /// Controlled Arena 8 moving anchor. No aura, shield, ranged attack or troops.
@@ -55,4 +54,3 @@ final class CinderCarrierNode: EnemyNode {
         super.chase(target: packetNavigationTarget ?? target, deltaTime: deltaTime, globalSlow: globalSlow)
     }
 }
-#endif

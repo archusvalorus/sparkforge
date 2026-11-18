@@ -72,6 +72,14 @@ final class ProgressionManager {
         if arenasUnlocked < opens { arenasUnlocked = opens }
     }
 
+    /// Production room victories use the same stable registry and unlock path.
+    /// Isolated previews retain their memory-only records without deriving access.
+    func registerRoomBossDefeat(_ id: RoomBossID) {
+        guard id.isEnabled else { return }
+        if GameRunPreferences.isIsolated { recordBossDefeat(id.rawValue) }
+        else { registerArenaBossDefeat(id.rawValue) }
+    }
+
     /// True if the boss has been felled. Falls back to the legacy per-boss
     /// unlock flags so players who beat these BEFORE v2.0 keep their access
     /// instead of having to re-earn the whole roster.

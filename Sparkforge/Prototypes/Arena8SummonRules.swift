@@ -1,5 +1,4 @@
 // G6: existing Tree moving summons in the six-room Debug preview only.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -80,4 +79,3 @@ struct Arena8SummonRules {
         return Arena8GardenFootprint.placementRoot(in: map, toward: root, clearance: bodyRadius)
     }
 }
-#endif

@@ -82,7 +82,7 @@ final class UpgradeCardNode: SKNode {
     init(card: UpgradeManager.UpgradeCard, currentTier: Int = 0) {
         self.card = card
         self.currentTier = currentTier
-        self.tagColorHex = UpgradeCardNode.color(for: card.tag)
+        self.tagColorHex = card.isBreadthReward ? 0xA837EE : UpgradeCardNode.color(for: card.tag)
 
         let w = UpgradeCardNode.cardWidth
         let h = UpgradeCardNode.cardHeight
@@ -129,7 +129,7 @@ final class UpgradeCardNode: SKNode {
         let h = UpgradeCardNode.cardHeight
         
         // Tag emoji — dual-tag cards show both
-        var emojiText = UpgradeCardNode.emoji(for: card.tag)
+        var emojiText = card.isBreadthReward ? "🌈" : UpgradeCardNode.emoji(for: card.tag)
         if let second = card.secondaryTag {
             emojiText += UpgradeCardNode.emoji(for: second)
         }

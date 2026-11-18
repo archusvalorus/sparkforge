@@ -330,6 +330,9 @@ final class PlayerStats {
     
     /// Projectile damage multiplier (base: 1.0) — multiplies baseAttack
     var damageMultiplier: CGFloat = 1.0
+    /// Run-owned breadth reward, never included in general ability ATK.
+    var rainbowOwned = false
+    var rainbowPrimaryMultiplier: CGFloat { rainbowOwned ? GameConfig.RainbowRuntime.primaryMultiplier : 1 }
     /// Crit chance 0.0–1.0 (base: 0)
     var critChance: CGFloat = 0.0
     /// Crit damage multiplier (base: 2.0)
@@ -1265,6 +1268,7 @@ final class PlayerStats {
         forgeMoveBonus = 0
 
         damageMultiplier = 1.0
+        rainbowOwned = false
         critChance = 0.0
         critMultiplier = 2.0
         fireRateMultiplier = 1.0

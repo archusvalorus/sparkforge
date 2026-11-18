@@ -1,5 +1,4 @@
 // Six-room well births only; area, travel and wall policies stay unchanged.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -32,4 +31,3 @@ struct Arena8VoidWellPlacement {
             .min { $0.distance(to: center) < $1.distance(to: center) }
     }
 }
-#endif

@@ -1,5 +1,4 @@
 // Rolling ignores internal walls; only the outer rectangle retires it.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -18,4 +17,3 @@ struct Arena8PandaRollBounds {
         return point.x < minX || point.x > maxX || point.y < minY || point.y > maxY
     }
 }
-#endif

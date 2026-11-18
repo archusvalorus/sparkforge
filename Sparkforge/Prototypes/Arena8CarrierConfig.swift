@@ -1,4 +1,3 @@
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -14,4 +13,3 @@ extension GameConfig {
         static let escortCount = 2
     }
 }
-#endif

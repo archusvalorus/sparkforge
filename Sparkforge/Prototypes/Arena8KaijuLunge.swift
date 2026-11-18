@@ -1,5 +1,4 @@
-// Forced kaiju action displacement for the opt-in six-room preview only.
-#if DEBUG
+// Shared forced displacement resolver; scene activation remains opt-in.
 import Foundation
 import CoreGraphics
 
@@ -27,4 +26,3 @@ struct Arena8KaijuLunge {
             .min { $0.distance(to: clipped) < $1.distance(to: clipped) } ?? from
     }
 }
-#endif

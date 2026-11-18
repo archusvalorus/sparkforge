@@ -2295,6 +2295,23 @@ enum GameConfig {
         static let stampColorHex: UInt32 = 0xFFD27A
         static let shadowColorHex: UInt32 = 0x7A2F00
     }
+    /// Locked R1 tuning. Runtime activation remains disabled while the complete
+    /// feature unit is assembled and qualified; no live caller is enabled here.
+    enum RainbowRuntime {
+        static let primaryMultiplier: CGFloat = 2
+        static let sweepMultiplier: CGFloat = 3.5
+        static let cadence: TimeInterval = 20
+        static let crossing: TimeInterval = 0.75
+        static let warning: TimeInterval = 1
+        static let laneHeightFraction: CGFloat = 1.0 / 3.0
+        static let maximumActiveStep: TimeInterval = 0.1
+        static let contactSearchSteps = 32
+        static let luckyBreakChance: CGFloat = 0.10
+        static let luckyBreakMultiplier: CGFloat = 1.5
+        static let trailLength: CGFloat = 90
+        static let colors: [UInt32] = [0xFF244C, 0xFF861C, 0xFFD21C, 0x31DC63, 0x19C9F0, 0x4356ED, 0xA837EE]
+    }
+
     #if DEBUG
     /// Isolated P1 lab only. Never consulted by production combat/drafting.
     enum RainbowPrototype {

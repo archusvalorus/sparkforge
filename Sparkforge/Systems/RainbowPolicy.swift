@@ -1,7 +1,7 @@
 // RainbowPolicy.swift
-// v2.3 R0: isolated proof only. No production caller or live catalog entry.
-// This plans a special reward; it never applies effects, changes a real spread,
-// grants a level, or mutates UpgradeManager. See the R0 kickoff/return packet.
+// Run-owned breadth qualification and protected-seat offer/commit policy.
+// UpgradeManager owns the actual spread and acquisition; this value type never
+// applies effects, grants a level or mutates persistent progression.
 
 import Foundation
 
@@ -27,8 +27,8 @@ struct RainbowPolicy {
         }
     }
 
-    /// R1 must provide real effects and catalog/UI representation before this
-    /// special descriptor is ever turned into a selectable production entry.
+    /// The runtime/card UI use this stable one-rank special descriptor. A
+    /// qualified run must still receive and explicitly select its real offer.
     struct Reward: Equatable {
         enum Category { case breadthReward }
         let id = "special_variegated_rainbow"

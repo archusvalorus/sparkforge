@@ -1,5 +1,4 @@
 // Six-room coil roots only. Targeting, damage, cadence and walls stay unchanged.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -48,4 +47,3 @@ struct Arena8SentryPlacement {
     }
 
 }
-#endif

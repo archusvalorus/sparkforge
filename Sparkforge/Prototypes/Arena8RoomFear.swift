@@ -1,5 +1,4 @@
 // Directional fear adapter for the opt-in six-room floor only.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -93,4 +92,3 @@ struct Arena8RoomFear {
         return candidates(from:p,spark:spark,radius:radius,length:length,minimum:1e-9) ?? p
     }
 }
-#endif

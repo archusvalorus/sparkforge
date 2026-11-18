@@ -21,6 +21,7 @@ struct CardMaxReveal {
     /// The one tier-5 capstone per tree gets the grand "CAPSTONE" framing;
     /// other maxed ladders (if ever routed here) get "CARD MASTERED".
     let isCapstone: Bool
+    var isBreadthReward: Bool = false
 }
 
 final class SynergyUnlockNode: SKNode {
@@ -40,9 +41,9 @@ final class SynergyUnlockNode: SKNode {
 
     /// v1.9 Unit 3: card capstone / max-tier reveal.
     convenience init(capstone: CardMaxReveal) {
-        self.init(header: capstone.isCapstone ? "CAPSTONE UNLOCKED" : "CARD MASTERED",
+        self.init(header: capstone.isBreadthReward ? "RAINBOW SELECTED" : (capstone.isCapstone ? "CAPSTONE UNLOCKED" : "CARD MASTERED"),
                   tag: capstone.tag,
-                  subline: capstone.isCapstone ? "TREE CAPSTONE" : "MAX TIER",
+                  subline: capstone.isBreadthReward ? "BREADTH REWARD" : (capstone.isCapstone ? "TREE CAPSTONE" : "MAX TIER"),
                   title: capstone.cardName, effect: capstone.effect)
     }
 

@@ -29,11 +29,9 @@ final class LinekeeperNode: EnemyNode {
     /// v2.1 geometry Unit 4: the aim begins (its tone plays in the scene).
     var onAimStart: (() -> Void)?
 
-    #if DEBUG
     /// Optional room-order waypoint. Spark remains goalPosition and aim target.
     var packetNavigationTarget: CGPoint?
     var packetNavigationSafePhase: Bool { phase == .seek && !isStunned && !isFrozen }
-    #endif
 
     private var phase: Phase = .seek
     private var phaseTimer: TimeInterval = 0
@@ -125,7 +123,6 @@ final class LinekeeperNode: EnemyNode {
 
         switch phase {
         case .seek:
-            #if DEBUG
             if let waypoint = packetNavigationTarget {
                 // A moving room order does not plant a new firing anchor at
                 // a doorway. Existing aim/cooldown phases never enter here.
@@ -141,7 +138,6 @@ final class LinekeeperNode: EnemyNode {
                 }
                 return
             }
-            #endif
             // Spark drifted far from the line I was holding → re-anchor.
             if let a = anchor, a.distance(to: goal) > C.standoff * C.reanchorDistanceFactor {
                 anchor = nil

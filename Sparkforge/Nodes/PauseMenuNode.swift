@@ -262,7 +262,7 @@ final class PauseMenuNode: SKNode {
         chip.userData = NSMutableDictionary(dictionary: [
             "index": index, "w": chipSize.width, "h": chipSize.height
         ])
-        let colorHex = UpgradeCardNode.color(for: card.tag)
+        let colorHex = card.isBreadthReward ? UInt32(0xC27CFF) : UpgradeCardNode.color(for: card.tag)
 
         let plate = SKShapeNode(rectOf: chipSize, cornerRadius: 5)
         plate.fillColor = SKColor(hex: 0x161616)
@@ -275,7 +275,7 @@ final class PauseMenuNode: SKNode {
         wash.lineWidth = 1
         chip.addChild(wash)
 
-        let emoji = SKLabelNode(text: UpgradeCardNode.emoji(for: card.tag))
+        let emoji = SKLabelNode(text: card.isBreadthReward ? "🌈" : UpgradeCardNode.emoji(for: card.tag))
         emoji.fontSize = 11
         emoji.verticalAlignmentMode = .center
         emoji.position = CGPoint(x: -chipSize.width / 2 + 13, y: 0)

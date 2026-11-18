@@ -1,5 +1,4 @@
 // Same random-angle approach, mapped to the authored building rim.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -22,4 +21,3 @@ struct Arena8PandaEntry {
         return point
     }
 }
-#endif

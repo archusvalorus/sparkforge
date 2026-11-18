@@ -3529,7 +3529,18 @@ final class TitleScene: SKScene {
         #if DEBUG
         if GameRunPreferences.isIsolated {
             gameScene.debugArena9Traversal = ProcessInfo.processInfo.arguments.contains("--arena9-traversal")
-            gameScene.debugRoomIntegration = gameScene.debugArena9Traversal ? GameConfig.Arena9TraversalLab.map : (ProcessInfo.processInfo.arguments.contains("--arena8-six") ? .sixRoom : .twoRoom)
+            if gameScene.debugArena9Traversal {
+                gameScene.debugRoomIntegration = GameConfig.Arena9TraversalLab.map
+            } else {
+                guard gameScene.configureArena8Rooms(sixRoom: ProcessInfo.processInfo.arguments.contains("--arena8-six")) else {
+                    // startGame already faded/locked this Title; recover a usable screen.
+                    let recoveredTitle = TitleScene(size: view.bounds.size)
+                    recoveredTitle.scaleMode = .resizeFill
+                    recoveredTitle.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+                    view.presentScene(recoveredTitle)
+                    return
+                }
+            }
             gameScene.debugRoomEntryFromTitle = true
         }
         #endif

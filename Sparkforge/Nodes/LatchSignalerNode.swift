@@ -1,4 +1,3 @@
-#if DEBUG
 import SpriteKit
 
 /// Grounded contact enemy with a non-damaging planted command tell.
@@ -54,4 +53,3 @@ final class LatchSignalerNode: EnemyNode {
         super.chase(target: target, deltaTime: deltaTime, globalSlow: globalSlow)
     }
 }
-#endif

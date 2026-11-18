@@ -213,6 +213,10 @@ final class BestiaryCodexNode: SKNode, CodexPage {
         case .ramplate:     node = RamplateNode(health: 1, xpValue: 0)
         case .marchwarden:  node = MarchwardenNode()
         case .switchwarden: node = SwitchwardenNode()
+        case .lockmarshal:
+            let portrait = LockmarshalNode(map: .sixRoom, at: Arena8GameMap.sixRoom.player)
+            portrait.position = .zero
+            node = portrait
         case .mote:         return nil
         }
         stripPhysics(node)

@@ -1,5 +1,4 @@
 // Panda spectacle may cross geometry; persistent grounded enemy endpoints may not.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -18,4 +17,3 @@ struct Arena8PandaEndpoints {
         return Arena8GardenFootprint.placementRoot(in: map, toward: desired, clearance: radius) ?? previous
     }
 }
-#endif

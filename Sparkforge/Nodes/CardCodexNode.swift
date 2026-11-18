@@ -37,7 +37,7 @@ final class CardCodexNode: SKNode, CodexPage {
     private var detailNode: CardDetailNode?
 
     init(width: CGFloat, height: CGFloat, topInset: CGFloat, bottomInset: CGFloat) {
-        let catalog = UpgradeManager().allCards
+        let catalog = UpgradeManager().allCards + (RainbowRuntimeGate.enabled ? [UpgradeManager.rainbowCard] : [])
         cards = catalog
 
         let topSafe = height / 2 - topInset
@@ -55,11 +55,14 @@ final class CardCodexNode: SKNode, CodexPage {
 
         // Group cards by primary tree, preserving Tag order.
         let trees = UpgradeManager.Tag.allCases
-        let grouped: [(tag: UpgradeManager.Tag, cards: [UpgradeManager.UpgradeCard])] =
+        var grouped: [(tag: UpgradeManager.Tag, cards: [UpgradeManager.UpgradeCard])] =
             trees.compactMap { tag in
-                let inTree = catalog.filter { $0.tag == tag }
+                let inTree = catalog.filter { $0.tag == tag && !$0.isBreadthReward }
                 return inTree.isEmpty ? nil : (tag, inTree)
             }
+
+        let special=catalog.filter(\.isBreadthReward)
+        if !special.isEmpty {grouped.append((.neutral,special))}
 
         var measured: CGFloat = 8
         for group in grouped {
@@ -114,10 +117,11 @@ final class CardCodexNode: SKNode, CodexPage {
         var y: CGFloat = -8
 
         for group in grouped {
-            let colorHex = UpgradeCardNode.color(for: group.tag)
+            let breadth=group.cards.first?.isBreadthReward == true
+            let colorHex: UInt32 = breadth ? 0xA837EE : UpgradeCardNode.color(for: group.tag)
             let isNeutral = (group.tag == .neutral)
 
-            let header = UITheme.label("\(UpgradeCardNode.emoji(for: group.tag))  \(group.tag.rawValue.uppercased())",
+            let header = UITheme.label(breadth ? "🌈  BREADTH REWARDS" : "\(UpgradeCardNode.emoji(for: group.tag))  \(group.tag.rawValue.uppercased())",
                                        size: UITheme.Size.heading,
                                        color: isNeutral ? UITheme.Color.infoSoft : SKColor(hex: colorHex),
                                        bold: true)

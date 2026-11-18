@@ -40,6 +40,43 @@ struct BossEntry {
     var isUnlocked: Bool { ProgressionManager.shared.hasDefeatedBoss(id) }
 }
 
+/// Stable room encounter identity shared by campaign and Boss Mode.
+enum RoomBossID: String {
+    case lockmarshal = "lockmarshal"
+
+    var isEnabled: Bool {
+        if !GameRunPreferences.isIsolated { return ArenaConfig.current.id == ArenaConfig.lockworks.id }
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        // The existing isolated natural stream earns this registered room boss.
+        // Combined natural/duel flags remain rejected by both route contracts.
+        if Arena8NaturalWaveMode.enabled(arguments: args,
+            sixRoom: args.contains("--arena8-six"), isolated: GameRunPreferences.isIsolated,
+            arena9: args.contains("--arena9-traversal")) { return true }
+        return GameRunPreferences.isIsolated && args.contains("--arena8-six")
+            && args.contains("--arena8-lockmarshal") && !args.contains("--arena9-traversal")
+            && args.filter { $0.hasPrefix("--arena8-") }.allSatisfy {
+                ["--arena8-six", "--arena8-title", "--arena8-lockmarshal", "--arena8-lockmarshal-checks",
+                 "--arena8-title-input", "--arena8-title-autoplay", "--arena8-six-input"].contains($0)
+            }
+        #else
+        return false
+        #endif
+    }
+}
+
+/// The actual scene supplies its map and spawn; no global/default home fallback.
+struct RoomBossEntry {
+    let id: RoomBossID
+    let map: Arena8GameMap
+
+    func make(at root: CGPoint) -> LockmarshalNode? {
+        guard id.isEnabled, map.isSixRoom, map.rooms.count == 6,
+              map.valid(root, radius: GameConfig.LockmarshalFixture.bodyRadius) else { return nil }
+        return LockmarshalNode(map: map, at: root)
+    }
+}
+
 @MainActor
 final class BossRegistry {
 
@@ -82,7 +119,21 @@ final class BossRegistry {
                       boss.applyHealthBonus(hp)
                       return boss
                   }),
+        BossEntry(id: "lockmarshal", name: "Lockmarshal", arenaID: 7,
+                  grammar: .arena, accentHex: 0xD4C49B,
+                  make: { _, hp in
+                      let map = Arena8GameMap.sixRoom
+                      let boss = LockmarshalNode(map: map, at: map.rooms[5].center)
+                      boss.applyHealthBonus(hp)
+                      return boss
+                  }),
     ]
+
+    /// Map-aware room factory; the actual scene retains run/actor ownership.
+    func roomEntry(_ id: RoomBossID, map: Arena8GameMap) -> RoomBossEntry? {
+        guard id.isEnabled, map.isSixRoom, map.rooms.count == 6 else { return nil }
+        return RoomBossEntry(id: id, map: map)
+    }
 
     // MARK: - Queries
 

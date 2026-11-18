@@ -1,4 +1,3 @@
-#if DEBUG
 import CoreGraphics
 import Foundation
 extension GameConfig {
@@ -11,4 +10,3 @@ extension GameConfig {
         static let warningDuration: TimeInterval = 1
     }
 }
-#endif

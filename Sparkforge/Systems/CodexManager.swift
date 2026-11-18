@@ -189,6 +189,7 @@ enum BestiaryFamily: String, CaseIterable {
     case switchwarden = "switchwarden"
     case ramplate     = "ramplate"
     case marchwarden  = "marchwarden"   // Arena 6 boss
+    case lockmarshal = "lockmarshal"   // Stable Arena 8 / Boss Mode identity.
     /// Reserved v2.0 slot — the hidden nemesis. Present in the schema NOW so it
     /// doesn't churn at v2.0; the bestiary page MUST skip entries where
     /// `hiddenUntilFutureVersion` is true until Mote ships. See
@@ -226,6 +227,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .ramplate:     return "Ramplate"
         case .marchwarden:  return "The Marchwarden"
         case .switchwarden: return "The Switchwarden"
+        case .lockmarshal:  return "Lockmarshal"
         case .mote:         return "????"
         }
     }
@@ -233,13 +235,16 @@ enum BestiaryFamily: String, CaseIterable {
     var isBoss: Bool {
         switch self {
         case .slagTitan, .quenchWarden, .dynamoChoir, .facetedLie, .unmadeStar, .marchwarden, .switchwarden: return true
+        case .lockmarshal: return true
         default: return false
         }
     }
 
     /// The bestiary page must not render this entry until its version ships
     /// (Mote = v2.0). Keeps the schema stable across the version boundary.
-    var hiddenUntilFutureVersion: Bool { self == .mote }
+    var hiddenUntilFutureVersion: Bool {
+        return self == .mote
+    }
 
     /// Lyra's bestiary voice (v1.8 Ask 4b). Mote has no entry — empty chair.
     var flavor: String {
@@ -278,6 +283,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .ramplate:     return "A barricade with forward momentum. The forge forgot that walls should stay put."
         case .marchwarden:  return "The march ended long ago. Its warden still clears the road for an army that will never come."
         case .switchwarden: return "It gives orders to an empty railway. Let the signal pass. Then cross."
+        case .lockmarshal:  return ""   // No new lore copy chosen by this engineering slice.
         case .mote:         return ""
         }
     }
@@ -313,6 +319,7 @@ enum BestiaryFamily: String, CaseIterable {
         case .ramplate:     return 0xFF7722   // kiln orange (the charge)
         case .marchwarden:  return 0x3F8F8A   // oxidized teal (entrance banner color)
         case .switchwarden: return 0xB6AC98
+        case .lockmarshal:  return 0xD4C49B   // Existing authored chassis/crown stroke.
         case .mote:         return 0x8E44FF
         }
     }

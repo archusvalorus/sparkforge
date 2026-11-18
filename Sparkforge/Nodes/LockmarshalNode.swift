@@ -1,5 +1,4 @@
-// DEBUG-only isolated Arena8 body/two-verb proof. Not a registered boss.
-#if DEBUG
+// The Lockworks mobile boss. Scene owns campaign/BossMode routing and rewards.
 import SpriteKit
 
 final class LockmarshalNode: SKNode, ArenaBossNode, PlayerReachHazards {
@@ -34,14 +33,14 @@ final class LockmarshalNode: SKNode, ArenaBossNode, PlayerReachHazards {
     init(map: Arena8GameMap, at root: CGPoint) {
         model = LockmarshalModel(map: map, position: root)
         super.init()
-        position = root; name = "lockmarshal-fixture"; zPosition = 6
+        position = root; name = "lockmarshal"; zPosition = 6
         shell.fillColor = SKColor(hex: 0x292522); shell.strokeColor = SKColor(hex: 0xD4C49B); shell.lineWidth = 3
         addChild(shell)
         // Key/fork crown remains inside the declared26-point circular body.
         let p = CGMutablePath();p.move(to:CGPoint(x:-16,y:-12));p.addLine(to:CGPoint(x:16,y:-12));p.addLine(to:CGPoint(x:16,y:14));p.addLine(to:CGPoint(x:7,y:14));p.addLine(to:CGPoint(x:7,y:3));p.addLine(to:CGPoint(x:-7,y:3));p.addLine(to:CGPoint(x:-7,y:14));p.addLine(to:CGPoint(x:-16,y:14));p.closeSubpath()
         crown.path=p;crown.fillColor=SKColor(hex:0xBB994D);crown.strokeColor=SKColor(hex:0xF1DFAE);crown.lineWidth=1;addChild(crown)
         tell.name="lockmarshal-ground-tell";tell.zPosition = -1;tell.lineWidth=2;addChild(tell)
-        label.text="LOCKMARSHAL · TEST";label.fontSize=10;label.fontColor=SKColor(hex:0xEEDCA4);label.position=CGPoint(x:0,y:50);addChild(label)
+        label.text="LOCKMARSHAL";label.fontSize=10;label.fontColor=SKColor(hex:0xEEDCA4);label.position=CGPoint(x:0,y:50);addChild(label)
         hp.position=CGPoint(x:0,y:36);hp.fillColor=SKColor(hex:0xD4C49B);hp.strokeColor = .clear;addChild(hp)
         let body=SKPhysicsBody(circleOfRadius:C.bodyRadius);body.isDynamic=false
         body.categoryBitMask=GameConfig.Physics.enemy;body.contactTestBitMask=GameConfig.Physics.projectile | GameConfig.Physics.player;body.collisionBitMask=0;physicsBody=body
@@ -60,6 +59,16 @@ final class LockmarshalNode: SKNode, ArenaBossNode, PlayerReachHazards {
     var hasPaintedTell:Bool { !tell.isHidden && tell.path?.isEmpty == false }
     func interruptAttack(){model.interrupt();render()}
     func cancelAttack(){retired=true;physicsBody?.categoryBitMask=0;physicsBody?.contactTestBitMask=0;model.cancel();tell.path=nil;tell.isHidden=true;onHazardDamage=nil;onLethalHit=nil;onDeath=nil;canAdvance=nil}
+    /// Add the existing stage ramp before the shared BossMode challenge dial.
+    func applyHealthBonus(_ bonus: Int) {
+        guard !isDead, !retired else { return }
+        maxHealth = max(1, C.health + bonus); health = maxHealth; render()
+    }
+    /// Scene/factory placement must keep the authored movement model in sync.
+    @discardableResult func relocate(to point: CGPoint) -> Bool {
+        guard !isDead, !retired, model.relocate(to: point) else { return false }
+        position = model.position; render(); return true
+    }
     func applyChallengeHealthScale(_ factor:CGFloat){
         guard factor.isFinite,factor>0,!isDead else{return}
         maxHealth=max(1,Int((CGFloat(maxHealth)*factor).rounded()));health=maxHealth;render()
@@ -98,4 +107,3 @@ final class LockmarshalNode: SKNode, ArenaBossNode, PlayerReachHazards {
         label.text="LOCKMARSHAL · \(model.phase.rawValue.uppercased())"
     }
 }
-#endif

@@ -1,5 +1,4 @@
 // Ordinary six-room Panda destinations only; arrivals, acts and rolls stay unchanged.
-#if DEBUG
 import Foundation
 import CoreGraphics
 
@@ -30,4 +29,3 @@ struct Arena8PandaDestination {
     }
 
 }
-#endif

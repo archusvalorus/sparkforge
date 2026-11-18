@@ -24,12 +24,10 @@ final class SpurhoundNode: EnemyNode {
     var onLungeOutcome: ((LungeOutcome) -> Void)?
     var onLungeCommitted: (() -> Void)?
 
-    #if DEBUG
     /// Optional room-order waypoint, never a replacement combat target.
     /// The scene clears it during forced motion/status holds and on teardown.
     var packetNavigationTarget: CGPoint?
     var packetNavigationSafePhase: Bool { phase == .hunt && !isStunned && !isFrozen }
-    #endif
 
     private var phase: Phase = .hunt
     private var phaseTimer: TimeInterval = 0
@@ -114,13 +112,8 @@ final class SpurhoundNode: EnemyNode {
             }
             let factor = C.huntSpeedFactor + (C.sprintSpeedFactor - C.huntSpeedFactor) * sprint
             let slow = min(currentSlow + globalSlow, 0.8)
-            #if DEBUG
             let movementGoal = packetNavigationTarget ?? target
             let attackGoal = packetNavigationTarget == nil ? target : goalPosition
-            #else
-            let movementGoal = target
-            let attackGoal = target
-            #endif
             let dir = (movementGoal - position).normalized
             position += dir * GameConfig.Enemy.baseSpeed * factor * (1 - slow) * CGFloat(dt)
             aim(dir)
